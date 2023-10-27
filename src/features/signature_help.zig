@@ -236,56 +236,45 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                     try symbol_stack.append(arena, .l_paren);
                     continue;
                 }
-                const expr_start = token_starts[expr_first_token];
-                const last_token_slice = tree.tokenSlice(expr_last_token);
-                const expr_end = token_starts[expr_last_token] + last_token_slice.len;
 
-                var held_expr = try arena.dupeZ(u8, handle.tree.source[expr_start..expr_end]);
+                const loc = offsets.tokensToLoc(tree, expr_first_token, expr_last_token);
 
-                // Resolve the expression.
-                var tokenizer = std.zig.Tokenizer.init(held_expr);
-                if (try analyser.getFieldAccessType(
-                    handle,
-                    expr_start,
-                    &tokenizer,
-                )) |result| {
-                    var type_handle = result.unwrapped orelse result.original;
+                var type_handle = try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue;
 
-                    if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
-                        return try fnProtoToSignatureInfo(
-                            analyser,
-                            arena,
-                            paren_commas,
-                            false,
-                            func_type,
-                        );
-                    }
+                if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
+                    return try fnProtoToSignatureInfo(
+                        analyser,
+                        arena,
+                        paren_commas,
+                        false,
+                        func_type,
+                    );
+                }
 
-                    const name_loc = Analyser.identifierLocFromPosition(expr_end - 1, handle) orelse {
-                        try symbol_stack.append(arena, .l_paren);
-                        continue;
-                    };
-                    const name = offsets.locToSlice(handle.tree.source, name_loc);
+                const name_loc = Analyser.identifierLocFromPosition(loc.end - 1, handle) orelse {
+                    try symbol_stack.append(arena, .l_paren);
+                    continue;
+                };
+                const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-                    const skip_self_param = !type_handle.type.is_type_val;
-                    const decl_handle = (try type_handle.lookupSymbol(analyser, name)) orelse {
-                        try symbol_stack.append(arena, .l_paren);
-                        continue;
-                    };
-                    type_handle = try decl_handle.resolveType(analyser) orelse {
-                        try symbol_stack.append(arena, .l_paren);
-                        continue;
-                    };
+                const skip_self_param = !type_handle.type.is_type_val;
+                const decl_handle = (try type_handle.lookupSymbol(analyser, name)) orelse {
+                    try symbol_stack.append(arena, .l_paren);
+                    continue;
+                };
+                type_handle = try decl_handle.resolveType(analyser) orelse {
+                    try symbol_stack.append(arena, .l_paren);
+                    continue;
+                };
 
-                    if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
-                        return try fnProtoToSignatureInfo(
-                            analyser,
-                            arena,
-                            paren_commas,
-                            skip_self_param,
-                            func_type,
-                        );
-                    }
+                if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
+                    return try fnProtoToSignatureInfo(
+                        analyser,
+                        arena,
+                        paren_commas,
+                        skip_self_param,
+                        func_type,
+                    );
                 }
             },
             .r_brace, .r_paren, .r_bracket => |tag| {

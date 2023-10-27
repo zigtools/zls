@@ -448,10 +448,6 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
     const gop = try node_trail.getOrPut(analyser.gpa, node_with_uri);
     if (gop.found_existing) return null;
 
-    return try analyser.resolveVarDeclAliasUncached(node_handle, node_trail);
-}
-
-fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -527,7 +523,7 @@ fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle,
         return null;
     }
 
-    if (try analyser.resolveVarDeclAliasUncached(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
+    if (try analyser.resolveVarDeclAliasInternal(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
         return result;
     } else {
         return resolved;
@@ -619,22 +615,46 @@ fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *Do
     } else return child_type.instanceTypeVal();
 }
 
-/// Resolves the child type of an optional type
-pub fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    const opt_node = switch (opt.type.data) {
-        .other => |n| n,
+/// `optional.?`
+pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    _ = analyser;
+    if (optional.type.is_type_val) return null;
+
+    switch (optional.type.data) {
+        .optional => |child_ty| {
+            std.debug.assert(child_ty.type.is_type_val);
+            return child_ty.instanceTypeVal();
+        },
         else => return null,
-    };
-
-    const tree = opt.handle.tree;
-    if (tree.nodes.items(.tag)[opt_node] == .optional_type) {
-        return ((try analyser.resolveTypeOfNodeInternal(.{
-            .node = tree.nodes.items(.data)[opt_node].lhs,
-            .handle = opt.handle,
-        })) orelse return null).instanceTypeVal();
     }
+}
 
-    return null;
+/// Resolves the child type of an optional type
+pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    _ = analyser;
+    if (!optional_type.type.is_type_val) return null;
+    switch (optional_type.type.data) {
+        .optional => |child_ty| {
+            std.debug.assert(child_ty.type.is_type_val);
+            return child_ty.*;
+        },
+        else => return null,
+    }
+}
+
+pub fn resolveAddressOf(analyser: *Analyser, type_handle: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    if (type_handle.type.is_type_val) return null;
+
+    const base_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+
+    base_type_ptr.* = TypeWithHandle{
+        .type = .{ .data = type_handle.type.data, .is_type_val = true },
+        .handle = type_handle.handle,
+    };
+    return TypeWithHandle{
+        .type = .{ .data = .{ .pointer = .{ .size = .One, .is_const = false, .elem_ty = base_type_ptr } }, .is_type_val = false },
+        .handle = type_handle.handle,
+    };
 }
 
 fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: ErrorUnionSide) error{OutOfMemory}!?TypeWithHandle {
@@ -718,100 +738,74 @@ pub fn resolveFuncProtoOfCallable(analyser: *Analyser, type_handle: TypeWithHand
     return deref_type;
 }
 
-/// Resolves the child type of a deref type
-fn resolveDerefType(analyser: *Analyser, deref: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    const deref_node = switch (deref.type.data) {
-        .other => |n| n,
-        .pointer => |t| return t.*,
-        else => return null,
-    };
-    const tree = deref.handle.tree;
-    const main_token = tree.nodes.items(.main_token)[deref_node];
-    const token_tag = tree.tokens.items(.tag)[main_token];
+/// resolve a pointer dereference
+/// `pointer.*`
+pub fn resolveDerefType(analyser: *Analyser, pointer: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    _ = analyser;
+    if (pointer.type.is_type_val) return null;
 
-    if (ast.fullPtrType(tree, deref_node)) |ptr_type| {
-        switch (token_tag) {
-            .asterisk => {
-                return ((try analyser.resolveTypeOfNodeInternal(.{
-                    .node = ptr_type.ast.child_type,
-                    .handle = deref.handle,
-                })) orelse return null).instanceTypeVal();
-            },
-            .l_bracket, .asterisk_asterisk => return null,
-            else => unreachable,
-        }
+    switch (pointer.type.data) {
+        .pointer => |info| switch (info.size) {
+            .One, .C => return info.elem_ty.instanceTypeVal(),
+            .Many, .Slice => return null,
+        },
+        else => return null,
     }
-    return null;
 }
 
 /// Resolves slicing and array access
+/// - `lhs[index]`
+/// - `lhs[start..]`
+/// - `lhs[start..end]`
 fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum { Single, Range }) error{OutOfMemory}!?TypeWithHandle {
-    const lhs_node = switch (lhs.type.data) {
-        .other => |n| n,
-        .multi_pointer => |t| return switch (rhs) {
-            .Single => t.*,
-            .Range => TypeWithHandle{
-                .type = .{ .data = .{ .slice = t }, .is_type_val = lhs.type.is_type_val },
-                .handle = lhs.handle,
-            },
-        },
-        .slice => |t| return switch (rhs) {
-            .Single => t.*,
-            .Range => lhs,
-        },
-        else => return null,
-    };
+    if (lhs.type.is_type_val) return null;
 
     const tree = lhs.handle.tree;
     const tags = tree.nodes.items(.tag);
 
-    switch (tags[lhs_node]) {
-        .array_type, .array_type_sentinel => {
-            const child_type = (try analyser.resolveTypeOfNodeInternal(.{
-                .node = tree.nodes.items(.data)[lhs_node].rhs,
-                .handle = lhs.handle,
-            })) orelse return null;
-            if (rhs == .Single)
-                return child_type.instanceTypeVal();
-            const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-            child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
-            return TypeWithHandle{
-                .type = .{ .data = .{ .slice = child_type_ptr }, .is_type_val = false },
-                .handle = lhs.handle,
-            };
-        },
-        .ptr_type_aligned,
-        .ptr_type_sentinel,
-        .ptr_type,
-        .ptr_type_bit_range,
-        => {
-            const ptr_type = ast.fullPtrType(tree, lhs_node).?;
-            switch (ptr_type.size) {
-                .Slice, .C, .Many => {
-                    if (rhs == .Single) {
-                        return ((try analyser.resolveTypeOfNodeInternal(.{
-                            .node = ptr_type.ast.child_type,
+    switch (lhs.type.data) {
+        .other => |node| switch (tags[node]) {
+            .array_type, .array_type_sentinel => {
+                const child_type = (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = tree.nodes.items(.data)[node].rhs,
+                    .handle = lhs.handle,
+                })) orelse return null;
+                if (!child_type.type.is_type_val) return null;
+
+                switch (rhs) {
+                    .Single => return child_type.instanceTypeVal(),
+                    .Range => {
+                        const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+                        child_type_ptr.* = child_type;
+                        return TypeWithHandle{
+                            .type = .{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = child_type_ptr } }, .is_type_val = false },
                             .handle = lhs.handle,
-                        })) orelse return null).instanceTypeVal();
-                    }
-                    return lhs;
-                },
-                .One => {},
-            }
-            return null;
+                        };
+                    },
+                }
+            },
+            .for_range => return TypeWithHandle{
+                .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
+                .handle = lhs.handle,
+            },
+            else => return null,
         },
-        .for_range => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
-            .handle = lhs.handle,
+        .pointer => |info| return switch (info.size) {
+            .One => null,
+            .Many => switch (rhs) {
+                .Single => info.elem_ty.instanceTypeVal(),
+                .Range => TypeWithHandle{
+                    .type = .{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
+                    .handle = lhs.handle,
+                },
+            },
+            .Slice, .C => switch (rhs) {
+                .Single => info.elem_ty.instanceTypeVal(),
+                .Range => lhs,
+            },
         },
         else => return null,
     }
-}
-
-/// Called to remove one level of pointerness before a field access
-pub fn resolveFieldAccessLhsType(analyser: *Analyser, lhs: TypeWithHandle) error{OutOfMemory}!TypeWithHandle {
-    // analyser.bound_type_params.clearRetainingCapacity();
-    return (try analyser.resolveDerefType(lhs)) orelse lhs;
 }
 
 fn resolveTupleFieldType(analyser: *Analyser, type_handle: TypeWithHandle, index: usize) error{OutOfMemory}!?TypeWithHandle {
@@ -855,19 +849,27 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
     const node_tags = tree.nodes.items(.tag);
 
     switch (type_handle.type.data) {
-        .slice => |t| {
-            if (std.mem.eql(u8, "len", name)) {
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
-                    .handle = handle,
-                };
-            }
+        .pointer => |info| switch (info.size) {
+            .One, .Many, .C => {},
+            .Slice => {
+                if (std.mem.eql(u8, "len", name)) {
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
+                        .handle = handle,
+                    };
+                }
 
-            if (std.mem.eql(u8, "ptr", name)) {
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .multi_pointer = t }, .is_type_val = false },
-                    .handle = handle,
-                };
+                if (std.mem.eql(u8, "ptr", name)) {
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .pointer = .{ .size = .Many, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
+                        .handle = handle,
+                    };
+                }
+            },
+        },
+        .optional => |child_ty| {
+            if (std.mem.eql(u8, "?", name)) {
+                return child_ty.*;
             }
         },
 
@@ -881,37 +883,6 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                     .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
                     .handle = handle,
                 };
-            },
-
-            .ptr_type,
-            .ptr_type_aligned,
-            .ptr_type_bit_range,
-            .ptr_type_sentinel,
-            => {
-                const ptr_type = ast.fullPtrType(tree, n).?;
-
-                if (ptr_type.size == .Slice) {
-                    if (std.mem.eql(u8, "len", name)) {
-                        return TypeWithHandle{
-                            .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
-                            .handle = handle,
-                        };
-                    }
-
-                    if (std.mem.eql(u8, "ptr", name)) {
-                        const child_type = (try analyser.resolveTypeOfNodeInternal(.{
-                            .node = ptr_type.ast.child_type,
-                            .handle = handle,
-                        })) orelse return null;
-
-                        const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-                        child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
-                        return TypeWithHandle{
-                            .type = .{ .data = .{ .multi_pointer = child_type_ptr }, .is_type_val = false },
-                            .handle = handle,
-                        };
-                    }
-                }
             },
 
             .container_decl,
@@ -1307,19 +1278,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .slice_open,
                 => try analyser.resolveBracketAccessType(base_type, .Range),
                 .deref => try analyser.resolveDerefType(base_type),
-                .unwrap_optional => try analyser.resolveUnwrapOptionalType(base_type),
+                .unwrap_optional => try analyser.resolveOptionalUnwrap(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
-                .@"orelse" => try analyser.resolveUnwrapOptionalType(base_type),
+                .@"orelse" => try analyser.resolveOptionalUnwrap(base_type),
                 .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
                 .@"try" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
-                .address_of => {
-                    const base_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-                    base_type_ptr.* = base_type;
-                    return TypeWithHandle{
-                        .type = .{ .data = .{ .pointer = base_type_ptr }, .is_type_val = base_type.type.is_type_val },
-                        .handle = base.handle,
-                    };
-                },
+                .address_of => try analyser.resolveAddressOf(base_type),
                 else => unreachable,
             };
         },
@@ -1335,14 +1299,38 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             return try resolveFieldAccess(analyser, lhs, symbol);
         },
-        .anyframe_type,
-        .array_type,
-        .array_type_sentinel,
-        .optional_type,
+        .optional_type => {
+            const child_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].lhs, .handle = handle }) orelse return null;
+            if (!child_ty.type.is_type_val) return null;
+
+            const child_ty_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+            child_ty_ptr.* = child_ty;
+
+            return TypeWithHandle{
+                .type = .{ .data = .{ .optional = child_ty_ptr }, .is_type_val = true },
+                .handle = node_handle.handle,
+            };
+        },
         .ptr_type_aligned,
         .ptr_type_sentinel,
         .ptr_type,
         .ptr_type_bit_range,
+        => {
+            const ptr_info = ast.fullPtrType(tree, node).?;
+
+            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
+            if (!elem_ty.type.is_type_val) return null;
+
+            const elem_ty_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+            elem_ty_ptr.* = elem_ty;
+            return TypeWithHandle{
+                .type = .{ .data = .{ .pointer = .{ .size = ptr_info.size, .is_const = ptr_info.const_token != null, .elem_ty = elem_ty_ptr } }, .is_type_val = true },
+                .handle = node_handle.handle,
+            };
+        },
+        .anyframe_type,
+        .array_type,
+        .array_type_sentinel,
         .error_union,
         .error_set_decl,
         .merge_error_sets,
@@ -1760,14 +1748,15 @@ pub const Type = struct {
     };
 
     data: union(enum) {
-        /// Type of `foo` in `&foo`
-        pointer: *TypeWithHandle,
+        /// *T, [*]T, [T], [*c]T
+        pointer: struct {
+            size: std.builtin.Type.Pointer.Size,
+            is_const: bool,
+            elem_ty: *TypeWithHandle,
+        },
 
-        /// Element type of `slice` in `slice.ptr`
-        multi_pointer: *TypeWithHandle,
-
-        /// Element type of `array` in `array[x..y]`
-        slice: *TypeWithHandle,
+        /// ?T
+        optional: *TypeWithHandle,
 
         /// Return type of `fn foo() !Foo`
         error_union: *TypeWithHandle,
@@ -1776,7 +1765,6 @@ pub const Type = struct {
         union_tag: *TypeWithHandle,
 
         /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
-        /// - Pointer type: `*Foo`, `[]Foo`, `?Foo`
         /// - Error type: `Foo || Bar`, `Foo!Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
         /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
@@ -1813,9 +1801,11 @@ pub const TypeWithHandle = struct {
             hasher.update(&.{ @intFromBool(ty.is_type_val), @intFromEnum(ty.data) });
 
             switch (ty.data) {
-                inline .pointer,
-                .multi_pointer,
-                .slice,
+                .pointer => |info| {
+                    std.hash.autoHash(hasher, info.size);
+                    hashTypeWithHandle(hasher, info.elem_ty.*);
+                },
+                inline .optional,
                 .error_union,
                 .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
@@ -1851,9 +1841,12 @@ pub const TypeWithHandle = struct {
             if (@intFromEnum(a.type.data) != @intFromEnum(b.type.data)) return false;
 
             switch (a.type.data) {
-                inline .pointer,
-                .multi_pointer,
-                .slice,
+                .pointer => |a_type| {
+                    const b_type = b.type.data.pointer;
+                    if (a_type.size != b_type.size) return false;
+                    if (!self.eql(a_type.elem_ty.*, b_type.elem_ty.*)) return false;
+                },
+                inline .optional,
                 .error_union,
                 .union_tag,
                 => |a_type, name| {
@@ -1943,7 +1936,7 @@ pub const TypeWithHandle = struct {
         }
     }
 
-    fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
+    pub fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
         if (!self.type.is_type_val) return null;
         return TypeWithHandle{
             .type = .{ .data = self.type.data, .is_type_val = false },
@@ -2190,23 +2183,22 @@ pub const NodeWithHandle = struct {
     }
 };
 
-pub const FieldAccessReturn = struct {
-    original: TypeWithHandle,
-    unwrapped: ?TypeWithHandle = null,
-};
-
-pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) error{OutOfMemory}!?FieldAccessReturn {
+pub fn getFieldAccessType(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    loc: offsets.Loc,
+) error{OutOfMemory}!?TypeWithHandle {
     analyser.bound_type_params.clearRetainingCapacity();
 
+    const held_range = try analyser.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
+    var tokenizer = std.zig.Tokenizer.init(held_range);
     var current_type: ?TypeWithHandle = null;
 
     while (true) {
         const tok = tokenizer.next();
         switch (tok.tag) {
-            .eof => return FieldAccessReturn{
-                .original = current_type orelse return null,
-                .unwrapped = try analyser.resolveDerefType(current_type orelse return null),
-            },
+            .eof => return current_type,
             .identifier => {
                 const ct_handle = if (current_type) |c| c.handle else handle;
                 if (try analyser.lookupSymbolGlobal(
@@ -2224,24 +2216,14 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
                         // function labels cannot be dot accessed
                         if (current_type) |ct| {
                             if (ct.isFunc()) return null;
-                            return FieldAccessReturn{
-                                .original = ct,
-                                .unwrapped = try analyser.resolveDerefType(ct),
-                            };
+                            return ct;
                         } else {
                             return null;
                         }
                     },
                     .identifier => {
                         if (after_period.loc.end == tokenizer.buffer.len) {
-                            if (current_type) |ct| {
-                                return FieldAccessReturn{
-                                    .original = ct,
-                                    .unwrapped = try analyser.resolveDerefType(ct),
-                                };
-                            } else {
-                                return null;
-                            }
+                            return current_type;
                         }
 
                         const deref_type = if (current_type) |ty|
@@ -2264,7 +2246,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
                         }
                     },
                     .question_mark => {
-                        current_type = (try analyser.resolveUnwrapOptionalType(current_type orelse return null)) orelse return null;
+                        current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;
                     },
                     else => {
                         log.debug("Unrecognized token {} after period.", .{after_period.tag});
@@ -2353,14 +2335,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
         }
     }
 
-    if (current_type) |ct| {
-        return FieldAccessReturn{
-            .original = ct,
-            .unwrapped = try analyser.resolveDerefType(ct),
-        };
-    } else {
-        return null;
-    }
+    return current_type;
 }
 
 pub fn isNodePublic(tree: Ast, node: Ast.Node.Index) bool {
@@ -2966,12 +2941,13 @@ pub const DeclWithHandle = struct {
                     .{ .node = param.type_expr, .handle = self.handle },
                 )) orelse return null).instanceTypeVal();
             },
-            .pointer_payload => |pay| try analyser.resolveUnwrapOptionalType(
-                (try analyser.resolveTypeOfNodeInternal(.{
+            .pointer_payload => |pay| {
+                const ty = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = pay.condition,
                     .handle = self.handle,
-                })) orelse return null,
-            ),
+                })) orelse return null;
+                return try analyser.resolveOptionalUnwrap(ty);
+            },
             .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
                 (try analyser.resolveTypeOfNodeInternal(.{
                     .node = pay.condition,
@@ -3434,7 +3410,7 @@ pub fn lookupSymbolFieldInit(
     if (try analyser.resolveUnwrapErrorUnionType(container_type, .right)) |unwrapped|
         container_type = unwrapped;
 
-    if (try analyser.resolveUnwrapOptionalType(container_type)) |unwrapped|
+    if (try analyser.resolveOptionalUnwrap(container_type)) |unwrapped|
         container_type = unwrapped;
 
     const container_node = switch (container_type.type.data) {
@@ -3808,13 +3784,10 @@ pub fn getSymbolFieldAccesses(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, held_loc));
-    var tokenizer = std.zig.Tokenizer.init(held_range);
-
     var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};
 
-    if (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
-        const container_handle = result.unwrapped orelse result.original;
+    if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |type_handle| {
+        const container_handle = try analyser.resolveDerefType(type_handle) orelse type_handle;
 
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
 
@@ -3966,19 +3939,21 @@ fn addReferencedTypes(
     const token_starts = tree.tokens.items(.start);
 
     switch (type_handle.type.data) {
-        .pointer => |t| {
-            const child_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "*{s}", .{child_type_str orelse return null});
+        .pointer => |info| {
+            const size_prefix = switch (info.size) {
+                .One => "*",
+                .Many => "[*]",
+                .Slice => "[]",
+                .C => "[*c]",
+            };
+            const const_prefix = if (info.is_const) "const " else "";
+            const child_type_str = try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types));
+            return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ size_prefix, const_prefix, child_type_str orelse return null });
         },
 
-        .multi_pointer => |t| {
-            const child_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "[*]{s}", .{child_type_str orelse return null});
-        },
-
-        .slice => |t| {
-            const child_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "[]{s}", .{child_type_str orelse return null});
+        .optional => |child_ty| {
+            const elem_type_str = try analyser.addReferencedTypes(child_ty.*, ReferencedType.Collector.init(referenced_types));
+            return try std.fmt.allocPrint(allocator, "?{s}", .{elem_type_str orelse return null});
         },
 
         .error_union => |t| {
@@ -4115,32 +4090,9 @@ fn addReferencedTypes(
             .ptr_type_aligned,
             .ptr_type_bit_range,
             .ptr_type_sentinel,
-            => {
-                const ptr_type = ast.fullPtrType(tree, p).?;
+            => unreachable,
 
-                const child_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = ptr_type.ast.child_type, .handle = handle },
-                    referenced_types,
-                );
-
-                const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(p));
-                const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(ptr_type.ast.child_type));
-                return try std.fmt.allocPrint(allocator, "{s}{s}", .{
-                    tree.source[prefix_start..prefix_end],
-                    child_type_str orelse return null,
-                });
-            },
-
-            .optional_type => {
-                const child_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = datas[p].lhs, .handle = handle },
-                    referenced_types,
-                );
-
-                return try std.fmt.allocPrint(allocator, "?{s}", .{
-                    child_type_str orelse return null,
-                });
-            },
+            .optional_type => unreachable,
 
             .error_union => {
                 const lhs_str = try analyser.addReferencedTypesFromNode(
