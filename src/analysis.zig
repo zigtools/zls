@@ -2742,7 +2742,7 @@ pub const Declaration = union(enum) {
         param_index: u16,
         func: Ast.Node.Index,
 
-        pub fn get(self: Param, tree: Ast) Ast.full.FnProto.Param {
+        pub fn get(self: Param, tree: Ast) ?Ast.full.FnProto.Param {
             var buffer: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buffer, self.func).?;
             var param_index: u16 = 0;
@@ -2750,7 +2750,7 @@ pub const Declaration = union(enum) {
             while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
                 if (self.param_index == param_index) return param;
             }
-            unreachable;
+            return null;
         }
     };
 
@@ -2793,7 +2793,7 @@ pub const Declaration = union(enum) {
     pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
         return switch (decl) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
-            .param_payload => |pp| pp.get(tree).name_token.?,
+            .param_payload => |pp| pp.get(tree).?.name_token.?,
             .pointer_payload => |pp| pp.name,
             .error_union_payload => |ep| ep.name,
             .error_union_error => |ep| ep.name,
@@ -2854,7 +2854,7 @@ pub const DeclWithHandle = struct {
             // TODO: delete redundant `Analyser.`
             .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
             .param_payload => |pay| {
-                const param = pay.get(tree);
+                const param = pay.get(tree).?;
                 const doc_comments = param.first_doc_comment orelse return null;
                 return try Analyser.collectDocComments(allocator, tree, doc_comments, false);
             },
@@ -2879,7 +2879,9 @@ pub const DeclWithHandle = struct {
                 .{ .node = node, .handle = self.handle },
             ),
             .param_payload => |pay| {
-                const param = pay.get(tree);
+                // the `get` function never fails on declarations from the DocumentScope but
+                // there may be manually created Declarations with invalid parameter indicies.
+                const param = pay.get(tree) orelse return null;
 
                 // handle anytype
                 if (param.type_expr == 0) {
