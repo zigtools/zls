@@ -68,7 +68,7 @@ fn typeToCompletion(
             try list.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
-                .insertText = "*",
+                .insertText = "?",
                 .insertTextFormat = .PlainText,
             });
         },
