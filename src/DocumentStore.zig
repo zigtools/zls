@@ -546,6 +546,8 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
         log.warn("Document modified without being opened: {s}", .{uri});
     }
     try handle.setSource(new_text);
+    handle.import_uris = try self.collectImportUris(handle.*);
+    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 }
 
 /// Invalidates a build files.
