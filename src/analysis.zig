@@ -1495,7 +1495,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
                 try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
 
-            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
+            return TypeWithHandle.fromEither(analyser.arena.allocator(), either.items, handle);
         },
         .@"switch",
         .switch_comma,
@@ -1521,7 +1521,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     });
             }
 
-            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
+            return TypeWithHandle.fromEither(analyser.arena.allocator(), either.items, handle);
         },
         .@"while",
         .while_simple,
@@ -1787,96 +1787,109 @@ pub const Type = struct {
     /// const bar = @as(u32, ...); // is_type_val == false
     /// ```
     is_type_val: bool,
+
+    pub fn hash32(self: Type) u32 {
+        return @truncate(self.hash64());
+    }
+
+    pub fn hash64(self: Type) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        self.hashWithHasher(&hasher);
+        return hasher.final();
+    }
+
+    pub fn hashWithHasher(self: Type, hasher: anytype) void {
+        hasher.update(&.{ @intFromBool(self.is_type_val), @intFromEnum(self.data) });
+
+        switch (self.data) {
+            .pointer => |info| {
+                std.hash.autoHash(hasher, info.size);
+                std.hash.autoHash(hasher, info.is_const);
+                info.elem_ty.hashWithHasher(hasher);
+            },
+            .optional,
+            .error_union,
+            .union_tag,
+            => |t| t.hashWithHasher(hasher),
+            .other => |idx| std.hash.autoHash(hasher, idx),
+            .either => |entries| {
+                for (entries) |entry| {
+                    hasher.update(entry.descriptor);
+                    entry.type_with_handle.hashWithHasher(hasher);
+                }
+            },
+            .ip_index => |payload| {
+                std.hash.autoHash(hasher, payload.node);
+                std.hash.autoHash(hasher, payload.index);
+            },
+        }
+    }
+
+    pub fn eql(a: Type, b: Type) bool {
+        if (a.is_type_val != b.is_type_val) return false;
+        if (@intFromEnum(a.data) != @intFromEnum(b.data)) return false;
+
+        switch (a.data) {
+            .pointer => |a_type| {
+                const b_type = b.data.pointer;
+                if (a_type.size != b_type.size) return false;
+                if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
+            },
+            inline .optional,
+            .error_union,
+            .union_tag,
+            => |a_type, name| {
+                const b_type = @field(b.data, @tagName(name));
+                if (!a_type.eql(b_type.*)) return false;
+            },
+            .other => |a_idx| {
+                const b_idx = b.data.other;
+                if (a_idx != b_idx) return false;
+            },
+            .either => |a_entries| {
+                const b_entries = b.data.either;
+
+                if (a_entries.len != b_entries.len) return false;
+                for (a_entries, b_entries) |a_entry, b_entry| {
+                    if (!std.mem.eql(u8, a_entry.descriptor, b_entry.descriptor)) return false;
+                    if (!a_entry.type_with_handle.eql(b_entry.type_with_handle)) return false;
+                }
+            },
+            .ip_index => |a_payload| {
+                const b_payload = b.data.ip_index;
+
+                if (a_payload.index != b_payload.index) return false;
+                if (!std.meta.eql(a_payload.node, b_payload.node)) return false;
+            },
+        }
+
+        return true;
+    }
 };
 
 pub const TypeWithHandle = struct {
     type: Type,
     handle: *DocumentStore.Handle,
 
-    const Context = struct {
-        // Note that we don't hash/equate descriptors to remove
-        // duplicates
+    pub fn hash32(self: TypeWithHandle) u32 {
+        return @truncate(self.hash64());
+    }
 
-        fn hashType(hasher: *std.hash.Wyhash, ty: Type) void {
-            hasher.update(&.{ @intFromBool(ty.is_type_val), @intFromEnum(ty.data) });
+    pub fn hash64(self: TypeWithHandle) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        self.hashWithHasher(&hasher);
+        return hasher.final();
+    }
 
-            switch (ty.data) {
-                .pointer => |info| {
-                    std.hash.autoHash(hasher, info.size);
-                    hashTypeWithHandle(hasher, info.elem_ty.*);
-                },
-                inline .optional,
-                .error_union,
-                .union_tag,
-                => |t| hashTypeWithHandle(hasher, t.*),
-                .other => |idx| std.hash.autoHash(hasher, idx),
-                .either => |entries| {
-                    for (entries) |e| {
-                        hasher.update(e.descriptor);
-                        hashTypeWithHandle(hasher, e.type_with_handle);
-                    }
-                },
-                .ip_index => |payload| {
-                    std.hash.autoHash(hasher, payload.node);
-                    std.hash.autoHash(hasher, payload.index);
-                },
-            }
-        }
+    pub fn hashWithHasher(self: TypeWithHandle, hasher: anytype) void {
+        self.type.hashWithHasher(hasher);
+        hasher.update(self.handle.uri);
+    }
 
-        fn hashTypeWithHandle(hasher: *std.hash.Wyhash, item: TypeWithHandle) void {
-            hashType(hasher, item.type);
-            hasher.update(item.handle.uri);
-        }
-
-        pub fn hash(self: @This(), item: TypeWithHandle) u64 {
-            _ = self;
-            var hasher = std.hash.Wyhash.init(0);
-            hashTypeWithHandle(&hasher, item);
-            return hasher.final();
-        }
-
-        pub fn eql(self: @This(), a: TypeWithHandle, b: TypeWithHandle) bool {
-            if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
-            if (a.type.is_type_val != b.type.is_type_val) return false;
-            if (@intFromEnum(a.type.data) != @intFromEnum(b.type.data)) return false;
-
-            switch (a.type.data) {
-                .pointer => |a_type| {
-                    const b_type = b.type.data.pointer;
-                    if (a_type.size != b_type.size) return false;
-                    if (!self.eql(a_type.elem_ty.*, b_type.elem_ty.*)) return false;
-                },
-                inline .optional,
-                .error_union,
-                .union_tag,
-                => |a_type, name| {
-                    const b_type = @field(b.type.data, @tagName(name));
-                    if (!self.eql(a_type.*, b_type.*)) return false;
-                },
-                .other => |a_idx| {
-                    const b_idx = b.type.data.other;
-                    if (a_idx != b_idx) return false;
-                },
-                .either => |a_entries| {
-                    const b_entries = b.type.data.either;
-
-                    if (a_entries.len != b_entries.len) return false;
-                    for (a_entries, b_entries) |ae, be| {
-                        if (!std.mem.eql(u8, ae.descriptor, be.descriptor)) return false;
-                        if (!self.eql(ae.type_with_handle, be.type_with_handle)) return false;
-                    }
-                },
-                .ip_index => |a_payload| {
-                    const b_payload = b.type.data.ip_index;
-
-                    if (a_payload.index != b_payload.index) return false;
-                    if (!std.meta.eql(a_payload.node, b_payload.node)) return false;
-                },
-            }
-
-            return true;
-        }
-    };
+    pub fn eql(a: TypeWithHandle, b: TypeWithHandle) bool {
+        if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
+        return a.type.eql(b.type);
+    }
 
     pub fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
         return .{
@@ -1888,33 +1901,48 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    pub const Deduplicator = std.HashMapUnmanaged(TypeWithHandle, void, TypeWithHandle.Context, std.hash_map.default_max_load_percentage);
-
-    pub fn fromEither(allocator: std.mem.Allocator, entries: []const Type.EitherEntry, handle: *DocumentStore.Handle) error{OutOfMemory}!?TypeWithHandle {
+    pub fn fromEither(arena: std.mem.Allocator, entries: []const Type.EitherEntry, handle: *DocumentStore.Handle) error{OutOfMemory}!?TypeWithHandle {
         if (entries.len == 0)
             return null;
 
         if (entries.len == 1)
             return entries[0].type_with_handle;
 
+        // Note that we don't hash/equate descriptors to remove
+        // duplicates
+
+        const DeduplicatorContext = struct {
+            pub fn hash(self: @This(), item: Type.EitherEntry) u32 {
+                _ = self;
+                return item.type_with_handle.hash32();
+            }
+
+            pub fn eql(self: @This(), a: Type.EitherEntry, b: Type.EitherEntry, b_index: usize) bool {
+                _ = b_index;
+                _ = self;
+                return a.type_with_handle.eql(b.type_with_handle);
+            }
+        };
+        const Deduplicator = std.ArrayHashMapUnmanaged(Type.EitherEntry, void, DeduplicatorContext, true);
+
         var deduplicator = Deduplicator{};
-        defer deduplicator.deinit(allocator);
+        defer deduplicator.deinit(arena);
 
         var has_type_val: bool = false;
 
         for (entries) |entry| {
-            _ = try deduplicator.getOrPut(allocator, entry.type_with_handle);
+            try deduplicator.put(arena, entry, {});
             if (entry.type_with_handle.type.is_type_val) {
                 has_type_val = true;
             }
         }
 
-        if (deduplicator.size == 1)
+        if (deduplicator.count() == 1)
             return entries[0].type_with_handle;
 
         return .{
             .type = .{
-                .data = .{ .either = entries },
+                .data = .{ .either = try arena.dupe(Type.EitherEntry, deduplicator.keys()) },
                 .is_type_val = has_type_val,
             },
             .handle = handle,
@@ -1931,7 +1959,11 @@ pub const TypeWithHandle = struct {
 
     pub fn getAllTypesWithHandlesArrayList(ty: TypeWithHandle, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(TypeWithHandle)) !void {
         switch (ty.type.data) {
-            .either => |e| for (e) |i| try i.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types),
+            .either => |entries| {
+                for (entries) |entry| {
+                    try entry.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types);
+                }
+            },
             else => try all_types.append(arena, ty),
         }
     }
@@ -2865,7 +2897,7 @@ pub const DeclWithHandle = struct {
                     if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
                     gop_resolved.value_ptr.* = null;
 
-                    var func_decl = Declaration{ .ast_node = pay.func };
+                    const func_decl = Declaration{ .ast_node = pay.func };
 
                     var func_buf: [1]Ast.Node.Index = undefined;
                     const func = tree.fullFnProto(&func_buf, pay.func).?;
@@ -2877,23 +2909,25 @@ pub const DeclWithHandle = struct {
                         func_params_len += 1;
                     }
 
-                    var refs = try references.callsiteReferences(analyser.arena.allocator(), analyser, .{
-                        .decl = func_decl,
-                        .handle = self.handle,
-                    }, false, false, false);
+                    const refs = try references.callsiteReferences(
+                        analyser.arena.allocator(),
+                        analyser,
+                        .{ .decl = func_decl, .handle = self.handle },
+                        false,
+                        false,
+                        false,
+                    );
 
                     // TODO: Set `workspace` to true; current problems
                     // - we gather dependencies, not dependents
 
                     var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
-                    var deduplicator = TypeWithHandle.Deduplicator{};
-                    defer deduplicator.deinit(analyser.gpa);
 
                     for (refs.items) |ref| {
-                        var handle = analyser.store.getOrLoadHandle(ref.uri).?;
+                        const handle = analyser.store.getOrLoadHandle(ref.uri).?;
 
                         var call_buf: [1]Ast.Node.Index = undefined;
-                        var call = tree.fullCall(&call_buf, ref.call_node).?;
+                        const call = tree.fullCall(&call_buf, ref.call_node).?;
 
                         const real_param_idx = if (func_params_len != 0 and pay.param_index != 0 and call.ast.params.len == func_params_len - 1)
                             pay.param_index - 1
@@ -2902,26 +2936,23 @@ pub const DeclWithHandle = struct {
 
                         if (real_param_idx >= call.ast.params.len) continue;
 
-                        if (try analyser.resolveTypeOfNode(.{
+                        const ty = try analyser.resolveTypeOfNode(.{
                             // TODO?: this is a """heuristic based approach"""
                             // perhaps it would be better to use proper self detection
                             // maybe it'd be a perf issue and this is fine?
                             // you figure it out future contributor <3
                             .node = call.ast.params[real_param_idx],
                             .handle = handle,
-                        })) |ty| {
-                            var gop = try deduplicator.getOrPut(analyser.gpa, ty);
-                            if (gop.found_existing) continue;
+                        }) orelse continue;
 
-                            var loc = offsets.tokenToPosition(tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
-                            try possible.append(analyser.arena.allocator(), .{ // TODO: Dedup
-                                .type_with_handle = ty,
-                                .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
-                            });
-                        }
+                        const loc = offsets.tokenToPosition(tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
+                        try possible.append(analyser.arena.allocator(), .{
+                            .type_with_handle = ty,
+                            .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
+                        });
                     }
 
-                    const maybe_type_handle = try TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
+                    const maybe_type_handle = try TypeWithHandle.fromEither(analyser.arena.allocator(), possible.items, self.handle);
                     if (maybe_type_handle) |type_handle| analyser.resolved_callsites.getPtr(pay).?.* = type_handle;
                     return maybe_type_handle;
                 }
