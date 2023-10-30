@@ -122,6 +122,14 @@ test "foldingRange - function" {
     try testFoldingRange(
         \\fn main(
         \\  a: ?u32,
+        \\  b: anytype,
+        \\) !u32 {}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 13 },
+    });
+    try testFoldingRange(
+        \\fn main(
+        \\  a: ?u32,
         \\) !u32 {
         \\    return 1 + 1;
         \\}
