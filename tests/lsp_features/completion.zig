@@ -389,6 +389,16 @@ test "completion - captures" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(maybe_maybe_s: ??S) void {
+        \\    if (maybe_maybe_s) |maybe_s| if (maybe_s) |s| {
+        \\        s.<cursor>
+        \\    };
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 
     try testCompletion(
         \\const S = struct { alpha: u32 };
