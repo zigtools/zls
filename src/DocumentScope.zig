@@ -648,8 +648,8 @@ noinline fn walkContainerDecl(
     defer tracy_zone.end();
 
     const allocator = context.allocator;
-    const scopes = &context.doc_scope.scopes;
     const tags = tree.nodes.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
     const token_tags = tree.tokens.items(.tag);
 
     var buf: [2]Ast.Node.Index = undefined;
@@ -660,11 +660,12 @@ noinline fn walkContainerDecl(
         break :blk switch (token_tags[container_decl.ast.main_token]) {
             .keyword_enum => true,
             .keyword_union => container_decl.ast.enum_token != null or container_decl.ast.arg != 0,
-            else => false,
+            .keyword_struct, .keyword_opaque => false,
+            else => unreachable,
         };
     };
 
-    var scope = try context.startScope(
+    const scope = try context.startScope(
         .container,
         .{ .ast_node = node_idx },
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
@@ -679,48 +680,75 @@ noinline fn walkContainerDecl(
         switch (tags[decl]) {
             .@"usingnamespace" => {
                 try uses.append(allocator, decl);
-                continue;
             },
-            .test_decl => {
-                continue;
+            .test_decl,
+            .@"comptime",
+            => continue,
+
+            .container_field,
+            .container_field_init,
+            .container_field_align,
+            => {
+                if (token_tags[main_tokens[node_idx]] == .keyword_struct and
+                    tree.fullContainerField(decl).?.ast.tuple_like)
+                {
+                    continue;
+                }
+
+                const name = offsets.tokenToSlice(tree, main_tokens[decl]);
+                try scope.pushDeclaration(name, .{ .ast_node = decl }, .field);
+
+                if (is_enum_or_tagged_union) {
+                    if (std.mem.eql(u8, name, "_")) continue;
+
+                    const doc = try Analyser.getDocComments(allocator, tree, decl);
+                    errdefer if (doc) |d| allocator.free(d);
+                    // TODO: Fix allocation; just store indices
+                    var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
+                        .label = name,
+                        .kind = .EnumMember,
+                        .insertText = name,
+                        .insertTextFormat = .PlainText,
+                        .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
+                    });
+                    if (gop_res.found_existing) {
+                        if (doc) |d| allocator.free(d);
+                    }
+                }
             },
-            else => {},
-        }
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            .fn_decl,
+            => {
+                var buffer: [1]Ast.Node.Index = undefined;
+                const name_token = tree.fullFnProto(&buffer, decl).?.name_token orelse continue;
+                const name = offsets.tokenToSlice(tree, name_token);
+                try scope.pushDeclaration(name, .{ .ast_node = decl }, .other);
+            },
+            .local_var_decl,
+            .global_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            => {
+                const name_token = tree.fullVarDecl(decl).?.ast.mut_token + 1;
+                if (name_token >= tree.tokens.len) continue;
 
-        const name = Analyser.getContainerDeclName(tree, node_idx, decl) orelse continue;
-        try scope.pushDeclaration(
-            name,
-            .{ .ast_node = decl },
-            if (tags[decl].isContainerField())
-                .field
-            else
-                .other,
-        );
+                const name = offsets.tokenToSlice(tree, name_token);
+                try scope.pushDeclaration(name, .{ .ast_node = decl }, .other);
+            },
 
-        if (is_enum_or_tagged_union) {
-            if (std.mem.eql(u8, name, "_")) continue;
-
-            const doc = try Analyser.getDocComments(allocator, tree, decl);
-            errdefer if (doc) |d| allocator.free(d);
-            // TODO: Fix allocation; just store indices
-            var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
-                .label = name,
-                .kind = .EnumMember,
-                .insertText = name,
-                .insertTextFormat = .PlainText,
-                .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
-            });
-            if (gop_res.found_existing) {
-                if (doc) |d| allocator.free(d);
-            }
+            else => unreachable,
         }
     }
 
     try scope.finalize();
 
     if (uses.items.len != 0) {
-        scopes.items(.data)[@intFromEnum(scope.scope)].tag = .container_usingnamespace;
-        scopes.items(.data)[@intFromEnum(scope.scope)].data = .{ .container_usingnamespace = @intCast(context.doc_scope.extra.items.len) };
+        const scope_data = &context.doc_scope.scopes.items(.data)[@intFromEnum(scope.scope)];
+        scope_data.tag = .container_usingnamespace;
+        scope_data.data = .{ .container_usingnamespace = @intCast(context.doc_scope.extra.items.len) };
 
         try context.doc_scope.extra.ensureUnusedCapacity(allocator, uses.items.len + 2);
         context.doc_scope.extra.appendAssumeCapacity(node_idx);
