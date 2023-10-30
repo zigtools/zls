@@ -19,6 +19,13 @@ test "foldingRange - container type without members" {
     , &.{
         .{ .startLine = 0, .startCharacter = 18, .endLine = 1, .endCharacter = 0 },
     });
+    try testFoldingRange(
+        \\const S = struct {
+        \\    // hello there
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 18, .endLine = 2, .endCharacter = 0 },
+    });
 }
 
 test "foldingRange - doc comment" {
@@ -173,7 +180,7 @@ test "foldingRange - container decl" {
         \\const Foo = struct {
         \\  /// doc comment
         \\  alpha: u32,
-        \\  beta: []const u8,
+        \\  // beta: []const u8,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
@@ -201,6 +208,22 @@ test "foldingRange - container decl" {
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 25, .endLine = 3, .endCharacter = 0 },
+    });
+    try testFoldingRange(
+        \\const Foo = struct {
+        \\  fn foo() void {}
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 2, .endCharacter = 0 },
+    });
+    try testFoldingRange(
+        \\const Foo = struct {
+        \\  fn foo() void {}
+        \\  fn bar() void {}
+        \\  // some comment
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
     });
 }
 
