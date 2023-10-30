@@ -434,6 +434,7 @@ fn walkNodeEnsureScope(
                 undefined,
                 locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
             );
+            try walkNode(context, tree, node_idx);
             return new_scope;
         },
     }
