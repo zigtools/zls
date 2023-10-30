@@ -1447,13 +1447,7 @@ test "builtin fn `field`" {
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
         \\        pub const chip1 = struct {
-        \\            canary: bool,
         \\            pub const peripherals = struct {};
-        \\            pub fn chip1fn1() void {}
-        \\            pub fn chip1fn2(_: u32) void {}
-        \\        };
-        \\        pub const chip2 = struct {
-        \\            pub fn chip2fn1() void {}
         \\        };
         \\    };
         \\};
@@ -1463,8 +1457,40 @@ test "builtin fn `field`" {
         \\}
     , &.{
         .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
-        .{ .label = "chip1fn1", .kind = .Function, .detail = "fn chip1fn1() void" },
-        .{ .label = "chip1fn2", .kind = .Function, .detail = "fn chip1fn2(_: u32) void" },
+    });
+    try testCompletion(
+        \\pub const chip_mod = struct {
+        \\    pub const devices = struct {
+        \\        pub const chip1 = struct {
+        \\            pub const peripherals = struct {};
+        \\        };
+        \\    };
+        \\};
+        \\test {
+        \\    const chip_name = "chip1";
+        \\    const chip = @field(chip_mod.devices, chip_name);
+        \\    chip.<cursor>
+        \\}
+    , &.{
+        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+    });
+    try testCompletion(
+        \\pub const chip_mod = struct {
+        \\    pub const devices = struct {
+        \\        pub const @"chip-1" = struct {
+        \\            pub const peripherals = struct {};
+        \\        };
+        \\    };
+        \\};
+        \\test {
+        \\    const chips = struct {
+        \\          pub const chip_name: []const u8 = "chip-1";
+        \\      };
+        \\    const chip = @field(chip_mod.devices, chips.chip_name);
+        \\    chip.<cursor>
+        \\}
+    , &.{
+        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
     });
 }
 
