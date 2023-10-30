@@ -1,7 +1,3 @@
-//! ZLS has a [DocumentScope](https://github.com/zigtools/zls/blob/61fec01a2006c5d509dee11c6f0d32a6dfbbf44e/src/analysis.zig#L3811) data structure that represents a high-level Ast used for looking up declarations and finding the current scope at a given source location.
-//! I recently had a discussion with @SuperAuguste about the DocumentScope and we were both agreed that it was in need of a rework.
-//! I took some of his suggestions and this what I came up with:
-
 const std = @import("std");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
@@ -9,7 +5,6 @@ const types = @import("lsp.zig");
 const tracy = @import("tracy.zig");
 const offsets = @import("offsets.zig");
 const Analyser = @import("analysis.zig");
-/// this a tagged union.
 const Declaration = Analyser.Declaration;
 
 const DocumentScope = @This();
@@ -45,12 +40,8 @@ pub const CompletionSet = std.ArrayHashMapUnmanaged(
     false,
 );
 
-/// alternative representation:
-///
-/// if we add every `Declaration` to `DocumentScope.declarations` in the same order we
-/// insert into this Map then there is no need to store the `Declaration.Index`
-/// because it matches the index inside the Map.
-/// this only works if every `Declaration` has only added to a single scope
+/// Every `index` inside this `ArrayhashMap` is equivalent to a `Declaration.Index`
+/// This means that every declaration is only the child of a single scope
 pub const DeclarationLookupMap = std.ArrayHashMapUnmanaged(
     DeclarationLookup,
     void,
@@ -138,12 +129,12 @@ pub const Scope = struct {
         data: Data,
     },
     // offsets.Loc store `usize` instead of `u32`
-    // zig only allows files up to std.math.maxInt(u32) bytes to do this kind of optimization. ZLS should also follow this.
+    // zig only allows files up to `std.math.maxInt(u32)` bytes to do this kind of optimization.
+    // TODO ZLS should check this.
     loc: SmallLoc,
     parent_scope: OptionalIndex,
     // child scopes have contiguous indices
-    // used only by the EnclosingScopeIterator
-    // https://github.com/zigtools/zls/blob/61fec01a2006c5d509dee11c6f0d32a6dfbbf44e/src/analysis.zig#L3127
+    // used only by the `EnclosingScopeIterator`
     child_scopes: ChildScopes,
     child_declarations: ChildDeclarations,
 
