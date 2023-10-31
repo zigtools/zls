@@ -407,7 +407,7 @@ pub fn getContainerDeclNameToken(tree: Ast, container: ?Ast.Node.Index, node: As
                 tok;
         }, // 'error'.<main_token +2>
 
-        .test_decl => datas[node].lhs,
+        .test_decl => if (datas[node].lhs != 0) datas[node].lhs else null,
 
         else => null,
     };

@@ -104,7 +104,7 @@ const Builder = struct {
             .identifier,
             .test_decl,
             => {
-                const identifier_token = Analyser.getDeclNameToken(tree, node).?;
+                const identifier_token = Analyser.getDeclNameToken(tree, node) orelse return;
                 if (token_tags[identifier_token] != .identifier) return;
 
                 const child = (try builder.analyser.lookupSymbolGlobal(
@@ -274,6 +274,7 @@ const CallBuilder = struct {
 
         const node_tags = tree.nodes.items(.tag);
         const datas = tree.nodes.items(.data);
+        const main_tokens = tree.nodes.items(.main_token);
         // const token_tags = tree.tokens.items(.tag);
         const starts = tree.tokens.items(.start);
 
@@ -294,7 +295,7 @@ const CallBuilder = struct {
 
                 switch (node_tags[called_node]) {
                     .identifier => {
-                        const identifier_token = Analyser.getDeclNameToken(tree, called_node).?;
+                        const identifier_token = main_tokens[called_node];
 
                         const child = (try builder.analyser.lookupSymbolGlobal(
                             handle,
