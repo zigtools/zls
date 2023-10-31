@@ -98,9 +98,8 @@ test "references - for/while capture" {
 }
 
 test "references - struct field access" {
-    if (true) return error.SkipZigTest; // TODO
     try testReferences(
-        \\const S = struct {placeholder: u32 = 3};
+        \\const S = struct {<0>: u32 = 3};
         \\pub fn foo() bool {
         \\    const s: S = .{};
         \\    return s.<0> == s.<0>;
