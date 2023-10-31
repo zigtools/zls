@@ -889,6 +889,22 @@ fn completeFileSystemStringLiteral(
                 }, {});
             }
         }
+
+        try completions.ensureUnusedCapacity(arena, 2);
+        if (store.config.zig_lib_path) |zig_lib_path| {
+            completions.putAssumeCapacity(.{
+                .label = "std",
+                .kind = .Module,
+                .detail = zig_lib_path,
+            }, {});
+        }
+        if (store.config.builtin_path) |builtin_path| {
+            completions.putAssumeCapacity(.{
+                .label = "builtin",
+                .kind = .Module,
+                .detail = builtin_path,
+            }, {});
+        }
     }
 
     return completions.keys();
