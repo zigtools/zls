@@ -885,6 +885,7 @@ fn completeFileSystemStringLiteral(
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
+                    .detail = pkg.path,
                 }, {});
             }
         }
