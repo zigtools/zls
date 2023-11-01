@@ -811,7 +811,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
 
 fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
-    store: DocumentStore,
+    store: *DocumentStore,
     handle: DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
@@ -888,6 +888,17 @@ fn completeFileSystemStringLiteral(
                     .detail = pkg.path,
                 }, {});
             }
+        } else if (std.mem.endsWith(u8, handle.uri, "/build.zig")) blk: {
+            const build_file_entry = store.getOrLoadBuildFile(handle.uri) orelse break :blk;
+            const build_config = build_file_entry.value_ptr.config orelse break :blk;
+            try completions.ensureUnusedCapacity(arena, build_config.value.deps_build_roots.len);
+            for (build_config.value.deps_build_roots) |dbr| {
+                completions.putAssumeCapacity(.{
+                    .label = dbr.name,
+                    .kind = .Module,
+                    .detail = dbr.path,
+                }, {});
+            }
         }
 
         try completions.ensureUnusedCapacity(arena, 2);
@@ -936,7 +947,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => completeFileSystemStringLiteral(arena, server.document_store, handle.*, pos_context) catch |err| {
+        => completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
             log.err("failed to get file system completions: {}", .{err});
             return null;
         },
