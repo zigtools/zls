@@ -176,17 +176,19 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             => {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_proto = tree.fullFnProto(&buffer, node).?;
+                var it = fn_proto.iterate(&tree);
 
-                if (fn_proto.ast.params.len != 0) {
-                    const list_start_tok = fn_proto.lparen;
-                    const last_param = fn_proto.ast.params[fn_proto.ast.params.len - 1];
-                    const last_param_tok = ast.lastToken(tree, last_param);
-                    const param_has_comma = last_param_tok + 1 < tree.tokens.len and token_tags[last_param_tok + 1] == .comma;
-                    const list_end_tok = last_param_tok + @intFromBool(param_has_comma);
-
-                    if (list_start_tok > list_end_tok) continue; // Incomplete, ie `fn a()`
-                    try builder.add(null, list_start_tok, list_end_tok, .exclusive, .inclusive);
+                var last_param: ?Ast.full.FnProto.Param = null;
+                while (ast.nextFnParam(&it)) |param| {
+                    last_param = param;
                 }
+
+                const list_start_tok = fn_proto.lparen;
+                const last_param_tok = ast.paramLastToken(tree, last_param orelse continue);
+                const param_has_comma = last_param_tok + 1 < tree.tokens.len and token_tags[last_param_tok + 1] == .comma;
+                const list_end_tok = last_param_tok + @intFromBool(param_has_comma);
+
+                try builder.add(null, list_start_tok, list_end_tok, .exclusive, .inclusive);
             },
 
             .block_two,
