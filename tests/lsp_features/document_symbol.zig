@@ -42,6 +42,17 @@ test "documentSymbol - enum" {
     );
 }
 
+test "documentSymbol - test decl" {
+    try testDocumentSymbol(
+        \\test foo {}
+        \\test "bar" {}
+        \\test {}
+    ,
+        \\Method foo
+        \\Method bar
+    );
+}
+
 // https://github.com/zigtools/zls/issues/986
 test "documentSymbol - nested struct with self" {
     try testDocumentSymbol(
