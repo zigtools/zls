@@ -531,7 +531,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
 }
 
 /// resolves `@field(lhs, field_name)`
-fn resolveFieldAccess(analyser: *Analyser, lhs: TypeWithHandle, field_name: []const u8) !?TypeWithHandle {
+pub fn resolveFieldAccess(analyser: *Analyser, lhs: TypeWithHandle, field_name: []const u8) !?TypeWithHandle {
     if (try analyser.resolveTaggedUnionFieldType(lhs, field_name)) |tag_type| return tag_type;
 
     // If we are accessing a pointer type, remove one pointerness level :)

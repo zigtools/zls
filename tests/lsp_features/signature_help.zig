@@ -108,6 +108,8 @@ test "signature help - function pointer container field" {
 }
 
 test "signature help - self parameter" {
+    // parameter: S
+    // argument: S
     try testSignatureHelp(
         \\const S = struct {
         \\    fn foo(self: @This(), a: u32, b: void) bool {}
@@ -121,6 +123,42 @@ test "signature help - self parameter" {
         \\};
         \\const foo = S.foo(undefined,<cursor>);
     , "fn foo(self: @This(), a: u32, b: void) bool", 1);
+
+    // parameter: *S
+    // argument: S
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(self: *@This(), a: u32, b: void) bool {}
+        \\};
+        \\const s: S = undefined;
+        \\const foo = s.foo(3,<cursor>);
+    , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(self: *@This(), a: u32, b: void) bool {}
+        \\};
+        \\const foo = S.foo(undefined,<cursor>);
+    , "fn foo(self: *@This(), a: u32, b: void) bool", 1);
+
+    // parameter: S
+    // argument: *S
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(self: @This(), a: u32, b: void) bool {}
+        \\};
+        \\const s: *S = undefined;
+        \\const foo = s.foo(3,<cursor>);
+    , "fn foo(self: @This(), a: u32, b: void) bool", 2);
+
+    // parameter: *S
+    // argument: *S
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(self: *@This(), a: u32, b: void) bool {}
+        \\};
+        \\const s: *S = undefined;
+        \\const foo = s.foo(3,<cursor>);
+    , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
 }
 
 test "signature help - anytype" {

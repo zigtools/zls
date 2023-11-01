@@ -258,11 +258,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                 const name = offsets.locToSlice(handle.tree.source, name_loc);
 
                 const skip_self_param = !type_handle.type.is_type_val;
-                const decl_handle = (try type_handle.lookupSymbol(analyser, name)) orelse {
-                    try symbol_stack.append(arena, .l_paren);
-                    continue;
-                };
-                type_handle = try decl_handle.resolveType(analyser) orelse {
+                type_handle = try analyser.resolveFieldAccess(type_handle, name) orelse {
                     try symbol_stack.append(arena, .l_paren);
                     continue;
                 };
