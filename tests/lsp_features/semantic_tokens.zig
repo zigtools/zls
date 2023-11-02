@@ -690,6 +690,42 @@ test "semantic tokens - usingnamespace" {
         .{ "usingnamespace", .keyword, .{} },
     });
 }
+
+test "semantic tokens - container declarations" {
+    try testSemanticTokens(
+        \\const Foo = struct {
+        \\    /// some
+        \\    /// comment
+        \\    pub const Bar = u32;
+        \\    comptime {
+        \\        return;
+        \\    }
+        \\    test {
+        \\        return;
+        \\    }
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "/// some", .comment, .{ .documentation = true } },
+        .{ "/// comment", .comment, .{ .documentation = true } },
+        .{ "pub", .keyword, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "Bar", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "u32", .type, .{} },
+
+        .{ "comptime", .keyword, .{} },
+        .{ "return", .keyword, .{} },
+
+        .{ "test", .keyword, .{} },
+        .{ "return", .keyword, .{} },
+    });
+}
+
 test "semantic tokens - struct" {
     try testSemanticTokens(
         \\const Foo = struct {};
