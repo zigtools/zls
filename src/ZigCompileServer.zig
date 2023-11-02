@@ -65,8 +65,8 @@ pub fn receiveEmitBinPath(client: *Client) !InMessage.EmitBinPath {
 pub fn receiveErrorBundle(client: *Client) !InMessage.ErrorBundle {
     const reader = client.pooler.fifo(.in).reader();
     return .{
-        .extra_len = try reader.readIntLittle(u32),
-        .string_bytes_len = try reader.readIntLittle(u32),
+        .extra_len = try reader.readInt(u32, .little),
+        .string_bytes_len = try reader.readInt(u32, .little),
     };
 }
 
@@ -144,12 +144,12 @@ fn bswap_u32_array(slice: []u32) void {
 
 /// workaround for https://github.com/ziglang/zig/issues/14904
 fn bswap_and_workaround_u32(bytes_ptr: *const [4]u8) u32 {
-    return std.mem.readIntLittle(u32, bytes_ptr);
+    return std.mem.readInt(u32, bytes_ptr, .little);
 }
 
 /// workaround for https://github.com/ziglang/zig/issues/14904
 fn bswap_and_workaround_tag(bytes_ptr: *const [4]u8) InMessage.Tag {
-    const int = std.mem.readIntLittle(u32, bytes_ptr);
+    const int = std.mem.readInt(u32, bytes_ptr, .little);
     return @as(InMessage.Tag, @enumFromInt(int));
 }
 
@@ -162,4 +162,4 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const native_endian = builtin.target.cpu.arch.endian();
-const need_bswap = native_endian != .Little;
+const need_bswap = native_endian != .little;
