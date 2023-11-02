@@ -1263,6 +1263,11 @@ test "semantic tokens - test decl" {
         .{ "\"test inside a test\"", .string, .{} },
     });
     try testSemanticTokens(
+        \\test {}
+    , &.{
+        .{ "test", .keyword, .{} },
+    });
+    try testSemanticTokens(
         \\test foo {}
     , &.{
         .{ "test", .keyword, .{} },
