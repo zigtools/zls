@@ -508,6 +508,23 @@ test "semantic tokens - struct literal" {
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },
     });
+    try testSemanticTokens(
+        \\var alpha = .{ .foo = 1, .bar = 2 };
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "foo", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "1", .number, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "bar", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "2", .number, .{} },
+    });
 }
 
 test "semantic tokens - optional types" {
