@@ -607,6 +607,39 @@ test "semantic tokens - error union types" {
     });
 }
 
+test "semantic tokens - usingnamespace" {
+    try testSemanticTokens(
+        \\const Foo = struct {
+        \\    usingnamespace {};
+        \\    pub usingnamespace {};
+        \\    /// aaa
+        \\    /// bbb
+        \\    pub usingnamespace {};
+        \\    /// ccc
+        \\    /// ddd
+        \\    usingnamespace {};
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "pub", .keyword, .{} },
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "/// aaa", .comment, .{ .documentation = true } },
+        .{ "/// bbb", .comment, .{ .documentation = true } },
+        .{ "pub", .keyword, .{} },
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "/// ccc", .comment, .{ .documentation = true } },
+        .{ "/// ddd", .comment, .{ .documentation = true } },
+        .{ "usingnamespace", .keyword, .{} },
+    });
+}
 test "semantic tokens - struct" {
     try testSemanticTokens(
         \\const Foo = struct {};
