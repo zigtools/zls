@@ -1047,6 +1047,24 @@ test "semantic tokens - while" {
         .{ "else", .keyword, .{} },
         .{ "true", .keywordLiteral, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = blk: while (undefined) {
+        \\    continue :blk;
+        \\} else |err| return err;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "blk", .label, .{ .declaration = true } },
+        .{ "while", .keyword, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "continue", .keyword, .{} },
+        .{ "blk", .label, .{} },
+        .{ "else", .keyword, .{} },
+        .{ "err", .variable, .{ .declaration = true } },
+        .{ "return", .keyword, .{} },
+        .{ "err", .variable, .{} },
+    });
 }
 
 test "semantic tokens - for" {
@@ -1068,6 +1086,23 @@ test "semantic tokens - for" {
         .{ "for", .keyword, .{} },
         .{ "\"\"", .string, .{} },
         .{ "val", .variable, .{ .declaration = true } },
+    });
+    try testSemanticTokens(
+        \\const foo = blk: for ("") |val| {} else {
+        \\    break :blk null;
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "blk", .label, .{ .declaration = true } },
+        .{ "for", .keyword, .{} },
+        .{ "\"\"", .string, .{} },
+        .{ "val", .variable, .{ .declaration = true } },
+        .{ "else", .keyword, .{} },
+        .{ "break", .keyword, .{} },
+        .{ "blk", .label, .{} },
+        .{ "null", .keywordLiteral, .{} },
     });
 }
 

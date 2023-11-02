@@ -498,7 +498,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .while_cont,
         => {
             const while_node = ast.fullWhile(tree, node).?;
-            try writeToken(builder, while_node.label_token, .label);
+            try writeTokenMod(builder, while_node.label_token, .label, .{ .declaration = true });
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
             try writeNodeTokens(builder, while_node.ast.cond_expr);
@@ -524,7 +524,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .@"for",
         => {
             const for_node = ast.fullFor(tree, node).?;
-            try writeToken(builder, for_node.label_token, .label);
+            try writeTokenMod(builder, for_node.label_token, .label, .{ .declaration = true });
             try writeToken(builder, for_node.inline_token, .keyword);
             try writeToken(builder, for_node.ast.for_token, .keyword);
 
