@@ -43,6 +43,26 @@ test "semantic tokens - comment" {
         .{ "a", .variable, .{ .declaration = true } },
     });
 }
+test "semantic tokens - doc comment" {
+    try testSemanticTokens(
+        \\/// line 1
+        \\/// line 2
+        \\const foo = struct {
+        \\    /// some comment
+        \\    alpha: u32,
+        \\};
+    , &.{
+        .{ "/// line 1", .comment, .{ .documentation = true } },
+        .{ "/// line 2", .comment, .{ .documentation = true } },
+        .{ "const", .keyword, .{} },
+        .{ "foo", .@"struct", .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "/// some comment", .comment, .{ .documentation = true } },
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+    });
+}
 
 test "semantic tokens - string literals" {
     try testSemanticTokens(
