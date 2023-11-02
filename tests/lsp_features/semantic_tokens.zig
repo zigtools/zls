@@ -99,11 +99,13 @@ test "semantic tokens - value literals" {
         \\true,
         \\false,
         \\undefined,
+        \\unreachable,
         \\null,
     , &.{
         .{ "true", .keywordLiteral, .{} },
         .{ "false", .keywordLiteral, .{} },
         .{ "undefined", .keywordLiteral, .{} },
+        .{ "unreachable", .keywordLiteral, .{} },
         .{ "null", .keywordLiteral, .{} },
     });
 }
