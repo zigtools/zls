@@ -538,7 +538,6 @@ test "semantic tokens - pointer types" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "u32", .type, .{} },
     });
     try testSemanticTokens(
@@ -547,7 +546,6 @@ test "semantic tokens - pointer types" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "allowzero", .keyword, .{} },
         .{ "u32", .type, .{} },
     });
@@ -562,12 +560,21 @@ test "semantic tokens - pointer types" {
         .{ "u32", .type, .{} },
     });
     try testSemanticTokens(
+        \\const alpha = [*c]const volatile u32;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "volatile", .keyword, .{} },
+        .{ "u32", .type, .{} },
+    });
+    try testSemanticTokens(
         \\const alpha = *align(1:2:3) u32;
     , &.{
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "align", .keyword, .{} },
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },

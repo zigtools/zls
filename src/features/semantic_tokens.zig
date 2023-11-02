@@ -900,13 +900,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         => {
             const ptr_type = ast.fullPtrType(tree, node).?;
 
-            if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
-                main_token == main_tokens[ptr_type.ast.child_type])
-            {
-                return try writeNodeTokens(builder, ptr_type.ast.child_type);
-            }
-
-            if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
             if (ptr_type.ast.sentinel != 0) {
                 try writeNodeTokens(builder, ptr_type.ast.sentinel);
             }
