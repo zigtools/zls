@@ -246,6 +246,17 @@ test "semantic tokens - operators" {
         .{ "and", .keyword, .{} },
         .{ "false", .keywordLiteral, .{} },
     });
+    try testSemanticTokens(
+        \\var alpha = (undefined).?.*;
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        // TODO these should be either (.? and .*) or (? and *)
+        .{ "?", .operator, .{} },
+        .{ ".*", .operator, .{} },
+    });
 }
 
 test "semantic tokens - field access with @import" {
