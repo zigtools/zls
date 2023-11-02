@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/zigtools/install-zls/main/img/zls-opt.svg" alt="Zig Language Server" width=200>
+<img src="https://raw.githubusercontent.com/zigtools/zls/master/.github/assets/zls-opt.svg" alt="Zig Language Server" width=200>
 
 [![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
 
