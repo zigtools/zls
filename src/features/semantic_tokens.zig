@@ -955,7 +955,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, main_token, .keyword);
             try writeNodeTokens(builder, node_data[node].lhs);
         },
-        .anyframe_literal => try writeToken(builder, main_token, .keyword),
+        .anyframe_literal => try writeToken(builder, main_token, .type),
     }
 }
 

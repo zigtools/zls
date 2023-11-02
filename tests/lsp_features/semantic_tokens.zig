@@ -84,11 +84,13 @@ test "semantic tokens - type literals" {
         \\f16,
         \\u8,
         \\u15,
+        \\anyframe,
     , &.{
         .{ "bool", .type, .{} },
         .{ "f16", .type, .{} },
         .{ "u8", .type, .{} },
         .{ "u15", .type, .{} },
+        .{ "anyframe", .type, .{} },
     });
 }
 
