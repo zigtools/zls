@@ -432,8 +432,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param_decl| {
-                if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
-
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
 
                 const token_type: TokenType = if (Analyser.isMetaType(tree, param_decl.type_expr)) .typeParameter else .parameter;

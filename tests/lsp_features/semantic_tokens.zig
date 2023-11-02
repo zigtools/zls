@@ -879,6 +879,29 @@ test "semantic tokens - function" {
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
+        \\fn foo(
+        \\    /// some comment
+        \\    alpha: u32,
+        \\    /// some
+        \\    /// comment
+        \\    beta: anytype,
+        \\) void {}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+
+        .{ "/// some comment", .comment, .{ .documentation = true } },
+        .{ "alpha", .parameter, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+
+        .{ "/// some", .comment, .{ .documentation = true } },
+        .{ "/// comment", .comment, .{ .documentation = true } },
+        .{ "beta", .parameter, .{ .declaration = true } },
+        .{ "anytype", .type, .{} },
+
+        .{ "void", .type, .{} },
+    });
+    try testSemanticTokens(
         \\extern fn foo() align(4) callconv(.C) void;
     , &.{
         .{ "extern", .keyword, .{} },
