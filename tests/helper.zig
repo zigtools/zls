@@ -45,7 +45,7 @@ pub fn clearPlaceholders(allocator: std.mem.Allocator, source: []const u8) ![]co
     return replacePlaceholders(allocator, source, "");
 }
 
-const CollectPlaceholdersResult = struct {
+pub const CollectPlaceholdersResult = struct {
     /// list of all placeholder with old and new location
     locations: std.MultiArrayList(LocPair),
     /// equivalent to calling `replacePlaceholders(source, new_name)`
