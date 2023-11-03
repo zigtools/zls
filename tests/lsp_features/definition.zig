@@ -1,5 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
 const zls = @import("zls");
 const builtin = @import("builtin");
 
@@ -54,43 +53,185 @@ test "definition - multiline builder pattern" {
     );
 }
 
+/// - use `<>` to indicate the cursor position
+/// - use `<decl>content</decl>` to set the expected range of the declaration
+/// - use `<def>content</def>` to set the expected range of the definition
+/// - use `<tdef>content</tdef>` to set the expected range of the type definition
+///
+/// If a declaration, definition or type definition is not set, it default to checking for no response from the Server
 fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
-    var cursor: ?offsets.Loc = null;
-    var def_start: ?offsets.Loc = null;
-    var def_end: ?offsets.Loc = null;
-    for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
-        const str = offsets.locToSlice(source, old_loc);
-        if (mem.eql(u8, str, "<>")) cursor = new_loc;
-        if (mem.eql(u8, str, "<def>")) def_start = new_loc;
-        if (mem.eql(u8, str, "</def>")) def_end = new_loc;
+    var error_builder = ErrorBuilder.init(allocator);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
+
+    try error_builder.addFile("old_source", source);
+    try error_builder.addFile("new_source", phr.new_source);
+
+    const cursor_index: usize = blk: {
+        var cursor_index: ?usize = null;
+        var cursor_old_loc: ?offsets.Loc = null;
+        for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
+            const str = offsets.locToSlice(source, old_loc);
+            if (!std.mem.eql(u8, str, "<>")) continue;
+            if (cursor_old_loc) |previous_loc| {
+                try error_builder.msgAtLoc("duplicate cursor position", "old_source", old_loc, .err, .{});
+                try error_builder.msgAtLoc("previously declared here", "old_source", previous_loc, .err, .{});
+                return error.DuplicateCursorPosition;
+            } else {
+                std.debug.assert(new_loc.start == new_loc.end);
+                cursor_index = new_loc.start;
+                cursor_old_loc = old_loc;
+            }
+        }
+        break :blk cursor_index orelse {
+            std.debug.print("must specify cursor position with `<>`\n", .{});
+            return error.ExpectedCursorPosition;
+        };
+    };
+
+    for (phr.locations.items(.old)) |loc| {
+        const str = offsets.locToSlice(source, loc); // e.g. '</decl>'
+        const tag_content = str[1 .. str.len - 1]; // e.g. '/decl'
+        const is_end = std.mem.startsWith(u8, tag_content, "/");
+        const tag_name = tag_content[@intFromBool(is_end)..]; // e.g. 'decl'
+
+        if (std.mem.eql(u8, tag_name, "")) continue; // cursor index
+        if (std.mem.eql(u8, tag_name, "decl")) continue;
+        if (std.mem.eql(u8, tag_name, "def")) continue;
+        if (std.mem.eql(u8, tag_name, "tdef")) continue;
+        std.debug.print("unknown placeholder '{s}'\n", .{str});
+        return error.UnknownPlaceholder;
     }
-    try std.testing.expect(cursor != null);
-    try std.testing.expect(def_start != null);
-    try std.testing.expect(def_end != null);
+
+    const declaration_loc: ?offsets.Loc = try parseTaggedLoc(source, phr, "decl");
+    const definition_loc: ?offsets.Loc = try parseTaggedLoc(source, phr, "def");
+    const type_definition_loc: ?offsets.Loc = try parseTaggedLoc(source, phr, "tdef");
+
+    if (declaration_loc == null and
+        definition_loc == null and
+        type_definition_loc == null)
+    {
+        std.debug.print("must specify at least one sub-test with <decl>, <def> or <tdef>\n", .{});
+        return error.NoChecksSpecified;
+    }
 
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    ctx.server.client_capabilities.supports_textDocument_definition_linkSupport = true;
-
-    const cursor_lsp = offsets.locToRange(phr.new_source, cursor.?, ctx.server.offset_encoding).start;
-    const def_range_lsp = offsets.locToRange(phr.new_source, .{ .start = def_start.?.end, .end = def_end.?.start }, ctx.server.offset_encoding);
-
     const test_uri = try ctx.addDocument(phr.new_source);
+    try error_builder.addFile(test_uri, phr.new_source);
 
-    const params = types.DefinitionParams{
-        .textDocument = .{ .uri = test_uri },
-        .position = cursor_lsp,
-    };
+    const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", params) orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
+    const declaration_params = types.DeclarationParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const definition_params = types.DefinitionParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const type_definition_params = types.TypeDefinitionParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+
+    const maybe_declaration_response = if (declaration_loc != null)
+        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params)
+    else
+        null;
+
+    const maybe_definition_response = if (definition_loc != null)
+        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", definition_params)
+    else
+        null;
+
+    const maybe_type_definition_response = if (type_definition_loc != null)
+        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/typeDefinition", type_definition_params)
+    else
+        null;
+
+    if (maybe_declaration_response) |response| {
+        try std.testing.expect(response == .Declaration);
+        try std.testing.expect(response.Declaration == .Location);
+        try std.testing.expectEqualStrings(test_uri, response.Declaration.Location.uri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.Declaration.Location.range, ctx.server.offset_encoding);
+        if (declaration_loc) |expected_loc| {
+            if (!std.meta.eql(expected_loc, actual_loc)) {
+                try error_builder.msgAtLoc("expected declaration here!", test_uri, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual declaration here", test_uri, actual_loc, .err, .{});
+            }
+        }
+    } else if (declaration_loc) |expected_loc| {
+        try error_builder.msgAtLoc("expected declaration here but got no result instead!", test_uri, expected_loc, .err, .{});
+    }
+
+    if (maybe_definition_response) |response| {
+        try std.testing.expect(response == .Definition);
+        try std.testing.expect(response.Definition == .Location);
+        try std.testing.expectEqualStrings(test_uri, response.Definition.Location.uri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.Definition.Location.range, ctx.server.offset_encoding);
+        if (definition_loc) |expected_loc| {
+            if (!std.meta.eql(expected_loc, actual_loc)) {
+                try error_builder.msgAtLoc("expected definition here!", test_uri, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual definition here", test_uri, actual_loc, .err, .{});
+            }
+        }
+    } else if (definition_loc) |expected_loc| {
+        try error_builder.msgAtLoc("expected definition here but got no result instead!", test_uri, expected_loc, .err, .{});
+    }
+
+    if (maybe_type_definition_response) |response| {
+        try std.testing.expect(response == .Definition);
+        try std.testing.expect(response.Definition == .Location);
+        try std.testing.expectEqualStrings(test_uri, response.Definition.Location.uri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.Definition.Location.range, ctx.server.offset_encoding);
+        if (type_definition_loc) |expected_loc| {
+            if (!std.meta.eql(expected_loc, actual_loc)) {
+                try error_builder.msgAtLoc("expected type definition here!", test_uri, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual type definition here", test_uri, actual_loc, .err, .{});
+            }
+        }
+    } else if (type_definition_loc) |expected_loc| {
+        try error_builder.msgAtLoc("expected type definition here but got no result instead!", test_uri, expected_loc, .err, .{});
+    }
+
+    if (error_builder.hasMessages()) {
+        try error_builder.msgAtIndex("cursor position here", test_uri, cursor_index, .info, .{});
         return error.InvalidResponse;
-    };
+    }
+}
 
-    try std.testing.expectEqual(@as(usize, 1), response.array_of_DefinitionLink.len);
-    try std.testing.expectEqual(def_range_lsp, response.array_of_DefinitionLink[0].targetSelectionRange);
+/// finds the source location that is enclosed by `<tag_name>return_value</tag_name>`
+fn parseTaggedLoc(old_source: []const u8, phr: helper.CollectPlaceholdersResult, tag_name: []const u8) !?offsets.Loc {
+    var old_start_loc: ?offsets.Loc = null;
+    var old_end_loc: ?offsets.Loc = null;
+    var start: ?usize = null;
+    var end: ?usize = null;
+
+    for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
+        const str = offsets.locToSlice(old_source, old_loc); // e.g. '</decl>'
+        const tag_content = str[1 .. str.len - 1]; // e.g. '/decl'
+        const is_end = std.mem.startsWith(u8, tag_content, "/");
+        const tag = tag_content[@intFromBool(is_end)..]; // e.g. 'decl'
+        if (!std.mem.eql(u8, tag_name, tag)) continue;
+        if (is_end) {
+            end = new_loc.start;
+            old_end_loc = old_loc;
+        } else {
+            start = new_loc.end;
+            old_start_loc = old_loc;
+        }
+    }
+
+    if (start == null and end == null) {
+        return null;
+    } else if (start != null and end == null) {
+        std.debug.print("'{s}' is missing closing tag", .{offsets.locToSlice(old_source, old_start_loc.?)});
+        return error.MissingClosingTag;
+    } else if (start == null and end != null) {
+        std.debug.print("unexpected closing tag '{s}'", .{offsets.locToSlice(old_source, old_end_loc.?)});
+        return error.UnexpectedClosingTag;
+    }
+
+    if (start.? > end.?) {
+        std.debug.print("opening tag of '{s}' is after the closing tag", .{offsets.locToSlice(old_source, old_start_loc.?)});
+        return error.MissmatchedTags;
+    }
+
+    return .{ .start = start.?, .end = end.? };
 }

@@ -1332,14 +1332,27 @@ fn gotoHandler(
         };
     }
 
-    var aol = try arena.alloc(types.Location, response.len);
-    for (0..response.len) |index| {
-        aol[index].uri = response[index].targetUri;
-        aol[index].range = response[index].targetSelectionRange;
+    switch (response.len) {
+        0 => return null,
+        1 => {
+            return .{
+                .Definition = .{ .Location = .{
+                    .uri = response[0].targetUri,
+                    .range = response[0].targetSelectionRange,
+                } },
+            };
+        },
+        else => {
+            const locations = try arena.alloc(types.Location, response.len);
+            for (locations, response) |*location, definition_link| {
+                location.uri = definition_link.targetUri;
+                location.range = definition_link.targetSelectionRange;
+            }
+            return .{
+                .Definition = .{ .array_of_Location = locations },
+            };
+        },
     }
-    return .{
-        .Definition = .{ .array_of_Location = aol },
-    };
 }
 
 fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
