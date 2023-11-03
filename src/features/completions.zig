@@ -811,7 +811,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
 
 fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
-    store: DocumentStore,
+    store: *DocumentStore,
     handle: DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
@@ -877,11 +877,12 @@ fn completeFileSystemStringLiteral(
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
         if (handle.associated_build_file) |uri| blk: {
-            const build_file = store.build_files.get(uri).?;
-            const build_config = build_file.config orelse break :blk;
-            try completions.ensureUnusedCapacity(arena, build_config.value.packages.len);
+            const build_file = store.getBuildFile(uri).?;
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
 
-            for (build_config.value.packages) |pkg| {
+            try completions.ensureUnusedCapacity(arena, build_config.packages.len);
+            for (build_config.packages) |pkg| {
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
@@ -936,7 +937,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => completeFileSystemStringLiteral(arena, server.document_store, handle.*, pos_context) catch |err| {
+        => completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
             log.err("failed to get file system completions: {}", .{err});
             return null;
         },
