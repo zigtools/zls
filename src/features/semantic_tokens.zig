@@ -192,16 +192,6 @@ inline fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type:
     }
 }
 
-fn writeDocComments(builder: *Builder, tree: Ast, doc: Ast.TokenIndex) !void {
-    const token_tags = tree.tokens.items(.tag);
-    var tok_idx = doc;
-    while (token_tags[tok_idx] == .doc_comment or
-        token_tags[tok_idx] == .container_doc_comment) : (tok_idx += 1)
-    {
-        try builder.add(tok_idx, .comment, .{ .documentation = true });
-    }
-}
-
 fn fieldTokenType(
     container_decl: Ast.Node.Index,
     handle: *DocumentStore.Handle,
@@ -344,10 +334,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeNodeTokens(builder, var_decl.ast.init_node);
         },
         .@"usingnamespace" => {
-            const first_tok = tree.firstToken(node);
-            if (first_tok > 0 and token_tags[first_tok - 1] == .doc_comment)
-                try writeDocComments(builder, tree, first_tok - 1);
-            try writeToken(builder, if (token_tags[first_tok] == .keyword_pub) first_tok else null, .keyword);
+            const first_token = tree.firstToken(node);
+            if (token_tags[first_token] == .keyword_pub) {
+                try writeToken(builder, first_token, .keyword);
+            }
             try writeToken(builder, main_token, .keyword);
             try writeNodeTokens(builder, node_data[node].lhs);
         },
@@ -432,8 +422,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param_decl| {
-                if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
-
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
 
                 const token_type: TokenType = if (Analyser.isMetaType(tree, param_decl.type_expr)) .typeParameter else .parameter;
@@ -498,7 +486,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .while_cont,
         => {
             const while_node = ast.fullWhile(tree, node).?;
-            try writeToken(builder, while_node.label_token, .label);
+            try writeTokenMod(builder, while_node.label_token, .label, .{ .declaration = true });
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
             try writeNodeTokens(builder, while_node.ast.cond_expr);
@@ -524,7 +512,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .@"for",
         => {
             const for_node = ast.fullFor(tree, node).?;
-            try writeToken(builder, for_node.label_token, .label);
+            try writeTokenMod(builder, for_node.label_token, .label, .{ .declaration = true });
             try writeToken(builder, for_node.inline_token, .keyword);
             try writeToken(builder, for_node.ast.for_token, .keyword);
 
@@ -900,13 +888,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         => {
             const ptr_type = ast.fullPtrType(tree, node).?;
 
-            if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
-                main_token == main_tokens[ptr_type.ast.child_type])
-            {
-                return try writeNodeTokens(builder, ptr_type.ast.child_type);
-            }
-
-            if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
             if (ptr_type.ast.sentinel != 0) {
                 try writeNodeTokens(builder, ptr_type.ast.sentinel);
             }
@@ -955,7 +936,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, main_token, .keyword);
             try writeNodeTokens(builder, node_data[node].lhs);
         },
-        .anyframe_literal => try writeToken(builder, main_token, .keyword),
+        .anyframe_literal => try writeToken(builder, main_token, .type),
     }
 }
 

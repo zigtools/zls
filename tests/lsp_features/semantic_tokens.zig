@@ -43,6 +43,26 @@ test "semantic tokens - comment" {
         .{ "a", .variable, .{ .declaration = true } },
     });
 }
+test "semantic tokens - doc comment" {
+    try testSemanticTokens(
+        \\/// line 1
+        \\/// line 2
+        \\const foo = struct {
+        \\    /// some comment
+        \\    alpha: u32,
+        \\};
+    , &.{
+        .{ "/// line 1", .comment, .{ .documentation = true } },
+        .{ "/// line 2", .comment, .{ .documentation = true } },
+        .{ "const", .keyword, .{} },
+        .{ "foo", .@"struct", .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "/// some comment", .comment, .{ .documentation = true } },
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+    });
+}
 
 test "semantic tokens - string literals" {
     try testSemanticTokens(
@@ -84,11 +104,13 @@ test "semantic tokens - type literals" {
         \\f16,
         \\u8,
         \\u15,
+        \\anyframe,
     , &.{
         .{ "bool", .type, .{} },
         .{ "f16", .type, .{} },
         .{ "u8", .type, .{} },
         .{ "u15", .type, .{} },
+        .{ "anyframe", .type, .{} },
     });
 }
 
@@ -97,11 +119,13 @@ test "semantic tokens - value literals" {
         \\true,
         \\false,
         \\undefined,
+        \\unreachable,
         \\null,
     , &.{
         .{ "true", .keywordLiteral, .{} },
         .{ "false", .keywordLiteral, .{} },
         .{ "undefined", .keywordLiteral, .{} },
+        .{ "unreachable", .keywordLiteral, .{} },
         .{ "null", .keywordLiteral, .{} },
     });
 }
@@ -241,6 +265,17 @@ test "semantic tokens - operators" {
         .{ "true", .keywordLiteral, .{} },
         .{ "and", .keyword, .{} },
         .{ "false", .keywordLiteral, .{} },
+    });
+    try testSemanticTokens(
+        \\var alpha = (undefined).?.*;
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        // TODO these should be either (.? and .*) or (? and *)
+        .{ "?", .operator, .{} },
+        .{ ".*", .operator, .{} },
     });
 }
 
@@ -493,6 +528,23 @@ test "semantic tokens - struct literal" {
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },
     });
+    try testSemanticTokens(
+        \\var alpha = .{ .foo = 1, .bar = 2 };
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "foo", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "1", .number, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "bar", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "2", .number, .{} },
+    });
 }
 
 test "semantic tokens - optional types" {
@@ -536,7 +588,6 @@ test "semantic tokens - pointer types" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "u32", .type, .{} },
     });
     try testSemanticTokens(
@@ -545,7 +596,6 @@ test "semantic tokens - pointer types" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "allowzero", .keyword, .{} },
         .{ "u32", .type, .{} },
     });
@@ -560,12 +610,21 @@ test "semantic tokens - pointer types" {
         .{ "u32", .type, .{} },
     });
     try testSemanticTokens(
+        \\const alpha = [*c]const volatile u32;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "volatile", .keyword, .{} },
+        .{ "u32", .type, .{} },
+    });
+    try testSemanticTokens(
         \\const alpha = *align(1:2:3) u32;
     , &.{
         .{ "const", .keyword, .{} },
         .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "*", .operator, .{} },
         .{ "align", .keyword, .{} },
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },
@@ -595,6 +654,75 @@ test "semantic tokens - error union types" {
         .{ "=", .operator, .{} },
         .{ "u32", .type, .{} },
         .{ "u32", .type, .{} },
+    });
+}
+
+test "semantic tokens - usingnamespace" {
+    try testSemanticTokens(
+        \\const Foo = struct {
+        \\    usingnamespace {};
+        \\    pub usingnamespace {};
+        \\    /// aaa
+        \\    /// bbb
+        \\    pub usingnamespace {};
+        \\    /// ccc
+        \\    /// ddd
+        \\    usingnamespace {};
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "pub", .keyword, .{} },
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "/// aaa", .comment, .{ .documentation = true } },
+        .{ "/// bbb", .comment, .{ .documentation = true } },
+        .{ "pub", .keyword, .{} },
+        .{ "usingnamespace", .keyword, .{} },
+
+        .{ "/// ccc", .comment, .{ .documentation = true } },
+        .{ "/// ddd", .comment, .{ .documentation = true } },
+        .{ "usingnamespace", .keyword, .{} },
+    });
+}
+
+test "semantic tokens - container declarations" {
+    try testSemanticTokens(
+        \\const Foo = struct {
+        \\    /// some
+        \\    /// comment
+        \\    pub const Bar = u32;
+        \\    comptime {
+        \\        return;
+        \\    }
+        \\    test {
+        \\        return;
+        \\    }
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "/// some", .comment, .{ .documentation = true } },
+        .{ "/// comment", .comment, .{ .documentation = true } },
+        .{ "pub", .keyword, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "Bar", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "u32", .type, .{} },
+
+        .{ "comptime", .keyword, .{} },
+        .{ "return", .keyword, .{} },
+
+        .{ "test", .keyword, .{} },
+        .{ "return", .keyword, .{} },
     });
 }
 
@@ -870,6 +998,29 @@ test "semantic tokens - function" {
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
+        \\fn foo(
+        \\    /// some comment
+        \\    alpha: u32,
+        \\    /// some
+        \\    /// comment
+        \\    beta: anytype,
+        \\) void {}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+
+        .{ "/// some comment", .comment, .{ .documentation = true } },
+        .{ "alpha", .parameter, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+
+        .{ "/// some", .comment, .{ .documentation = true } },
+        .{ "/// comment", .comment, .{ .documentation = true } },
+        .{ "beta", .parameter, .{ .declaration = true } },
+        .{ "anytype", .type, .{} },
+
+        .{ "void", .type, .{} },
+    });
+    try testSemanticTokens(
         \\extern fn foo() align(4) callconv(.C) void;
     , &.{
         .{ "extern", .keyword, .{} },
@@ -1038,6 +1189,24 @@ test "semantic tokens - while" {
         .{ "else", .keyword, .{} },
         .{ "true", .keywordLiteral, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = blk: while (undefined) {
+        \\    continue :blk;
+        \\} else |err| return err;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "blk", .label, .{ .declaration = true } },
+        .{ "while", .keyword, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "continue", .keyword, .{} },
+        .{ "blk", .label, .{} },
+        .{ "else", .keyword, .{} },
+        .{ "err", .variable, .{ .declaration = true } },
+        .{ "return", .keyword, .{} },
+        .{ "err", .variable, .{} },
+    });
 }
 
 test "semantic tokens - for" {
@@ -1059,6 +1228,23 @@ test "semantic tokens - for" {
         .{ "for", .keyword, .{} },
         .{ "\"\"", .string, .{} },
         .{ "val", .variable, .{ .declaration = true } },
+    });
+    try testSemanticTokens(
+        \\const foo = blk: for ("") |val| {} else {
+        \\    break :blk null;
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "blk", .label, .{ .declaration = true } },
+        .{ "for", .keyword, .{} },
+        .{ "\"\"", .string, .{} },
+        .{ "val", .variable, .{ .declaration = true } },
+        .{ "else", .keyword, .{} },
+        .{ "break", .keyword, .{} },
+        .{ "blk", .label, .{} },
+        .{ "null", .keywordLiteral, .{} },
     });
 }
 
@@ -1159,6 +1345,11 @@ test "semantic tokens - test decl" {
     , &.{
         .{ "test", .keyword, .{} },
         .{ "\"test inside a test\"", .string, .{} },
+    });
+    try testSemanticTokens(
+        \\test {}
+    , &.{
+        .{ "test", .keyword, .{} },
     });
     try testSemanticTokens(
         \\test foo {}
