@@ -132,11 +132,45 @@ pub fn main() !void {
         }
     }
 
+    // Sample `@dependencies` structure:
+    // pub const packages = struct {
+    //     pub const @"1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" = struct {
+    //         pub const build_root = "/home/rad/.cache/zig/p/1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5";
+    //         pub const build_zig = @import("1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5");
+    //         pub const deps: []const struct { []const u8, []const u8 } = &.{};
+    //     };
+    // ...
+    // };
+    // pub const root_deps: []const struct { []const u8, []const u8 } = &.{
+    //     .{ "known_folders", "1220bb12c9bfe291eed1afe6a2070c7c39918ab1979f24a281bba39dfb23f5bcd544" },
+    //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
+    //     .{ "binned_allocator", "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" },
+    // };
+
+    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    for (dependencies.root_deps) |root_dep| {
+        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| {
+            if (std.mem.eql(u8, package.name, root_dep[1])) {
+                const package_info = @field(dependencies.packages, package.name);
+                if (!@hasDecl(package_info, "build_root")) continue;
+                try deps_build_roots.append(allocator, .{
+                    .name = root_dep[0],
+                    // XXX Check if it exists?
+                    .path = try std.fs.path.resolve(allocator, &[_][]const u8{ package_info.build_root, "./build.zig" }),
+                });
+            }
+        }
+    }
+
+    const deps_build_roots_list = try deps_build_roots.toOwnedSlice(allocator);
+    defer allocator.free(deps_build_roots_list);
+
     const package_list = try packages.toPackageList();
     defer allocator.free(package_list);
 
     try std.json.stringify(
         BuildConfig{
+            .deps_build_roots = deps_build_roots_list,
             .packages = package_list,
             .include_dirs = include_dirs.keys(),
         },

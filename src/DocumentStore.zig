@@ -875,7 +875,7 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
             .allocator = self.allocator,
             .argv = args,
             .cwd = std.fs.path.dirname(build_file_path).?,
-            .max_output_bytes = 1024 * 100,
+            .max_output_bytes = 1024 * 1024,
         });
     };
     defer self.allocator.free(zig_run_result.stdout);
@@ -1411,6 +1411,16 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             for (build_config.packages) |pkg| {
                 if (std.mem.eql(u8, import_str, pkg.name)) {
                     return try URI.fromPath(allocator, pkg.path);
+                }
+            }
+        } else if (isBuildFile(handle.uri)) blk: {
+            const build_file = self.getBuildFile(handle.uri).?;
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
+
+            for (build_config.deps_build_roots) |dep_build_root| {
+                if (std.mem.eql(u8, import_str, dep_build_root.name)) {
+                    return try URI.fromPath(allocator, dep_build_root.path);
                 }
             }
         }

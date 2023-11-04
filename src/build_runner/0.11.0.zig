@@ -1,5 +1,6 @@
 const root = @import("@build");
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log;
 const process = std.process;
 
@@ -64,6 +65,7 @@ pub fn main() !void {
     cache.addPrefix(build_root_directory);
     cache.addPrefix(local_cache_directory);
     cache.addPrefix(global_cache_directory);
+    cache.hash.addBytes(builtin.zig_version_string);
 
     const host = try std.zig.system.NativeTargetInfo.detect(.{});
 
@@ -129,11 +131,23 @@ pub fn main() !void {
         }
     }
 
+    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    inline for (@typeInfo(dependencies.build_root).Struct.decls) |decl| {
+        try deps_build_roots.append(allocator, .{
+            .name = decl.name,
+            // XXX Check if it exists?
+            .path = try std.fs.path.resolve(allocator, &[_][]const u8{ @field(dependencies.build_root, decl.name), "./build.zig" }),
+        });
+    }
+    const deps_build_roots_list = try deps_build_roots.toOwnedSlice(allocator);
+    defer allocator.free(deps_build_roots_list);
+
     const package_list = try packages.toPackageList();
     defer allocator.free(package_list);
 
     try std.json.stringify(
         BuildConfig{
+            .deps_build_roots = deps_build_roots_list,
             .packages = package_list,
             .include_dirs = include_dirs.keys(),
         },
@@ -208,14 +222,14 @@ fn processStep(
 ) anyerror!void {
     if (step.cast(Build.Step.InstallArtifact)) |install_exe| {
         if (install_exe.artifact.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| _ = try packages.addPackage("root", path);
         }
         try processIncludeDirs(builder, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, install_exe.artifact);
         try processModules(builder, packages, install_exe.artifact.modules);
     } else if (step.cast(Build.Step.Compile)) |exe| {
         if (exe.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| _ = try packages.addPackage("root", path);
         }
         try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, exe);
@@ -233,7 +247,7 @@ fn processModules(
     modules: std.StringArrayHashMap(*Build.Module),
 ) !void {
     for (modules.keys(), modules.values()) |name, mod| {
-        const path = mod.builder.pathFromRoot(mod.source_file.getPath(mod.builder));
+        const path = copied_from_zig.getPath(mod.source_file, mod.builder) orelse continue;
 
         const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
@@ -252,8 +266,7 @@ fn processIncludeDirs(
 
     for (dirs) |dir| {
         const candidate: []const u8 = switch (dir) {
-            .path => |path| path.getPath(builder),
-            .path_system => |path| path.getPath(builder),
+            .path, .path_system => |path| copied_from_zig.getPath(path, builder) orelse continue,
             else => continue,
         };
 
@@ -310,6 +323,21 @@ fn getPkgConfigIncludes(
 
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
+    /// Copied from `std.Build.LazyPath.getPath2` and massaged a bit.
+    fn getPath(path: std.Build.LazyPath, builder: *Build) ?[]const u8 {
+        switch (path) {
+            .path => |p| return builder.pathFromRoot(p),
+            .cwd_relative => |p| return pathFromCwd(builder, p),
+            .generated => |gen| return builder.pathFromRoot(gen.path orelse return null),
+        }
+    }
+
+    /// Copied from `std.Build.pathFromCwd` as it is non-pub.
+    fn pathFromCwd(b: *Build, p: []const u8) []u8 {
+        const cwd = process.getCwdAlloc(b.allocator) catch @panic("OOM");
+        return std.fs.path.resolve(b.allocator, &.{ cwd, p }) catch @panic("OOM");
+    }
+
     fn runPkgConfig(self: *Build.Step.Compile, lib_name: []const u8) ![]const []const u8 {
         const b = self.step.owner;
         const pkg_name = match: {
