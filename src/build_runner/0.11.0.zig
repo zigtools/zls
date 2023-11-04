@@ -13,13 +13,15 @@ const Build = std.Build;
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
+    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
+    // one shot program. We don't need to waste time freeing memory and finding places to squish
+    // bytes into. So we free everything all at once at the very end.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
     var args = try process.argsAlloc(allocator);
-    defer process.argsFree(allocator, args);
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -108,12 +110,6 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
 
-    var packages = Packages{ .allocator = allocator };
-    defer packages.deinit();
-
-    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(allocator);
-
     // This scans the graph of Steps to find all `OptionsStep`s then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
     for (builder.top_level_steps.values()) |tls| {
@@ -121,6 +117,9 @@ pub fn main() !void {
             try reifyOptions(step);
         }
     }
+
+    var packages = Packages{ .allocator = allocator };
+    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
@@ -139,16 +138,11 @@ pub fn main() !void {
             .path = try std.fs.path.resolve(allocator, &[_][]const u8{ @field(dependencies.build_root, decl.name), "./build.zig" }),
         });
     }
-    const deps_build_roots_list = try deps_build_roots.toOwnedSlice(allocator);
-    defer allocator.free(deps_build_roots_list);
-
-    const package_list = try packages.toPackageList();
-    defer allocator.free(package_list);
 
     try std.json.stringify(
         BuildConfig{
-            .deps_build_roots = deps_build_roots_list,
-            .packages = package_list,
+            .deps_build_roots = try deps_build_roots.toOwnedSlice(allocator),
+            .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
         },
         .{},
