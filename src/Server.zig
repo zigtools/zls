@@ -878,6 +878,9 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     if (new_zig_exe_path or new_zig_lib_path) {
+        for (server.document_store.cimports.values()) |*result| {
+            result.deinit(server.document_store.allocator);
+        }
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
     }
 
