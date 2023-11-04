@@ -983,14 +983,15 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
     const handle = builder.handle;
     const tree = handle.tree;
 
-    std.debug.assert(tree.tokens.items(.tag)[name_token] == .identifier);
-    const name = offsets.tokenToSlice(tree, name_token);
+    const name = offsets.identifierTokenToNameSlice(tree, name_token);
+    const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
 
-    if (std.mem.eql(u8, name, "_")) return;
-
-    if (Analyser.resolvePrimitiveType(name)) |primitive| {
-        const is_type = builder.analyser.ip.indexToKey(primitive).typeOf() == .type_type;
-        return try writeToken(builder, name_token, if (is_type) .type else .keywordLiteral);
+    if (!is_escaped_identifier) {
+        if (std.mem.eql(u8, name, "_")) return;
+        if (Analyser.resolvePrimitiveType(name)) |primitive| {
+            const is_type = builder.analyser.ip.indexToKey(primitive).typeOf() == .type_type;
+            return try writeToken(builder, name_token, if (is_type) .type else .keywordLiteral);
+        }
     }
 
     if (try builder.analyser.lookupSymbolGlobal(

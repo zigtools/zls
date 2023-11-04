@@ -46,6 +46,20 @@ test "offsets - tokenIndexToLoc" {
     try testTokenIndexToLoc(" bar ", 0, 1, 4);
 }
 
+test "offsets - identifierIndexToNameLoc" {
+    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice("", 0));
+    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" ", 0));
+    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" world", 0));
+
+    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("hello", 0));
+    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("hello world", 0));
+    try std.testing.expectEqualStrings("world", offsets.identifierIndexToNameSlice("hello world", 6));
+
+    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("@\"hello\"", 0));
+    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("@\"hello\" world", 0));
+    try std.testing.expectEqualStrings("world", offsets.identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
+}
+
 test "offsets - lineLocAtIndex" {
     try std.testing.expectEqualStrings("", offsets.lineSliceAtIndex("", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceAtIndex("\n", 0));

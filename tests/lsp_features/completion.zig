@@ -67,6 +67,79 @@ test "completion - local scope" {
     });
 }
 
+test "completion - symbol lookup on escaped identifiers" {
+    // decl name:   unescaped
+    // symbol name: unescaped
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const Inner = Bar; };
+        \\const foo = Outer.Inner.<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    // decl name:   escaped
+    // symbol name: unescaped
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const @"Inner" = Bar; };
+        \\const foo = Outer.Inner.<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    // decl name:   unescaped
+    // symbol name: escaped
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const Inner = Bar; };
+        \\const foo = Outer.@"Inner".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    // decl name:   escaped
+    // symbol name: escaped
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const @"Inner" = Bar; };
+        \\const foo = Outer.@"Inner".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+}
+
+test "completion - escaped identifier normalization" {
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\var s: @"\x53" = undefined;
+        \\const foo = @"\x73".<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant },
+    });
+}
+
+test "completion - symbol lookup on identifier named after primitive" {
+    try testCompletion(
+        \\const Outer = struct { const @"u32" = Bar; };
+        \\const Bar = struct { const Some = u32; };
+        \\const foo = Outer.@"u32".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    try testCompletion(
+        \\const Outer = struct { const @"undefined" = Bar; };
+        \\const Bar = struct { const Some = u32; };
+        \\const foo = Outer.@"undefined".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    try testCompletion(
+        \\const @"unreachable" = struct { const Some = u32; };
+        \\const foo = @"unreachable".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+}
+
 test "completion - function" {
     try testCompletion(
         \\fn foo(alpha: u32, beta: []const u8) void {

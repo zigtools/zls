@@ -326,26 +326,6 @@ const ScopeContext = struct {
             context.child_scopes_scratch.appendAssumeCapacity(child_scope_index);
         }
     }
-
-    fn pushDeclLoopLabel(context: *ScopeContext, label: u32, node_idx: Ast.Node.Index) error{OutOfMemory}![]const u8 {
-        var label_scope = try context.startScope(
-            .other,
-            undefined,
-            locToSmallLoc(offsets.tokenToLoc(context.tree, label)),
-        );
-
-        const name = offsets.tokenToSlice(context.tree, label);
-        try label_scope.pushDeclaration(name, .{
-            .label_decl = .{
-                .label = label,
-                .block = node_idx,
-            },
-        }, .other);
-
-        try label_scope.finalize();
-
-        return name;
-    }
 };
 
 pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!DocumentScope {
@@ -686,7 +666,11 @@ noinline fn walkContainerDecl(
                     continue;
                 }
 
-                const name = offsets.tokenToSlice(tree, main_tokens[decl]);
+                if (token_tags[main_tokens[decl]] != .identifier) {
+                    // TODO this code path should not be reachable
+                    continue;
+                }
+                const name = offsets.identifierTokenToNameSlice(tree, main_tokens[decl]);
                 try scope.pushDeclaration(name, .{ .ast_node = decl }, .field);
 
                 if (is_enum_or_tagged_union) {
@@ -715,7 +699,7 @@ noinline fn walkContainerDecl(
             => {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const name_token = tree.fullFnProto(&buffer, decl).?.name_token orelse continue;
-                const name = offsets.tokenToSlice(tree, name_token);
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
                 try scope.pushDeclaration(name, .{ .ast_node = decl }, .other);
             },
             .local_var_decl,
@@ -726,7 +710,7 @@ noinline fn walkContainerDecl(
                 const name_token = tree.fullVarDecl(decl).?.ast.mut_token + 1;
                 if (name_token >= tree.tokens.len) continue;
 
-                const name = offsets.tokenToSlice(tree, name_token);
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
                 try scope.pushDeclaration(name, .{ .ast_node = decl }, .other);
             },
 
@@ -769,7 +753,7 @@ noinline fn walkErrorSetNode(
         switch (token_tags[tok_i]) {
             .doc_comment, .comma => {},
             .identifier => {
-                const name = offsets.tokenToSlice(tree, tok_i);
+                const name = offsets.identifierTokenToNameSlice(tree, tok_i);
                 try scope.pushDeclaration(name, .{ .error_token = tok_i }, .other);
                 const gop = try context.doc_scope.error_completions.getOrPut(context.allocator, .{
                     .label = name,
@@ -812,7 +796,7 @@ noinline fn walkFuncNode(
     while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
         if (param.name_token) |name_token| {
             try scope.pushDeclaration(
-                offsets.tokenToSlice(tree, name_token),
+                offsets.identifierTokenToNameSlice(tree, name_token),
                 .{ .param_payload = .{ .param_index = param_index, .func = node_idx } },
                 .other,
             );
@@ -861,7 +845,7 @@ fn walkBlockNodeKeepOpen(
     // if labeled block
     if (token_tags[first_token] == .identifier) {
         try scope.pushDeclaration(
-            offsets.tokenToSlice(tree, first_token),
+            offsets.identifierTokenToNameSlice(tree, first_token),
             .{ .label_decl = .{ .label = first_token, .block = node_idx } },
             .other,
         );
@@ -879,8 +863,7 @@ fn walkBlockNodeKeepOpen(
             .simple_var_decl,
             => {
                 const var_decl = tree.fullVarDecl(idx).?;
-                const name = offsets.tokenToSlice(tree, var_decl.ast.mut_token + 1);
-                std.debug.assert(token_tags[var_decl.ast.mut_token + 1] == .identifier);
+                const name = offsets.identifierTokenToNameSlice(tree, var_decl.ast.mut_token + 1);
                 try scope.pushDeclaration(name, .{ .ast_node = idx }, .other);
             },
             .assign_destructure => {
@@ -889,8 +872,7 @@ fn walkBlockNodeKeepOpen(
 
                 for (lhs_exprs, 0..) |lhs_node, i| {
                     const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
-                    std.debug.assert(token_tags[var_decl.ast.mut_token + 1] == .identifier);
-                    const name = offsets.tokenToSlice(tree, var_decl.ast.mut_token + 1);
+                    const name = offsets.identifierTokenToNameSlice(tree, var_decl.ast.mut_token + 1);
                     try scope.pushDeclaration(
                         name,
                         .{ .assign_destructure = .{ .node = idx, .index = @intCast(i) } },
@@ -916,9 +898,8 @@ noinline fn walkIfNode(
 
     if (if_node.payload_token) |payload_token| {
         const name_token = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
-        std.debug.assert(token_tags[name_token] == .identifier);
+        const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
-        const name = offsets.tokenToSlice(tree, name_token);
         const decl: Declaration = if (if_node.error_token != null)
             .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } }
         else
@@ -933,8 +914,7 @@ noinline fn walkIfNode(
 
     if (if_node.ast.else_expr != 0) {
         if (if_node.error_token) |error_token| {
-            std.debug.assert(token_tags[error_token] == .identifier);
-            const name = offsets.tokenToSlice(tree, error_token);
+            const name = offsets.identifierTokenToNameSlice(tree, error_token);
 
             const else_scope = try walkNodeEnsureScope(context, tree, if_node.ast.else_expr, error_token);
             try else_scope.pushDeclaration(
@@ -965,7 +945,7 @@ noinline fn walkCatchNode(
         token_tags[catch_token - 1] == .pipe and
         token_tags[catch_token] == .identifier)
     {
-        const name = offsets.tokenToSlice(tree, catch_token);
+        const name = offsets.identifierTokenToNameSlice(tree, catch_token);
 
         const expr_scope = try walkNodeEnsureScope(context, tree, data[node_idx].rhs, catch_token);
         try expr_scope.pushDeclaration(
@@ -999,8 +979,7 @@ noinline fn walkWhileNode(
 
     const payload_declaration, const payload_name = if (while_node.payload_token) |payload_token| blk: {
         const name_token = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
-        std.debug.assert(token_tags[name_token] == .identifier);
-        const name = offsets.tokenToSlice(tree, name_token);
+        const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
         const decl: Declaration = if (while_node.error_token != null)
             .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
@@ -1053,8 +1032,7 @@ noinline fn walkWhileNode(
             }
 
             if (while_node.error_token) |error_token| {
-                std.debug.assert(token_tags[error_token] == .identifier);
-                const name = offsets.tokenToSlice(tree, error_token);
+                const name = offsets.identifierTokenToNameSlice(tree, error_token);
 
                 try else_scope.pushDeclaration(
                     name,
@@ -1084,12 +1062,6 @@ noinline fn walkForNode(
         try walkNode(context, tree, input_node);
     }
 
-    const label_token, const label_name = if (for_node.label_token) |label| blk: {
-        std.debug.assert(token_tags[label] == .identifier);
-        const name = try context.pushDeclLoopLabel(label, node_idx);
-        break :blk .{ label, name };
-    } else .{ null, null };
-
     const then_scope = try walkNodeEnsureScope(context, tree, for_node.ast.then_expr, for_node.payload_token);
 
     var capture_token = for_node.payload_token;
@@ -1100,16 +1072,21 @@ noinline fn walkForNode(
         capture_token = name_token + 2;
 
         try then_scope.pushDeclaration(
-            offsets.tokenToSlice(tree, name_token),
+            offsets.identifierTokenToNameSlice(tree, name_token),
             .{ .array_payload = .{ .identifier = name_token, .array_expr = input } },
             .other,
         );
     }
 
-    if (label_token) |label| {
+    const label_name = if (for_node.label_token) |label_token|
+        offsets.identifierTokenToNameSlice(context.tree, label_token)
+    else
+        null;
+
+    if (for_node.label_token) |label_token| {
         try then_scope.pushDeclaration(
             label_name.?,
-            .{ .label_decl = .{ .label = label, .block = for_node.ast.then_expr } },
+            .{ .label_decl = .{ .label = label_token, .block = for_node.ast.then_expr } },
             .other,
         );
     }
@@ -1117,11 +1094,11 @@ noinline fn walkForNode(
     try then_scope.finalize();
 
     if (for_node.ast.else_expr != 0) {
-        if (label_token) |label| {
+        if (for_node.label_token) |label_token| {
             const else_scope = try walkNodeEnsureScope(context, tree, for_node.ast.else_expr, tree.firstToken(for_node.ast.else_expr));
             try else_scope.pushDeclaration(
                 label_name.?,
-                .{ .label_decl = .{ .label = label, .block = for_node.ast.else_expr } },
+                .{ .label_decl = .{ .label = label_token, .block = for_node.ast.else_expr } },
                 .other,
             );
             try else_scope.finalize();
@@ -1147,7 +1124,7 @@ noinline fn walkSwitchNode(
 
         if (switch_case.payload_token) |payload_token| {
             const name_token = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
-            const name = offsets.tokenToSlice(tree, name_token);
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
             const expr_scope = try walkNodeEnsureScope(context, tree, switch_case.ast.target_expr, name_token);
             try expr_scope.pushDeclaration(
@@ -1171,7 +1148,7 @@ noinline fn walkErrdeferNode(
     const payload_token = data[node_idx].lhs;
 
     if (payload_token != 0) {
-        const name = offsets.tokenToSlice(tree, payload_token);
+        const name = offsets.identifierTokenToNameSlice(tree, payload_token);
 
         const expr_scope = try walkNodeEnsureScope(context, tree, data[node_idx].rhs, payload_token);
         try expr_scope.pushDeclaration(

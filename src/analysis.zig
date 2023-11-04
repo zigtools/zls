@@ -419,15 +419,15 @@ pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
 
 pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?[]const u8 {
     const name_token = getContainerDeclNameToken(tree, container, node) orelse return null;
-    const name = offsets.tokenToSlice(tree, name_token);
 
     if (tree.nodes.items(.tag)[node] == .test_decl and
         tree.tokens.items(.tag)[name_token] == .string_literal)
     {
+        const name = offsets.tokenToSlice(tree, name_token);
         return name[1 .. name.len - 1];
     }
 
-    return name;
+    return offsets.identifierTokenToNameSlice(tree, name_token);
 }
 
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
@@ -457,11 +457,12 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
 
     const resolved = switch (node_tags[node_handle.node]) {
         .identifier => blk: {
-            const token = main_tokens[node_handle.node];
+            const name_token = main_tokens[node_handle.node];
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
-                tree.tokenSlice(token),
-                tree.tokens.items(.start)[token],
+                name,
+                tree.tokens.items(.start)[name_token],
             );
         },
         .field_access => blk: {
@@ -475,9 +476,11 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
                 else => return null,
             };
 
+            const symbol_name = offsets.identifierTokenToNameSlice(tree, datas[node_handle.node].rhs);
+
             break :blk try analyser.lookupSymbolContainer(
                 .{ .node = resolved_node, .handle = resolved.handle },
-                tree.tokenSlice(datas[node_handle.node].rhs),
+                symbol_name,
                 .other,
             );
         },
@@ -1078,20 +1081,25 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return try analyser.resolveTypeOfNodeInternal(value);
         },
         .identifier => {
-            const name = offsets.nodeToSlice(tree, node);
+            const name_token = main_tokens[node];
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
-            if (resolvePrimitiveType(name)) |primitive| {
-                const is_type = analyser.ip.indexToKey(primitive).typeOf() == .type_type;
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
-                    .handle = handle,
-                };
+            const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
+            if (!is_escaped_identifier) {
+                if (std.mem.eql(u8, name, "_")) return null;
+                if (resolvePrimitiveType(name)) |primitive| {
+                    const is_type = analyser.ip.indexToKey(primitive).typeOf() == .type_type;
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
+                        .handle = handle,
+                    };
+                }
             }
 
             if (try analyser.lookupSymbolGlobal(
                 handle,
                 name,
-                starts[main_tokens[node]],
+                starts[name_token],
             )) |child| {
                 switch (child.decl) {
                     .ast_node => |n| {
@@ -1482,9 +1490,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             // HACK: resolve std.ArrayList(T).Slice
             if (std.mem.endsWith(u8, node_handle.handle.uri, "array_list.zig") and
                 if_node.payload_token != null and
-                std.mem.eql(u8, offsets.tokenToSlice(tree, if_node.payload_token.?), "a") and
+                std.mem.eql(u8, offsets.identifierTokenToNameSlice(tree, if_node.payload_token.?), "a") and
                 node_tags[if_node.ast.cond_expr] == .identifier and
-                std.mem.eql(u8, offsets.tokenToSlice(tree, main_tokens[if_node.ast.cond_expr]), "alignment"))
+                std.mem.eql(u8, offsets.identifierTokenToNameSlice(tree, main_tokens[if_node.ast.cond_expr]), "alignment"))
             blk: {
                 return (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) orelse break :blk;
             }
@@ -1575,7 +1583,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const first_token = tree.firstToken(node);
             if (token_tags[first_token] != .identifier) return null;
 
-            const block_label = tree.tokenSlice(first_token);
+            const block_label = offsets.identifierTokenToNameSlice(tree, first_token);
 
             // TODO: peer type resolution based on all `break` statements
             var context = FindBreaks{
@@ -2233,9 +2241,10 @@ pub fn getFieldAccessType(
             .eof => return current_type,
             .identifier => {
                 const ct_handle = if (current_type) |c| c.handle else handle;
+                const symbol_name = offsets.identifierIndexToNameSlice(tokenizer.buffer, tok.loc.start);
                 if (try analyser.lookupSymbolGlobal(
                     ct_handle,
-                    tokenizer.buffer[tok.loc.start..tok.loc.end],
+                    symbol_name,
                     source_index,
                 )) |child| {
                     current_type = (try child.resolveType(analyser)) orelse return null;
@@ -2263,7 +2272,7 @@ pub fn getFieldAccessType(
                         else
                             return null;
 
-                        const symbol = tokenizer.buffer[after_period.loc.start..after_period.loc.end];
+                        const symbol = offsets.identifierIndexToNameSlice(tokenizer.buffer, after_period.loc.start);
                         const current_type_nodes = try deref_type.getAllTypesWithHandles(analyser.arena.allocator());
 
                         // TODO: Return all options instead of first valid one
@@ -2401,7 +2410,7 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
             return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
         },
         .error_value => tree.tokenSlice(data[node].rhs),
-        .identifier => tree.tokenSlice(main_token),
+        .identifier => offsets.identifierTokenToNameSlice(tree, main_token),
         .fn_proto,
         .fn_proto_multi,
         .fn_proto_one,
@@ -2963,8 +2972,10 @@ pub const DeclWithHandle = struct {
                     }
                     return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
                 } else if (node_tags[param.type_expr] == .identifier) {
+                    const param_type_name = offsets.identifierTokenToNameSlice(tree, main_tokens[param.type_expr]);
                     if (param.name_token) |name_tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(main_tokens[param.type_expr]), tree.tokenSlice(name_tok)))
+                        const name = offsets.identifierTokenToNameSlice(tree, name_tok);
+                        if (std.mem.eql(u8, param_type_name, name))
                             return null;
                     }
                 }
@@ -4169,12 +4180,15 @@ fn addReferencedTypes(
             .enum_literal => return "@TypeOf(.enum_literal)",
 
             .error_value => {
-                const identifier = tree.tokenSlice(datas[p].rhs);
-                return try std.fmt.allocPrint(allocator, "error{{{s}}}", .{identifier});
+                const identifier = offsets.identifierTokenToNameSlice(tree, datas[p].rhs);
+                return try std.fmt.allocPrint(allocator, "error{{{}}}", .{std.zig.fmtId(identifier)});
             },
 
             .identifier => {
-                const name = offsets.nodeToSlice(tree, p);
+                const name_token = main_tokens[p];
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
+                if (is_escaped_identifier) return null;
                 const primitive = Analyser.resolvePrimitiveType(name) orelse return null;
                 return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip.*)});
             },
