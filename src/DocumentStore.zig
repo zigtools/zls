@@ -1354,7 +1354,14 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     {
         self.lock.lock();
         defer self.lock.unlock();
-        self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
+        const gop = self.cimports.getOrPutValue(self.allocator, hash, result) catch |err| {
+            result.deinit(self.allocator);
+            return err;
+        };
+        if (gop.found_existing) {
+            result.deinit(self.allocator);
+            result = gop.value_ptr.*;
+        }
     }
 
     switch (result) {
