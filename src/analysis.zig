@@ -1453,10 +1453,32 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
             if (std.mem.eql(u8, call_name, "@field")) {
                 if (params.len < 2) return null;
-                const field_param = params[1];
-                if (node_tags[field_param] != .string_literal) return null;
+                var field_name_node: NodeWithHandle = .{ .node = params[1], .handle = handle };
+                if (try analyser.resolveVarDeclAlias(field_name_node)) |decl_with_handle| {
+                    if (decl_with_handle.decl == .ast_node) {
+                        field_name_node = .{
+                            .node = decl_with_handle.decl.ast_node,
+                            .handle = decl_with_handle.handle,
+                        };
+                    }
+                }
+                const string_literal_node = switch (field_name_node.handle.tree.nodes.items(.tag)[field_name_node.node]) {
+                    .string_literal => field_name_node.node,
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => blk: {
+                        const init_node = field_name_node.handle.tree.fullVarDecl(field_name_node.node).?.ast.init_node;
+                        if (field_name_node.handle.tree.nodes.items(.tag)[init_node] != .string_literal) return null;
+                        break :blk init_node;
+                    },
+                    else => return null,
+                };
+                const field_name_token = field_name_node.handle.tree.nodes.items(.main_token)[string_literal_node];
+                const field_name = offsets.tokenToSlice(field_name_node.handle.tree, field_name_token);
 
-                const field_name = handle.tree.tokenSlice(main_tokens[field_param]);
+                // Need at least one char between the quotes, eg "a"
                 if (field_name.len < 2) return null;
 
                 var lhs = (try analyser.resolveTypeOfNodeInternal(.{
