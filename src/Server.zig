@@ -1022,7 +1022,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
 fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config: *configuration.Configuration) !void {
     if (config.zig_exe_path == null) blk: {
         std.debug.assert(!zig_builtin.is_test);
-        if (!std.process.can_spawn) break :blk;
+        if (zig_builtin.is_test or !std.process.can_spawn) break :blk;
         config.zig_exe_path = try configuration.findZig(config_arena);
     }
 
@@ -1060,8 +1060,9 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         };
     }
 
-    if (config.global_cache_path == null) {
+    if (config.global_cache_path == null) blk: {
         std.debug.assert(!zig_builtin.is_test);
+        if (zig_builtin.is_test) break :blk;
         const cache_dir_path = (try known_folders.getPath(server.allocator, .cache)) orelse {
             log.warn("Known-folders could not fetch the cache path", .{});
             return;
