@@ -1260,6 +1260,7 @@ fn collectDependenciesInternal(
 
 /// returns `true` if all include paths could be collected
 /// may return `false` because include paths from a build.zig may not have been resolved already
+/// **Thread safe** takes a shared lock
 pub fn collectIncludeDirs(
     store: *DocumentStore,
     allocator: std.mem.Allocator,
@@ -1301,61 +1302,66 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     if (self.config.zig_lib_path == null) return null;
     if (self.config.global_cache_path == null) return null;
 
-    self.lock.lock();
-    defer self.lock.unlock();
+    // TODO regenerate cimports if the header files gets modified
 
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
-
     const hash: Hash = handle.cimports.items(.hash)[index];
+    const source = handle.cimports.items(.source)[index];
 
-    // TODO regenerate cimports if the header files gets modified
-    const result = self.cimports.get(hash) orelse blk: {
-        const source: []const u8 = handle.cimports.items(.source)[index];
-
-        var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
-        defer {
-            for (include_dirs.items) |path| {
-                self.allocator.free(path);
+    {
+        self.lock.lockShared();
+        defer self.lock.unlockShared();
+        if (self.cimports.get(hash)) |result| {
+            switch (result) {
+                .success => |uri| return uri,
+                .failure => return null,
             }
-            include_dirs.deinit(self.allocator);
         }
+    }
 
-        const collected_all_include_dirs = self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
-            log.err("failed to resolve include paths: {}", .{err});
-            return null;
-        };
-
-        const maybe_result = translate_c.translate(
-            self.allocator,
-            self.config.*,
-            include_dirs.items,
-            source,
-        ) catch |err| switch (err) {
-            error.OutOfMemory => |e| return e,
-            else => |e| {
-                log.err("failed to translate cimport: {}", .{e});
-                return null;
-            },
-        };
-        var result = maybe_result orelse return null;
-
-        if (result == .failure and !collected_all_include_dirs) {
-            result.deinit(self.allocator);
-            return null;
+    var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+    defer {
+        for (include_dirs.items) |path| {
+            self.allocator.free(path);
         }
+        include_dirs.deinit(self.allocator);
+    }
 
-        self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
-
-        switch (result) {
-            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
-            .failure => {},
-        }
-
-        break :blk result;
+    const collected_all_include_dirs = self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
+        log.err("failed to resolve include paths: {}", .{err});
+        return null;
     };
 
+    const maybe_result = translate_c.translate(
+        self.allocator,
+        self.config.*,
+        include_dirs.items,
+        source,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => |e| return e,
+        else => |e| {
+            log.err("failed to translate cimport: {}", .{e});
+            return null;
+        },
+    };
+    var result = maybe_result orelse return null;
+
+    if (result == .failure and !collected_all_include_dirs) {
+        result.deinit(self.allocator);
+        return null;
+    }
+
+    {
+        self.lock.lock();
+        defer self.lock.unlock();
+        self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
+    }
+
     switch (result) {
-        .success => |uri| return uri,
+        .success => |uri| {
+            log.debug("Translated cImport into {s}", .{uri});
+            return uri;
+        },
         .failure => return null,
     }
 }
