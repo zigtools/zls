@@ -33,20 +33,112 @@ pub fn computeHash(bytes: []const u8) Hash {
     return hash;
 }
 
-const BuildFile = struct {
+pub const BuildFile = struct {
     uri: Uri,
-    /// contains information extracted from running build.zig with a custom build runner
-    /// e.g. include paths & packages
-    /// TODO this field should not be nullable, callsites should await the build config to be resolved
-    /// and then continue instead of dealing with missing information.
-    config: ?std.json.Parsed(BuildConfig),
     /// this build file may have an explicitly specified path to builtin.zig
     builtin_uri: ?Uri = null,
+    /// config options extracted from zls.build.json
     build_associated_config: ?std.json.Parsed(BuildAssociatedConfig) = null,
+    impl: struct {
+        mutex: std.Thread.Mutex = .{},
+        /// contains information extracted from running build.zig with a custom build runner
+        /// e.g. include paths & packages
+        /// TODO this field should not be nullable, callsites should await the build config to be resolved
+        /// and then continue instead of dealing with missing information.
+        config: ?std.json.Parsed(BuildConfig) = null,
+    } = .{},
 
-    pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
+    pub fn tryLockConfig(self: *BuildFile) ?BuildConfig {
+        self.impl.mutex.lock();
+        return if (self.impl.config) |cfg| cfg.value else {
+            self.impl.mutex.unlock();
+            return null;
+        };
+    }
+
+    pub fn unlockConfig(self: *BuildFile) void {
+        self.impl.mutex.unlock();
+    }
+
+    /// Usage example:
+    /// ```zig
+    /// const package_uris = std.ArrayListUnmanaged([]const u8){};
+    /// defer {
+    ///     for (package_uris) |uri| allocator.free(uri);
+    ///     package_uris.deinit(allocator);
+    /// }
+    /// const success = try build_file.collectBuildConfigPackageUris(allocator, &package_uris);
+    /// ```
+    pub fn collectBuildConfigPackageUris(
+        self: *BuildFile,
+        allocator: std.mem.Allocator,
+        package_uris: *std.ArrayListUnmanaged(Uri),
+    ) error{OutOfMemory}!bool {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const build_config = self.tryLockConfig() orelse return false;
+        defer self.unlockConfig();
+
+        try package_uris.ensureUnusedCapacity(allocator, build_config.packages.len);
+        for (build_config.packages) |package| {
+            package_uris.appendAssumeCapacity(try URI.fromPath(allocator, package.path));
+        }
+        return true;
+    }
+
+    /// Usage example:
+    /// ```zig
+    /// const include_paths = std.ArrayListUnmanaged([]u8){};
+    /// defer {
+    ///     for (include_paths) |path| allocator.free(path);
+    ///     include_paths.deinit(allocator);
+    /// }
+    /// const success = try build_file.collectBuildConfigIncludePaths(allocator, &include_paths);
+    /// ```
+    pub fn collectBuildConfigIncludePaths(
+        self: *BuildFile,
+        allocator: std.mem.Allocator,
+        include_paths: *std.ArrayListUnmanaged([]const u8),
+    ) !bool {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const build_config = self.tryLockConfig() orelse return false;
+        defer self.unlockConfig();
+
+        try include_paths.ensureUnusedCapacity(allocator, build_config.include_dirs.len);
+        for (build_config.include_dirs) |include_path| {
+            const absolute_path = if (std.fs.path.isAbsolute(include_path))
+                try allocator.dupe(u8, include_path)
+            else blk: {
+                const build_file_dir = std.fs.path.dirname(self.uri).?;
+                const build_file_path = try URI.parse(allocator, build_file_dir);
+                defer allocator.free(build_file_path);
+                break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
+            };
+
+            include_paths.appendAssumeCapacity(absolute_path);
+        }
+        return true;
+    }
+
+    fn setBuildConfig(self: *BuildFile, new_build_config: std.json.Parsed(BuildConfig)) void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        self.impl.mutex.lock();
+        defer self.impl.mutex.unlock();
+
+        if (self.impl.config) |*old_config| {
+            old_config.deinit();
+        }
+        self.impl.config = new_build_config;
+    }
+
+    fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
-        if (self.config) |cfg| cfg.deinit();
+        if (self.impl.config) |cfg| cfg.deinit();
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| cfg.deinit();
     }
@@ -389,7 +481,7 @@ config: *const Config,
 runtime_zig_version: *const ?ZigVersionWrapper,
 lock: std.Thread.RwLock = .{},
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
-build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
+build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
 pub fn deinit(self: *DocumentStore) void {
@@ -399,8 +491,9 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.handles.deinit(self.allocator);
 
-    for (self.build_files.values()) |*build_file| {
+    for (self.build_files.values()) |build_file| {
         build_file.deinit(self.allocator);
+        self.allocator.destroy(build_file);
     }
     self.build_files.deinit(self.allocator);
 
@@ -452,7 +545,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 }
 
 /// **Thread safe** takes a shared lock
-pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?BuildFile {
+pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     self.lock.lockShared();
     defer self.lock.unlockShared();
     return self.build_files.get(uri);
@@ -460,29 +553,30 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?BuildFile {
 
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
-fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?std.StringArrayHashMapUnmanaged(BuildFile).Entry {
-    {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
-        if (self.build_files.getEntry(uri)) |entry| return entry;
-    }
+fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
+    if (self.getBuildFile(uri)) |build_file| return build_file;
 
     self.lock.lock();
     defer self.lock.unlock();
 
     const gop = self.build_files.getOrPut(self.allocator, uri) catch return null;
     if (!gop.found_existing) {
-        gop.value_ptr.* = self.createBuildFile(uri) catch |err| {
+        gop.value_ptr.* = self.allocator.create(BuildFile) catch |err| {
             self.build_files.swapRemoveAt(gop.index);
             log.debug("Failed to load build file {s}: {}", .{ uri, err });
             return null;
         };
-        gop.key_ptr.* = gop.value_ptr.uri;
+
+        gop.value_ptr.*.* = self.createBuildFile(uri) catch |err| {
+            self.allocator.destroy(gop.value_ptr.*);
+            self.build_files.swapRemoveAt(gop.index);
+            log.debug("Failed to load build file {s}: {}", .{ uri, err });
+            return null;
+        };
+        gop.key_ptr.* = gop.value_ptr.*.uri;
     }
-    return .{
-        .key_ptr = gop.key_ptr,
-        .value_ptr = gop.value_ptr,
-    };
+
+    return gop.value_ptr.*;
 }
 
 /// **Thread safe** takes an exclusive lock
@@ -564,19 +658,12 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutO
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
         return;
     };
-    errdefer build_config.deinit();
 
-    self.lock.lock();
-    defer self.lock.unlock();
-
-    const build_file: *BuildFile = self.build_files.getPtr(build_file_uri) orelse {
+    const build_file = self.getBuildFile(build_file_uri) orelse {
         build_config.deinit();
         return;
     };
-    if (build_file.config) |*old_config| {
-        old_config.deinit();
-    }
-    build_file.config = build_config;
+    build_file.setBuildConfig(build_config);
 }
 
 /// The `DocumentStore` represents a graph structure where every
@@ -686,10 +773,11 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
     });
 
     while (it.next()) |build_file_index| {
-        var build_file = self.build_files.values()[build_file_index];
+        const build_file = self.build_files.values()[build_file_index];
         log.debug("Destroying build file {s}", .{build_file.uri});
         self.build_files.swapRemoveAt(build_file_index);
         build_file.deinit(self.allocator);
+        self.allocator.destroy(build_file);
     }
 }
 
@@ -749,9 +837,7 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
         args.appendAssumeCapacity(try self.allocator.dupe(u8, arg));
     }
 
-    self.lock.lockShared();
-    defer self.lock.unlockShared();
-    if (self.build_files.getPtr(build_file_uri)) |build_file| blk: {
+    if (self.getBuildFile(build_file_uri)) |build_file| blk: {
         const build_config = build_file.build_associated_config orelse break :blk;
         const build_options = build_config.value.build_options orelse break :blk;
 
@@ -883,7 +969,6 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 
     var build_file = BuildFile{
         .uri = try self.allocator.dupe(u8, uri),
-        .config = null,
     };
 
     errdefer build_file.deinit(self.allocator);
@@ -923,7 +1008,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 /// **Thread safe** takes an exclusive lock
 fn uriAssociatedWithBuild(
     self: *DocumentStore,
-    build_file: BuildFile,
+    build_file: *BuildFile,
     uri: Uri,
 ) error{OutOfMemory}!bool {
     const tracy_zone = tracy.trace(@src());
@@ -932,11 +1017,14 @@ fn uriAssociatedWithBuild(
     var checked_uris = std.StringHashMapUnmanaged(void){};
     defer checked_uris.deinit(self.allocator);
 
-    const build_config = build_file.config orelse return false;
-    for (build_config.value.packages) |package| {
-        const package_uri = try URI.fromPath(self.allocator, package.path);
-        defer self.allocator.free(package_uri);
+    var package_uris = std.ArrayListUnmanaged(Uri){};
+    defer {
+        for (package_uris.items) |package_uri| self.allocator.free(package_uri);
+        package_uris.deinit(self.allocator);
+    }
+    _ = try build_file.collectBuildConfigPackageUris(self.allocator, &package_uris);
 
+    for (package_uris.items) |package_uri| {
         if (try self.uriInImports(&checked_uris, build_file.uri, package_uri, uri))
             return true;
     }
@@ -1013,9 +1101,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             const build_file = self.getOrLoadBuildFile(build_file_uri) orelse continue;
 
             if (handle.associated_build_file == null) {
-                handle.associated_build_file = build_file.value_ptr.uri;
-            } else if (try self.uriAssociatedWithBuild(build_file.value_ptr.*, uri)) { // build_file has been invalidated
-                handle.associated_build_file = self.getBuildFile(build_file_uri).?.uri;
+                handle.associated_build_file = build_file.uri;
+            } else if (try self.uriAssociatedWithBuild(build_file, uri)) {
+                handle.associated_build_file = build_file.uri;
                 break;
             }
         }
@@ -1164,13 +1252,8 @@ fn collectDependenciesInternal(
     }
 
     if (handle.associated_build_file) |build_file_uri| {
-        if (store.build_files.get(build_file_uri)) |build_file| blk: {
-            const build_config = build_file.config orelse break :blk;
-            const packages = build_config.value.packages;
-            try dependencies.ensureUnusedCapacity(allocator, packages.len);
-            for (packages) |pkg| {
-                dependencies.appendAssumeCapacity(try URI.fromPath(allocator, pkg.path));
-            }
+        if (store.build_files.get(build_file_uri)) |build_file| {
+            _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
         }
     }
 }
@@ -1178,47 +1261,27 @@ fn collectDependenciesInternal(
 /// returns `true` if all include paths could be collected
 /// may return `false` because include paths from a build.zig may not have been resolved already
 pub fn collectIncludeDirs(
-    store: *const DocumentStore,
+    store: *DocumentStore,
     allocator: std.mem.Allocator,
     handle: Handle,
     include_dirs: *std.ArrayListUnmanaged([]const u8),
 ) !bool {
     var collected_all = true;
 
-    const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
 
-    var native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
+    const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
+    const native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
 
-    const build_file_includes_paths: []const []const u8 = if (handle.associated_build_file) |build_file_uri| blk: {
-        if (store.build_files.get(build_file_uri).?.config) |cfg| {
-            break :blk cfg.value.include_dirs;
-        } else {
-            collected_all = false;
-            break :blk &.{};
-        }
-    } else &.{};
-
-    try include_dirs.ensureTotalCapacity(allocator, native_paths.include_dirs.items.len + build_file_includes_paths.len);
-
+    try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {
         include_dirs.appendAssumeCapacity(try allocator.dupe(u8, native_include_dir));
     }
 
-    for (build_file_includes_paths) |include_path| {
-        const absolute_path = if (std.fs.path.isAbsolute(include_path))
-            try allocator.dupe(u8, include_path)
-        else blk: {
-            const build_file_uri = handle.associated_build_file.?;
-            const build_file_dir = std.fs.path.dirname(build_file_uri).?;
-            const build_file_path = try URI.parse(allocator, build_file_dir);
-            defer allocator.free(build_file_path);
-
-            break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
-        };
-        include_dirs.appendAssumeCapacity(absolute_path);
+    if (handle.associated_build_file) |build_file_uri| {
+        const build_file = store.getBuildFile(build_file_uri).?;
+        collected_all = try build_file.collectBuildConfigIncludePaths(allocator, include_dirs);
     }
 
     return collected_all;
@@ -1329,8 +1392,10 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (handle.associated_build_file) |build_file_uri| blk: {
             const build_file = self.getBuildFile(build_file_uri).?;
-            const config = build_file.config orelse break :blk;
-            for (config.value.packages) |pkg| {
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
+
+            for (build_config.packages) |pkg| {
                 if (std.mem.eql(u8, import_str, pkg.name)) {
                     return try URI.fromPath(allocator, pkg.path);
                 }
