@@ -118,7 +118,12 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
-        const error_bundle: std.zig.ErrorBundle = switch (server.document_store.cimports.get(hash) orelse continue) {
+        const result = blk: {
+            server.document_store.lock.lock();
+            defer server.document_store.lock.unlock();
+            break :blk server.document_store.cimports.get(hash) orelse continue;
+        };
+        const error_bundle: std.zig.ErrorBundle = switch (result) {
             .success => continue,
             .failure => |bundle| bundle,
         };
