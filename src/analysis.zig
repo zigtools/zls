@@ -1069,16 +1069,24 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
-            if (var_decl.ast.type_node != 0) {
-                const decl_type = .{ .node = var_decl.ast.type_node, .handle = handle };
-                if (try analyser.resolveTypeOfNodeInternal(decl_type)) |typ|
-                    return typ.instanceTypeVal();
-            }
-            if (var_decl.ast.init_node == 0)
-                return null;
+            var fallback_type: ?TypeWithHandle = null;
 
-            const value = .{ .node = var_decl.ast.init_node, .handle = handle };
-            return try analyser.resolveTypeOfNodeInternal(value);
+            if (var_decl.ast.type_node != 0) blk: {
+                const type_node = .{ .node = var_decl.ast.type_node, .handle = handle };
+                const decl_type = try analyser.resolveTypeOfNodeInternal(type_node) orelse break :blk;
+                if (decl_type.isMetaType()) {
+                    fallback_type = decl_type;
+                    break :blk;
+                }
+                return decl_type.instanceTypeVal();
+            }
+
+            if (var_decl.ast.init_node != 0) blk: {
+                const value = .{ .node = var_decl.ast.init_node, .handle = handle };
+                return try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
+            }
+
+            return fallback_type;
         },
         .identifier => {
             const name_token = main_tokens[node];
@@ -2059,6 +2067,15 @@ pub const TypeWithHandle = struct {
             .other => |n| ast.isTaggedUnion(tree, n),
             else => false,
         };
+    }
+
+    pub fn isMetaType(self: TypeWithHandle) bool {
+        if (!self.type.is_type_val) return false;
+        switch (self.type.data) {
+            .other => |node| return Analyser.isMetaType(self.handle.tree, node),
+            .ip_index => |payload| return payload.index == .type_type,
+            else => return false,
+        }
     }
 
     pub fn isTypeFunc(self: TypeWithHandle) bool {

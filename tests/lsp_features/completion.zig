@@ -1334,6 +1334,27 @@ test "completion - struct init" {
 test "completion - declarations" {
     try testCompletion(
         \\const S = struct {
+        \\    pub const Public = u32;
+        \\    const Private = u32;
+        \\};
+        \\const foo = S.<cursor>
+    , &.{
+        .{ .label = "Public", .kind = .Constant, .detail = "const Public = u32" },
+        .{ .label = "Private", .kind = .Constant, .detail = "const Private = u32" },
+    });
+    try testCompletion(
+        \\const S: type = struct {
+        \\    pub const Public = u32;
+        \\    const Private: type = u32;
+        \\};
+        \\const foo = S.<cursor>
+    , &.{
+        .{ .label = "Public", .kind = .Constant, .detail = "const Public = u32" },
+        .{ .label = "Private", .kind = .Constant, .detail = "const Private: type = u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct {
         \\    pub fn public() S {}
         \\    fn private() !void {}
         \\};
@@ -1345,7 +1366,7 @@ test "completion - declarations" {
     });
 
     try testCompletion(
-        \\const S = struct {
+        \\const S: type = struct {
         \\    pub fn public() S {}
         \\    fn private() !void {}
         \\};
