@@ -10,9 +10,6 @@
       gitignore.inputs.nixpkgs.follows = "nixpkgs";
 
       flake-utils.url = "github:numtide/flake-utils";
-
-      langref.url = "https://raw.githubusercontent.com/ziglang/zig/63bd2bff12992aef0ce23ae4b344e9cb5d65f05d/doc/langref.html.in";
-      langref.flake = false;
     };
 
   outputs = inputs:
@@ -25,28 +22,55 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         zig = zig-overlay.packages.${system}.master;
+        inherit (pkgs) lib;
+
+        sources = builtins.fromJSON (lib.fileContents ./sources.json);
+        deps = pkgs.callPackage ./deps.nix { };
+
+        zlsFor = { data_version ? null, langref ? null }:
+          let
+            buildOption = opt: val: lib.optionalString (val != null) "-D${opt}=${val}";
+          in
+          pkgs.stdenvNoCC.mkDerivation {
+            inherit data_version langref;
+            name = "zls";
+            version = "master";
+            src = gitignoreSource ./.;
+            nativeBuildInputs = [ zig ];
+            dontConfigure = true;
+            dontInstall = true;
+            doCheck = true;
+            buildPhase = ''
+              runHook preBuild
+              mkdir -p .cache
+              ln -s ${deps} .cache/p
+              zig build install --cache-dir $PWD/zig-cache --global-cache-dir $PWD/.cache --prefix $out \
+                -Dcpu=baseline -Doptimize=ReleaseSafe ${buildOption "data_version" data_version} ${buildOption "version_data_path" langref}
+              runHook postBuild
+            '';
+            checkPhase = ''
+              runHook preCheck
+              zig build test --cache-dir $PWD/zig-cache --global-cache-dir $PWD/.cache -Dcpu=baseline ${buildOption "version_data_path" langref}
+              runHook postCheck
+            '';
+          };
+
+        zlsPackages = lib.mapAttrs'
+          (version: info: {
+            name = "dv_" + version;
+            value = zlsFor {
+              data_version = version;
+              langref = pkgs.fetchurl {
+                inherit (info) hash;
+                url = info.langref;
+              };
+            };
+          })
+          sources;
       in
       rec {
         formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
-        packages.default = packages.zls;
-        packages.zls = pkgs.stdenvNoCC.mkDerivation {
-          name = "zls";
-          version = "master";
-          src = gitignoreSource ./.;
-          nativeBuildInputs = [ zig ];
-          dontConfigure = true;
-          dontInstall = true;
-          doCheck = true;
-          langref = inputs.langref;
-          buildPhase = ''
-            mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { }} .cache/p
-            zig build install --cache-dir $(pwd)/zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
-          '';
-          checkPhase = ''
-            zig build test --cache-dir $(pwd)/zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline
-          '';
-        };
+        packages = zlsPackages // { default = zlsPackages.dv_master; };
       }
     );
 }

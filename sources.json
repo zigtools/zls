@@ -1,0 +1,18 @@
+{
+    "0.10.0": {
+        "langref": "https://raw.githubusercontent.com/ziglang/zig/0c1701768d4fefcc4792ebe39b79e31028c53bfa/doc/langref.html.in",
+        "hash": "sha256-LXigafnw+FzWLoI0YYh4FMGD/yYm8Dy/rWbtPRpC79U="
+    },
+    "0.10.1": {
+        "langref": "https://raw.githubusercontent.com/ziglang/zig/b57081f039bd3f8f82210e8896e336e3c3a6869b/doc/langref.html.in",
+        "hash": "sha256-7L0XcgTtJLiEetZ/ve4hBhYXStAQfcTKGnYiZHpjrjM="
+    },
+    "0.11.0": {
+        "langref": "https://raw.githubusercontent.com/ziglang/zig/67709b638224ac03820226c6744d8b6ead59184c/doc/langref.html.in",
+        "hash": "sha256-APh+jFhGeUdFQzd82hOYYpSIPGOR24LcSkWvQiatftA="
+    },
+    "master": {
+        "langref": "https://raw.githubusercontent.com/ziglang/zig/f24ceec35a6fd1e5e6a671461b78919b5f588a32/doc/langref.html.in",
+        "hash": "sha256-2P7a9jPkNXK7mX+gdMMRpShqiR2LFRZ1RpwRAIGrUWI="
+    }
+}
