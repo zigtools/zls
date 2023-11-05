@@ -1,5 +1,6 @@
 const root = @import("@build");
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log;
 const process = std.process;
 
@@ -12,13 +13,15 @@ const Build = std.Build;
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
+    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
+    // one shot program. We don't need to waste time freeing memory and finding places to squish
+    // bytes into. So we free everything all at once at the very end.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
     var args = try process.argsAlloc(allocator);
-    defer process.argsFree(allocator, args);
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -64,6 +67,7 @@ pub fn main() !void {
     cache.addPrefix(build_root_directory);
     cache.addPrefix(local_cache_directory);
     cache.addPrefix(global_cache_directory);
+    cache.hash.addBytes(builtin.zig_version_string);
 
     const host = try std.zig.system.NativeTargetInfo.detect(.{});
 
@@ -106,12 +110,6 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
 
-    var packages = Packages{ .allocator = allocator };
-    defer packages.deinit();
-
-    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(allocator);
-
     // This scans the graph of Steps to find all `OptionsStep`s then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
     for (builder.top_level_steps.values()) |tls| {
@@ -119,6 +117,9 @@ pub fn main() !void {
             try reifyOptions(step);
         }
     }
+
+    var packages = Packages{ .allocator = allocator };
+    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
@@ -129,12 +130,19 @@ pub fn main() !void {
         }
     }
 
-    const package_list = try packages.toPackageList();
-    defer allocator.free(package_list);
+    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    inline for (@typeInfo(dependencies.build_root).Struct.decls) |decl| {
+        try deps_build_roots.append(allocator, .{
+            .name = decl.name,
+            // XXX Check if it exists?
+            .path = try std.fs.path.resolve(allocator, &[_][]const u8{ @field(dependencies.build_root, decl.name), "./build.zig" }),
+        });
+    }
 
     try std.json.stringify(
         BuildConfig{
-            .packages = package_list,
+            .deps_build_roots = try deps_build_roots.toOwnedSlice(allocator),
+            .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
         },
         .{},
@@ -208,14 +216,14 @@ fn processStep(
 ) anyerror!void {
     if (step.cast(Build.Step.InstallArtifact)) |install_exe| {
         if (install_exe.artifact.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| _ = try packages.addPackage("root", path);
         }
         try processIncludeDirs(builder, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, install_exe.artifact);
         try processModules(builder, packages, install_exe.artifact.modules);
     } else if (step.cast(Build.Step.Compile)) |exe| {
         if (exe.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| _ = try packages.addPackage("root", path);
         }
         try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, exe);
@@ -233,7 +241,7 @@ fn processModules(
     modules: std.StringArrayHashMap(*Build.Module),
 ) !void {
     for (modules.keys(), modules.values()) |name, mod| {
-        const path = mod.builder.pathFromRoot(mod.source_file.getPath(mod.builder));
+        const path = copied_from_zig.getPath(mod.source_file, mod.builder) orelse continue;
 
         const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
@@ -252,8 +260,7 @@ fn processIncludeDirs(
 
     for (dirs) |dir| {
         const candidate: []const u8 = switch (dir) {
-            .path => |path| path.getPath(builder),
-            .path_system => |path| path.getPath(builder),
+            .path, .path_system => |path| copied_from_zig.getPath(path, builder) orelse continue,
             else => continue,
         };
 
@@ -310,6 +317,21 @@ fn getPkgConfigIncludes(
 
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
+    /// Copied from `std.Build.LazyPath.getPath2` and massaged a bit.
+    fn getPath(path: std.Build.LazyPath, builder: *Build) ?[]const u8 {
+        switch (path) {
+            .path => |p| return builder.pathFromRoot(p),
+            .cwd_relative => |p| return pathFromCwd(builder, p),
+            .generated => |gen| return builder.pathFromRoot(gen.path orelse return null),
+        }
+    }
+
+    /// Copied from `std.Build.pathFromCwd` as it is non-pub.
+    fn pathFromCwd(b: *Build, p: []const u8) []u8 {
+        const cwd = process.getCwdAlloc(b.allocator) catch @panic("OOM");
+        return std.fs.path.resolve(b.allocator, &.{ cwd, p }) catch @panic("OOM");
+    }
+
     fn runPkgConfig(self: *Build.Step.Compile, lib_name: []const u8) ![]const []const u8 {
         const b = self.step.owner;
         const pkg_name = match: {

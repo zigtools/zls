@@ -13,13 +13,15 @@ const Build = std.Build;
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
+    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
+    // one shot program. We don't need to waste time freeing memory and finding places to squish
+    // bytes into. So we free everything all at once at the very end.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
     var args = try process.argsAlloc(allocator);
-    defer process.argsFree(allocator, args);
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -110,10 +112,7 @@ pub fn main() !void {
     try runBuild(builder);
 
     var packages = Packages{ .allocator = allocator };
-    defer packages.deinit();
-
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(allocator);
 
     // This scans the graph of Steps to find all `OptionsStep`s then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
@@ -132,12 +131,40 @@ pub fn main() !void {
         }
     }
 
-    const package_list = try packages.toPackageList();
-    defer allocator.free(package_list);
+    // Sample `@dependencies` structure:
+    // pub const packages = struct {
+    //     pub const @"1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" = struct {
+    //         pub const build_root = "/home/rad/.cache/zig/p/1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5";
+    //         pub const build_zig = @import("1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5");
+    //         pub const deps: []const struct { []const u8, []const u8 } = &.{};
+    //     };
+    // ...
+    // };
+    // pub const root_deps: []const struct { []const u8, []const u8 } = &.{
+    //     .{ "known_folders", "1220bb12c9bfe291eed1afe6a2070c7c39918ab1979f24a281bba39dfb23f5bcd544" },
+    //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
+    //     .{ "binned_allocator", "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" },
+    // };
+
+    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    for (dependencies.root_deps) |root_dep| {
+        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| {
+            if (std.mem.eql(u8, package.name, root_dep[1])) {
+                const package_info = @field(dependencies.packages, package.name);
+                if (!@hasDecl(package_info, "build_root")) continue;
+                try deps_build_roots.append(allocator, .{
+                    .name = root_dep[0],
+                    // XXX Check if it exists?
+                    .path = try std.fs.path.resolve(allocator, &[_][]const u8{ package_info.build_root, "./build.zig" }),
+                });
+            }
+        }
+    }
 
     try std.json.stringify(
         BuildConfig{
-            .packages = package_list,
+            .deps_build_roots = try deps_build_roots.toOwnedSlice(allocator),
+            .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
         },
         .{

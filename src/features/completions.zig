@@ -889,6 +889,19 @@ fn completeFileSystemStringLiteral(
                     .detail = pkg.path,
                 }, {});
             }
+        } else if (DocumentStore.isBuildFile(handle.uri)) blk: {
+            const build_file = store.getBuildFile(handle.uri).?;
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
+
+            try completions.ensureUnusedCapacity(arena, build_config.deps_build_roots.len);
+            for (build_config.deps_build_roots) |dbr| {
+                completions.putAssumeCapacity(.{
+                    .label = dbr.name,
+                    .kind = .Module,
+                    .detail = dbr.path,
+                }, {});
+            }
         }
 
         try completions.ensureUnusedCapacity(arena, 2);
