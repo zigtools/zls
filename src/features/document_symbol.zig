@@ -20,6 +20,7 @@ const Symbol = struct {
 const Context = struct {
     arena: std.mem.Allocator,
     last_var_decl_name: ?[]const u8,
+    parent_container: Ast.Node.Index,
     parent_node: Ast.Node.Index,
     parent_symbols: *std.ArrayListUnmanaged(Symbol),
     total_symbol_count: *usize,
@@ -32,8 +33,8 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
     const main_tokens = tree.nodes.items(.main_token);
     const token_tags = tree.tokens.items(.tag);
 
-    const decl_name_token = analysis.getDeclNameToken(tree, node);
-    const decl_name = analysis.getDeclName(tree, node);
+    const decl_name_token = analysis.getContainerDeclNameToken(tree, ctx.parent_container, node);
+    const decl_name = if (decl_name_token) |name_token| analysis.declNameTokenToSlice(tree, name_token) else null;
 
     var new_ctx = ctx.*;
     const maybe_symbol: ?Symbol = switch (node_tags[node]) {
@@ -52,7 +53,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
             };
 
             break :blk .{
-                .name = decl_name.?,
+                .name = decl_name orelse break :blk null,
                 .detail = null,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
@@ -87,7 +88,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
         .container_field_align,
         .container_field,
         => blk: {
-            const kind: types.SymbolKind = switch (node_tags[ctx.parent_node]) {
+            const kind: types.SymbolKind = switch (node_tags[ctx.parent_container]) {
                 .root => .Field,
                 .container_decl,
                 .container_decl_trailing,
@@ -95,7 +96,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .container_decl_arg_trailing,
                 .container_decl_two,
                 .container_decl_two_trailing,
-                => switch (token_tags[main_tokens[ctx.parent_node]]) {
+                => switch (token_tags[main_tokens[ctx.parent_container]]) {
                     .keyword_struct => .Field,
                     .keyword_union => .Field,
                     .keyword_enum => .EnumMember,
@@ -113,13 +114,29 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
             };
 
             break :blk .{
-                .name = decl_name.?,
+                .name = decl_name orelse break :blk null,
                 .detail = ctx.last_var_decl_name,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, decl_name_token.?),
                 .children = .{},
             };
+        },
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        => blk: {
+            new_ctx.parent_container = node;
+            break :blk null;
         },
         else => null,
     };
@@ -230,6 +247,7 @@ pub fn getDocumentSymbols(
         .arena = arena,
         .last_var_decl_name = null,
         .parent_node = 0, // root-node
+        .parent_container = 0, // root-node
         .parent_symbols = &root_symbols,
         .total_symbol_count = &total_symbol_count,
     };

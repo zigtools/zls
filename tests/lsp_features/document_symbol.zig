@@ -27,6 +27,14 @@ test "documentSymbol - container decl" {
         \\  Field alpha
         \\  Function f
     );
+    try testDocumentSymbol(
+        \\const S = struct {
+        \\    []const u8,
+        \\    u32,
+        \\};
+    ,
+        \\Constant S
+    );
 }
 
 test "documentSymbol - enum" {
@@ -50,6 +58,20 @@ test "documentSymbol - test decl" {
     ,
         \\Method foo
         \\Method bar
+    );
+}
+
+// https://github.com/zigtools/zls/issues/1583
+test "documentSymbol - builtin" {
+    try testDocumentSymbol(
+        \\comptime {
+        \\    @abs();
+        \\    @foo();
+        \\    @foo
+        \\}
+        \\
+    ,
+        \\
     );
 }
 
@@ -105,7 +127,7 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
             _ = stack.pop();
         }
     }
-    _ = got.pop(); // Final \n
+    _ = got.popOrNull(); // Final \n
 
     try std.testing.expectEqualStrings(want, got.items);
 }
