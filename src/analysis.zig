@@ -419,15 +419,18 @@ pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
 
 pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?[]const u8 {
     const name_token = getContainerDeclNameToken(tree, container, node) orelse return null;
+    return declNameTokenToSlice(tree, name_token);
+}
 
-    if (tree.nodes.items(.tag)[node] == .test_decl and
-        tree.tokens.items(.tag)[name_token] == .string_literal)
-    {
-        const name = offsets.tokenToSlice(tree, name_token);
-        return name[1 .. name.len - 1];
+pub fn declNameTokenToSlice(tree: Ast, name_token: Ast.TokenIndex) ?[]const u8 {
+    switch (tree.tokens.items(.tag)[name_token]) {
+        .string_literal => {
+            const name = offsets.tokenToSlice(tree, name_token);
+            return name[1 .. name.len - 1];
+        },
+        .identifier => return offsets.identifierTokenToNameSlice(tree, name_token),
+        else => return null,
     }
-
-    return offsets.identifierTokenToNameSlice(tree, name_token);
 }
 
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
