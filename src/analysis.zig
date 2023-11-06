@@ -3983,7 +3983,7 @@ pub fn referencedTypes(
         .ip_index => |payload| {
             const allocator = collector.referenced_types.allocator;
             const ip = analyser.ip;
-            const index = if (resolved_type.type.is_type_val) ip.indexToKey(payload.index).typeOf() else payload.index;
+            const index = ip.indexToKey(payload.index).typeOf();
             resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{index.fmt(ip.*)});
         },
         else => {},
