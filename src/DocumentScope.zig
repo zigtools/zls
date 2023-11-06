@@ -1071,6 +1071,7 @@ noinline fn walkForNode(
         const name_token = capture_token + @intFromBool(capture_is_ref);
         capture_token = name_token + 2;
 
+        if (tree.tokens.items(.tag)[name_token] != .identifier) break;
         try then_scope.pushDeclaration(
             offsets.identifierTokenToNameSlice(tree, name_token),
             .{ .array_payload = .{ .identifier = name_token, .array_expr = input } },

@@ -112,6 +112,92 @@ pub fn ptrTypeBitRange(tree: Ast, node: Node.Index) full.PtrType {
     });
 }
 
+fn fullAsmComponents(tree: Ast, info: full.Asm.Components) full.Asm {
+    const token_tags = tree.tokens.items(.tag);
+    const node_tags = tree.nodes.items(.tag);
+    var result: full.Asm = .{
+        .ast = info,
+        .volatile_token = null,
+        .inputs = &.{},
+        .outputs = &.{},
+        .first_clobber = null,
+    };
+    if (info.asm_token + 1 < tree.tokens.len and token_tags[info.asm_token + 1] == .keyword_volatile) {
+        result.volatile_token = info.asm_token + 1;
+    }
+    const outputs_end: usize = for (info.items, 0..) |item, i| {
+        switch (node_tags[item]) {
+            .asm_output => continue,
+            else => break i,
+        }
+    } else info.items.len;
+
+    result.outputs = info.items[0..outputs_end];
+    result.inputs = info.items[outputs_end..];
+
+    if (info.items.len == 0) {
+        // asm ("foo" ::: "a", "b");
+        const template_token = lastToken(tree, info.template);
+        if (template_token + 4 < tree.tokens.len and
+            token_tags[template_token + 1] == .colon and
+            token_tags[template_token + 2] == .colon and
+            token_tags[template_token + 3] == .colon and
+            token_tags[template_token + 4] == .string_literal)
+        {
+            result.first_clobber = template_token + 4;
+        }
+    } else if (result.inputs.len != 0) {
+        // asm ("foo" :: [_] "" (y) : "a", "b");
+        const last_input = result.inputs[result.inputs.len - 1];
+        const rparen = lastToken(tree, last_input);
+        var i = rparen + 1;
+        // Allow a (useless) comma right after the closing parenthesis.
+        if (token_tags[i] == .comma) i += 1;
+        if (token_tags[i] == .colon and
+            token_tags[i + 1] == .string_literal)
+        {
+            result.first_clobber = i + 1;
+        }
+    } else {
+        // asm ("foo" : [_] "" (x) :: "a", "b");
+        const last_output = result.outputs[result.outputs.len - 1];
+        const rparen = lastToken(tree, last_output);
+        var i = rparen + 1;
+        // Allow a (useless) comma right after the closing parenthesis.
+        if (i + 1 < tree.tokens.len and token_tags[i] == .comma) i += 1;
+        if (i + 2 < tree.tokens.len and
+            token_tags[i] == .colon and
+            token_tags[i + 1] == .colon and
+            token_tags[i + 2] == .string_literal)
+        {
+            result.first_clobber = i + 2;
+        }
+    }
+
+    return result;
+}
+
+pub fn asmSimple(tree: Ast, node: Node.Index) full.Asm {
+    const data = tree.nodes.items(.data)[node];
+    return fullAsmComponents(tree, .{
+        .asm_token = tree.nodes.items(.main_token)[node],
+        .template = data.lhs,
+        .items = &.{},
+        .rparen = data.rhs,
+    });
+}
+
+pub fn asmFull(tree: Ast, node: Node.Index) full.Asm {
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.rhs, Node.Asm);
+    return fullAsmComponents(tree, .{
+        .asm_token = tree.nodes.items(.main_token)[node],
+        .template = data.lhs,
+        .items = tree.extra_data[extra.items_start..extra.items_end],
+        .rparen = extra.rparen,
+    });
+}
+
 fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
     const token_tags = tree.tokens.items(.tag);
     var result: full.If = .{
@@ -313,6 +399,14 @@ pub fn fullFor(tree: Ast, node: Node.Index) ?full.For {
     return switch (tree.nodes.items(.tag)[node]) {
         .for_simple => forSimple(tree, node),
         .@"for" => forFull(tree, node),
+        else => null,
+    };
+}
+
+pub fn fullAsm(tree: Ast, node: Node.Index) ?full.Asm {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .asm_simple => asmSimple(tree, node),
+        .@"asm" => asmFull(tree, node),
         else => null,
     };
 }
@@ -585,10 +679,10 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .@"switch" => {
             const cases = tree.extraData(datas[n].rhs, Node.SubRange);
             if (cases.end - cases.start == 0) {
-                const token = tree.lastToken(datas[n].lhs) + 3; // rparen, lbrace, rbrace
+                const token = lastToken(tree, datas[n].lhs) + 3; // rparen, lbrace, rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             } else {
-                var token = tree.lastToken(tree.extra_data[cases.end - 1]) + 1; // for the rbrace
+                var token = lastToken(tree, tree.extra_data[cases.end - 1]) + 1; // for the rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             }
         },
@@ -656,10 +750,10 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .block_two, .container_decl_two => {
             if (datas[n].rhs != 0) {
-                const token = tree.lastToken(datas[n].rhs) + 1; // for the rparen/rbrace
+                const token = lastToken(tree, datas[n].rhs) + 1; // for the rparen/rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             } else if (datas[n].lhs != 0) {
-                const token = tree.lastToken(datas[n].lhs) + 1; // for the rparen/rbrace
+                const token = lastToken(tree, datas[n].lhs) + 1; // for the rparen/rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             } else {
                 const token: TokenIndex = switch (tags[n]) {
@@ -675,10 +769,10 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         => {
             const members = tree.extraData(datas[n].rhs, Node.SubRange);
             if (members.end - members.start == 0) {
-                const token = tree.lastToken(datas[n].lhs) + 3; // // for the rparen + lbrace + rbrace
+                const token = lastToken(tree, datas[n].lhs) + 3; // // for the rparen + lbrace + rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             } else {
-                const token = tree.lastToken(tree.extra_data[members.end - 1]) + 1; // for the rbrace
+                const token = lastToken(tree, tree.extra_data[members.end - 1]) + 1; // for the rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             }
         },

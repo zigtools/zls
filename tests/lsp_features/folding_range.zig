@@ -259,6 +259,15 @@ test "foldingRange - invalid condition within a `switch`" {
     });
 }
 
+test "foldingRange - weird code" {
+    // the expected output is irrelevant, just ensure no crash
+    try testFoldingRange(
+        \\if ( {fn foo()}
+        \\
+        , &.{},
+    );
+}
+
 fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
