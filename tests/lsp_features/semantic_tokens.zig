@@ -1257,6 +1257,26 @@ test "semantic tokens - for with invalid capture" {
         .{ "bar", .variable, .{} },
         .{ "baz", .variable, .{} },
     });
+    // the expected output is irrelevant, just ensure no crash
+    try testSemanticTokens("comptime { for (foo) }", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) |}", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) |*}", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) |bar}", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) |*bar}", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) }", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) *}", &.{.{ "comptime", .keyword, .{} }});
+    try testSemanticTokens("comptime { for (foo) bar}", &.{
+        .{ "comptime", .keyword, .{} },
+        .{ "for", .keyword, .{} },
+        .{ "foo", .variable, .{} },
+        .{ "bar", .variable, .{} },
+    });
+    try testSemanticTokens("comptime { for (foo) *bar}", &.{
+        .{ "comptime", .keyword, .{} },
+        .{ "for", .keyword, .{} },
+        .{ "foo", .variable, .{} },
+        .{ "bar", .variable, .{ .declaration = true } },
+    });
 }
 
 test "semantic tokens - switch" {
@@ -1403,6 +1423,24 @@ test "semantic tokens - assembly" {
         .{ "arg1", .parameter, .{} },
         .{ "\"rcx\"", .string, .{} },
         .{ "\"r11\"", .string, .{} },
+    });
+}
+
+test "semantic tokens - weird code" {
+    // the expected output is irrelevant, just ensure no crash
+    try testSemanticTokens(
+        \\0"" (}; @compileErrors.a
+    , &.{
+        .{ "0", .number, .{} },
+    });
+    try testSemanticTokens(
+        \\foo = asm (fn bar())
+    , &.{
+        .{ "foo", .variable, .{} },
+        .{ "=", .operator, .{} },
+        .{ "asm", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "bar", .function, .{.declaration = true} },
     });
 }
 

@@ -1093,6 +1093,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         },
         .identifier => {
             const name_token = main_tokens[node];
+            if (tree.tokens.items(.tag)[name_token] != .identifier) return null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
             const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
