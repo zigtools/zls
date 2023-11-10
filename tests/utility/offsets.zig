@@ -91,6 +91,23 @@ test "offsets - lineLocAtIndex" {
     try std.testing.expectEqualStrings("foo", offsets.lineSliceAtIndex("foo\n", 3));
 }
 
+test "offsets - multilineLocAtIndex" {
+    const text =
+        \\line0
+        \\line1
+        \\line2
+        \\line3
+        \\line4
+    ;
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 0), offsets.multilineSliceAtIndex(text, 0, 0));
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 5), offsets.multilineSliceAtIndex(text, 5, 0));
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 6), offsets.multilineSliceAtIndex(text, 6, 0));
+
+    try std.testing.expectEqualStrings("line1\nline2\nline3", offsets.multilineSliceAtIndex(text, 15, 1));
+    try std.testing.expectEqualStrings("line0\nline1", offsets.multilineSliceAtIndex(text, 3, 1));
+    try std.testing.expectEqualStrings("line3\nline4", offsets.multilineSliceAtIndex(text, 27, 1));
+}
+
 test "offsets - lineLocUntilIndex" {
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("\n", 0));
