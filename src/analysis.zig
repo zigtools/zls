@@ -1223,13 +1223,19 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 log.info("Invoking interpreter!", .{});
 
                 const interpreter = try handle.getComptimeInterpreter(analyser.store, analyser.ip);
-                _ = interpreter.interpret(0, .none, .{}) catch |err| {
-                    log.err("Failed to interpret file: {s}", .{@errorName(err)});
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
-                    return null;
-                };
+                interpreter.mutex.lock();
+                defer interpreter.mutex.unlock();
+
+                if (!interpreter.has_analyzed_root) {
+                    interpreter.has_analyzed_root = true;
+                    _ = interpreter.interpret(0, .none, .{}) catch |err| {
+                        log.err("Failed to interpret file: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
+                        return null;
+                    };
+                }
 
                 const root_namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0);
 

@@ -25,6 +25,8 @@ ip: *InternPool,
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 namespaces: std.MultiArrayList(Namespace) = .{},
+has_analyzed_root: bool = false,
+mutex: std.Thread.Mutex = .{},
 
 pub fn getHandle(interpreter: *ComptimeInterpreter) *DocumentStore.Handle {
     // This interpreter is loaded from a known-valid handle so a valid handle must exist
@@ -892,18 +894,26 @@ pub fn interpret(
                 const import_handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
                 const import_interpreter = try import_handle.getComptimeInterpreter(interpreter.document_store, interpreter.ip);
 
-                return import_interpreter.interpret(0, .none, options) catch |err| {
-                    log.err("Failed to interpret node: {s}", .{@errorName(err)});
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
+                if (import_interpreter.mutex.tryLock()) {
+                    defer import_interpreter.mutex.unlock();
+
+                    if (!import_interpreter.has_analyzed_root) {
+                        interpreter.has_analyzed_root = true;
+                        _ = import_interpreter.interpret(0, .none, .{}) catch |err| {
+                            log.err("Failed to interpret file: {s}", .{@errorName(err)});
+                            if (@errorReturnTrace()) |trace| {
+                                std.debug.dumpStackTrace(trace.*);
+                            }
+                        };
                     }
-                    return InterpretResult{
-                        .value = Value{
-                            .interpreter = import_interpreter,
-                            .node_idx = 0,
-                            .index = .unknown_type,
-                        },
-                    };
+                }
+
+                return InterpretResult{
+                    .value = Value{
+                        .interpreter = import_interpreter,
+                        .node_idx = 0,
+                        .index = .unknown_type,
+                    },
                 };
             }
 
