@@ -90,7 +90,6 @@ fn typeToCompletion(
             list,
             analyser.ip,
             payload.index,
-            type_handle.type.is_type_val,
             payload.node,
         ),
         .either => |bruh| {
