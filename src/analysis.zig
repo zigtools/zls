@@ -25,15 +25,18 @@ resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?TypeWithHandle)
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 /// used to detect recursion
 use_trail: NodeSet = .{},
+/// handle of the doc where the request originated
+root_handle: ?*DocumentStore.Handle = undefined,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
-pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool) Analyser {
+pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool, root_handle: ?*DocumentStore.Handle) Analyser {
     return .{
         .gpa = gpa,
         .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
         .ip = ip,
+        .root_handle = root_handle,
     };
 }
 
@@ -1449,7 +1452,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 if (node_tags[import_param] != .string_literal) return null;
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
-                const import_uri = (try analyser.store.uriFromImportStr(analyser.arena.allocator(), handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
+                const import_uri = (try analyser.store.uriFromImportStr(
+                    analyser.arena.allocator(),
+                    handle.*,
+                    import_str[1 .. import_str.len - 1],
+                )) orelse (try analyser.store.uriFromImportStr(
+                    analyser.arena.allocator(),
+                    if (analyser.root_handle) |root_handle| root_handle.* else return null,
+                    import_str[1 .. import_str.len - 1],
+                )) orelse return null;
 
                 const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
 
