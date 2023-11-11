@@ -128,7 +128,7 @@ const Builder = struct {
 
     fn addDirect(self: *Builder, param_token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
         std.debug.assert(loc.start <= loc.end);
-        std.debug.assert(self.previous_source_index <= self.source_index); 
+        std.debug.assert(self.previous_source_index <= self.source_index);
         if (loc.start < self.previous_source_index) return;
         if (loc.start < self.source_index) return;
         var token_type = param_token_type;
@@ -701,7 +701,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .@"asm",
         .asm_simple,
         => {
-            const asm_node: Ast.full.Asm = ast.fullAsm(tree,node).?;
+            const asm_node: Ast.full.Asm = ast.fullAsm(tree, node).?;
 
             try writeToken(builder, main_token, .keyword);
             try writeToken(builder, asm_node.volatile_token, .keyword);
