@@ -1,2 +1,3 @@
 * text=auto
 *.zig text=auto eol=lf
+*.zon text=auto eol=lf
