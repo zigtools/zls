@@ -1021,7 +1021,7 @@ fn deepHash(hasher: anytype, key: anytype) void {
 
     switch (@typeInfo(T)) {
         .Int => {
-            if (comptime std.meta.hasUniqueRepresentation(Tuple)) {
+            if (comptime std.meta.hasUniqueRepresentation(T)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
                 const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(T), 8) catch unreachable;
