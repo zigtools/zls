@@ -210,7 +210,7 @@ pub const Decl = struct {
         _,
 
         pub fn toOptional(i: Decl.Index) OptionalIndex {
-            return @as(OptionalIndex, @enumFromInt(@intFromEnum(i)));
+            return @enumFromInt(@intFromEnum(i));
         }
     };
 
@@ -224,7 +224,7 @@ pub const Decl = struct {
 
         pub fn unwrap(oi: OptionalIndex) ?Decl.Index {
             if (oi == .none) return null;
-            return @as(Decl.Index, @enumFromInt(@intFromEnum(oi)));
+            return @enumFromInt(@intFromEnum(oi));
         }
     };
 };
@@ -792,14 +792,8 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
         .simple_type => .{ .simple_type = @enumFromInt(data) },
         .simple_value => .{ .simple_value = @enumFromInt(data) },
 
-        .type_int_signed => .{ .int_type = .{
-            .signedness = .signed,
-            .bits = @as(u16, @intCast(data)),
-        } },
-        .type_int_unsigned => .{ .int_type = .{
-            .signedness = .unsigned,
-            .bits = @as(u16, @intCast(data)),
-        } },
+        .type_int_signed => .{ .int_type = .{ .signedness = .signed, .bits = @intCast(data) } },
+        .type_int_unsigned => .{ .int_type = .{ .signedness = .unsigned, .bits = @intCast(data) } },
         .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Array, data) },
         .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(data) } },
@@ -840,16 +834,16 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
         .error_value => .{ .error_value = ip.extraData(ErrorValue, data) },
-        .null_value => .{ .null_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
-        .undefined_value => .{ .undefined_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
-        .unknown_value => .{ .unknown_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
+        .null_value => .{ .null_value = .{ .ty = @enumFromInt(data) } },
+        .undefined_value => .{ .undefined_value = .{ .ty = @enumFromInt(data) } },
+        .unknown_value => .{ .unknown_value = .{ .ty = @enumFromInt(data) } },
     };
 }
 
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
-    if (gop.found_existing) return @as(Index, @enumFromInt(gop.index));
+    if (gop.found_existing) return @enumFromInt(gop.index);
 
     const tag: Tag = key.tag();
     const data: u32 = switch (key) {
@@ -942,7 +936,7 @@ fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32
         @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
 
-    const result = @as(u32, @intCast(ip.extra.items.len));
+    const result: u32 = @intCast(ip.extra.items.len);
     var managed = ip.extra.toManaged(gpa);
     defer ip.extra = managed.moveToUnmanaged();
     try encoding.encode(&managed, T, extra);
@@ -959,7 +953,7 @@ const KeyAdapter = struct {
 
     pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
         _ = b_void;
-        return a.eql(ctx.ip.indexToKey(@as(Index, @enumFromInt(b_map_index))));
+        return a.eql(ctx.ip.indexToKey(@enumFromInt(b_map_index)));
     }
 
     pub fn hash(ctx: @This(), a: Key) u32 {
