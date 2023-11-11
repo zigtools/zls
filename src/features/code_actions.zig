@@ -8,6 +8,8 @@ const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
 
+const log = std.log.scoped(.zls_server);
+
 pub const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
@@ -18,15 +20,18 @@ pub const Builder = struct {
         builder: *Builder,
         diagnostic: types.Diagnostic,
         actions: *std.ArrayListUnmanaged(types.CodeAction),
+        action_index: usize,
         remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
         const loc = offsets.rangeToLoc(builder.handle.tree.source, diagnostic.range, builder.offset_encoding);
 
+        log.debug("code action for diagnostic: {s}", .{diagnostic.message});
+
         switch (kind) {
             .unused => |id| switch (id) {
-                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
+                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, action_index, loc),
                 .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
@@ -81,7 +86,12 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
     try actions.append(builder.arena, action1);
 }
 
-fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedFunctionParameter(
+    builder: *Builder,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+    action_index: usize,
+    loc: offsets.Loc,
+) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -109,7 +119,11 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const block = node_datas[payload.func].rhs;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true);
+    const new_text = try if (action_index == actions.items.len)
+        // If our fix is on the last item, we need to append an additional newline.
+        createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, true)
+    else
+        createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, false);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -159,7 +173,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     if (last_token >= tree.tokens.len) return;
     if (token_tags[last_token] != .semicolon) return;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false);
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false, false);
 
     const index = token_starts[last_token] + 1;
 
@@ -208,7 +222,13 @@ fn handleUnusedCapture(
 
     const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
     const identifier_name = source[loc.start..loc.end];
-    const new_text = try createDiscardText(builder, identifier_name, block_start, true);
+    // if we are on the last capture of the block, we need to add an additional newline
+    // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
+    const new_text = try if (source[capture_loc.end] == source[loc.end + 1])
+        createDiscardText(builder, identifier_name, block_start, true, true)
+    else
+        createDiscardText(builder, identifier_name, block_start, true, false);
+
     const action1 = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
@@ -310,7 +330,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 }
 
 // returns a discard string `\n{indent}_ = identifier_name;`
-fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
+fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool, add_suffix_newline: bool) ![]const u8 {
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.tree.source, declaration_start);
         for (line, 0..) |char, i| {
@@ -321,8 +341,9 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
         break :find_indent line;
     };
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
+    const additional_newline = if (add_suffix_newline) "\n" else "";
 
-    const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
+    const new_text_len = 1 + indent.len + additional_indent.len + additional_newline.len + "_ = ;".len + identifier_name.len;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
@@ -331,6 +352,7 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
+    new_text.appendSliceAssumeCapacity(additional_newline);
 
     return new_text.toOwnedSlice(builder.arena);
 }
