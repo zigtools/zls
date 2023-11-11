@@ -235,10 +235,22 @@ fn handleUnusedCapture(
 
     const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
     const identifier_name = source[loc.start..loc.end];
+
+    var capture_end = loc.end;
+    var is_last: bool = false;
+    while (capture_end < source.len) : (capture_end += 1) {
+        switch (source[capture_end]) {
+            ' ', '\n' => continue,
+            '|' => {
+                is_last = true;
+                break;
+            },
+            else => break,
+        }
+    }
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const new_text = try createDiscardText(builder, identifier_name, block_start, true, (source[capture_loc.end] == source[loc.end + 1]));
-
+    const new_text = try createDiscardText(builder, identifier_name, block_start, true, is_last);
     const action1 = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
@@ -257,7 +269,7 @@ fn handleUnusedCapture(
     const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
     const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
     if (gop.found_existing)
-        try actions.appendSlice(builder.arena, &.{ action1, action2 })
+        try prependSlice(actions, builder.arena, &.{ action1, action2 })
     else {
         const action0 = types.CodeAction{
             .title = "remove capture",
@@ -265,7 +277,7 @@ fn handleUnusedCapture(
             .isPreferred = false,
             .edit = try builder.createWorkspaceEdit(&.{remove_cap_loc}),
         };
-        try actions.appendSlice(builder.arena, &.{ action0, action1, action2 });
+        try prependSlice(actions, builder.arena, &.{ action0, action1, action2 });
     }
 }
 

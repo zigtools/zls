@@ -33,9 +33,9 @@ test "code actions - discard function parameter" {
         \\
     ,
         \\fn foo(a: void, b: void, c: void) void {
-        \\    _ = c;
-        \\    _ = b;
         \\    _ = a;
+        \\    _ = b;
+        \\    _ = c;
         \\}
         \\
     );
@@ -56,14 +56,14 @@ test "code actions - discard captures" {
     ,
         \\test {
         \\    for (0..10, 0..10, 0..10) |i, j, k| {
-        \\        _ = k;
-        \\        _ = j;
         \\        _ = i;
+        \\        _ = j;
+        \\        _ = k;
         \\    }
         \\    switch (union(enum) {}{}) {
         \\        inline .a => |cap, tag| {
-        \\            _ = tag;
         \\            _ = cap;
+        \\            _ = tag;
         \\        },
         \\    }
         \\    if (null) |x| {
