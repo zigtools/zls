@@ -25,6 +25,8 @@ pub const Uri = []const u8;
 pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
 pub const Hash = [Hasher.mac_length]u8;
 
+pub const max_document_size = std.math.maxInt(u32);
+
 pub fn computeHash(bytes: []const u8) Hash {
     var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
     hasher.update(bytes);
@@ -521,13 +523,20 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 
     if (self.getHandle(uri)) |handle| return handle;
 
-    const file_path = URI.parse(self.allocator, uri) catch return null;
+    const file_path = URI.parse(self.allocator, uri) catch |err| {
+        log.err("failed to parse URI `{s}`: {}", .{ uri, err });
+        return null;
+    };
     defer self.allocator.free(file_path);
 
-    var file = std.fs.openFileAbsolute(file_path, .{}) catch return null;
-    defer file.close();
-
-    const file_contents = file.readToEndAllocOptions(self.allocator, std.math.maxInt(usize), null, @alignOf(u8), 0) catch return null;
+    if (!std.fs.path.isAbsolute(file_path)) {
+        log.err("file path is not absolute `{s}`", .{file_path});
+        return null;
+    }
+    const file_contents = std.fs.cwd().readFileAllocOptions(self.allocator, file_path, max_document_size, null, @alignOf(u8), 0) catch |err| {
+        log.err("failed to load document `{s}`: {}", .{ file_path, err });
+        return null;
+    };
 
     const handle = self.createAndStoreDocument(uri, file_contents, false) catch return null;
 

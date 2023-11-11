@@ -130,7 +130,6 @@ pub const Scope = struct {
     },
     // offsets.Loc store `usize` instead of `u32`
     // zig only allows files up to `std.math.maxInt(u32)` bytes to do this kind of optimization.
-    // TODO ZLS should check this.
     loc: SmallLoc,
     parent_scope: OptionalIndex,
     // child scopes have contiguous indices

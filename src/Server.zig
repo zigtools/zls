@@ -1139,6 +1139,15 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
 }
 
 fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
+    if (notification.textDocument.text.len > DocumentStore.max_document_size) {
+        log.err("open document `{s}` failed: text size ({d}) is above maximum length ({d})", .{
+            notification.textDocument.uri,
+            notification.textDocument.text.len,
+            DocumentStore.max_document_size,
+        });
+        return error.InternalError;
+    }
+
     try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1152,6 +1161,15 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
+
+    if (new_text.len > DocumentStore.max_document_size) {
+        log.err("change document `{s}` failed: text size ({d}) is above maximum length ({d})", .{
+            notification.textDocument.uri,
+            new_text.len,
+            DocumentStore.max_document_size,
+        });
+        return error.InternalError;
+    }
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
