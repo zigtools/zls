@@ -36,6 +36,9 @@ jobs:
 
       - run: zig env
 
+      - name: Run zig fmt
+        run: zig fmt --check .
+
       - name: Build
         run: zig build
 
