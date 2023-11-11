@@ -156,7 +156,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.get(tree).?), "")}),
     };
 
-    try prependSlice(actions, builder.arena, &.{ action1, action2 });
+    try actions.insertSlice(builder.arena, 0, &.{ action1, action2 });
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
@@ -269,7 +269,7 @@ fn handleUnusedCapture(
     const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
     const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
     if (gop.found_existing)
-        try prependSlice(actions, builder.arena, &.{ action1, action2 })
+        try actions.insertSlice(builder.arena, 0, &.{ action1, action2 })
     else {
         const action0 = types.CodeAction{
             .title = "remove capture",
@@ -277,7 +277,7 @@ fn handleUnusedCapture(
             .isPreferred = false,
             .edit = try builder.createWorkspaceEdit(&.{remove_cap_loc}),
         };
-        try prependSlice(actions, builder.arena, &.{ action0, action1, action2 });
+        try actions.insertSlice(builder.arena, 0, &.{ action0, action1, action2 });
     }
 }
 
@@ -556,16 +556,6 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     if (trimmed.len == 0) return null;
 
     return .{ .start = start_pipe_position, .end = end_pipe_position };
-}
-
-fn prependSlice(list: *std.ArrayListUnmanaged(types.CodeAction), arena: std.mem.Allocator, values: []const types.CodeAction) !void {
-    const old_len = list.items.len;
-    try list.resize(arena, list.items.len + values.len);
-    var i = old_len + values.len - 1;
-    while (i >= values.len) : (i -= 1) {
-        list.items[i] = list.items[i - values.len];
-    }
-    std.mem.copy(types.CodeAction, list.items[0..values.len], values);
 }
 
 test "getCaptureLoc" {
