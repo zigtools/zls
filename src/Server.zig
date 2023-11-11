@@ -346,9 +346,8 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
     var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items, 0..) |diagnostic, i| {
-        log.debug("what is the code action?! {s}", .{diagnostic.message});
-        try builder.generateCodeAction(diagnostic, &actions, i, &remove_capture_actions);
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
     var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
@@ -365,10 +364,6 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         const edits: []const types.TextEdit = changes.get(handle.uri) orelse continue;
 
         try text_edits.appendSlice(arena, edits);
-    }
-
-    for (text_edits.items) |edit| {
-        log.debug("updating with new text: {s}", .{edit.newText});
     }
 
     return text_edits;
@@ -1158,8 +1153,6 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
 
-    log.debug("the new text from didChange ? {s}", .{new_text});
-
     try server.document_store.refreshDocument(handle.uri, new_text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1409,8 +1402,6 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     const formatted = try handle.tree.render(arena);
 
-    log.info("requested reformat!! formatted:\n{s}", .{formatted});
-
     if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
     return if (diff.edits(arena, handle.tree.source, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
@@ -1574,8 +1565,6 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    log.debug("this is the code action {any}", .{request});
-
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
 
@@ -1594,9 +1583,8 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
     var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items, 0..) |diagnostic, i| {
-        log.debug("what is the code action?! {s}", .{diagnostic.message});
-        try builder.generateCodeAction(diagnostic, &actions, i, &remove_capture_actions);
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
     const Result = getRequestMetadata("textDocument/codeAction").?.Result;

@@ -1,14 +1,14 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
 
+const log = std.log.scoped(.zls_server);
+
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
-
-const log = std.log.scoped(.zls_server);
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
@@ -20,18 +20,15 @@ pub const Builder = struct {
         builder: *Builder,
         diagnostic: types.Diagnostic,
         actions: *std.ArrayListUnmanaged(types.CodeAction),
-        action_index: usize,
         remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
         const loc = offsets.rangeToLoc(builder.handle.tree.source, diagnostic.range, builder.offset_encoding);
 
-        log.debug("code action for diagnostic: {s}", .{diagnostic.message});
-
         switch (kind) {
             .unused => |id| switch (id) {
-                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, action_index, loc),
+                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
                 .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
@@ -86,12 +83,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
     try actions.append(builder.arena, action1);
 }
 
-fn handleUnusedFunctionParameter(
-    builder: *Builder,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
-    action_index: usize,
-    loc: offsets.Loc,
-) !void {
+fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -119,11 +111,35 @@ fn handleUnusedFunctionParameter(
 
     const block = node_datas[payload.func].rhs;
 
-    const new_text = try if (action_index == actions.items.len)
-        // If our fix is on the last item, we need to append an additional newline.
-        createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, true)
-    else
-        createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, false);
+    // If we are on the "last parameter" that requires a discard, then we need to append a newline,
+    // as well as any relevant indentations, such that the next line is indented to the same column.
+    // To do this, you may have a function like:
+    // fn(a: i32, b: i32, c: i32) void { _ = a; _ = b; _ = c; }
+    // or
+    // fn(
+    //     a: i32,
+    //     b: i32,
+    //     c: i32,
+    // ) void { ... }
+    // We have to be able to detect both cases.
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, payload.get(tree).?)).end;
+    var found_comma: bool = false;
+    while (param_end < tree.source.len) : (param_end += 1) {
+        switch (tree.source[param_end]) {
+            ' ', '\n' => continue,
+            ',' => if (!found_comma) {
+                found_comma = true;
+                continue;
+            } else {
+                param_end += 1;
+                break;
+            },
+            ')' => break,
+            else => break,
+        }
+    }
+
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, !found_comma);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -142,7 +158,7 @@ fn handleUnusedFunctionParameter(
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.get(tree).?), "")}),
     };
 
-    try actions.appendSlice(builder.arena, &.{ action1, action2 });
+    try prependSlice(actions, builder.arena, &.{ action1, action2 });
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
@@ -174,7 +190,6 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     if (token_tags[last_token] != .semicolon) return;
 
     const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false, false);
-
     const index = token_starts[last_token] + 1;
 
     try actions.append(builder.arena, .{
@@ -224,10 +239,7 @@ fn handleUnusedCapture(
     const identifier_name = source[loc.start..loc.end];
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const new_text = try if (source[capture_loc.end] == source[loc.end + 1])
-        createDiscardText(builder, identifier_name, block_start, true, true)
-    else
-        createDiscardText(builder, identifier_name, block_start, true, false);
+    const new_text = try createDiscardText(builder, identifier_name, block_start, true, (source[capture_loc.end] == source[loc.end + 1]));
 
     const action1 = .{
         .title = "discard capture",
@@ -343,8 +355,11 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
     const additional_newline = if (add_suffix_newline) "\n" else "";
 
-    const new_text_len = 1 + indent.len + additional_indent.len + additional_newline.len + "_ = ;".len + identifier_name.len;
-    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
+    var new_text_len = 1 + indent.len + additional_indent.len + additional_newline.len + "_ = ;".len + identifier_name.len;
+    // if we have an additional newline, then we will need an additional indent too.
+    if (add_suffix_newline) new_text_len += indent.len;
+    const post_new_len = new_text_len;
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, post_new_len);
 
     new_text.appendAssumeCapacity('\n');
     new_text.appendSliceAssumeCapacity(indent);
@@ -352,7 +367,9 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
+    // if we are adding a suffix newline, we need to add the additional indentation again.
     new_text.appendSliceAssumeCapacity(additional_newline);
+    if (add_suffix_newline) new_text.appendSliceAssumeCapacity(indent);
 
     return new_text.toOwnedSlice(builder.arena);
 }
@@ -529,6 +546,16 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     if (trimmed.len == 0) return null;
 
     return .{ .start = start_pipe_position, .end = end_pipe_position };
+}
+
+fn prependSlice(list: *std.ArrayListUnmanaged(types.CodeAction), arena: std.mem.Allocator, values: []const types.CodeAction) !void {
+    const old_len = list.items.len;
+    try list.resize(arena, list.items.len + values.len);
+    var i = old_len + values.len - 1;
+    while (i >= values.len) : (i -= 1) {
+        list.items[i] = list.items[i - values.len];
+    }
+    std.mem.copy(types.CodeAction, list.items[0..values.len], values);
 }
 
 test "getCaptureLoc" {
