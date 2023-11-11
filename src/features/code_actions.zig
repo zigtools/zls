@@ -122,21 +122,12 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     // We have to be able to detect both cases.
     const fn_proto_param = payload.get(tree).?;
     var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
-    var found_comma: bool = false;
-    while (param_end < tree.source.len) : (param_end += 1) {
-        switch (tree.source[param_end]) {
-            ' ', '\n' => continue,
-            ',' => if (!found_comma) {
-                found_comma = true;
-                continue;
-            } else {
-                param_end += 1;
-                break;
-            },
-            ')' => break,
-            else => break,
-        }
-    }
+
+    var found_comma = std.mem.startsWith(
+        u8,
+        std.mem.trimLeft(u8, tree.source[param_end..], " \n"),
+        ",",
+    );
 
     const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, !found_comma);
 
