@@ -3210,7 +3210,7 @@ fn iterateUsingnamespaceContainerSymbols(
                 switch (entry.type_with_handle.type.data) {
                     .other => |expr| {
                         try analyser.iterateSymbolsContainerInternal(
-                            .{ .node = expr, .handle = use_expr.handle },
+                            .{ .node = expr, .handle = entry.type_with_handle.handle },
                             orig_handle,
                             callback,
                             context,
