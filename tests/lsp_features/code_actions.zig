@@ -85,10 +85,11 @@ test "code actions - discard captures" {
 test "code actions - discard capture with comment" {
     try testAutofix(
         \\test {
-        \\  if (1 == 1) |a|
-        \\      //a
-        \\      {}
+        \\    if (1 == 1) |a|
+        \\    //a
+        \\    {}
         \\}
+        \\
     ,
         \\test {
         \\    if (1 == 1) |a|
@@ -174,9 +175,5 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     defer allocator.free(actual);
     try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
 
-    try std.testing.expect(handle.tree.errors.len == 0);
-    const formatted_actual = try handle.tree.render(allocator);
-    defer allocator.free(formatted_actual);
-
-    try std.testing.expectEqualStrings(after, formatted_actual);
+    try std.testing.expectEqualStrings(after, handle.tree.source);
 }
