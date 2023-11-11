@@ -2534,12 +2534,8 @@ pub fn isType(ip: *const InternPool, ty: Index) bool {
 
 pub fn isUnknown(ip: *const InternPool, index: Index) bool {
     switch (index) {
-        .unknown_type => return true,
-        .unknown_unknown => return true,
-        else => switch (ip.items.items(.tag)[@intFromEnum(index)]) {
-            .unknown_value => return true,
-            else => return false,
-        },
+        .unknown_type, .unknown_unknown => return true,
+        else => return ip.items.items(.tag)[@intFromEnum(index)] == .unknown_value,
     }
 }
 
