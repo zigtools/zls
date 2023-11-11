@@ -344,7 +344,13 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 }
 
 // returns a discard string `\n{indent}_ = identifier_name;`
-fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool, add_suffix_newline: bool) ![]const u8 {
+fn createDiscardText(
+    builder: *Builder,
+    identifier_name: []const u8,
+    declaration_start: usize,
+    add_block_indentation: bool,
+    add_suffix_newline: bool,
+) ![]const u8 {
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.tree.source, declaration_start);
         for (line, 0..) |char, i| {
@@ -355,13 +361,15 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
         break :find_indent line;
     };
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
-    const additional_newline = if (add_suffix_newline) "\n" else "";
 
-    var new_text_len = 1 + indent.len + additional_indent.len + additional_newline.len + "_ = ;".len + identifier_name.len;
-    // if we have an additional newline, then we will need an additional indent too.
-    if (add_suffix_newline) new_text_len += indent.len;
-    const post_new_len = new_text_len;
-    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, post_new_len);
+    const new_text_len =
+        1 +
+        indent.len +
+        additional_indent.len +
+        "_ = ;".len +
+        identifier_name.len +
+        if (add_suffix_newline) 1 + indent.len else 0;
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
     new_text.appendSliceAssumeCapacity(indent);
@@ -369,9 +377,10 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
-    // if we are adding a suffix newline, we need to add the additional indentation again.
-    new_text.appendSliceAssumeCapacity(additional_newline);
-    if (add_suffix_newline) new_text.appendSliceAssumeCapacity(indent);
+    if (add_suffix_newline) {
+        new_text.appendAssumeCapacity('\n');
+        new_text.appendSliceAssumeCapacity(indent);
+    }
 
     return new_text.toOwnedSlice(builder.arena);
 }
