@@ -120,7 +120,8 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     //     c: i32,
     // ) void { ... }
     // We have to be able to detect both cases.
-    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, payload.get(tree).?)).end;
+    const fn_proto_param = payload.get(tree).?;
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
     var found_comma: bool = false;
     while (param_end < tree.source.len) : (param_end += 1) {
         switch (tree.source[param_end]) {
@@ -153,7 +154,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .title = "remove function parameter",
         .kind = .quickfix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.get(tree).?), "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, fn_proto_param), "")}),
     };
 
     try actions.insertSlice(builder.arena, 0, &.{ action1, action2 });
