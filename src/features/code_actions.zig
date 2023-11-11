@@ -109,7 +109,27 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const block = node_datas[payload.func].rhs;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true);
+    // If we are on the "last parameter" that requires a discard, then we need to append a newline,
+    // as well as any relevant indentations, such that the next line is indented to the same column.
+    // To do this, you may have a function like:
+    // fn(a: i32, b: i32, c: i32) void { _ = a; _ = b; _ = c; }
+    // or
+    // fn(
+    //     a: i32,
+    //     b: i32,
+    //     c: i32,
+    // ) void { ... }
+    // We have to be able to detect both cases.
+    const fn_proto_param = payload.get(tree).?;
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
+
+    var found_comma = std.mem.startsWith(
+        u8,
+        std.mem.trimLeft(u8, tree.source[param_end..], " \n"),
+        ",",
+    );
+
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, !found_comma);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -125,10 +145,10 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .title = "remove function parameter",
         .kind = .quickfix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.get(tree).?), "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, fn_proto_param), "")}),
     };
 
-    try actions.appendSlice(builder.arena, &.{ action1, action2 });
+    try actions.insertSlice(builder.arena, 0, &.{ action1, action2 });
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
@@ -159,8 +179,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     if (last_token >= tree.tokens.len) return;
     if (token_tags[last_token] != .semicolon) return;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false);
-
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false, false);
     const index = token_starts[last_token] + 1;
 
     try actions.append(builder.arena, .{
@@ -208,7 +227,22 @@ fn handleUnusedCapture(
 
     const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
     const identifier_name = source[loc.start..loc.end];
-    const new_text = try createDiscardText(builder, identifier_name, block_start, true);
+
+    var capture_end = loc.end;
+    var is_last: bool = false;
+    while (capture_end < source.len) : (capture_end += 1) {
+        switch (source[capture_end]) {
+            ' ', '\n' => continue,
+            '|' => {
+                is_last = true;
+                break;
+            },
+            else => break,
+        }
+    }
+    // if we are on the last capture of the block, we need to add an additional newline
+    // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
+    const new_text = try createDiscardText(builder, identifier_name, block_start, true, is_last);
     const action1 = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
@@ -227,7 +261,7 @@ fn handleUnusedCapture(
     const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
     const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
     if (gop.found_existing)
-        try actions.appendSlice(builder.arena, &.{ action1, action2 })
+        try actions.insertSlice(builder.arena, 0, &.{ action1, action2 })
     else {
         const action0 = types.CodeAction{
             .title = "remove capture",
@@ -235,7 +269,7 @@ fn handleUnusedCapture(
             .isPreferred = false,
             .edit = try builder.createWorkspaceEdit(&.{remove_cap_loc}),
         };
-        try actions.appendSlice(builder.arena, &.{ action0, action1, action2 });
+        try actions.insertSlice(builder.arena, 0, &.{ action0, action1, action2 });
     }
 }
 
@@ -310,7 +344,13 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 }
 
 // returns a discard string `\n{indent}_ = identifier_name;`
-fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
+fn createDiscardText(
+    builder: *Builder,
+    identifier_name: []const u8,
+    declaration_start: usize,
+    add_block_indentation: bool,
+    add_suffix_newline: bool,
+) ![]const u8 {
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.tree.source, declaration_start);
         for (line, 0..) |char, i| {
@@ -322,7 +362,13 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     };
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
 
-    const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
+    const new_text_len =
+        1 +
+        indent.len +
+        additional_indent.len +
+        "_ = ;".len +
+        identifier_name.len +
+        if (add_suffix_newline) 1 + indent.len else 0;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
@@ -331,6 +377,10 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
+    if (add_suffix_newline) {
+        new_text.appendAssumeCapacity('\n');
+        new_text.appendSliceAssumeCapacity(indent);
+    }
 
     return new_text.toOwnedSlice(builder.arena);
 }

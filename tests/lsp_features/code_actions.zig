@@ -33,9 +33,9 @@ test "code actions - discard function parameter" {
         \\
     ,
         \\fn foo(a: void, b: void, c: void) void {
-        \\    _ = c;
-        \\    _ = b;
         \\    _ = a;
+        \\    _ = b;
+        \\    _ = c;
         \\}
         \\
     );
@@ -56,14 +56,14 @@ test "code actions - discard captures" {
     ,
         \\test {
         \\    for (0..10, 0..10, 0..10) |i, j, k| {
-        \\        _ = k;
-        \\        _ = j;
         \\        _ = i;
+        \\        _ = j;
+        \\        _ = k;
         \\    }
         \\    switch (union(enum) {}{}) {
         \\        inline .a => |cap, tag| {
-        \\            _ = tag;
         \\            _ = cap;
+        \\            _ = tag;
         \\        },
         \\    }
         \\    if (null) |x| {
@@ -85,10 +85,11 @@ test "code actions - discard captures" {
 test "code actions - discard capture with comment" {
     try testAutofix(
         \\test {
-        \\  if (1 == 1) |a|
-        \\      //a
-        \\      {}
+        \\    if (1 == 1) |a|
+        \\    //a
+        \\    {}
         \\}
+        \\
     ,
         \\test {
         \\    if (1 == 1) |a|
@@ -174,9 +175,5 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     defer allocator.free(actual);
     try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
 
-    try std.testing.expect(handle.tree.errors.len == 0);
-    const formatted_actual = try handle.tree.render(allocator);
-    defer allocator.free(formatted_actual);
-
-    try std.testing.expectEqualStrings(after, formatted_actual);
+    try std.testing.expectEqualStrings(after, handle.tree.source);
 }
