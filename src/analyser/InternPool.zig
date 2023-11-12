@@ -2474,15 +2474,19 @@ pub fn typeOf(ip: *const InternPool, index: Index) Index {
         .float_f128 => .f128_type,
         .float_comptime => .comptime_float_type,
 
-        .int_u64 => ip.extraData(U64Value, data).ty,
-        .int_i64 => ip.extraData(I64Value, data).ty,
-        .int_big_positive, .int_big_negative => ip.extraData(BigIntInternal, data).ty,
-        .optional_value => ip.extraData(OptionalValue, data).ty,
-        .aggregate => ip.extraData(Aggregate, data).ty,
-        .slice => ip.extraData(Slice, data).ty,
-        .union_value => ip.extraData(UnionValue, data).ty,
-        .error_value => ip.extraData(ErrorValue, data).ty,
+        // the type is stored as the first entry in the extra
+        .int_u64,
+        .int_i64,
+        .int_big_positive,
+        .int_big_negative,
+        .optional_value,
+        .aggregate,
+        .slice,
+        .union_value,
+        .error_value,
+        => std.mem.bytesToValue(Index, ip.extra.items[ip.items.items(.data)[@intFromEnum(index)]..][0..@sizeOf(Index)]),
 
+        // the type is the `data` field
         .null_value,
         .undefined_value,
         .unknown_value,
