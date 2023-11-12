@@ -23,217 +23,6 @@ pub const SPString = StringPool.String;
 const encoding = @import("encoding.zig");
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
 
-pub const Pointer = struct {
-    elem_type: Index,
-    sentinel: Index = .none,
-    size: std.builtin.Type.Pointer.Size,
-    alignment: u16 = 0,
-    bit_offset: u16 = 0,
-    host_size: u16 = 0,
-    is_const: bool = false,
-    is_volatile: bool = false,
-    is_allowzero: bool = false,
-    address_space: std.builtin.AddressSpace = .generic,
-};
-
-pub const Array = struct {
-    len: u64,
-    child: Index,
-    sentinel: Index = .none,
-};
-
-pub const FieldStatus = enum {
-    none,
-    field_types_wip,
-    have_field_types,
-    layout_wip,
-    have_layout,
-    fully_resolved_wip,
-    fully_resolved,
-};
-
-pub const StructIndex = enum(u32) { _ };
-
-pub const Struct = struct {
-    fields: std.AutoArrayHashMapUnmanaged(SPString, Field),
-    owner_decl: Decl.OptionalIndex,
-    namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout = .Auto,
-    backing_int_ty: Index,
-    status: FieldStatus,
-
-    pub const Field = struct {
-        ty: Index,
-        default_value: Index = .none,
-        alignment: u16 = 0,
-        is_comptime: bool = false,
-    };
-};
-
-pub const Optional = struct {
-    payload_type: Index,
-};
-
-pub const ErrorUnion = struct {
-    // .none if inferred error set
-    error_set_type: Index,
-    payload_type: Index,
-};
-
-pub const ErrorSet = struct {
-    owner_decl: Decl.OptionalIndex,
-    names: []const SPString,
-};
-
-pub const EnumIndex = enum(u32) { _ };
-
-pub const Enum = struct {
-    tag_type: Index,
-    fields: std.AutoArrayHashMapUnmanaged(SPString, void),
-    values: std.AutoArrayHashMapUnmanaged(Index, void),
-    namespace: NamespaceIndex,
-    tag_type_inferred: bool,
-};
-
-pub const Function = struct {
-    args: []const Index,
-    /// zig only lets the first 32 arguments be `comptime`
-    args_is_comptime: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
-    /// zig only lets the first 32 arguments be generic
-    args_is_generic: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
-    /// zig only lets the first 32 arguments be `noalias`
-    args_is_noalias: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
-    return_type: Index,
-    alignment: u16 = 0,
-    calling_convention: std.builtin.CallingConvention = .Unspecified,
-    is_generic: bool = false,
-    is_var_args: bool = false,
-};
-
-pub const UnionIndex = enum(u32) { _ };
-
-pub const Union = struct {
-    tag_type: Index,
-    fields: std.AutoArrayHashMapUnmanaged(SPString, Field),
-    namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout = .Auto,
-    status: FieldStatus,
-
-    pub const Field = struct {
-        ty: Index,
-        alignment: u16,
-    };
-};
-
-pub const Tuple = struct {
-    types: []const Index,
-    /// Index.none elements are used to indicate runtime-known.
-    values: []const Index,
-};
-
-pub const Vector = struct {
-    len: u32,
-    child: Index,
-};
-
-pub const AnyFrame = struct {
-    child: Index,
-};
-
-const U64Value = struct {
-    ty: Index,
-    int: u64,
-};
-
-const I64Value = struct {
-    ty: Index,
-    int: i64,
-};
-
-pub const BigInt = struct {
-    ty: Index,
-    int: std.math.big.int.Const,
-};
-
-pub const OptionalValue = struct {
-    ty: Index,
-    val: Index,
-};
-
-pub const Slice = struct {
-    ty: Index,
-    ptr: Index,
-    len: Index,
-};
-
-pub const Aggregate = struct {
-    ty: Index,
-    values: []const Index,
-};
-
-pub const UnionValue = struct {
-    ty: Index,
-    field_index: u32,
-    val: Index,
-};
-
-pub const ErrorValue = struct {
-    ty: Index,
-    error_tag_name: SPString,
-};
-
-pub const NullValue = struct {
-    ty: Index,
-};
-
-pub const UndefinedValue = struct {
-    ty: Index,
-};
-
-pub const UnknownValue = struct {
-    /// asserts that this is not .type_type because that is a the same as .unknown_type
-    ty: Index,
-};
-
-pub const Decl = struct {
-    name: SPString,
-    node_idx: u32,
-    /// this stores both the type and the value
-    index: InternPool.Index,
-    alignment: u16,
-    address_space: std.builtin.AddressSpace,
-    src_namespace: InternPool.NamespaceIndex,
-    is_pub: bool,
-    is_exported: bool,
-
-    pub const Index = enum(u32) {
-        _,
-
-        pub fn toOptional(i: Decl.Index) OptionalIndex {
-            return @enumFromInt(@intFromEnum(i));
-        }
-    };
-
-    pub const OptionalIndex = enum(u32) {
-        none = std.math.maxInt(u32),
-        _,
-
-        pub fn init(oi: ?Decl.Index) OptionalIndex {
-            return if (oi) |index| index.toOptional() else .none;
-        }
-
-        pub fn unwrap(oi: OptionalIndex) ?Decl.Index {
-            if (oi == .none) return null;
-            return @enumFromInt(@intFromEnum(oi));
-        }
-    };
-};
-
-const BigIntInternal = struct {
-    ty: Index,
-    limbs: []const std.math.big.Limb,
-};
-
 pub const Key = union(enum) {
     simple_type: SimpleType,
     simple_value: SimpleValue,
@@ -241,13 +30,13 @@ pub const Key = union(enum) {
     int_type: std.builtin.Type.Int,
     pointer_type: Pointer,
     array_type: Array,
-    struct_type: StructIndex,
+    struct_type: Struct.Index,
     optional_type: Optional,
     error_union_type: ErrorUnion,
     error_set_type: ErrorSet,
-    enum_type: EnumIndex,
+    enum_type: Enum.Index,
     function_type: Function,
-    union_type: UnionIndex,
+    union_type: Union.Index,
     tuple_type: Tuple,
     vector_type: Vector,
     anyframe_type: AnyFrame,
@@ -270,8 +59,131 @@ pub const Key = union(enum) {
     null_value: NullValue,
     undefined_value: UndefinedValue,
     unknown_value: UnknownValue,
-
     // error union
+
+    pub const Pointer = struct {
+        elem_type: Index,
+        sentinel: Index = .none,
+        size: std.builtin.Type.Pointer.Size,
+        alignment: u16 = 0,
+        bit_offset: u16 = 0,
+        host_size: u16 = 0,
+        is_const: bool = false,
+        is_volatile: bool = false,
+        is_allowzero: bool = false,
+        address_space: std.builtin.AddressSpace = .generic,
+    };
+
+    pub const Array = struct {
+        len: u64,
+        child: Index,
+        sentinel: Index = .none,
+    };
+
+    pub const Optional = struct {
+        payload_type: Index,
+    };
+
+    pub const ErrorUnion = struct {
+        // .none if inferred error set
+        error_set_type: Index,
+        payload_type: Index,
+    };
+
+    pub const ErrorSet = struct {
+        owner_decl: Decl.OptionalIndex,
+        names: []const SPString,
+    };
+
+    pub const Function = struct {
+        args: []const Index,
+        /// zig only lets the first 32 arguments be `comptime`
+        args_is_comptime: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+        /// zig only lets the first 32 arguments be generic
+        args_is_generic: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+        /// zig only lets the first 32 arguments be `noalias`
+        args_is_noalias: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+        return_type: Index,
+        alignment: u16 = 0,
+        calling_convention: std.builtin.CallingConvention = .Unspecified,
+        is_generic: bool = false,
+        is_var_args: bool = false,
+    };
+
+    pub const Tuple = struct {
+        types: []const Index,
+        /// Index.none elements are used to indicate runtime-known.
+        values: []const Index,
+    };
+
+    pub const Vector = struct {
+        len: u32,
+        child: Index,
+    };
+
+    pub const AnyFrame = struct {
+        child: Index,
+    };
+
+    const U64Value = struct {
+        ty: Index,
+        int: u64,
+    };
+
+    const I64Value = struct {
+        ty: Index,
+        int: i64,
+    };
+
+    pub const BigInt = struct {
+        ty: Index,
+        int: std.math.big.int.Const,
+    };
+
+    pub const OptionalValue = struct {
+        ty: Index,
+        val: Index,
+    };
+
+    pub const Slice = struct {
+        ty: Index,
+        ptr: Index,
+        len: Index,
+    };
+
+    pub const Aggregate = struct {
+        ty: Index,
+        values: []const Index,
+    };
+
+    pub const UnionValue = struct {
+        ty: Index,
+        field_index: u32,
+        val: Index,
+    };
+
+    pub const ErrorValue = struct {
+        ty: Index,
+        error_tag_name: SPString,
+    };
+
+    pub const NullValue = struct {
+        ty: Index,
+    };
+
+    pub const UndefinedValue = struct {
+        ty: Index,
+    };
+
+    pub const UnknownValue = struct {
+        /// asserts that this is not .type_type because that is a the same as .unknown_type
+        ty: Index,
+    };
+
+    const BigIntInternal = struct {
+        ty: Index,
+        limbs: []const std.math.big.Limb,
+    };
 
     pub fn eql(a: Key, b: Key) bool {
         return deepEql(a, b);
@@ -465,11 +377,6 @@ comptime {
     assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
 }
 
-pub const NamespaceIndex = enum(u32) {
-    none = std.math.maxInt(u32),
-    _,
-};
-
 pub const Tag = enum(u8) {
     /// A type that can be represented with only an enum tag.
     /// data is SimpleType enum value
@@ -642,6 +549,97 @@ comptime {
     assert(@sizeOf(SimpleType) == @sizeOf(SimpleValue));
 }
 
+pub const NamespaceIndex = enum(u32) {
+    none = std.math.maxInt(u32),
+    _,
+};
+
+pub const Decl = struct {
+    name: SPString,
+    node_idx: std.zig.Ast.Node.Index,
+    /// this stores both the type and the value
+    index: InternPool.Index,
+    alignment: u16,
+    address_space: std.builtin.AddressSpace,
+    src_namespace: InternPool.NamespaceIndex,
+    is_pub: bool,
+    is_exported: bool,
+
+    pub const Index = enum(u32) {
+        _,
+
+        pub fn toOptional(i: Decl.Index) OptionalIndex {
+            return @enumFromInt(@intFromEnum(i));
+        }
+    };
+
+    pub const OptionalIndex = enum(u32) {
+        none = std.math.maxInt(u32),
+        _,
+
+        pub fn init(oi: ?Decl.Index) OptionalIndex {
+            return if (oi) |index| index.toOptional() else .none;
+        }
+
+        pub fn unwrap(oi: OptionalIndex) ?Decl.Index {
+            if (oi == .none) return null;
+            return @enumFromInt(@intFromEnum(oi));
+        }
+    };
+};
+pub const FieldStatus = enum {
+    none,
+    field_types_wip,
+    have_field_types,
+    layout_wip,
+    have_layout,
+    fully_resolved_wip,
+    fully_resolved,
+};
+
+pub const Struct = struct {
+    fields: std.AutoArrayHashMapUnmanaged(SPString, Field),
+    owner_decl: Decl.OptionalIndex,
+    namespace: NamespaceIndex,
+    layout: std.builtin.Type.ContainerLayout = .Auto,
+    backing_int_ty: InternPool.Index,
+    status: FieldStatus,
+
+    pub const Index = enum(u32) { _ };
+
+    pub const Field = struct {
+        ty: InternPool.Index,
+        default_value: InternPool.Index = .none,
+        alignment: u16 = 0,
+        is_comptime: bool = false,
+    };
+};
+
+pub const Enum = struct {
+    tag_type: InternPool.Index,
+    fields: std.AutoArrayHashMapUnmanaged(SPString, void),
+    values: std.AutoArrayHashMapUnmanaged(InternPool.Index, void),
+    namespace: NamespaceIndex,
+    tag_type_inferred: bool,
+
+    pub const Index = enum(u32) { _ };
+};
+
+pub const Union = struct {
+    tag_type: InternPool.Index,
+    fields: std.AutoArrayHashMapUnmanaged(SPString, Field),
+    namespace: NamespaceIndex,
+    layout: std.builtin.Type.ContainerLayout = .Auto,
+    status: FieldStatus,
+
+    pub const Field = struct {
+        ty: InternPool.Index,
+        alignment: u16,
+    };
+
+    pub const Index = enum(u32) { _ };
+};
+
 pub fn init(gpa: Allocator) Allocator.Error!InternPool {
     var ip: InternPool = .{};
     errdefer ip.deinit(gpa);
@@ -737,7 +735,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{ .ty = .unknown_type } } },
     };
 
-    const extra_count = 6 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 8 * @sizeOf(InternPool.U64Value) + @sizeOf(InternPool.Aggregate);
+    const extra_count = 6 * @sizeOf(Key.Pointer) + @sizeOf(Key.ErrorUnion) + 4 * @sizeOf(Key.Function) + 8 * @sizeOf(Key.U64Value) + @sizeOf(Key.Aggregate);
 
     try ip.map.ensureTotalCapacity(gpa, items.len);
     try ip.items.ensureTotalCapacity(gpa, items.len);
@@ -794,26 +792,26 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
 
         .type_int_signed => .{ .int_type = .{ .signedness = .signed, .bits = @intCast(data) } },
         .type_int_unsigned => .{ .int_type = .{ .signedness = .unsigned, .bits = @intCast(data) } },
-        .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
-        .type_array => .{ .array_type = ip.extraData(Array, data) },
+        .type_pointer => .{ .pointer_type = ip.extraData(Key.Pointer, data) },
+        .type_array => .{ .array_type = ip.extraData(Key.Array, data) },
         .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(data) } },
         .type_anyframe => .{ .anyframe_type = .{ .child = @enumFromInt(data) } },
-        .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
-        .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
-        .type_function => .{ .function_type = ip.extraData(Function, data) },
-        .type_tuple => .{ .tuple_type = ip.extraData(Tuple, data) },
-        .type_vector => .{ .vector_type = ip.extraData(Vector, data) },
+        .type_error_union => .{ .error_union_type = ip.extraData(Key.ErrorUnion, data) },
+        .type_error_set => .{ .error_set_type = ip.extraData(Key.ErrorSet, data) },
+        .type_function => .{ .function_type = ip.extraData(Key.Function, data) },
+        .type_tuple => .{ .tuple_type = ip.extraData(Key.Tuple, data) },
+        .type_vector => .{ .vector_type = ip.extraData(Key.Vector, data) },
 
         .type_struct => .{ .struct_type = @enumFromInt(data) },
         .type_enum => .{ .enum_type = @enumFromInt(data) },
         .type_union => .{ .union_type = @enumFromInt(data) },
 
-        .int_u64 => .{ .int_u64_value = ip.extraData(U64Value, data) },
-        .int_i64 => .{ .int_i64_value = ip.extraData(I64Value, data) },
+        .int_u64 => .{ .int_u64_value = ip.extraData(Key.U64Value, data) },
+        .int_i64 => .{ .int_i64_value = ip.extraData(Key.I64Value, data) },
         .int_big_positive,
         .int_big_negative,
         => .{ .int_big_value = blk: {
-            const big_int = ip.extraData(BigIntInternal, data);
+            const big_int = ip.extraData(Key.BigIntInternal, data);
             break :blk .{
                 .ty = big_int.ty,
                 .int = .{
@@ -829,11 +827,11 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
         .float_comptime => .{ .float_comptime_value = ip.extraData(f128, data) },
 
-        .optional_value => .{ .optional_value = ip.extraData(OptionalValue, data) },
-        .slice => .{ .slice = ip.extraData(Slice, data) },
-        .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
-        .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
-        .error_value => .{ .error_value = ip.extraData(ErrorValue, data) },
+        .optional_value => .{ .optional_value = ip.extraData(Key.OptionalValue, data) },
+        .slice => .{ .slice = ip.extraData(Key.Slice, data) },
+        .aggregate => .{ .aggregate = ip.extraData(Key.Aggregate, data) },
+        .union_value => .{ .union_value = ip.extraData(Key.UnionValue, data) },
+        .error_value => .{ .error_value = ip.extraData(Key.ErrorValue, data) },
         .null_value => .{ .null_value = .{ .ty = @enumFromInt(data) } },
         .undefined_value => .{ .undefined_value = .{ .ty = @enumFromInt(data) } },
         .unknown_value => .{ .unknown_value = .{ .ty = @enumFromInt(data) } },
@@ -860,7 +858,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
 
         .int_u64_value => |int_val| try ip.addExtra(gpa, int_val),
         .int_i64_value => |int_val| try ip.addExtra(gpa, int_val),
-        .int_big_value => |big_int_val| try ip.addExtra(gpa, BigIntInternal{
+        .int_big_value => |big_int_val| try ip.addExtra(gpa, Key.BigIntInternal{
             .ty = big_int_val.ty,
             .limbs = big_int_val.int.limbs,
         }),
@@ -894,38 +892,38 @@ pub fn getDecl(ip: *const InternPool, index: InternPool.Decl.Index) *const Inter
 pub fn getDeclMut(ip: *InternPool, index: InternPool.Decl.Index) *InternPool.Decl {
     return ip.decls.at(@intFromEnum(index));
 }
-pub fn getStruct(ip: *const InternPool, index: InternPool.StructIndex) *const InternPool.Struct {
+pub fn getStruct(ip: *const InternPool, index: Struct.Index) *const Struct {
     return ip.structs.at(@intFromEnum(index));
 }
-pub fn getStructMut(ip: *InternPool, index: InternPool.StructIndex) *InternPool.Struct {
+pub fn getStructMut(ip: *InternPool, index: Struct.Index) *Struct {
     return ip.structs.at(@intFromEnum(index));
 }
-pub fn getEnum(ip: *const InternPool, index: InternPool.EnumIndex) *const InternPool.Enum {
+pub fn getEnum(ip: *const InternPool, index: Enum.Index) *const Enum {
     return ip.enums.at(@intFromEnum(index));
 }
-pub fn getEnumMut(ip: *InternPool, index: InternPool.EnumIndex) *InternPool.Enum {
+pub fn getEnumMut(ip: *InternPool, index: Enum.Index) *Enum {
     return ip.enums.at(@intFromEnum(index));
 }
-pub fn getUnion(ip: *const InternPool, index: InternPool.UnionIndex) *const InternPool.Union {
+pub fn getUnion(ip: *const InternPool, index: Union.Index) *const Union {
     return ip.unions.at(@intFromEnum(index));
 }
-pub fn getUnionMut(ip: *InternPool, index: InternPool.UnionIndex) *InternPool.Union {
+pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
     return ip.unions.at(@intFromEnum(index));
 }
 
-pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) Allocator.Error!InternPool.Decl.Index {
+pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: Decl) Allocator.Error!Decl.Index {
     try ip.decls.append(gpa, decl);
     return @enumFromInt(ip.decls.count() - 1);
 }
-pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) Allocator.Error!InternPool.StructIndex {
+pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: Struct) Allocator.Error!Struct.Index {
     try ip.structs.append(gpa, struct_info);
     return @enumFromInt(ip.structs.count() - 1);
 }
-pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) Allocator.Error!InternPool.EnumIndex {
+pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: Enum) Allocator.Error!Enum.Index {
     try ip.enums.append(gpa, enum_info);
     return @enumFromInt(ip.enums.count() - 1);
 }
-pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) Allocator.Error!InternPool.UnionIndex {
+pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: Union) Allocator.Error!Union.Index {
     try ip.unions.append(gpa, union_info);
     return @enumFromInt(ip.unions.count() - 1);
 }
@@ -1745,7 +1743,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         // turn []T => []const T
         switch (ip.indexToKey(chosen)) {
             .error_union_type => |error_union_info| {
-                var info: Pointer = ip.indexToKey(error_union_info.payload_type).pointer_type;
+                var info = ip.indexToKey(error_union_info.payload_type).pointer_type;
                 info.is_const = true;
 
                 const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
