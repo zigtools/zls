@@ -1440,7 +1440,7 @@ test "semantic tokens - weird code" {
         .{ "=", .operator, .{} },
         .{ "asm", .keyword, .{} },
         .{ "fn", .keyword, .{} },
-        .{ "bar", .function, .{.declaration = true} },
+        .{ "bar", .function, .{ .declaration = true } },
     });
 }
 

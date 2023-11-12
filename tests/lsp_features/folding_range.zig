@@ -264,7 +264,8 @@ test "foldingRange - weird code" {
     try testFoldingRange(
         \\if ( {fn foo()}
         \\
-        , &.{},
+    ,
+        &.{},
     );
 }
 
