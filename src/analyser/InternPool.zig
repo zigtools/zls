@@ -2720,6 +2720,7 @@ pub fn isFloat(ip: *const InternPool, ty: Index) bool {
         .f64_type,
         .f80_type,
         .f128_type,
+        .comptime_float_type,
         => true,
         else => false,
     };
