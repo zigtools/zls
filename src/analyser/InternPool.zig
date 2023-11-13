@@ -741,7 +741,12 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
 
     try ip.map.ensureTotalCapacity(gpa, items.len);
     try ip.items.ensureTotalCapacity(gpa, items.len);
-    try ip.extra.ensureTotalCapacity(gpa, extra_count);
+    if (builtin.is_test or builtin.mode == .Debug) {
+        // detect wrong value for extra_count
+        try ip.extra.ensureTotalCapacityPrecise(gpa, extra_count);
+    } else {
+        try ip.extra.ensureTotalCapacity(gpa, extra_count);
+    }
 
     for (items, 0..) |item, i| {
         assert(@intFromEnum(item.index) == i);
