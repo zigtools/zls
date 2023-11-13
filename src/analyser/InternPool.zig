@@ -403,7 +403,7 @@ pub const Tag = enum(u8) {
     /// data is payload to Struct.
     type_struct,
     /// An optional type.
-    /// data is index to type
+    /// data is the child/payload type
     type_optional,
     /// An error union type.
     /// data is payload to ErrorUnion.
@@ -869,7 +869,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .null_value => |null_val| @intFromEnum(null_val.ty),
         .undefined_value => |undefined_val| @intFromEnum(undefined_val.ty),
         .unknown_value => |unknown_val| blk: {
-            assert(unknown_val.ty != .type_type); // .unknown_type instead
+            assert(unknown_val.ty != .type_type); // use .unknown_type instead
             break :blk @intFromEnum(unknown_val.ty);
         },
         inline else => |data| try ip.addExtra(gpa, data),
@@ -2334,7 +2334,7 @@ fn optionalPtrTy(ip: *const InternPool, ty: Index) Index {
     }
 }
 
-/// will panic in during testing else will return `value`
+/// will panic in during testing, otherwise will return `value`
 inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
     if (builtin.is_test) {
         @panic(message);
@@ -2346,6 +2346,7 @@ inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
 //               HELPER FUNCTIONS
 // ---------------------------------------------
 
+/// TODO make the return type optional and return null on unknown type.
 pub fn zigTypeTag(ip: *const InternPool, index: Index) std.builtin.TypeId {
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
         .simple_type => switch (@as(SimpleType, @enumFromInt(ip.items.items(.data)[@intFromEnum(index)]))) {
@@ -2802,7 +2803,7 @@ pub fn isPtrAtRuntime(ip: *const InternPool, ty: Index) bool {
 /// For [*c]T,          returns T.
 /// For [N]T,           returns T.
 /// For ?T,             returns T.
-/// For @vector(T, _),  returns T.
+/// For @vector(_, T),  returns T.
 /// For anyframe->T,    returns T.
 pub fn childType(ip: *const InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
@@ -2825,7 +2826,7 @@ pub fn childType(ip: *const InternPool, ty: Index) Index {
 /// For [*c]T,          returns T.
 /// For [N]T,           returns T.
 /// For ?T,             returns T.
-/// For @vector(T, _),  returns T.
+/// For @vector(_, T),  returns T.
 /// For anyframe->T,    returns T.
 pub fn elemType(ip: *const InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
@@ -3062,6 +3063,7 @@ pub fn canHaveFields(ip: *const InternPool, ty: Index) bool {
     };
 }
 
+/// see `std.meta.trait.isIndexable`
 pub fn isIndexable(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .array_type, .vector_type => true,
