@@ -2549,7 +2549,7 @@ pub fn isUnknown(ip: *const InternPool, index: Index) bool {
     }
 }
 
-pub fn isUnknownDeep(ip: *const InternPool, gpa: std.mem.Allocator, index: Index) Allocator.Error!bool {
+pub fn isUnknownDeep(ip: *const InternPool, gpa: Allocator, index: Index) Allocator.Error!bool {
     var set = std.AutoHashMap(Index, void).init(gpa);
     defer set.deinit();
     return try ip.isUnknownDeepInternal(index, &set);
@@ -2848,7 +2848,10 @@ pub fn elemType(ip: *const InternPool, ty: Index) Index {
     };
 }
 
-pub fn errorSetMerge(ip: *InternPool, gpa: std.mem.Allocator, a_ty: Index, b_ty: Index) Allocator.Error!Index {
+pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) Allocator.Error!Index {
+    assert(ip.zigTypeTag(a_ty) == .ErrorSet);
+    assert(ip.zigTypeTag(b_ty) == .ErrorSet);
+
     // Anything merged with anyerror is anyerror.
     if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
         return .anyerror_type;
