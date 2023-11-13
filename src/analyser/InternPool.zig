@@ -75,6 +75,7 @@ pub const Key = union(enum) {
     };
 
     pub const Array = struct {
+        // TODO convert this into an enum and have `std.math.maxInt(u64)` represent unknown length,
         len: u64,
         child: Index,
         sentinel: Index = .none,
@@ -117,6 +118,7 @@ pub const Key = union(enum) {
     };
 
     pub const Vector = struct {
+        // TODO convert this into an enum and have `std.math.maxInt(u32)` represent unknown length,
         len: u32,
         child: Index,
     };
