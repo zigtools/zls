@@ -3111,6 +3111,7 @@ pub fn isZero(ip: *const InternPool, val: Index) bool {
 
 /// If the value fits in the given integer, return it, otherwise null.
 pub fn toInt(ip: *const InternPool, val: Index, comptime T: type) !?T {
+    comptime assert(std.meta.trait.isIntegral(T));
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
             .null_value => 0,
@@ -3119,8 +3120,8 @@ pub fn toInt(ip: *const InternPool, val: Index, comptime T: type) !?T {
             .the_only_possible_value => 0,
             else => null,
         },
-        .int_u64_value => |int_value| @intCast(int_value.int),
-        .int_i64_value => |int_value| @intCast(int_value.int),
+        .int_u64_value => |int_value| std.math.cast(T, int_value.int),
+        .int_i64_value => |int_value| std.math.cast(T, int_value.int),
         .int_big_value => |int_value| int_value.int.to(T) catch null,
         .null_value => 0,
         else => null,
