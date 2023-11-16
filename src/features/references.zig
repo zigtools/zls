@@ -162,7 +162,7 @@ fn gatherReferences(
 
         try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
         for (handle_dependencies.items) |uri| {
-            var gop = dependencies.getOrPutAssumeCapacity(uri);
+            const gop = dependencies.getOrPutAssumeCapacity(uri);
             if (gop.found_existing) {
                 allocator.free(uri);
             }
@@ -289,7 +289,7 @@ const CallBuilder = struct {
             .async_call_one_comma,
             => {
                 var buf: [1]Ast.Node.Index = undefined;
-                var call = tree.fullCall(&buf, node).?;
+                const call = tree.fullCall(&buf, node).?;
 
                 const called_node = call.ast.fn_expr;
 

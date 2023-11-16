@@ -1836,14 +1836,14 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
     var arena_allocator = std.heap.ArenaAllocator.init(gpa);
     defer arena_allocator.deinit();
-    var arena = arena_allocator.allocator();
+    const arena = arena_allocator.allocator();
 
     var chosen = types[0];
     // If this is non-null then it does the following thing, depending on the chosen zigTypeTag().
     //  * ErrorSet: this is an override
     //  * ErrorUnion: this is an override of the error set only
     //  * other: at the end we make an ErrorUnion with the other thing and this
-    var err_set_ty: Index = Index.none;
+    const err_set_ty: Index = Index.none;
     var any_are_null = false;
     var seen_const = false;
     var convert_to_slice = false;

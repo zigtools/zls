@@ -67,7 +67,7 @@ const Builder = struct {
         var last_index: usize = 0;
         var last_position: types.Position = .{ .line = 0, .character = 0 };
 
-        var converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
+        const converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
         for (converted_hints, self.hints.items) |*converted_hint, hint| {
             const position = offsets.advancePosition(
                 self.handle.tree.source,

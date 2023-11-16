@@ -113,7 +113,7 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
         }
     }
     while (upper_index > 0) : (upper_index -= 1) {
-        var token_start = tokens_start[upper_index];
+        const token_start = tokens_start[upper_index];
         if (token_start > source_index) continue; // checking for equality here is suboptimal
         // Handle source_index being > than the last possible token_start (max_token_start < source_index < tree.source.len)
         if (upper_index == tokens_start.len - 1) break;

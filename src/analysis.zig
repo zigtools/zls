@@ -196,7 +196,7 @@ pub fn getFunctionSnippet(
                 try buf_stream.writeAll("...");
         } else if (param.type_expr != 0) {
             var curr_token = tree.firstToken(param.type_expr);
-            var end_token = ast.lastToken(tree, param.type_expr);
+            const end_token = ast.lastToken(tree, param.type_expr);
             while (curr_token <= end_token) : (curr_token += 1) {
                 const tag = token_tags[curr_token];
                 const is_comma = tag == .comma;
@@ -1493,7 +1493,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 // Need at least one char between the quotes, eg "a"
                 if (field_name.len < 2) return null;
 
-                var lhs = (try analyser.resolveTypeOfNodeInternal(.{
+                const lhs = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = params[0],
                     .handle = handle,
                 })) orelse return null;
@@ -2396,10 +2396,10 @@ pub fn getFieldAccessType(
                 const curr_handle = if (current_type == null) handle else current_type.?.handle;
                 if (std.mem.eql(u8, tokenizer.buffer[tok.loc.start..tok.loc.end], "@import")) {
                     if (tokenizer.next().tag != .l_paren) return null;
-                    var import_str_tok = tokenizer.next(); // should be the .string_literal
+                    const import_str_tok = tokenizer.next(); // should be the .string_literal
                     if (import_str_tok.tag != .string_literal) return null;
                     if (import_str_tok.loc.end - import_str_tok.loc.start < 2) return null;
-                    var import_str = offsets.locToSlice(tokenizer.buffer, .{
+                    const import_str = offsets.locToSlice(tokenizer.buffer, .{
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
@@ -2563,7 +2563,7 @@ pub fn getPositionContext(
 
     var line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
 
-    var line = offsets.locToSlice(text, line_loc);
+    const line = offsets.locToSlice(text, line_loc);
     if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return .comment;
 
     // Check if the (trimmed) line starts with a '.', ie a continuation
@@ -2742,7 +2742,7 @@ pub fn getPositionContext(
 
     if (line.len == 0) return .empty;
 
-    var held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
+    const held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
     defer allocator.free(held_line);
 
     switch (line[0]) {

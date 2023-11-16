@@ -215,9 +215,9 @@ pub fn interpret(
                     continue;
                 };
 
-                var init_value = try (try interpreter.interpret(container_field.ast.type_expr, container_namespace, .{})).getValue();
+                const init_value = try (try interpreter.interpret(container_field.ast.type_expr, container_namespace, .{})).getValue();
 
-                var default_value = if (container_field.ast.value_expr == 0)
+                const default_value = if (container_field.ast.value_expr == 0)
                     Index.none
                 else
                     (try (try interpreter.interpret(container_field.ast.value_expr, container_namespace, .{})).getValue()).index; // TODO check ty
@@ -443,7 +443,7 @@ pub fn interpret(
             const field_name = tree.tokenSlice(data[node_idx].rhs);
 
             var ir = try interpreter.interpret(data[node_idx].lhs, namespace, options);
-            var ir_value = try ir.getValue();
+            const ir_value = try ir.getValue();
 
             const val_index = ir_value.index;
             const val = interpreter.ip.indexToKey(val_index);
@@ -883,7 +883,7 @@ pub fn interpret(
                     } };
                 }
 
-                var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+                const import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
                 const import_handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
@@ -1248,7 +1248,7 @@ pub fn call(
     var arg_index: usize = 0;
     while (ast.nextFnParam(&arg_it)) |param| {
         if (arg_index >= arguments.len) return error.MissingArguments;
-        var tex = try (try interpreter.interpret(param.type_expr, fn_namespace, options)).getValue();
+        const tex = try (try interpreter.interpret(param.type_expr, fn_namespace, options)).getValue();
         const tex_ty = interpreter.ip.indexToKey(tex.index).typeOf();
         if (tex_ty != .type_type) {
             try interpreter.recordError(

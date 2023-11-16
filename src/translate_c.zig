@@ -51,7 +51,7 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
 fn callConvertCIncludeInternal(allocator: std.mem.Allocator, args: anytype) error{ OutOfMemory, Unsupported }!void {
     if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
         const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
-        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        const child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
         defer allocator.free(child_frame);
 
         return await @asyncCall(child_frame, {}, convertCIncludeInternal, args);

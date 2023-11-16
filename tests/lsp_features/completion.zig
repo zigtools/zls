@@ -1675,7 +1675,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
     if (missing.count() != 0 or unexpected.count() != 0) {
         var buffer = std.ArrayListUnmanaged(u8){};
         defer buffer.deinit(allocator);
-        var out = buffer.writer(allocator);
+        const out = buffer.writer(allocator);
 
         try printLabels(out, found, "found");
         try printLabels(out, missing, "missing");

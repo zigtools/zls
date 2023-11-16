@@ -601,8 +601,8 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
     // log.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
     if (std.mem.startsWith(u8, it, "fn ") or std.mem.startsWith(u8, it, "@")) {
-        var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
-        var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+        const s: usize = std.mem.indexOf(u8, it, "(") orelse return;
+        const e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
             log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind.? });
             return;
@@ -615,8 +615,8 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
             if (std.mem.indexOf(u8, it, "= struct")) |_| {
                 item.labelDetails.?.description = "struct";
             } else if (std.mem.indexOf(u8, it, "= union")) |_| {
-                var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
-                var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+                const us: usize = std.mem.indexOf(u8, it, "(") orelse return;
+                const ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
                 if (ue < us) {
                     log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                     return;
@@ -636,7 +636,7 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
             if (eqlPos != null) {
                 if (start > eqlPos.?) return;
             }
-            var e: usize = eqlPos orelse it.len;
+            const e: usize = eqlPos orelse it.len;
             item.labelDetails = .{
                 .detail = "", // left
                 .description = it[start + 1 .. e], // right
@@ -653,8 +653,8 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
             };
         }
     } else if (item.kind.? == .Variable) {
-        var s: usize = std.mem.indexOf(u8, it, ":") orelse return;
-        var e: usize = std.mem.indexOf(u8, it, "=") orelse return;
+        const s: usize = std.mem.indexOf(u8, it, ":") orelse return;
+        const e: usize = std.mem.indexOf(u8, it, "=") orelse return;
 
         if (e < s) {
             log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
@@ -677,8 +677,8 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
             .description = it, // right
         };
     } else if (item.kind.? == .Constant or item.kind.? == .Field) {
-        var s: usize = std.mem.indexOf(u8, it, " ") orelse return;
-        var e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
+        const s: usize = std.mem.indexOf(u8, it, " ") orelse return;
+        const e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
         if (e < s) {
             log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
@@ -693,16 +693,16 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
         };
 
         if (std.mem.indexOf(u8, it, "= union(")) |_| {
-            var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
-            var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+            const us: usize = std.mem.indexOf(u8, it, "(") orelse return;
+            const ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ue < us) {
                 log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                 return;
             }
             item.labelDetails.?.description = it[us - 5 .. ue + 1];
         } else if (std.mem.indexOf(u8, it, "= enum(")) |_| {
-            var es: usize = std.mem.indexOf(u8, it, "(") orelse return;
-            var ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+            const es: usize = std.mem.indexOf(u8, it, "(") orelse return;
+            const ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ee < es) {
                 log.warn("something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
                 return;
@@ -775,7 +775,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     const token_tags = tree.tokens.items(.tag);
 
     // as invoked source_index points to the char/token after the `.`, do `- 1`
-    var dot_token_index = offsets.sourceIndexToTokenIndex(tree, source_index - 1);
+    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, source_index - 1);
     if (dot_token_index < 2) return &.{};
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -805,7 +805,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     if (token_tags[dot_token_index - 1] == .number_literal or token_tags[dot_token_index - 1] != .equal) return &.{};
 
     // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
-    var enum_completions = try document_store.enumCompletionItems(arena, handle.*);
+    const enum_completions = try document_store.enumCompletionItems(arena, handle.*);
     return enum_completions;
 }
 
@@ -835,7 +835,7 @@ fn completeFileSystemStringLiteral(
             return &.{};
         };
     } else {
-        var document_path = try URI.parse(arena, handle.uri);
+        const document_path = try URI.parse(arena, handle.uri);
         try search_paths.append(arena, std.fs.path.dirname(document_path).?);
     }
 
@@ -1292,7 +1292,7 @@ fn collectVarAccessContainerNodes(
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
         }
-        var fn_param_decl = Analyser.Declaration{ .param_payload = .{
+        const fn_param_decl = Analyser.Declaration{ .param_payload = .{
             .func = fn_proto_node,
             .param_index = @intCast(dot_context.fn_arg_index),
         } };

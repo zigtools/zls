@@ -2,7 +2,7 @@ const std = @import("std");
 const zls = @import("zls");
 
 fn gen(alloc: std.mem.Allocator, rand: std.rand.Random) ![]const u8 {
-    var buffer = try alloc.alloc(u8, rand.intRangeAtMost(usize, 0, 256));
+    const buffer = try alloc.alloc(u8, rand.intRangeAtMost(usize, 0, 256));
     for (buffer) |*b| b.* = rand.intRangeAtMost(u8, ' ', '~');
     return buffer;
 }

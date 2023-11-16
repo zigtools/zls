@@ -15,7 +15,7 @@ pub const Options = struct {
 };
 
 pub fn init(options: Options) Client {
-    var s: Client = .{
+    const s: Client = .{
         .in = options.in,
         .out = options.out,
         .pooler = std.io.poll(options.gpa, StreamEnum, .{ .in = options.in }),
