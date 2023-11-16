@@ -1226,7 +1226,7 @@ fn awaitExpr(
             try astgen.errNoteNode(gz.suspend_node, "suspend block here", .{}),
         });
     }
-    const operand = try expr(gz, scope, .{ .rl = .none }, rhs_node);
+    const operand = try expr(gz, scope, .{ .rl = .ref }, rhs_node);
     const result = if (gz.nosuspend_node != 0)
         try gz.addExtendedPayload(.await_nosuspend, Zir.Inst.UnNode{
             .node = gz.nodeIndexToRelative(node),
@@ -1248,7 +1248,7 @@ fn resumeExpr(
     const tree = astgen.tree;
     const node_datas = tree.nodes.items(.data);
     const rhs_node = node_datas[node].lhs;
-    const operand = try expr(gz, scope, .{ .rl = .none }, rhs_node);
+    const operand = try expr(gz, scope, .{ .rl = .ref }, rhs_node);
     const result = try gz.addUnNode(.@"resume", operand, node);
     return rvalue(gz, ri, result, node);
 }
@@ -2891,11 +2891,19 @@ fn checkUsed(gz: *GenZir, outer_scope: *Scope, inner_scope: *Scope) InnerError!v
                 const s = scope.cast(Scope.LocalPtr).?;
                 if (s.used == 0 and s.discarded == 0) {
                     try astgen.appendErrorTok(s.token_src, "unused {s}", .{@tagName(s.id_cat)});
-                } else if (s.used != 0 and s.discarded != 0) {
-                    try astgen.appendErrorTokNotes(s.discarded, "pointless discard of {s}", .{@tagName(s.id_cat)}, &[_]u32{
-                        try gz.astgen.errNoteTok(s.used, "used here", .{}),
-                    });
+                } else {
+                    if (s.used != 0 and s.discarded != 0) {
+                        try astgen.appendErrorTokNotes(s.discarded, "pointless discard of {s}", .{@tagName(s.id_cat)}, &[_]u32{
+                            try astgen.errNoteTok(s.used, "used here", .{}),
+                        });
+                    }
+                    if (s.id_cat == .@"local variable" and !s.used_as_lvalue) {
+                        try astgen.appendErrorTokNotes(s.token_src, "local variable is never mutated", .{}, &.{
+                            try astgen.errNoteTok(s.token_src, "consider using 'const'", .{}),
+                        });
+                    }
                 }
+
                 scope = s.parent;
             },
             .defer_normal, .defer_error => scope = scope.cast(Scope.Defer).?.parent,
@@ -6591,7 +6599,7 @@ fn forExpr(
         };
     }
 
-    var then_node = for_full.ast.then_expr;
+    const then_node = for_full.ast.then_expr;
     var then_scope = parent_gz.makeSubBlock(&cond_scope.base);
     defer then_scope.unstack();
 
@@ -7471,7 +7479,10 @@ fn localVarRef(
                 );
 
                 switch (ri.rl) {
-                    .ref, .ref_coerced_ty => return ptr_inst,
+                    .ref, .ref_coerced_ty => {
+                        local_ptr.used_as_lvalue = true;
+                        return ptr_inst;
+                    },
                     else => {
                         const loaded = try gz.addUnNode(.load, ptr_inst, ident);
                         return rvalueNoCoercePreRef(gz, ri, loaded, ident);
@@ -8041,7 +8052,7 @@ fn typeOf(
     }
     const payload_size: u32 = std.meta.fields(Zir.Inst.TypeOfPeer).len;
     const payload_index = try reserveExtra(astgen, payload_size + args.len);
-    var args_index = payload_index + payload_size;
+    const args_index = payload_index + payload_size;
 
     const typeof_inst = try gz.addExtendedMultiOpPayloadIndex(.typeof_peer, payload_index, args.len);
 
@@ -10840,6 +10851,9 @@ const Scope = struct {
         /// Track the identifier where it is discarded, like this `_ = foo;`.
         /// 0 means never discarded.
         discarded: Ast.TokenIndex = 0,
+        /// Whether this value is used as an lvalue after inititialization.
+        /// If not, we know it can be `const`, so will emit a compile error if it is `var`.
+        used_as_lvalue: bool = false,
         /// String table index.
         name: u32,
         id_cat: IdCat,
