@@ -106,7 +106,7 @@ test "code actions - remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
         \\    _ = a;
-        \\    var b: ?u32 = a;
+        \\    const b: ?u32 = a;
         \\    _ = b;
         \\    const c = b;
         \\    _ = c;
@@ -119,12 +119,28 @@ test "code actions - remove pointless discard" {
         \\
     ,
         \\fn foo(a: u32) u32 {
-        \\    var b: ?u32 = a;
+        \\    const b: ?u32 = a;
         \\    const c = b;
         \\    if (c) |d| {
         \\        return d;
         \\    }
         \\    return 0;
+        \\}
+        \\
+    );
+}
+
+test "code actions - correct unnecessary uses of var" {
+    try testAutofix(
+        \\test {
+        \\    var foo = 5;
+        \\    _ = foo;
+        \\}
+        \\
+    ,
+        \\test {
+        \\    const foo = 5;
+        \\    _ = foo;
         \\}
         \\
     );
