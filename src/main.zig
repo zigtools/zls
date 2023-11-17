@@ -9,7 +9,7 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const Transport = @import("Transport.zig");
 const debug = @import("debug.zig");
-const binned_allocator = @import("binned_allocator");
+const binned_allocator = @import("binned_allocator.zig");
 
 const logger = std.log.scoped(.zls_main);
 

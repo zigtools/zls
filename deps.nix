@@ -4,13 +4,6 @@
 
 linkFarm "zig-packages" [
   {
-    name = "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5";
-    path = fetchzip {
-      url = "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz";
-      hash = "sha256-m/kr4kmkG2rLkAj5YwvM0HmXTd+chAiQHzYK6ozpWlw=";
-    };
-  }
-  {
     name = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864";
     path = fetchzip {
       url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz";
