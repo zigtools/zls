@@ -1,6 +1,6 @@
 <img src="https://raw.githubusercontent.com/zigtools/zls/master/.github/assets/zls-opt.svg" alt="Zig Language Server" width=200>
 
-[![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
+[![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions) [![codecov](https://codecov.io/github/zigtools/zls/graph/badge.svg?token=WE18MPF00W)](https://codecov.io/github/zigtools/zls)
 
 **Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
 
