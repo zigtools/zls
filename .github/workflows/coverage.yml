@@ -1,0 +1,41 @@
+name: Code Coverage
+
+on: [push, pull_request]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+
+      - run: zig version
+      - run: zig env
+
+      - name: Build
+        run: zig build
+
+      - name: Install kcov
+        run: |
+          wget https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
+          sudo tar xf kcov-amd64.tar.gz -C /
+
+      - name: Run Tests with kcov
+        run: |
+          kcov --version
+          zig build test -Dgenerate_coverage
+          
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: zig-out/kcov/kcov-merged
+          fail_ci_if_error: true
+          verbose: true
+
