@@ -682,7 +682,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 const token = lastToken(tree, datas[n].lhs) + 3; // rparen, lbrace, rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             } else {
-                var token = lastToken(tree, tree.extra_data[cases.end - 1]) + 1; // for the rbrace
+                const token = lastToken(tree, tree.extra_data[cases.end - 1]) + 1; // for the rbrace
                 return end_offset + (findMatchingRBrace(tree, token) orelse token);
             }
         },

@@ -267,7 +267,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     }
 
     var buffered_writer = std.io.bufferedWriter(config_file.writer());
-    var writer = buffered_writer.writer();
+    const writer = buffered_writer.writer();
 
     try std.json.stringify(configuration, .{
         .whitespace = .indent_4,
@@ -553,7 +553,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                         else => unreachable,
                     }
 
-                    var content_token = tokenizer.next();
+                    const content_token = tokenizer.next();
                     std.debug.assert(content_token.id == .Content);
                     const content = tokenizer.buffer[content_token.start..content_token.end];
                     const writer = builtins.items[builtins.items.len - 1].documentation.writer(allocator);
@@ -846,7 +846,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
     };
     defer allocator.free(langref_source);
 
-    var builtins = try collectBuiltinData(allocator, version, langref_source);
+    const builtins = try collectBuiltinData(allocator, version, langref_source);
     defer {
         for (builtins) |*builtin| {
             builtin.documentation.deinit(allocator);
@@ -884,7 +884,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         const snippet = try extractSnippetFromSignature(allocator, signature);
         defer allocator.free(snippet);
 
-        var arguments = try extractArgumentsFromSignature(allocator, signature[builtin.name.len + 1 ..]);
+        const arguments = try extractArgumentsFromSignature(allocator, signature[builtin.name.len + 1 ..]);
         defer allocator.free(arguments);
 
         try writer.print(
@@ -970,7 +970,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
-    var gpa = general_purpose_allocator.allocator();
+    const gpa = general_purpose_allocator.allocator();
 
     var stderr = std.io.getStdErr().writer();
 

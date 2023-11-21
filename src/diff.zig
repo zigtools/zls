@@ -21,7 +21,7 @@ pub fn edits(
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var diffs = try dmp.diff(arena.allocator(), before, after, true);
+    const diffs = try dmp.diff(arena.allocator(), before, after, true);
 
     var edit_count: usize = 0;
     for (diffs.items) |diff| {
@@ -41,7 +41,7 @@ pub fn edits(
 
     var offset: usize = 0;
     for (diffs.items) |diff| {
-        var start = offset;
+        const start = offset;
         switch (diff.operation) {
             .delete => {
                 offset += diff.text.len;
@@ -122,7 +122,7 @@ pub fn applyTextEdits(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var text_edits_sortable = try allocator.dupe(types.TextEdit, text_edits);
+    const text_edits_sortable = try allocator.dupe(types.TextEdit, text_edits);
     defer allocator.free(text_edits_sortable);
 
     std.mem.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);

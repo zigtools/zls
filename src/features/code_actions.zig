@@ -121,9 +121,9 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     // ) void { ... }
     // We have to be able to detect both cases.
     const fn_proto_param = payload.get(tree).?;
-    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
+    const param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
 
-    var found_comma = std.mem.startsWith(
+    const found_comma = std.mem.startsWith(
         u8,
         std.mem.trimLeft(u8, tree.source[param_end..], " \n"),
         ",",
@@ -292,7 +292,7 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
 fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
-    var len = source.len - 1; // I need 1 look-ahead
+    const len = source.len - 1; // I need 1 look-ahead
     while (i < len) : (i += 1) {
         if (source[i] != '\n') continue;
         i += 1;

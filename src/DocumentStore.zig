@@ -409,7 +409,7 @@ pub const Handle = struct {
         var old_analysis_errors = self.analysis_errors;
         var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
         var old_zir = if (old_status.has_zir) self.impl.zir else null;
-        var old_comptime_interpreter = if (old_status.has_comptime_interpreter) self.impl.comptime_interpreter else null;
+        const old_comptime_interpreter = if (old_status.has_comptime_interpreter) self.impl.comptime_interpreter else null;
 
         self.tree = new_tree;
         self.import_uris = .{};
@@ -877,7 +877,7 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
         self.allocator.free(args);
     }
 
-    var zig_run_result = blk: {
+    const zig_run_result = blk: {
         const tracy_zone2 = tracy.trace(@src());
         defer tracy_zone2.end();
         break :blk try std.process.Child.run(.{
@@ -1194,7 +1194,7 @@ fn collectCIncludes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var cimport_nodes = try analysis.collectCImportNodes(allocator, tree);
+    const cimport_nodes = try analysis.collectCImportNodes(allocator, tree);
     defer allocator.free(cimport_nodes);
 
     var sources = std.MultiArrayList(CImportHandle){};

@@ -22,7 +22,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var args = try process.argsAlloc(allocator);
+    const args = try process.argsAlloc(allocator);
     defer process.argsFree(allocator, args);
 
     // skip my own exe name

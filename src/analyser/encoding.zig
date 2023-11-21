@@ -147,7 +147,7 @@ pub fn decode(extra: *[]const u8, comptime T: type) T {
         .Array => |info| blk: {
             var array: T = undefined;
             var i: usize = 0;
-            while (i < info.len) {
+            while (i < info.len) : (i += 1) {
                 array[i] = decode(extra, info.child);
             }
             break :blk array;

@@ -96,7 +96,6 @@ pub fn build(b: *std.build.Builder) !void {
     const exe_options_module = exe_options.createModule();
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
-    const binned_allocator_module = b.dependency("binned_allocator", .{}).module("binned_allocator");
 
     const exe = b.addExecutable(.{
         .name = "zls",
@@ -111,7 +110,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addModule("build_options", exe_options_module);
     exe.addModule("known-folders", known_folders_module);
     exe.addModule("diffz", diffz_module);
-    exe.addModule("binned_allocator", binned_allocator_module);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/public/TracyClient.cpp";

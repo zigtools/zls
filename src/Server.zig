@@ -1606,7 +1606,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     }
 
     const Result = getRequestMetadata("textDocument/codeAction").?.Result;
-    var result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
+    const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
     for (actions.items, result) |action, *out| {
         out.* = .{ .CodeAction = action };
     }

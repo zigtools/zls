@@ -262,7 +262,7 @@ test "ComptimeInterpreter - call comptime argument" {
     try std.testing.expect(result1.ty.simple_type == .type);
     try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, result1.val.?);
 
-    var result2 = try context.call(context.findFn("Foo"), &.{KV{
+    const result2 = try context.call(context.findFn("Foo"), &.{KV{
         .ty = .{ .simple_type = .bool },
         .val = .{ .simple_value = .bool_false },
     }});
@@ -298,7 +298,7 @@ const Context = struct {
     interpreter: *ComptimeInterpreter,
 
     pub fn init(source: []const u8) !Context {
-        var config = try allocator.create(zls.Config);
+        const config = try allocator.create(zls.Config);
         errdefer allocator.destroy(config);
 
         var document_store = try allocator.create(zls.DocumentStore);

@@ -678,7 +678,7 @@ noinline fn walkContainerDecl(
                     const doc = try Analyser.getDocComments(allocator, tree, decl);
                     errdefer if (doc) |d| allocator.free(d);
                     // TODO: Fix allocation; just store indices
-                    var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
+                    const gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                         .label = name,
                         .kind = .EnumMember,
                         .insertText = name,

@@ -59,7 +59,7 @@ const Builder = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        var result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
+        const result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
         errdefer builder.allocator.free(result_locations);
 
         for (builder.locations.items, result_locations) |folding_range, *result| {

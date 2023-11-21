@@ -21,7 +21,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var args = try process.argsAlloc(allocator);
+    const args = try process.argsAlloc(allocator);
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -143,7 +143,6 @@ pub fn main() !void {
     // pub const root_deps: []const struct { []const u8, []const u8 } = &.{
     //     .{ "known_folders", "1220bb12c9bfe291eed1afe6a2070c7c39918ab1979f24a281bba39dfb23f5bcd544" },
     //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
-    //     .{ "binned_allocator", "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" },
     // };
 
     var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
