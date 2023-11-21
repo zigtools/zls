@@ -43,6 +43,7 @@ pub const Builder = struct {
                 // autofix: comment out code
                 // fix: remove code
             },
+            .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
         }
     }
 
@@ -289,6 +290,28 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     });
 }
 
+fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const source = builder.handle.tree.source;
+
+    const var_keyword_end = 1 + (std.mem.lastIndexOfNone(u8, source[0..loc.start], &std.ascii.whitespace) orelse return);
+
+    const var_keyword_loc: offsets.Loc = .{
+        .start = var_keyword_end -| "var".len,
+        .end = var_keyword_end,
+    };
+
+    if (!std.mem.eql(u8, offsets.locToSlice(source, var_keyword_loc), "var")) return;
+
+    try actions.append(builder.arena, .{
+        .title = "use 'const'",
+        .kind = .@"source.fixAll",
+        .isPreferred = true,
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditLoc(var_keyword_loc, "const"),
+        }),
+    });
+}
+
 fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
@@ -431,6 +454,7 @@ const DiagnosticKind = union(enum) {
     non_camelcase_fn,
     undeclared_identifier,
     unreachable_code,
+    var_never_mutated,
 
     const IdCat = enum {
         @"function parameter",
@@ -464,6 +488,8 @@ const DiagnosticKind = union(enum) {
             return .non_camelcase_fn;
         } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
             return .undeclared_identifier;
+        } else if (std.mem.eql(u8, msg, "local variable is never mutated")) {
+            return .var_never_mutated;
         }
         return null;
     }
