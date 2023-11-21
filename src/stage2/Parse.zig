@@ -3554,7 +3554,7 @@ fn parsePtrModifiers(p: *Parse) !PtrModifiers {
     var saw_const = false;
     var saw_volatile = false;
     var saw_allowzero = false;
-    var saw_addrspace = false;
+
     while (true) {
         switch (p.token_tags[p.tok_i]) {
             .keyword_align => {
@@ -3595,7 +3595,7 @@ fn parsePtrModifiers(p: *Parse) !PtrModifiers {
                 saw_allowzero = true;
             },
             .keyword_addrspace => {
-                if (saw_addrspace) {
+                if (result.addrspace_node != 0) {
                     try p.warn(.extra_addrspace_qualifier);
                 }
                 result.addrspace_node = try p.parseAddrSpace();
