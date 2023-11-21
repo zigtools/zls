@@ -4,17 +4,17 @@
 
 linkFarm "zig-packages" [
   {
-    name = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864";
+    name = "122014b1776beda990cdc7bdbecc6960bdce9eb762d6dc7cc6664517f171becc17dd";
     path = fetchzip {
-      url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz";
-      hash = "sha256-3CdYo6WevT0alRwKmbABahjhFKz7V9rdkDUZ43VtDeU=";
+      url = "https://github.com/ziglibs/diffz/archive/86f5435f63961dcdba8b76e47b44e2381671fb09.tar.gz";
+      hash = "sha256-JXQQfyzDwSQ7+H8rWTdb0GrN5Rgeo3kCIYmW5QiWX9w=";
     };
   }
   {
-    name = "1220bb12c9bfe291eed1afe6a2070c7c39918ab1979f24a281bba39dfb23f5bcd544";
+    name = "1220f9d9dd88b1352b1a2bde4a96f547a1591d66ad0a9d76854d0c2c7fa59eef2508";
     path = fetchzip {
-      url = "https://github.com/ziglibs/known-folders/archive/a564f582122326328dad6b59209d070d57c4e6ae.tar.gz";
-      hash = "sha256-bZfn+jgCzrtm8vKPDDMNWLkJYoo7vKxZu+e2tGvSGHY=";
+      url = "https://github.com/ziglibs/known-folders/archive/855473062efac722624737f1adc56f9c0dd92017.tar.gz";
+      hash = "sha256-+W0Gx8l6Q9+9SK/968vunccNtRBZfCbOSjQnGB7H3os=";
     };
   }
 ]
