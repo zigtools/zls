@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// mem: fix UB in `readInt`/`writeInt` and delete variants
-const min_zig_string = "0.12.0-dev.1379+725f765c3";
+/// compiler: add error for unnecessary use of 'var'
+const min_zig_string = "0.12.0-dev.1663+6b1a823b2b";
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {
