@@ -949,6 +949,9 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     defer client.deinit();
     try client.ca_bundle.rescan(allocator);
 
+    if (@hasDecl(std.http.Client, "loadDefaultProxies"))
+        try client.loadDefaultProxies();
+
     var request = try client.open(.GET, uri, .{ .allocator = allocator }, .{});
     defer request.deinit();
 
