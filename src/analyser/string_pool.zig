@@ -192,3 +192,16 @@ test "StringPool - empty string" {
 
     try std.testing.expectEqualStrings("", pool.stringToSliceUnsafe(.empty));
 }
+
+test "StringPool - getOrPut on existing string without allocation" {
+    const gpa = std.testing.allocator;
+    var failing_gpa = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
+
+    var pool = StringPool(.{}){};
+    defer pool.deinit(gpa);
+
+    const hello_string = try pool.getOrPutString(gpa, "hello");
+
+    try std.testing.expectError(error.OutOfMemory, pool.getOrPutString(failing_gpa.allocator(), "world"));
+    try std.testing.expectEqual(hello_string, try pool.getOrPutString(failing_gpa.allocator(), "hello"));
+}
