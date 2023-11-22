@@ -61,24 +61,33 @@ pub fn dotCompletions(
             else => {},
         },
         .pointer_type => |pointer_info| {
-            if (pointer_info.size == .Slice) {
-                try completions.append(arena, .{
-                    .label = "ptr",
-                    .kind = .Field,
-                    // TODO this discards pointer attributes
-                    .detail = try std.fmt.allocPrint(arena, "ptr: [*]{}", .{pointer_info.elem_type.fmt(ip)}),
-                });
-                try completions.append(arena, .{
-                    .label = "len",
-                    .kind = .Field,
-                    .detail = "len: usize",
-                });
-            } else if (ip.indexToKey(pointer_info.elem_type) == .array_type) {
-                try completions.append(arena, .{
-                    .label = "len",
-                    .kind = .Field,
-                    .detail = "len: usize",
-                });
+            switch (pointer_info.size) {
+                .Many, .C => {},
+                .One => {
+                    switch (ip.indexToKey(pointer_info.elem_type)) {
+                        .array_type => |array_info| {
+                            try completions.append(arena, .{
+                                .label = "len",
+                                .kind = .Field,
+                                .detail = try std.fmt.allocPrint(arena, "const len: usize ({d})", .{array_info.len}), // TODO how should this be displayed
+                            });
+                        },
+                        else => {},
+                    }
+                },
+                .Slice => {
+                    try completions.append(arena, .{
+                        .label = "ptr",
+                        .kind = .Field,
+                        // TODO this discards pointer attributes
+                        .detail = try std.fmt.allocPrint(arena, "ptr: [*]{}", .{pointer_info.elem_type.fmt(ip)}),
+                    });
+                    try completions.append(arena, .{
+                        .label = "len",
+                        .kind = .Field,
+                        .detail = "len: usize",
+                    });
+                },
             }
         },
         .array_type => |array_info| {
