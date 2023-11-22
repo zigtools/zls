@@ -20,7 +20,7 @@ pub fn dotCompletions(
     const ty: InternPool.Index = ip.typeOf(index);
 
     const inner_ty = switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| if (pointer_info.size == .One) pointer_info.elem_type else ty,
+        .pointer_type => |pointer_info| if (pointer_info.flags.size == .One) pointer_info.elem_type else ty,
         else => ty,
     };
 
@@ -61,7 +61,7 @@ pub fn dotCompletions(
             else => {},
         },
         .pointer_type => |pointer_info| {
-            switch (pointer_info.size) {
+            switch (pointer_info.flags.size) {
                 .Many, .C => {},
                 .One => {
                     switch (ip.indexToKey(pointer_info.elem_type)) {

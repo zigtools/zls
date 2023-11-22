@@ -453,7 +453,7 @@ pub fn interpret(
             const ty = interpreter.ip.typeOf(val);
 
             const inner_ty = switch (interpreter.ip.indexToKey(ty)) {
-                .pointer_type => |pointer_info| if (pointer_info.size == .One) pointer_info.elem_type else ty,
+                .pointer_type => |pointer_info| if (pointer_info.flags.size == .One) pointer_info.elem_type else ty,
                 else => ty,
             };
 
@@ -505,7 +505,7 @@ pub fn interpret(
                     else => {},
                 },
                 .pointer_type => |pointer_info| {
-                    switch (pointer_info.size) {
+                    switch (pointer_info.flags.size) {
                         .Many, .C => {},
                         .One => {
                             switch (interpreter.ip.indexToKey(pointer_info.elem_type)) {
@@ -529,7 +529,7 @@ pub fn interpret(
                         .Slice => {
                             if (std.mem.eql(u8, field_name, "ptr")) {
                                 var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
-                                many_ptr_info.pointer_type.size = .Many;
+                                many_ptr_info.pointer_type.flags.size = .Many;
                                 return InterpretResult{
                                     .value = Value{
                                         .interpreter = interpreter,
@@ -1019,8 +1019,10 @@ pub fn interpret(
                     .len = @intCast(str.len),
                     .sentinel = .zero_u8,
                 } }),
-                .size = .One,
-                .is_const = true,
+                .flags = .{
+                    .size = .One,
+                    .is_const = true,
+                },
             } });
 
             return InterpretResult{ .value = Value{
@@ -1174,7 +1176,7 @@ pub fn interpret(
 
             const pointer_type = try interpreter.ip.get(interpreter.allocator, Key{ .pointer_type = .{
                 .elem_type = ty,
-                .size = .One,
+                .flags = .{ .size = .One },
             } });
 
             return InterpretResult{ .value = .{

@@ -61,17 +61,26 @@ pub const Key = union(enum) {
     unknown_value: UnknownValue,
     // error union
 
-    pub const Pointer = struct {
+    pub const Pointer = packed struct {
         elem_type: Index,
         sentinel: Index = .none,
-        size: std.builtin.Type.Pointer.Size,
-        alignment: u16 = 0,
-        bit_offset: u16 = 0,
-        host_size: u16 = 0,
-        is_const: bool = false,
-        is_volatile: bool = false,
-        is_allowzero: bool = false,
-        address_space: std.builtin.AddressSpace = .generic,
+        flags: Flags,
+        packed_offset: PackedOffset = .{ .bit_offset = 0, .host_size = 0 },
+
+        pub const Flags = packed struct(u32) {
+            size: std.builtin.Type.Pointer.Size,
+            is_const: bool = false,
+            is_volatile: bool = false,
+            is_allowzero: bool = false,
+            address_space: std.builtin.AddressSpace = .generic,
+            _: u6 = 0,
+            alignment: u16 = 0,
+        };
+
+        pub const PackedOffset = packed struct(u32) {
+            bit_offset: u16,
+            host_size: u16,
+        };
     };
 
     pub const Array = struct {
@@ -702,16 +711,16 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .export_options_type, .key = .{ .simple_type = .export_options } },
         .{ .index = .extern_options_type, .key = .{ .simple_type = .extern_options } },
         .{ .index = .type_info_type, .key = .{ .simple_type = .type_info } },
-        .{ .index = .manyptr_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many } } },
-        .{ .index = .manyptr_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many, .is_const = true } } },
-        .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Many, .is_const = true } } },
+        .{ .index = .manyptr_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .flags = .{ .size = .Many } } } },
+        .{ .index = .manyptr_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .flags = .{ .size = .Many, .is_const = true } } } },
+        .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Many, .is_const = true } } } },
         .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .noreturn_type } } },
         .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type } } },
         .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .Naked } } },
         .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .C } } },
-        .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .size = .One, .is_const = true } } },
-        .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
-        .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Slice, .is_const = true } } },
+        .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .flags = .{ .size = .One, .is_const = true } } } },
+        .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .flags = .{ .size = .Slice, .is_const = true } } } },
+        .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Slice, .is_const = true } } } },
         .{ .index = .optional_noreturn_type, .key = .{ .optional_type = .{ .payload_type = .noreturn_type } } },
         .{ .index = .anyerror_void_error_union_type, .key = .{ .error_union_type = .{ .error_set_type = .anyerror_type, .payload_type = .void_type } } },
         .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
@@ -1158,14 +1167,14 @@ pub fn coerce(
 
             const inst_ty_key = ip.indexToKey(inst_ty);
             // *T to *[1]T
-            if (dest_info.size == .One and ip.isSinglePointer(inst_ty)) single_item: {
+            if (dest_info.flags.size == .One and ip.isSinglePointer(inst_ty)) single_item: {
                 // TODO if (!sema.checkPtrAttributes(dest_ty, inst_ty, &in_memory_result)) break :pointer;
                 const ptr_elem_ty = ip.indexToKey(inst_ty).pointer_type.elem_type;
 
                 const array_ty = ip.indexToKey(dest_info.elem_type);
                 if (array_ty != .array_type) break :single_item;
                 const array_elem_ty = array_ty.array_type.child;
-                if (try ip.coerceInMemoryAllowed(gpa, arena, array_elem_ty, ptr_elem_ty, dest_info.is_const, target) != .ok) {
+                if (try ip.coerceInMemoryAllowed(gpa, arena, array_elem_ty, ptr_elem_ty, dest_info.flags.is_const, target) != .ok) {
                     break :single_item;
                 }
                 return try ip.getUnknown(gpa, dest_ty);
@@ -1181,7 +1190,7 @@ pub fn coerce(
                 if (array_ty != .array_type) break :src_array_ptr;
                 const array_elem_type = array_ty.array_type.child;
 
-                const elem_res = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, array_elem_type, dest_info.is_const, target);
+                const elem_res = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, array_elem_type, dest_info.flags.is_const, target);
                 if (elem_res != .ok) {
                     in_memory_result = .{ .ptr_child = .{
                         .child = try elem_res.dupe(arena),
@@ -1203,7 +1212,7 @@ pub fn coerce(
                 }
 
                 return try ip.getUnknown(gpa, dest_ty);
-                // switch (dest_info.size) {
+                // switch (dest_info.flags.size) {
                 //     // *[N]T to []T
                 //     .Slice => return ip.coerceArrayPtrToSlice(gpa, arena, dest_ty, inst),
                 //     // *[N]T to [*c]T
@@ -1219,7 +1228,7 @@ pub fn coerce(
 
                 // TODO if (!sema.checkPtrAttributes(dest_ty, inst_ty, &in_memory_result)) break :src_c_ptr;
                 const src_elem_ty = ip.indexToKey(inst_ty).pointer_type.elem_type;
-                if (try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_elem_ty, dest_info.is_const, target) != .ok) {
+                if (try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_elem_ty, dest_info.flags.is_const, target) != .ok) {
                     break :src_c_ptr;
                 }
                 return try ip.getUnknown(gpa, dest_ty);
@@ -1436,7 +1445,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         }
                         continue;
                     },
-                    .pointer_type => |chosen_info| if (chosen_info.size == .C) continue,
+                    .pointer_type => |chosen_info| if (chosen_info.flags.size == .C) continue,
                     else => {},
                 },
 
@@ -1467,7 +1476,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         else => {},
                     },
                     .int_type => continue,
-                    .pointer_type => |chosen_info| if (chosen_info.size == .C) continue,
+                    .pointer_type => |chosen_info| if (chosen_info.flags.size == .C) continue,
                     else => {},
                 },
                 .comptime_float => switch (chosen_key) {
@@ -1523,13 +1532,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     }
                     continue;
                 },
-                .pointer_type => |chosen_info| if (chosen_info.size == .C) continue,
+                .pointer_type => |chosen_info| if (chosen_info.flags.size == .C) continue,
                 else => {},
             },
             .pointer_type => |candidate_info| switch (chosen_key) {
                 .simple_type => |chosen_simple| switch (chosen_simple) {
                     .comptime_int => {
-                        if (candidate_info.size == .C) {
+                        if (candidate_info.flags.size == .C) {
                             chosen = candidate;
                             continue;
                         }
@@ -1537,15 +1546,15 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     else => {},
                 },
                 .pointer_type => |chosen_info| {
-                    seen_const = seen_const or chosen_info.is_const or candidate_info.is_const;
+                    seen_const = seen_const or chosen_info.flags.is_const or candidate_info.flags.is_const;
 
                     const candidate_elem_info = ip.indexToKey(candidate_info.elem_type);
                     const chosen_elem_info = ip.indexToKey(chosen_info.elem_type);
 
                     // *[N]T to [*]T
                     // *[N]T to []T
-                    if ((candidate_info.size == .Many or candidate_info.size == .Slice) and
-                        chosen_info.size == .One and
+                    if ((candidate_info.flags.size == .Many or candidate_info.flags.size == .Slice) and
+                        chosen_info.flags.size == .One and
                         chosen_elem_info == .array_type)
                     {
                         // In case we see i.e.: `*[1]T`, `*[2]T`, `[*]T`
@@ -1553,9 +1562,9 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         chosen = candidate;
                         continue;
                     }
-                    if (candidate_info.size == .One and
+                    if (candidate_info.flags.size == .One and
                         candidate_elem_info == .array_type and
-                        (chosen_info.size == .Many or chosen_info.size == .Slice))
+                        (chosen_info.flags.size == .Many or chosen_info.flags.size == .Slice))
                     {
                         // In case we see i.e.: `*[1]T`, `*[2]T`, `[*]T`
                         convert_to_slice = false;
@@ -1565,21 +1574,21 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     // *[N]T and *[M]T
                     // Verify both are single-pointers to arrays.
                     // Keep the one whose element type can be coerced into.
-                    if (chosen_info.size == .One and
-                        candidate_info.size == .One and
+                    if (chosen_info.flags.size == .One and
+                        candidate_info.flags.size == .One and
                         chosen_elem_info == .array_type and
                         candidate_elem_info == .array_type)
                     {
                         const chosen_elem_ty = chosen_elem_info.array_type.child;
                         const cand_elem_ty = candidate_elem_info.array_type.child;
 
-                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_elem_ty, cand_elem_ty, chosen_info.is_const, target);
+                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_elem_ty, cand_elem_ty, chosen_info.flags.is_const, target);
                         if (chosen_ok) {
                             convert_to_slice = true;
                             continue;
                         }
 
-                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, cand_elem_ty, chosen_elem_ty, candidate_info.is_const, target);
+                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, cand_elem_ty, chosen_elem_ty, candidate_info.flags.is_const, target);
                         if (cand_ok) {
                             convert_to_slice = true;
                             chosen = candidate;
@@ -1597,12 +1606,12 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     // Whichever element type can coerce to the other one, is
                     // the one we will keep. If they're both OK then we keep the
                     // C pointer since it matches both single and many pointers.
-                    if (candidate_info.size == .C or chosen_info.size == .C) {
-                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, candidate_info.elem_type, chosen_info.elem_type, candidate_info.is_const, target);
-                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_info.elem_type, candidate_info.elem_type, chosen_info.is_const, target);
+                    if (candidate_info.flags.size == .C or chosen_info.flags.size == .C) {
+                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, candidate_info.elem_type, chosen_info.elem_type, candidate_info.flags.is_const, target);
+                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_info.elem_type, candidate_info.elem_type, chosen_info.flags.is_const, target);
 
                         if (cand_ok) {
-                            if (!chosen_ok or chosen_info.size != .C) {
+                            if (!chosen_ok or chosen_info.flags.size != .C) {
                                 chosen = candidate;
                             }
                             continue;
@@ -1617,20 +1626,20 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     }
                 },
                 .int_type => {
-                    if (candidate_info.size == .C) {
+                    if (candidate_info.flags.size == .C) {
                         chosen = candidate;
                         continue;
                     }
                 },
                 .optional_type => |chosen_info| switch (ip.indexToKey(chosen_info.payload_type)) {
                     .pointer_type => |chosen_ptr_info| {
-                        seen_const = seen_const or chosen_ptr_info.is_const or candidate_info.is_const;
+                        seen_const = seen_const or chosen_ptr_info.flags.is_const or candidate_info.flags.is_const;
 
                         // *[N]T to ?![*]T
                         // *[N]T to ?![]T
-                        if (candidate_info.size == .One and
+                        if (candidate_info.flags.size == .One and
                             ip.indexToKey(candidate_info.elem_type) == .array_type and
-                            (chosen_ptr_info.size == .Many or chosen_ptr_info.size == .Slice))
+                            (chosen_ptr_info.flags.size == .Many or chosen_ptr_info.flags.size == .Slice))
                         {
                             continue;
                         }
@@ -1642,12 +1651,12 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                     if (chosen_ptr_key == .pointer_type) {
                         const chosen_ptr_info = chosen_ptr_key.pointer_type;
-                        seen_const = seen_const or chosen_ptr_info.is_const or candidate_info.is_const;
+                        seen_const = seen_const or chosen_ptr_info.flags.is_const or candidate_info.flags.is_const;
 
                         // *[N]T to E![*]T
                         // *[N]T to E![]T
-                        if (candidate_info.size == .One and
-                            (chosen_ptr_info.size == .Many or chosen_ptr_info.size == .Slice) and
+                        if (candidate_info.flags.size == .One and
+                            (chosen_ptr_info.flags.size == .Many or chosen_ptr_info.flags.size == .Slice) and
                             ip.indexToKey(candidate_info.elem_type) == .array_type)
                         {
                             continue;
@@ -1655,7 +1664,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     }
                 },
                 .function_type => {
-                    if (candidate_info.is_const and
+                    if (candidate_info.flags.is_const and
                         ip.zigTypeTag(candidate_info.elem_type) == .Fn and
                         .ok == try ip.coerceInMemoryAllowedFns(gpa, arena, chosen, candidate_info.elem_type, target))
                     {
@@ -1733,8 +1742,8 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         // turn *[N]T => []T
         var info = ip.indexToKey(chosen).pointer_type;
         info.sentinel = ip.sentinel(info.elem_type);
-        info.size = .Slice;
-        info.is_const = seen_const or ip.isConstPointer(info.elem_type);
+        info.flags.size = .Slice;
+        info.flags.is_const = seen_const or ip.isConstPointer(info.elem_type);
         info.elem_type = ip.elemType(info.elem_type);
 
         const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
@@ -1751,7 +1760,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         switch (ip.indexToKey(chosen)) {
             .error_union_type => |error_union_info| {
                 var info = ip.indexToKey(error_union_info.payload_type).pointer_type;
-                info.is_const = true;
+                info.flags.is_const = true;
 
                 const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
                 const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
@@ -1763,7 +1772,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
             },
             .pointer_type => |pointer_info| {
                 var info = pointer_info;
-                info.is_const = true;
+                info.flags.is_const = true;
 
                 const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
                 const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
@@ -2216,36 +2225,36 @@ fn coerceInMemoryAllowedPtrs(
     const dest_info = ip.indexToKey(dest_ty).pointer_type;
     const src_info = ip.indexToKey(src_ty).pointer_type;
 
-    const ok_ptr_size = src_info.size == dest_info.size or
-        src_info.size == .C or dest_info.size == .C;
+    const ok_ptr_size = src_info.flags.size == dest_info.flags.size or
+        src_info.flags.size == .C or dest_info.flags.size == .C;
     if (!ok_ptr_size) {
         return InMemoryCoercionResult{ .ptr_size = .{
-            .actual = src_info.size,
-            .wanted = dest_info.size,
+            .actual = src_info.flags.size,
+            .wanted = dest_info.flags.size,
         } };
     }
 
     const ok_cv_qualifiers =
-        (!src_info.is_const or dest_info.is_const) and
-        (!src_info.is_volatile or dest_info.is_volatile);
+        (!src_info.flags.is_const or dest_info.flags.is_const) and
+        (!src_info.flags.is_volatile or dest_info.flags.is_volatile);
 
     if (!ok_cv_qualifiers) {
         return InMemoryCoercionResult{ .ptr_qualifiers = .{
-            .actual_const = src_info.is_const,
-            .wanted_const = dest_info.is_const,
-            .actual_volatile = src_info.is_volatile,
-            .wanted_volatile = dest_info.is_volatile,
+            .actual_const = src_info.flags.is_const,
+            .wanted_const = dest_info.flags.is_const,
+            .actual_volatile = src_info.flags.is_volatile,
+            .wanted_volatile = dest_info.flags.is_volatile,
         } };
     }
 
-    if (dest_info.address_space != src_info.address_space) {
+    if (dest_info.flags.address_space != src_info.flags.address_space) {
         return InMemoryCoercionResult{ .ptr_addrspace = .{
-            .actual = src_info.address_space,
-            .wanted = dest_info.address_space,
+            .actual = src_info.flags.address_space,
+            .wanted = dest_info.flags.address_space,
         } };
     }
 
-    const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_info.elem_type, dest_info.is_const, target);
+    const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_info.elem_type, dest_info.flags.is_const, target);
     if (child != .ok) {
         return InMemoryCoercionResult{ .ptr_child = .{
             .child = try child.dupe(arena),
@@ -2265,18 +2274,18 @@ fn coerceInMemoryAllowedPtrs(
         } };
     }
 
-    if (src_info.host_size != dest_info.host_size or
-        src_info.bit_offset != dest_info.bit_offset)
+    if (src_info.packed_offset.host_size != dest_info.packed_offset.host_size or
+        src_info.packed_offset.bit_offset != dest_info.packed_offset.bit_offset)
     {
         return InMemoryCoercionResult{ .ptr_bit_range = .{
-            .actual_host = src_info.host_size,
-            .wanted_host = dest_info.host_size,
-            .actual_offset = src_info.bit_offset,
-            .wanted_offset = dest_info.bit_offset,
+            .actual_host = src_info.packed_offset.host_size,
+            .wanted_host = dest_info.packed_offset.host_size,
+            .actual_offset = src_info.packed_offset.bit_offset,
+            .wanted_offset = dest_info.packed_offset.bit_offset,
         } };
     }
 
-    const ok_sent = dest_info.sentinel == .none or src_info.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
+    const ok_sent = dest_info.sentinel == .none or src_info.flags.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
     if (!ok_sent) {
         return InMemoryCoercionResult{ .ptr_sentinel = .{
             .actual = src_info.sentinel,
@@ -2290,19 +2299,19 @@ fn coerceInMemoryAllowedPtrs(
     // pointee type alignment. Otherwise both pointee types must have their alignment
     // resolved and we compare the alignment numerically.
     alignment: {
-        if (src_info.alignment == 0 and dest_info.alignment == 0 and
+        if (src_info.flags.alignment == 0 and dest_info.flags.alignment == 0 and
             dest_info.elem_type == src_info.elem_type // is this enough for a value equality check?
         ) {
             break :alignment;
         }
 
-        // const src_align = if (src_info.alignment != 0)
-        //     src_info.alignment
+        // const src_align = if (src_info.flags.alignment != 0)
+        //     src_info.flags.alignment
         // else
         //     src_info.elem_type.abiAlignment(target);
 
-        // const dest_align = if (dest_info.alignment != 0)
-        //     dest_info.alignment
+        // const dest_align = if (dest_info.flags.alignment != 0)
+        //     dest_info.flags.alignment
         // else
         //     dest_info.elem_type.abiAlignment(target);
 
@@ -2322,10 +2331,10 @@ fn coerceInMemoryAllowedPtrs(
 fn optionalPtrTy(ip: *const InternPool, ty: Index) Index {
     switch (ip.indexToKey(ty)) {
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
-            .pointer_type => |pointer_info| switch (pointer_info.size) {
+            .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
                 .Slice, .C => return Index.none,
                 .Many, .One => {
-                    if (pointer_info.is_allowzero) return Index.none;
+                    if (pointer_info.flags.is_allowzero) return Index.none;
 
                     // optionals of zero sized types behave like bools, not pointers
                     if (ip.onePossibleValue(optional_info.payload_type) != Index.none) return Index.none;
@@ -2733,35 +2742,35 @@ pub fn isFloat(ip: *const InternPool, ty: Index) bool {
 
 pub fn isSinglePointer(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.size == .One,
+        .pointer_type => |pointer_info| pointer_info.flags.size == .One,
         else => false,
     };
 }
 
 pub fn isManyPointer(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.size == .Many,
+        .pointer_type => |pointer_info| pointer_info.flags.size == .Many,
         else => false,
     };
 }
 
 pub fn isSlicePointer(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.size == .Slice,
+        .pointer_type => |pointer_info| pointer_info.flags.size == .Slice,
         else => false,
     };
 }
 
 pub fn isCPointer(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.size == .C,
+        .pointer_type => |pointer_info| pointer_info.flags.size == .C,
         else => false,
     };
 }
 
 pub fn isConstPointer(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.is_const,
+        .pointer_type => |pointer_info| pointer_info.flags.is_const,
         else => false,
     };
 }
@@ -2769,7 +2778,7 @@ pub fn isConstPointer(ip: *const InternPool, ty: Index) bool {
 /// For pointer-like optionals, returns true, otherwise returns the allowzero property
 /// of pointers.
 pub fn ptrAllowsZero(ip: *const InternPool, ty: Index) bool {
-    if (ip.indexToKey(ty).pointer_type.is_allowzero) return true;
+    if (ip.indexToKey(ty).pointer_type.flags.is_allowzero) return true;
     return ip.isPtrLikeOptional(ty);
 }
 
@@ -2778,24 +2787,24 @@ pub fn ptrAllowsZero(ip: *const InternPool, ty: Index) bool {
 pub fn isPtrLikeOptional(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
-            .pointer_type => |pointer_info| switch (pointer_info.size) {
+            .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
                 .Slice, .C => false,
-                .Many, .One => !pointer_info.is_allowzero,
+                .Many, .One => !pointer_info.flags.is_allowzero,
             },
             else => false,
         },
-        .pointer_type => |pointer_info| pointer_info.size == .C,
+        .pointer_type => |pointer_info| pointer_info.flags.size == .C,
         else => false,
     };
 }
 
 pub fn isPtrAtRuntime(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| pointer_info.size != .Slice,
+        .pointer_type => |pointer_info| pointer_info.flags.size != .Slice,
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
-            .pointer_type => |pointer_info| switch (pointer_info.size) {
+            .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
                 .Slice, .C => false,
-                .Many, .One => !pointer_info.is_allowzero,
+                .Many, .One => !pointer_info.flags.is_allowzero,
             },
             else => false,
         },
@@ -2836,7 +2845,7 @@ pub fn childType(ip: *const InternPool, ty: Index) Index {
 /// For anyframe->T,    returns T.
 pub fn elemType(ip: *const InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| switch (pointer_info.size) {
+        .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
             .One => ip.childType(pointer_info.elem_type),
             .Many, .C, .Slice => pointer_info.elem_type,
         },
@@ -3076,7 +3085,7 @@ pub fn canHaveFields(ip: *const InternPool, ty: Index) bool {
 pub fn isIndexable(ip: *const InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .array_type, .vector_type => true,
-        .pointer_type => |pointer_info| switch (pointer_info.size) {
+        .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
             .Slice, .Many, .C => true,
             .One => ip.indexToKey(pointer_info.elem_type) == .array_type,
         },
@@ -3251,35 +3260,35 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
         },
         .pointer_type => |pointer_info| {
             if (pointer_info.sentinel != Index.none) {
-                switch (pointer_info.size) {
+                switch (pointer_info.flags.size) {
                     .One, .C => unreachable,
                     .Many => try writer.print("[*:{}]", .{pointer_info.sentinel.fmt(ip)}),
                     .Slice => try writer.print("[:{}]", .{pointer_info.sentinel.fmt(ip)}),
                 }
-            } else switch (pointer_info.size) {
+            } else switch (pointer_info.flags.size) {
                 .One => try writer.writeAll("*"),
                 .Many => try writer.writeAll("[*]"),
                 .C => try writer.writeAll("[*c]"),
                 .Slice => try writer.writeAll("[]"),
             }
 
-            if (pointer_info.alignment != 0) {
-                try writer.print("align({d}", .{pointer_info.alignment});
+            if (pointer_info.flags.alignment != 0) {
+                try writer.print("align({d}", .{pointer_info.flags.alignment});
 
-                if (pointer_info.bit_offset != 0 or pointer_info.host_size != 0) {
-                    try writer.print(":{d}:{d}", .{ pointer_info.bit_offset, pointer_info.host_size });
+                if (pointer_info.packed_offset.bit_offset != 0 or pointer_info.packed_offset.host_size != 0) {
+                    try writer.print(":{d}:{d}", .{ pointer_info.packed_offset.bit_offset, pointer_info.packed_offset.host_size });
                 }
 
                 try writer.writeAll(") ");
             }
 
-            if (pointer_info.address_space != .generic) {
-                try writer.print("addrspace(.{s}) ", .{@tagName(pointer_info.address_space)});
+            if (pointer_info.flags.address_space != .generic) {
+                try writer.print("addrspace(.{s}) ", .{@tagName(pointer_info.flags.address_space)});
             }
 
-            if (pointer_info.is_const) try writer.writeAll("const ");
-            if (pointer_info.is_volatile) try writer.writeAll("volatile ");
-            if (pointer_info.is_allowzero and pointer_info.size != .C) try writer.writeAll("allowzero ");
+            if (pointer_info.flags.is_const) try writer.writeAll("const ");
+            if (pointer_info.flags.is_volatile) try writer.writeAll("volatile ");
+            if (pointer_info.flags.is_allowzero and pointer_info.flags.size != .C) try writer.writeAll("allowzero ");
 
             return pointer_info.elem_type;
         },
@@ -3680,53 +3689,61 @@ test "pointer type" {
 
     const @"*i32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .i32_type,
-        .size = .One,
+        .flags = .{ .size = .One },
     } });
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .One,
+        .flags = .{ .size = .One },
     } });
     const @"*const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .One,
-        .is_const = true,
-        .is_volatile = true,
+        .flags = .{
+            .size = .One,
+            .is_const = true,
+            .is_volatile = true,
+        },
     } });
     const @"*align(4:2:3) u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .One,
-        .alignment = 4,
-        .bit_offset = 2,
-        .host_size = 3,
+        .flags = .{
+            .size = .One,
+            .alignment = 4,
+        },
+        .packed_offset = .{
+            .bit_offset = 2,
+            .host_size = 3,
+        },
     } });
     const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .One,
-        .is_const = true,
-        .address_space = .shared,
+        .flags = .{
+            .size = .One,
+            .is_const = true,
+            .address_space = .shared,
+        },
     } });
 
     const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .Many,
+        .flags = .{ .size = .Many },
     } });
     const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .Many,
         .sentinel = .zero_comptime_int,
+        .flags = .{ .size = .Many },
     } });
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .Slice,
+        .flags = .{ .size = .Slice },
     } });
     const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .Slice,
         .sentinel = .zero_comptime_int,
+        .flags = .{ .size = .Slice },
     } });
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
-        .size = .C,
+        .flags = .{ .size = .C },
     } });
 
     try expect(@"*i32" != @"*u32");
@@ -4204,19 +4221,19 @@ test "resolvePeerTypes pointers" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One } });
-    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Many } });
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Slice } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .C } });
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .One } } });
+    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .Many } } });
+    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .Slice } } });
+    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .C } } });
 
     const @"?*u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*u32" } });
     const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
     const @"?[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]u32" } });
 
-    const @"**u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"*u32", .size = .One } });
-    const @"*[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*]u32", .size = .One } });
-    const @"*[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[]u32", .size = .One } });
-    const @"*[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*c]u32", .size = .One } });
+    const @"**u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"*u32", .flags = .{ .size = .One } } });
+    const @"*[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*]u32", .flags = .{ .size = .One } } });
+    const @"*[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[]u32", .flags = .{ .size = .One } } });
+    const @"*[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*c]u32", .flags = .{ .size = .One } } });
 
     const @"?*[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[*]u32" } });
     const @"?*[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[]u32" } });
@@ -4224,16 +4241,16 @@ test "resolvePeerTypes pointers" {
     const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 1, .child = .u32_type, .sentinel = .none } });
     const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 2, .child = .u32_type, .sentinel = .none } });
 
-    const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .size = .One } });
-    const @"*[2]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[2]u32", .size = .One } });
+    const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .flags = .{ .size = .One } } });
+    const @"*[2]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[2]u32", .flags = .{ .size = .One } } });
 
     const @"?*[1]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[1]u32" } });
     const @"?*[2]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[2]u32" } });
 
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One, .is_const = true } });
-    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Many, .is_const = true } });
-    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Slice, .is_const = true } });
-    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .C, .is_const = true } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .One, .is_const = true } } });
+    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .Many, .is_const = true } } });
+    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .Slice, .is_const = true } } });
+    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .C, .is_const = true } } });
 
     const @"?*const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*const u32" } });
     const @"?[*]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]const u32" } });
@@ -4297,8 +4314,17 @@ test "resolvePeerTypes function pointers" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One } });
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One, .is_const = true } });
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = .u32_type,
+        .flags = .{ .size = .One },
+    } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = .u32_type,
+        .flags = .{
+            .size = .One,
+            .is_const = true,
+        },
+    } });
 
     const @"fn(*u32) void" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{@"*u32"},
