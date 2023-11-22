@@ -15,7 +15,7 @@ pub fn BinnedAllocator(comptime config: Config) type {
     return struct {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
         bins: Bins = .{},
-        large_count: if (config.report_leaks) Counter else u0 = if (config.report_leaks) Counter.init() else u0,
+        large_count: if (config.report_leaks) Counter else void = if (config.report_leaks) Counter.init(),
 
         const Bins = struct {
             Bin(16, 8) = .{},
