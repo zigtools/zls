@@ -334,7 +334,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     if (diagnostics.items.len == 0) return .{};
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     var builder = code_actions.Builder{
@@ -1231,7 +1231,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     return try semantic_tokens.writeSemanticTokens(
@@ -1250,7 +1250,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     return try semantic_tokens.writeSemanticTokens(
@@ -1268,7 +1268,7 @@ fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     return .{
@@ -1283,7 +1283,7 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     const signature_info = (try signature_help.getSignatureInfo(
@@ -1322,7 +1322,7 @@ fn gotoHandler(
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     const response = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null;
@@ -1389,7 +1389,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
@@ -1482,7 +1482,7 @@ fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: 
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     // TODO: Make this work with branching types
@@ -1566,7 +1566,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     return try inlay_hints.writeRangeInlayHint(
@@ -1583,7 +1583,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
     var builder = code_actions.Builder{

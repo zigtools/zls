@@ -354,6 +354,18 @@ fn getPkgConfigIncludes(
     } else |err| return err;
 }
 
+fn reify(step: *Build.Step) anyerror!void {
+    var progress: std.Progress = .{};
+    const main_progress_node = progress.start("", 0);
+    defer main_progress_node.end();
+
+    for (step.dependencies.items) |unknown_step| {
+        try reify(unknown_step);
+    }
+
+    try step.make(main_progress_node);
+}
+
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
     /// Copied from `std.Build.LazyPath.getPath2` and massaged a bit.
@@ -361,7 +373,17 @@ const copied_from_zig = struct {
         switch (path) {
             .path => |p| return builder.pathFromRoot(p),
             .cwd_relative => |p| return pathFromCwd(builder, p),
-            .generated => |gen| return builder.pathFromRoot(gen.path orelse return null),
+            .generated => |gen| {
+                if (gen.path) |gen_path|
+                    return builder.pathFromRoot(gen_path)
+                else {
+                    reify(gen.step) catch return null;
+                    if (gen.path) |gen_path|
+                        return builder.pathFromRoot(gen_path)
+                    else
+                        return null;
+                }
+            },
             .dependency => |dep| return dep.dependency.builder.pathJoin(&[_][]const u8{
                 dep.dependency.builder.build_root.path.?,
                 dep.sub_path,
