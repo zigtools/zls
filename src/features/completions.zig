@@ -843,7 +843,7 @@ fn completeFileSystemStringLiteral(
         if (!std.fs.path.isAbsolute(path)) continue;
         const dir_path = if (std.fs.path.isAbsolute(completing)) path else try std.fs.path.join(arena, &.{ path, completing });
 
-        var iterable_dir = std.fs.openIterableDirAbsolute(dir_path, .{}) catch continue;
+        var iterable_dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
         defer iterable_dir.close();
         var it = iterable_dir.iterateAssumeFirstIteration();
 
