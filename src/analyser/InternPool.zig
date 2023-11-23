@@ -61,7 +61,7 @@ pub const Key = union(enum) {
     unknown_value: UnknownValue,
     // error union
 
-    pub const Pointer = packed struct {
+    pub const Pointer = struct {
         elem_type: Index,
         sentinel: Index = .none,
         flags: Flags,
@@ -201,14 +201,194 @@ pub const Key = union(enum) {
         limbs: []const std.math.big.Limb,
     };
 
-    pub fn eql(a: Key, b: Key) bool {
-        return deepEql(a, b);
+    pub fn hash32(key: Key) u32 {
+        return @truncate(key.hash64());
     }
 
-    pub fn hash(a: Key) u32 {
+    pub fn hash64(key: Key) u64 {
         var hasher = std.hash.Wyhash.init(0);
-        deepHash(&hasher, a);
-        return @truncate(hasher.final());
+        key.hashWithHasher(&hasher);
+        return hasher.final();
+    }
+
+    pub fn hashWithHasher(key: Key, hasher: anytype) void {
+        std.hash.autoHash(hasher, std.meta.activeTag(key));
+        switch (key) {
+            inline .simple_type,
+            .simple_value,
+            .pointer_type,
+            .array_type,
+            .struct_type,
+            .optional_type,
+            .error_union_type,
+            .enum_type,
+            .union_type,
+            .vector_type,
+            .anyframe_type,
+            // .int_u64_value,
+            // .int_i64_value,
+            .optional_value,
+            .slice,
+            .union_value,
+            .error_value,
+            .null_value,
+            .undefined_value,
+            .unknown_value,
+            => |*data| {
+                hasher.update(std.mem.asBytes(data));
+            },
+
+            .int_type => |int_type| {
+                std.hash.autoHash(hasher, int_type.signedness);
+                std.hash.autoHash(hasher, int_type.bits);
+            },
+
+            .int_u64_value => |int_u64_value| {
+                std.hash.autoHash(hasher, int_u64_value.ty);
+                std.hash.autoHash(hasher, int_u64_value.int);
+            },
+            .int_i64_value => |int_i64_value| {
+                std.hash.autoHash(hasher, int_i64_value.ty);
+                std.hash.autoHash(hasher, int_i64_value.int);
+            },
+            .float_16_value => |float| std.hash.autoHash(hasher, @as(u16, @bitCast(float))),
+            .float_32_value => |float| std.hash.autoHash(hasher, @as(u32, @bitCast(float))),
+            .float_64_value => |float| std.hash.autoHash(hasher, @as(u64, @bitCast(float))),
+            .float_80_value => |float| std.hash.autoHash(hasher, @as(u80, @bitCast(float))),
+            .float_128_value, .float_comptime_value => |float| std.hash.autoHash(hasher, @as(u128, @bitCast(float))),
+
+            .error_set_type => |error_set_type| {
+                std.hash.autoHash(hasher, error_set_type.owner_decl);
+                std.hash.autoHashStrat(hasher, error_set_type.names, .Deep);
+            },
+            .function_type => |function_type| {
+                std.hash.autoHashStrat(hasher, function_type, .Deep);
+            },
+            .tuple_type => |tuple_type| {
+                std.hash.autoHashStrat(hasher, tuple_type.types, .Deep);
+                std.hash.autoHashStrat(hasher, tuple_type.values, .Deep);
+            },
+            .int_big_value => |int_big_value| {
+                std.hash.autoHash(hasher, int_big_value.ty);
+                std.hash.autoHashStrat(hasher, int_big_value.int, .Deep);
+            },
+            .aggregate => |aggregate| {
+                std.hash.autoHash(hasher, aggregate.ty);
+                std.hash.autoHashStrat(hasher, aggregate.values, .Deep);
+            },
+        }
+    }
+
+    pub fn eql(a: Key, b: Key) bool {
+        const a_tag = std.meta.activeTag(a);
+        const b_tag = std.meta.activeTag(b);
+        if (a_tag != b_tag) return false;
+
+        switch (a) {
+            inline .simple_type,
+            .simple_value,
+            .int_type,
+            .pointer_type,
+            .array_type,
+            .struct_type,
+            .optional_type,
+            .error_union_type,
+            .enum_type,
+            .union_type,
+            .vector_type,
+            .anyframe_type,
+            .int_u64_value,
+            .int_i64_value,
+            .optional_value,
+            .slice,
+            .union_value,
+            .error_value,
+            .null_value,
+            .undefined_value,
+            .unknown_value,
+            => |a_info, t| {
+                return std.meta.eql(a_info, @field(b, @tagName(t)));
+            },
+
+            inline .float_16_value,
+            .float_32_value,
+            .float_64_value,
+            .float_80_value,
+            .float_128_value,
+            .float_comptime_value,
+            => |a_data, t| {
+                const b_data = @field(b, @tagName(t));
+
+                const Int = std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(a_data)));
+                return @as(Int, @bitCast(a_data)) == @as(Int, @bitCast(b_data));
+            },
+
+            .error_set_type => |a_info| {
+                const b_info = b.error_set_type;
+
+                if (a_info.owner_decl != b_info.owner_decl) return false;
+
+                if (a_info.names.len != b_info.names.len) return false;
+                for (a_info.names, b_info.names) |a_name, b_name| {
+                    if (a_name != b_name) return false;
+                }
+
+                return true;
+            },
+            .function_type => |a_info| {
+                const b_info = b.function_type;
+
+                if (a_info.return_type != b_info.return_type) return false;
+                if (a_info.flags.alignment != b_info.flags.alignment) return false;
+                if (a_info.flags.calling_convention != b_info.flags.calling_convention) return false;
+                if (a_info.flags.is_generic != b_info.flags.is_generic) return false;
+                if (a_info.flags.is_var_args != b_info.flags.is_var_args) return false;
+
+                if (!a_info.args_is_comptime.eql(b_info.args_is_comptime)) return false;
+                if (!a_info.args_is_generic.eql(b_info.args_is_generic)) return false;
+                if (!a_info.args_is_noalias.eql(b_info.args_is_noalias)) return false;
+
+                if (a_info.args.len != b_info.args.len) return false;
+                for (a_info.args, b_info.args) |a_arg, b_arg| {
+                    if (a_arg != b_arg) return false;
+                }
+
+                return true;
+            },
+            .tuple_type => |a_info| {
+                const b_info = b.tuple_type;
+
+                std.debug.assert(a_info.types.len == b_info.types.len);
+                if (a_info.types.len != b_info.types.len) return false;
+                if (a_info.values.len != b_info.values.len) return false;
+
+                for (a_info.types, a_info.values, b_info.types, b_info.values) |a_ty, a_val, b_ty, b_val| {
+                    if (a_ty != b_ty) return false;
+                    if (a_val != b_val) return false;
+                }
+                return true;
+            },
+            .int_big_value => |a_info| {
+                const b_info = b.int_big_value;
+
+                if (a_info.ty != b_info.ty) return false;
+                if (!a_info.int.eql(b_info.int)) return false;
+
+                return true;
+            },
+            .aggregate => |a_info| {
+                const b_info = b.aggregate;
+
+                if (a_info.ty != b_info.ty) return false;
+
+                if (a_info.values.len != b_info.values.len) return false;
+                for (a_info.values, b_info.values) |a_val, b_val| {
+                    if (a_val != b_val) return false;
+                }
+
+                return true;
+            },
+        }
     }
 
     pub fn tag(key: Key) Tag {
@@ -977,130 +1157,9 @@ const KeyAdapter = struct {
 
     pub fn hash(ctx: @This(), a: Key) u32 {
         _ = ctx;
-        return a.hash();
+        return a.hash32();
     }
 };
-
-fn deepEql(a: anytype, b: @TypeOf(a)) bool {
-    const T = @TypeOf(a);
-
-    switch (@typeInfo(T)) {
-        .Struct => |info| {
-            if (info.layout == .Packed and comptime std.meta.hasUniqueRepresentation(T)) {
-                return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
-            }
-            inline for (info.fields) |field_info| {
-                if (!deepEql(@field(a, field_info.name), @field(b, field_info.name))) return false;
-            }
-            return true;
-        },
-        .Union => |info| {
-            const UnionTag = info.tag_type.?;
-
-            const tag_a = std.meta.activeTag(a);
-            const tag_b = std.meta.activeTag(b);
-            if (tag_a != tag_b) return false;
-
-            inline for (info.fields) |field_info| {
-                if (@field(UnionTag, field_info.name) == tag_a) {
-                    return deepEql(@field(a, field_info.name), @field(b, field_info.name));
-                }
-            }
-            return false;
-        },
-        .Pointer => |info| switch (info.size) {
-            .One => return deepEql(a.*, b.*),
-            .Slice => {
-                if (a.len != b.len) return false;
-
-                var i: usize = 0;
-                while (i < a.len) : (i += 1) {
-                    if (!deepEql(a[i], b[i])) return false;
-                }
-                return true;
-            },
-            .Many,
-            .C,
-            => @compileError("Unable to equality compare pointer " ++ @typeName(T)),
-        },
-        .Float => {
-            const I = std.meta.Int(.unsigned, @bitSizeOf(T));
-            return @as(I, @bitCast(a)) == @as(I, @bitCast(b));
-        },
-        .Bool,
-        .Int,
-        .Enum,
-        => return a == b,
-        else => @compileError("Unable to equality compare type " ++ @typeName(T)),
-    }
-}
-
-fn deepHash(hasher: anytype, key: anytype) void {
-    const T = @TypeOf(key);
-
-    switch (@typeInfo(T)) {
-        .Int => {
-            if (comptime std.meta.hasUniqueRepresentation(T)) {
-                hasher.update(std.mem.asBytes(&key));
-            } else {
-                const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(T), 8) catch unreachable;
-                hasher.update(std.mem.asBytes(&key)[0..byte_size]);
-            }
-        },
-
-        .Bool => deepHash(hasher, @intFromBool(key)),
-        .Enum => deepHash(hasher, @intFromEnum(key)),
-        .Float => |info| deepHash(hasher, switch (info.bits) {
-            16 => @as(u16, @bitCast(key)),
-            32 => @as(u32, @bitCast(key)),
-            64 => @as(u64, @bitCast(key)),
-            80 => @as(u80, @bitCast(key)),
-            128 => @as(u128, @bitCast(key)),
-            else => unreachable,
-        }),
-
-        .Pointer => |info| switch (info.size) {
-            .One => {
-                deepHash(hasher, key.*);
-            },
-            .Slice => {
-                if (info.child == u8) {
-                    hasher.update(key);
-                } else {
-                    for (key) |item| {
-                        deepHash(hasher, item);
-                    }
-                }
-            },
-            .Many,
-            .C,
-            => @compileError("Unable to hash pointer " ++ @typeName(T)),
-        },
-        .Struct => |info| {
-            if (info.layout == .Packed and comptime std.meta.hasUniqueRepresentation(T)) {
-                hasher.update(std.mem.asBytes(&key));
-            } else {
-                inline for (info.fields) |field| {
-                    deepHash(hasher, @field(key, field.name));
-                }
-            }
-        },
-
-        .Union => |info| {
-            const TagType = info.tag_type.?;
-
-            const tag = std.meta.activeTag(key);
-            deepHash(hasher, tag);
-            inline for (info.fields) |field| {
-                if (@field(TagType, field.name) == tag) {
-                    deepHash(hasher, @field(key, field.name));
-                    break;
-                }
-            }
-        },
-        else => @compileError("Unable to hash type " ++ @typeName(T)),
-    }
-}
 
 // ---------------------------------------------
 //                    UTILITY
