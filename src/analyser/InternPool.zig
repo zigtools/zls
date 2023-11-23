@@ -114,10 +114,15 @@ pub const Key = union(enum) {
         /// zig only lets the first 32 arguments be `noalias`
         args_is_noalias: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
         return_type: Index,
-        alignment: u16 = 0,
-        calling_convention: std.builtin.CallingConvention = .Unspecified,
-        is_generic: bool = false,
-        is_var_args: bool = false,
+        flags: Flags = .{},
+
+        pub const Flags = packed struct(u32) {
+            calling_convention: std.builtin.CallingConvention = .Unspecified,
+            is_generic: bool = false,
+            is_var_args: bool = false,
+            _: u6 = 0,
+            alignment: u16 = 0,
+        };
     };
 
     pub const Tuple = struct {
@@ -716,8 +721,8 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Many, .is_const = true } } } },
         .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .noreturn_type } } },
         .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type } } },
-        .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .Naked } } },
-        .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .C } } },
+        .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .flags = .{ .calling_convention = .Naked } } } },
+        .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .flags = .{ .calling_convention = .C } } } },
         .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .flags = .{ .size = .One, .is_const = true } } } },
         .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .flags = .{ .size = .Slice, .is_const = true } } } },
         .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Slice, .is_const = true } } } },
@@ -2141,18 +2146,18 @@ fn coerceInMemoryAllowedFns(
     const dest_info = ip.indexToKey(dest_ty).function_type;
     const src_info = ip.indexToKey(src_ty).function_type;
 
-    if (dest_info.is_var_args != src_info.is_var_args) {
-        return InMemoryCoercionResult{ .fn_var_args = dest_info.is_var_args };
+    if (dest_info.flags.is_var_args != src_info.flags.is_var_args) {
+        return InMemoryCoercionResult{ .fn_var_args = dest_info.flags.is_var_args };
     }
 
-    if (dest_info.is_generic != src_info.is_generic) {
-        return InMemoryCoercionResult{ .fn_generic = dest_info.is_generic };
+    if (dest_info.flags.is_generic != src_info.flags.is_generic) {
+        return InMemoryCoercionResult{ .fn_generic = dest_info.flags.is_generic };
     }
 
-    if (dest_info.calling_convention != src_info.calling_convention) {
+    if (dest_info.flags.calling_convention != src_info.flags.calling_convention) {
         return InMemoryCoercionResult{ .fn_cc = .{
-            .actual = src_info.calling_convention,
-            .wanted = dest_info.calling_convention,
+            .actual = src_info.flags.calling_convention,
+            .wanted = dest_info.flags.calling_convention,
         } };
     }
 
@@ -3352,7 +3357,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
                 try ip.print(arg_ty, writer, options);
             }
 
-            if (function_info.is_var_args) {
+            if (function_info.flags.is_var_args) {
                 if (function_info.args.len != 0) {
                     try writer.writeAll(", ");
                 }
@@ -3360,11 +3365,11 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             }
             try writer.writeAll(") ");
 
-            if (function_info.alignment != 0) {
-                try writer.print("align({d}) ", .{function_info.alignment});
+            if (function_info.flags.alignment != 0) {
+                try writer.print("align({d}) ", .{function_info.flags.alignment});
             }
-            if (function_info.calling_convention != .Unspecified) {
-                try writer.print("callconv(.{s}) ", .{@tagName(function_info.calling_convention)});
+            if (function_info.flags.calling_convention != .Unspecified) {
+                try writer.print("callconv(.{s}) ", .{@tagName(function_info.flags.calling_convention)});
             }
 
             return function_info.return_type;
@@ -3929,14 +3934,18 @@ test "function type" {
     const @"fn(i32, ...) type" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{.i32_type},
         .return_type = .type_type,
-        .is_var_args = true,
+        .flags = .{
+            .is_var_args = true,
+        },
     } });
 
     const @"fn() align(4) callconv(.C) type" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{},
         .return_type = .type_type,
-        .alignment = 4,
-        .calling_convention = .C,
+        .flags = .{
+            .calling_convention = .C,
+            .alignment = 4,
+        },
     } });
 
     try expectFmt("fn(i32) bool", "{}", .{@"fn(i32) bool".fmt(&ip)});

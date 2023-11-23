@@ -1050,12 +1050,8 @@ pub fn interpret(
             // TODO: Resolve function type
 
             const function_type = try interpreter.ip.get(interpreter.allocator, Key{ .function_type = .{
-                .calling_convention = .Unspecified,
-                .alignment = 0,
-                .is_generic = false,
-                .is_var_args = false,
-                .return_type = Index.none,
                 .args = &.{},
+                .return_type = Index.none,
             } });
 
             // var it = func.iterate(&tree);
