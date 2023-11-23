@@ -595,7 +595,7 @@ pub fn interpret(
                     const field = struct_info.fields.values()[field_index];
 
                     const result = switch (interpreter.ip.indexToKey(val)) {
-                        .aggregate => |aggregate| aggregate.values[field_index],
+                        .aggregate => |aggregate| aggregate.values.at(@intCast(field_index), interpreter.ip),
                         .unknown_value => try interpreter.ip.get(interpreter.allocator, .{
                             .unknown_value = .{ .ty = field.ty },
                         }),
@@ -1050,7 +1050,7 @@ pub fn interpret(
             // TODO: Resolve function type
 
             const function_type = try interpreter.ip.get(interpreter.allocator, Key{ .function_type = .{
-                .args = &.{},
+                .args = Index.Slice.empty,
                 .return_type = Index.none,
             } });
 

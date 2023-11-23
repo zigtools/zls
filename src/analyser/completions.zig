@@ -36,8 +36,11 @@ pub fn dotCompletions(
 
                 switch (ip.indexToKey(val)) {
                     .error_set_type => |error_set_info| {
-                        for (error_set_info.names) |name| {
-                            try completions.append(arena, .{
+                        const names = try error_set_info.names.dupe(arena, ip);
+
+                        try completions.ensureUnusedCapacity(arena, names.len);
+                        for (names) |name| {
+                            completions.appendAssumeCapacity(.{
                                 .label = try std.fmt.allocPrint(arena, "{}", .{name.fmt(&ip.string_pool)}),
                                 .kind = .Constant,
                                 .detail = try std.fmt.allocPrint(arena, "error.{}", .{ip.fmtId(name)}),
@@ -142,8 +145,12 @@ pub fn dotCompletions(
             }
         },
         .tuple_type => |tuple_info| {
-            for (tuple_info.types, 0..) |tuple_ty, i| {
-                try completions.append(arena, .{
+            std.debug.assert(tuple_info.types.len == tuple_info.values.len);
+            const tuple_types = try tuple_info.types.dupe(arena, ip);
+
+            try completions.ensureUnusedCapacity(arena, tuple_info.types.len);
+            for (tuple_types, 0..) |tuple_ty, i| {
+                completions.appendAssumeCapacity(.{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
                     .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmt(ip) }),

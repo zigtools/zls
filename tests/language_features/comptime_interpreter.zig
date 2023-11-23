@@ -134,7 +134,7 @@ test "ComptimeInterpreter - variable lookup" {
     defer context.deinit();
 
     const result = try context.interpret(context.findVar("bar"));
-    try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }));
+    try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, context.ip));
 }
 
 test "ComptimeInterpreter - field access" {
@@ -260,7 +260,7 @@ test "ComptimeInterpreter - call comptime argument" {
     }});
     try std.testing.expect(result1.ty == .simple_type);
     try std.testing.expect(result1.ty.simple_type == .type);
-    try std.testing.expect(result1.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }));
+    try std.testing.expect(result1.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, context.ip));
 
     const result2 = try context.call(context.findFn("Foo"), &.{KV{
         .ty = .{ .simple_type = .bool },
@@ -268,7 +268,7 @@ test "ComptimeInterpreter - call comptime argument" {
     }});
     try std.testing.expect(result2.ty == .simple_type);
     try std.testing.expect(result2.ty.simple_type == .type);
-    try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }));
+    try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, context.ip));
 }
 
 test "ComptimeInterpreter - call inner function" {

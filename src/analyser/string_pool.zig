@@ -112,6 +112,7 @@ pub fn StringPool(comptime config: Config) type {
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage
         pub fn stringToSliceUnsafe(pool: *Pool, index: String) [:0]const u8 {
+            std.debug.assert(@intFromEnum(index) < pool.bytes.items.len);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
             const start = @intFromEnum(index);
             return std.mem.sliceTo(string_bytes + start, 0);
