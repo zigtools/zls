@@ -1285,10 +1285,10 @@ fn collectVarAccessContainerNodes(
     if (type_expr.isFunc()) {
         const fn_proto_node = type_expr.type.data.other;
         var buf: [1]Ast.Node.Index = undefined;
-        const full_fn_proto = symbol_decl.handle.tree.fullFnProto(&buf, fn_proto_node) orelse return;
+        const full_fn_proto = type_expr.handle.tree.fullFnProto(&buf, fn_proto_node) orelse return;
         if (dot_context.likely == .enum_literal) { // => we need f()'s return type
             if (full_fn_proto.ast.return_type == 0) return;
-            const node_type = try analyser.resolveTypeOfNode(.{ .node = full_fn_proto.ast.return_type, .handle = symbol_decl.handle }) orelse return;
+            const node_type = try analyser.resolveTypeOfNode(.{ .node = full_fn_proto.ast.return_type, .handle = type_expr.handle }) orelse return;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
         }
@@ -1296,7 +1296,7 @@ fn collectVarAccessContainerNodes(
             .func = fn_proto_node,
             .param_index = @intCast(dot_context.fn_arg_index),
         } };
-        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = symbol_decl.handle };
+        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = type_expr.handle };
         const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
         try types_with_handles.append(arena, param_type);
         return;
