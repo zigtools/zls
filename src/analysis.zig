@@ -2795,11 +2795,7 @@ pub const Declaration = union(enum) {
         identifier: Ast.TokenIndex,
         array_expr: Ast.Node.Index,
     },
-    assign_destructure: struct {
-        /// tag is .assign_destructure
-        node: Ast.Node.Index,
-        index: u32,
-    },
+    assign_destructure: AssignDestructure,
     switch_payload: Switch,
     label_decl: struct {
         label: Ast.TokenIndex,
@@ -2821,6 +2817,21 @@ pub const Declaration = union(enum) {
                 if (self.param_index == param_index) return param;
             }
             return null;
+        }
+    };
+
+    pub const AssignDestructure = struct {
+        /// tag is .assign_destructure
+        node: Ast.Node.Index,
+        index: u32,
+
+        pub fn getVarDeclNode(self: AssignDestructure, tree: Ast) Ast.Node.Index {
+            const data = tree.nodes.items(.data);
+            return tree.extra_data[data[self.node].lhs + 1 ..][self.index];
+        }
+
+        pub fn getFullVarDecl(self: AssignDestructure, tree: Ast) Ast.full.VarDecl {
+            return tree.fullVarDecl(self.getVarDeclNode(tree)).?;
         }
     };
 
@@ -2870,12 +2881,7 @@ pub const Declaration = union(enum) {
             .array_payload => |ap| ap.identifier,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
-            .assign_destructure => |payload| {
-                const lhs_count = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs];
-                const lhs_exprs = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs + 1 ..][0..lhs_count];
-                const expr = lhs_exprs[payload.index];
-                return getDeclNameToken(tree, expr).?;
-            },
+            .assign_destructure => |payload| getDeclNameToken(tree, payload.getVarDeclNode(tree)).?,
             .switch_payload => |payload| {
                 const case = payload.getCase(tree);
                 const payload_token = case.payload_token.?;
