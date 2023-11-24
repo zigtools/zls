@@ -63,10 +63,16 @@ fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
+    var ctx = try Context.init();
+    defer ctx.deinit();
+
+    const test_uri = try ctx.addDocument(phr.new_source);
+
     var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
+    try error_builder.addFile(test_uri, phr.new_source);
     try error_builder.addFile("old_source", source);
     try error_builder.addFile("new_source", phr.new_source);
 
@@ -117,12 +123,6 @@ fn testDefinition(source: []const u8) !void {
         std.debug.print("must specify at least one sub-test with <decl>, <def> or <tdef>\n", .{});
         return error.NoChecksSpecified;
     }
-
-    var ctx = try Context.init();
-    defer ctx.deinit();
-
-    const test_uri = try ctx.addDocument(phr.new_source);
-    try error_builder.addFile(test_uri, phr.new_source);
 
     const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 

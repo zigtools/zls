@@ -1390,7 +1390,7 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
     })) orelse return null;
     return switch (response) {
         .array_of_DefinitionLink => |adl| .{ .array_of_DeclarationLink = adl },
-        .Definition => |def| .{ .Declaration = .{ .array_of_Location = def.array_of_Location } },
+        .Definition => |def| .{ .Declaration = .{ .Location = def.Location } },
     };
 }
 
