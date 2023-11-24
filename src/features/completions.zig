@@ -1283,10 +1283,10 @@ fn collectVarAccessContainerNodes(
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
     const type_expr = try symbol_decl.resolveType(analyser) orelse return;
     if (type_expr.isFunc()) {
-        const fn_proto_node = type_expr.type.data.other;
-        var buf: [1]Ast.Node.Index = undefined;
-        const full_fn_proto = type_expr.handle.tree.fullFnProto(&buf, fn_proto_node) orelse return;
+        const fn_proto_node = type_expr.type.data.other; // this assumes that function types can only be Ast nodes
         if (dot_context.likely == .enum_literal) { // => we need f()'s return type
+            var buf: [1]Ast.Node.Index = undefined;
+            const full_fn_proto = type_expr.handle.tree.fullFnProto(&buf, fn_proto_node).?;
             if (full_fn_proto.ast.return_type == 0) return;
             const node_type = try analyser.resolveTypeOfNode(.{ .node = full_fn_proto.ast.return_type, .handle = type_expr.handle }) orelse return;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
@@ -1363,8 +1363,9 @@ fn collectFieldAccessContainerNodes(
             if (try analyser.resolveOptionalChildType(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
+            const fn_proto_node = node_type.type.data.other; // this assumes that function types can only be Ast nodes
             var buf: [1]Ast.Node.Index = undefined;
-            const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, node_type.type.data.other) orelse continue;
+            const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, fn_proto_node).?;
             var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
             var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
             // don't have the luxury of referencing an `Ast.full.Call`
@@ -1407,7 +1408,7 @@ fn collectEnumLiteralContainerNodes(
 ) error{OutOfMemory}!void {
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);
-    var el_dot_context = getStructInitContext(handle.tree, dot_index) orelse return;
+    const el_dot_context = getStructInitContext(handle.tree, dot_index) orelse return;
     const containers = try collectContainerNodes(
         analyser,
         arena,
