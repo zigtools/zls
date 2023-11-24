@@ -31,11 +31,24 @@ fn gotoDefinitionSymbol(
         .declaration => try decl_handle.definitionToken(analyser, false),
         .definition => try decl_handle.definitionToken(analyser, true),
         .type_definition => blk: {
-            const resolved_type = try decl_handle.resolveType(analyser) orelse
+            // we should actually resolve the definition but declaration is can be more reliably implemented.
+            const type_declaration = try decl_handle.typeDeclarationNode() orelse {
+                // just resolve the type and guess
+                if (try decl_handle.resolveType(analyser)) |resolved_type| {
+                    if (resolved_type.typeDefinitionToken()) |token_handle| {
+                        break :blk token_handle;
+                    }
+                }
                 return null;
+            };
+            const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
 
-            break :blk resolved_type.typeDefinitionToken() orelse
-                return null;
+            return types.DefinitionLink{
+                .originSelectionRange = name_range,
+                .targetUri = type_declaration.handle.uri,
+                .targetRange = target_range,
+                .targetSelectionRange = target_range,
+            };
         },
     };
     const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);

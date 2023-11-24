@@ -2924,6 +2924,52 @@ pub const DeclWithHandle = struct {
         return .{ .token = self.nameToken(), .handle = self.handle };
     }
 
+    pub fn typeDeclarationNode(self: DeclWithHandle) error{OutOfMemory}!?NodeWithHandle {
+        const tree = self.handle.tree;
+        switch (self.decl) {
+            .ast_node => |node| switch (tree.nodes.items(.tag)[node]) {
+                .global_var_decl,
+                .local_var_decl,
+                .simple_var_decl,
+                .aligned_var_decl,
+                => {
+                    const var_decl = tree.fullVarDecl(node).?;
+                    if (var_decl.ast.type_node == 0) return null;
+                    return .{ .node = var_decl.ast.type_node, .handle = self.handle };
+                },
+                .container_field_init,
+                .container_field_align,
+                .container_field,
+                => {
+                    const container_field = tree.fullContainerField(node).?;
+                    if (container_field.ast.type_expr == 0) return null;
+                    return .{ .node = container_field.ast.type_expr, .handle = self.handle };
+                },
+                else => return null,
+            },
+            .assign_destructure => |payload| {
+                const var_decl = payload.getFullVarDecl(tree);
+                if (var_decl.ast.type_node == 0) return null;
+                return .{ .node = var_decl.ast.type_node, .handle = self.handle };
+            },
+            .param_payload => |payload| {
+                const param = payload.get(tree).?;
+                if (param.type_expr == 0) return null;
+                return .{ .node = param.type_expr, .handle = self.handle };
+            },
+            .pointer_payload,
+            .error_union_payload,
+            .error_union_error,
+            .array_payload,
+            .switch_payload,
+            => return null, // the payloads can't have a type specifier
+
+            .label_decl,
+            .error_token,
+            => return null,
+        }
+    }
+
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         const tree = self.handle.tree;
         return switch (self.decl) {
