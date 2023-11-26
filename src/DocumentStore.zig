@@ -164,7 +164,7 @@ pub const Handle = struct {
     /// private field
     impl: struct {
         /// @bitCast from/to `Status`
-        status: std.atomic.Atomic(u32) = std.atomic.Atomic(u32).init(@bitCast(Status{})),
+        status: std.atomic.Value(u32) = std.atomic.Value(u32).init(@bitCast(Status{})),
         /// TODO can we avoid storing one allocator per Handle?
         allocator: std.mem.Allocator,
 

@@ -133,9 +133,9 @@ pub fn BinnedAllocator(comptime config: Config) type {
 
         const Counter = if (config.thread_safe)
             struct {
-                count: std.atomic.Atomic(usize),
+                count: std.atomic.Value(usize),
                 fn init() @This() {
-                    return .{ .count = std.atomic.Atomic(usize).init(0) };
+                    return .{ .count = std.atomic.Value(usize).init(0) };
                 }
                 fn load(self: *const @This()) usize {
                     return self.count.load(.Acquire);

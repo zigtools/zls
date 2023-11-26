@@ -1703,7 +1703,7 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
 
     switch (@typeInfo(T)) {
         .Struct => |info| {
-            if (info.layout == .Packed and comptime std.meta.trait.hasUniqueRepresentation(T)) {
+            if (info.layout == .Packed and comptime std.meta.hasUniqueRepresentation(T)) {
                 return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
             }
             inline for (info.fields) |field_info| {
@@ -1757,7 +1757,7 @@ fn deepHash(hasher: anytype, key: anytype) void {
 
     switch (@typeInfo(T)) {
         .Int => {
-            if (comptime std.meta.trait.hasUniqueRepresentation(Tuple)) {
+            if (comptime std.meta.hasUniqueRepresentation(Tuple)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
                 const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(T), 8) catch unreachable;
@@ -1794,7 +1794,7 @@ fn deepHash(hasher: anytype, key: anytype) void {
             => @compileError("Unable to hash pointer " ++ @typeName(T)),
         },
         .Struct => |info| {
-            if (info.layout == .Packed and comptime std.meta.trait.hasUniqueRepresentation(T)) {
+            if (info.layout == .Packed and comptime std.meta.hasUniqueRepresentation(T)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
                 inline for (info.fields) |field| {
