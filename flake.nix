@@ -24,29 +24,14 @@
     flake-utils.lib.eachSystem systems (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}.master;
       in
       rec {
-        formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
+        formatter = pkgs.nixpkgs-fmt;
         packages.default = packages.zls;
-        packages.zls = pkgs.stdenvNoCC.mkDerivation {
-          name = "zls";
-          version = "master";
-          src = gitignoreSource ./.;
-          nativeBuildInputs = [ zig ];
-          dontConfigure = true;
-          dontInstall = true;
-          doCheck = true;
+        packages.zls = pkgs.callPackage ./zls.nix {
+          inherit (gitignore.lib) gitignoreSource;
           langref = inputs.langref;
-          buildPhase = ''
-            mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { }} .cache/p
-            zig build install --cache-dir $(pwd)/zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
-          '';
-          checkPhase = ''
-            zig build test --cache-dir $(pwd)/zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline
-          '';
+          zig = zig-overlay.packages.${system}.master;
         };
-      }
-    );
+      });
 }
