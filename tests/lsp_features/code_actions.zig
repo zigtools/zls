@@ -146,11 +146,16 @@ test "code actions - correct unnecessary uses of var" {
     );
 }
 
-/// does not check for correct formatting
 fn testAutofix(before: []const u8, after: []const u8) !void {
+    try testAutofixOptions(before, after, true); // diagnostics come from our AstGen fork
+    try testAutofixOptions(before, after, false); // diagnostics come from calling zig ast-check
+}
+
+fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
     ctx.server.config.enable_ast_check_diagnostics = true;
+    ctx.server.config.prefer_ast_check_as_child_process = !want_zir;
 
     const uri = try ctx.addDocument(before);
     const handle = ctx.server.document_store.getHandle(uri).?;
