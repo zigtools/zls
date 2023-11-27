@@ -334,6 +334,33 @@ test "semantic tokens - field access" {
     });
 }
 
+test "semantic tokens - field access on unknown" {
+    try testSemanticTokens(
+        \\const alpha = Unknown.foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Unknown", .variable, .{} },
+        .{ "foo", .variable, .{} },
+    });
+    try testSemanticTokens(
+        \\const S = struct {};
+        \\const alpha = S.unknown;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "unknown", .variable, .{} },
+    });
+}
+
 test "semantic tokens - alias" {
     try testSemanticTokens(
         \\extern fn foo() u32;
@@ -1464,6 +1491,7 @@ test "semantic tokens - weird code" {
         \\0"" (}; @compileErrors.a
     , &.{
         .{ "0", .number, .{} },
+        .{ "a", .variable, .{} },
     });
     try testSemanticTokens(
         \\foo = asm (fn bar())
