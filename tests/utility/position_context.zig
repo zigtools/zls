@@ -64,31 +64,30 @@ test "position context - var access" {
         "Str",
     );
 
-    // TODO fix failing tests
-    // try testContext(
-    //     \\    fn foo() <cursor>Err!void {
-    // ,
-    //     .var_access,
-    //     "E",
-    // );
-    // try testContext(
-    //     \\    fn foo() Er<cursor>r!void {
-    // ,
-    //     .var_access,
-    //     "Err",
-    // );
-    // try testContext(
-    //     \\    fn foo() Err<cursor>!void {
-    // ,
-    //     .var_access,
-    //     "Err",
-    // );
-    // try testContext(
-    //     \\    fn foo() Err!<cursor>void {
-    // ,
-    //     .var_access,
-    //     "v",
-    // );
+    try testContext(
+        \\    fn foo() <cursor>Err!void {
+    ,
+        .var_access,
+        "E",
+    );
+    try testContext(
+        \\    fn foo() Er<cursor>r!void {
+    ,
+        .var_access,
+        "Err",
+    );
+    try testContext(
+        \\    fn foo() Err<cursor>!void {
+    ,
+        .var_access,
+        "Err",
+    );
+    try testContext(
+        \\    fn foo() Err!<cursor>void {
+    ,
+        .var_access,
+        "v",
+    );
 
     try testContext(
         \\if (<cursor>bar.field == foo) {
@@ -239,25 +238,24 @@ test "position context - field access" {
         "Foo.bar",
     );
 
-    // TODO fix failing tests
-    // try testContext(
-    //     \\fn foo() Foo.<cursor>bar!void {
-    // ,
-    //     .field_access,
-    //     "Foo.b",
-    // );
-    // try testContext(
-    //     \\fn foo() Foo.ba<cursor>r!void {
-    // ,
-    //     .field_access,
-    //     "Foo.bar",
-    // );
-    // try testContext(
-    //     \\fn foo() Foo.bar<cursor>!void {
-    // ,
-    //     .field_access,
-    //     "Foo.bar",
-    // );
+    try testContext(
+        \\fn foo() Foo.<cursor>bar!void {
+    ,
+        .field_access,
+        "Foo.b",
+    );
+    try testContext(
+        \\fn foo() Foo.ba<cursor>r!void {
+    ,
+        .field_access,
+        "Foo.bar",
+    );
+    try testContext(
+        \\fn foo() Foo.bar<cursor>!void {
+    ,
+        .field_access,
+        "Foo.bar",
+    );
 }
 
 test "position context - builtin" {

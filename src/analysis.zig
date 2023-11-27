@@ -2671,7 +2671,7 @@ pub fn getPositionContext(
                     curr_ctx.ctx = .{ .string_literal = tok.loc };
                 },
                 .identifier => switch (curr_ctx.ctx) {
-                    .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
+                    .empty, .pre_label, .var_access => curr_ctx.ctx = .{ .var_access = tok.loc },
                     .label => |filled| if (!filled) {
                         curr_ctx.ctx = .{ .label = true };
                     } else {
