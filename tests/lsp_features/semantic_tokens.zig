@@ -1467,21 +1467,39 @@ test "semantic tokens - assembly" {
         .{ "arg1", .parameter, .{ .declaration = true } },
         .{ "usize", .type, .{} },
         .{ "usize", .type, .{} },
+
         .{ "return", .keyword, .{} },
         .{ "asm", .keyword, .{} },
         .{ "volatile", .keyword, .{} },
         .{ "\"syscall\"", .string, .{} },
+
         .{ "ret", .variable, .{} },
         .{ "\"={rax}\"", .string, .{} },
         .{ "usize", .type, .{} },
+
         .{ "number", .variable, .{} },
         .{ "\"{rax}\"", .string, .{} },
         .{ "number", .parameter, .{} },
+
         .{ "arg1", .variable, .{} },
         .{ "\"{rdi}\"", .string, .{} },
         .{ "arg1", .parameter, .{} },
+
         .{ "\"rcx\"", .string, .{} },
         .{ "\"r11\"", .string, .{} },
+    });
+    try testSemanticTokens(
+        \\const alpha = asm volatile ("foo" ::: "a", "b",);
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+
+        .{ "asm", .keyword, .{} },
+        .{ "volatile", .keyword, .{} },
+        .{ "\"foo\"", .string, .{} },
+        .{ "\"a\"", .string, .{} },
+        .{ "\"b\"", .string, .{} },
     });
 }
 
