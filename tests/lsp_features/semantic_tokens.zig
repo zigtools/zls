@@ -783,6 +783,7 @@ test "semantic tokens - struct" {
         \\const T = u32;
         \\const Foo = struct {
         \\    u32,
+        \\    []const u8 align(8) = undefined,
         \\    T align(4),
         \\};
     , &.{
@@ -794,7 +795,16 @@ test "semantic tokens - struct" {
         .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
+
         .{ "u32", .type, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "u8", .type, .{} },
+        .{ "align", .keyword, .{} },
+        .{ "8", .number, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+
         .{ "T", .type, .{} },
         .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },

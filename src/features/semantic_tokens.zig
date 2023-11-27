@@ -978,6 +978,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
         else
             container_field.ast.main_token + 1;
 
+        std.debug.assert(token_tags[eq_tok] == .equal);
         try writeToken(builder, eq_tok, .operator);
         try writeNodeTokens(builder, container_field.ast.value_expr);
     }
