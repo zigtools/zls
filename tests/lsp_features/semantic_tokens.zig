@@ -432,6 +432,18 @@ test "semantic tokens - catch" {
     });
 }
 
+test "semantic tokens - try" {
+    try testSemanticTokens(
+        \\var alpha = try undefined;
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "try", .keyword, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+    });
+}
+
 test "semantic tokens - slicing" {
     try testSemanticTokens(
         \\var alpha = a[0..1];
