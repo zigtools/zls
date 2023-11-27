@@ -11,24 +11,139 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "definition - smoke" {
+test "goto - global variable" {
     try testDefinition(
-        \\fn main() void { f<>oo(); }
-        \\fn <def>foo</def>() void {}
+        \\const <def><decl>foo</decl></def> = 5;
+        \\comptime {
+        \\    _ = <>foo;
+        \\}
+    );
+    try testDefinition(
+        \\const <def><decl>foo</decl></def>: <tdef>u32</tdef> = 5;
+        \\comptime {
+        \\    _ = <>foo;
+        \\}
+    );
+    try testDefinition(
+        \\const <def><decl><>foo</decl></def> = 5;
+    );
+    try testDefinition(
+        \\const <def><decl><>foo</decl></def>: <tdef>u32</tdef> = 5;
     );
 }
 
-test "definition - cursor is at the end of an identifier" {
+test "goto - local variable" {
     try testDefinition(
-        \\fn main() void { foo<>(); }
-        \\fn <def>foo</def>() void {}
+        \\comptime {
+        \\    var <def><decl>foo</decl></def> = 5;
+        \\    {
+        \\        var bar = 5;
+        \\        _ = <>foo;
+        \\        _ = bar;
+        \\    }
+        \\}
+    );
+    try testDefinition(
+        \\comptime {
+        \\    var foo = 5;
+        \\    {
+        \\        var <def><decl>bar</decl></def> = 5;
+        \\        _ = foo;
+        \\        _ = <>bar;
+        \\    }
+        \\}
     );
 }
 
-test "definition - cursor is at the start of an identifier" {
+test "goto - assign destructure" {
     try testDefinition(
-        \\fn main() void { <>foo(); }
-        \\fn <def>foo</def>() void {}
+        \\comptime {
+        \\    const foo, const <def><decl>bar</decl></def>: <tdef>u32</tdef> = .{ 1, 2 };
+        \\    _ = foo;
+        \\    _ = <>bar;
+        \\}
+    );
+}
+
+test "goto - function parameter" {
+    try testDefinition(
+        \\fn f(<def><decl>foo</decl></def>: <tdef>u32</tdef>) void {
+        \\    _ = <>foo;
+        \\}
+    );
+}
+
+test "goto - field access" {
+    try testDefinition(
+        \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
+        \\var s: S = undefined;
+        \\const foo = s.<>alpha;
+    );
+}
+
+test "goto - struct init" {
+    try testDefinition(
+        \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
+        \\var s = S{ .<>alpha = 5};
+    );
+}
+
+test "goto - capture" {
+    try testDefinition(
+        \\test {
+        \\    const S = <tdef>struct</tdef> {};
+        \\    var maybe: ?S = 5;
+        \\    if (maybe) |<>some| {}
+        \\}
+    );
+    if (true) return error.SkipZigTest; // TODO
+    // primitives like `u32` are represented as a InternPool.Index so they
+    // don't have a Ast.Node.Index that gives them a source location
+    try testDefinition(
+        \\test {
+        \\    var maybe: <tdef>?u32</tdef> = 5;
+        \\    if (maybe) |<>some| {}
+        \\}
+    );
+}
+
+test "goto - label" {
+    try testDefinition(
+        \\comptime {
+        \\    <def><decl>blk</decl></def>: {
+        \\        break :<>blk {};
+        \\    }
+        \\}
+    );
+}
+
+test "goto - different cursor position" {
+    try testDefinition(
+        \\const <def><decl>foo</decl></def> = 5;
+        \\comptime {
+        \\    _ = <>foo;
+        \\}
+    );
+    try testDefinition(
+        \\const <def><decl>foo</decl></def> = 5;
+        \\comptime {
+        \\    _ = f<>oo;
+        \\}
+    );
+    try testDefinition(
+        \\const <def><decl>foo</decl></def> = 5;
+        \\comptime {
+        \\    _ = foo<>;
+        \\}
+    );
+}
+
+test "goto - alias" {
+    try testDefinition(
+        \\const <def>Foo</def> = u32;
+        \\const <decl>Bar</decl> = Foo;
+        \\fn baz(_: <>Bar) void {
+        \\}
     );
 }
 
