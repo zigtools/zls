@@ -174,10 +174,13 @@ const Builder = struct {
         const delta = offsets.indexToPosition(delta_text, delta_text.len, self.encoding);
         const length = offsets.locLength(source, loc, self.encoding);
 
+        // assert that the `@intCast(length)` below is safe
+        comptime std.debug.assert(DocumentStore.max_document_size == std.math.maxInt(u32));
+
         try self.token_buffer.appendSlice(self.arena, &.{
-            @as(u32, @truncate(delta.line)),
-            @as(u32, @truncate(delta.character)),
-            @as(u32, @truncate(length)),
+            delta.line,
+            delta.character,
+            @intCast(length),
             @intFromEnum(token_type),
             @as(u16, @bitCast(token_modifiers)),
         });
