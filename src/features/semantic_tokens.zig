@@ -264,13 +264,14 @@ fn colorIdentifierBasedOnType(
 }
 
 fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+    if (node == 0) return;
+
     const handle = builder.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-    if (node == 0 or node >= node_data.len) return;
 
     const tag = node_tags[node];
     const main_token = main_tokens[node];
