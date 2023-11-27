@@ -364,10 +364,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, decl.layout_token, .keyword);
             try writeToken(builder, decl.ast.main_token, .keyword);
             if (decl.ast.enum_token) |enum_token| {
-                if (decl.ast.arg != 0)
-                    try writeNodeTokens(builder, decl.ast.arg)
-                else
-                    try writeToken(builder, enum_token, .keyword);
+                try writeToken(builder, enum_token, .keyword);
+                if (decl.ast.arg != 0) {
+                    try writeNodeTokens(builder, decl.ast.arg);
+                }
             } else try writeNodeTokens(builder, decl.ast.arg);
 
             for (decl.ast.members) |child| {

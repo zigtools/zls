@@ -821,6 +821,16 @@ test "semantic tokens - union" {
         .{ "enum", .keyword, .{} },
     });
     try testSemanticTokens(
+        \\const Foo = union(enum(u8)) {};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "union", .keyword, .{} },
+        .{ "enum", .keyword, .{} },
+        .{ "u8", .type, .{} },
+    });
+    try testSemanticTokens(
         \\const Foo = union(E) {
         \\    alpha,
         \\};
