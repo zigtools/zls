@@ -4,17 +4,17 @@
 
 linkFarm "zig-packages" [
   {
+    name = "122002462f37b67a54fa1ab712d870d4637dae0d94437c0077b148e1fb75616c573d";
+    path = fetchzip {
+      url = "https://github.com/ziglibs/known-folders/archive/8bb4bf761bab20ffed74ffac83c3a9eb4456f28d.tar.gz";
+      hash = "sha256-t5nZi7HmBy0tLBYphlyrPHTSr5HStobgdZbISi5hjno=";
+    };
+  }
+  {
     name = "122014b1776beda990cdc7bdbecc6960bdce9eb762d6dc7cc6664517f171becc17dd";
     path = fetchzip {
       url = "https://github.com/ziglibs/diffz/archive/86f5435f63961dcdba8b76e47b44e2381671fb09.tar.gz";
       hash = "sha256-JXQQfyzDwSQ7+H8rWTdb0GrN5Rgeo3kCIYmW5QiWX9w=";
-    };
-  }
-  {
-    name = "1220f9d9dd88b1352b1a2bde4a96f547a1591d66ad0a9d76854d0c2c7fa59eef2508";
-    path = fetchzip {
-      url = "https://github.com/ziglibs/known-folders/archive/855473062efac722624737f1adc56f9c0dd92017.tar.gz";
-      hash = "sha256-+W0Gx8l6Q9+9SK/968vunccNtRBZfCbOSjQnGB7H3os=";
     };
   }
 ]
