@@ -102,19 +102,33 @@ test "foldingRange - for/while" {
 test "foldingRange - switch" {
     try testFoldingRange(
         \\const foo = switch (5) {
-        \\  0 => {},
-        \\  1 => {}
+        \\    0 => {},
+        \\    1 => {}
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 24, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const foo = switch (5) {
-        \\  0 => {},
-        \\  1 => {},
+        \\    0 => {},
+        \\    1 => {},
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 24, .endLine = 3, .endCharacter = 0 },
+    });
+    try testFoldingRange(
+        \\const foo = switch (5) {
+        \\    0,
+        \\    1,
+        \\    2,
+        \\    3,
+        \\    4,
+        \\    => {},
+        \\    else => {},
+        \\};
+    , &.{
+        .{ .startLine = 1, .startCharacter = 4, .endLine = 5, .endCharacter = 6 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 8, .endCharacter = 0 },
     });
 }
 
@@ -282,5 +296,5 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
         return error.InvalidResponse;
     };
 
-    try std.testing.expectEqualDeep(expect, response);
+    try std.testing.expectEqualSlices(types.FoldingRange, expect, response);
 }

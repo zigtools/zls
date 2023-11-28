@@ -178,6 +178,24 @@ test "signature help - nested function call" {
     , "fn bar(c: bool) bool", 0);
 }
 
+test "signature help - builtin" {
+    try testSignatureHelp(
+        \\test {
+        \\    @panic(<cursor>)
+        \\}
+    , "@panic(message: []const u8) noreturn", 0);
+    try testSignatureHelp(
+        \\test {
+        \\    @as(?u32,<cursor>)
+        \\}
+    , "@as(comptime T: type, expression) T", 1);
+    try testSignatureHelp(
+        \\test {
+        \\    @as(?u32,@intCast(<cursor>))
+        \\}
+    , "@intCast(int: anytype) anytype", 0);
+}
+
 fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_active_parameter: ?u32) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });

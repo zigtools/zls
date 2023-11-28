@@ -334,6 +334,33 @@ test "semantic tokens - field access" {
     });
 }
 
+test "semantic tokens - field access on unknown" {
+    try testSemanticTokens(
+        \\const alpha = Unknown.foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Unknown", .variable, .{} },
+        .{ "foo", .variable, .{} },
+    });
+    try testSemanticTokens(
+        \\const S = struct {};
+        \\const alpha = S.unknown;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "unknown", .variable, .{} },
+    });
+}
+
 test "semantic tokens - alias" {
     try testSemanticTokens(
         \\extern fn foo() u32;
@@ -429,6 +456,18 @@ test "semantic tokens - catch" {
         .{ "catch", .keyword, .{} },
         .{ "err", .variable, .{ .declaration = true } },
         .{ "b", .variable, .{} },
+    });
+}
+
+test "semantic tokens - try" {
+    try testSemanticTokens(
+        \\var alpha = try undefined;
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "try", .keyword, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
     });
 }
 
@@ -783,6 +822,7 @@ test "semantic tokens - struct" {
         \\const T = u32;
         \\const Foo = struct {
         \\    u32,
+        \\    []const u8 align(8) = undefined,
         \\    T align(4),
         \\};
     , &.{
@@ -794,7 +834,16 @@ test "semantic tokens - struct" {
         .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
+
         .{ "u32", .type, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "u8", .type, .{} },
+        .{ "align", .keyword, .{} },
+        .{ "8", .number, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+
         .{ "T", .type, .{} },
         .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },
@@ -819,6 +868,16 @@ test "semantic tokens - union" {
         .{ "packed", .keyword, .{} },
         .{ "union", .keyword, .{} },
         .{ "enum", .keyword, .{} },
+    });
+    try testSemanticTokens(
+        \\const Foo = union(enum(u8)) {};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "union", .keyword, .{} },
+        .{ "enum", .keyword, .{} },
+        .{ "u8", .type, .{} },
     });
     try testSemanticTokens(
         \\const Foo = union(E) {
@@ -1408,21 +1467,39 @@ test "semantic tokens - assembly" {
         .{ "arg1", .parameter, .{ .declaration = true } },
         .{ "usize", .type, .{} },
         .{ "usize", .type, .{} },
+
         .{ "return", .keyword, .{} },
         .{ "asm", .keyword, .{} },
         .{ "volatile", .keyword, .{} },
         .{ "\"syscall\"", .string, .{} },
+
         .{ "ret", .variable, .{} },
         .{ "\"={rax}\"", .string, .{} },
         .{ "usize", .type, .{} },
+
         .{ "number", .variable, .{} },
         .{ "\"{rax}\"", .string, .{} },
         .{ "number", .parameter, .{} },
+
         .{ "arg1", .variable, .{} },
         .{ "\"{rdi}\"", .string, .{} },
         .{ "arg1", .parameter, .{} },
+
         .{ "\"rcx\"", .string, .{} },
         .{ "\"r11\"", .string, .{} },
+    });
+    try testSemanticTokens(
+        \\const alpha = asm volatile ("foo" ::: "a", "b",);
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+
+        .{ "asm", .keyword, .{} },
+        .{ "volatile", .keyword, .{} },
+        .{ "\"foo\"", .string, .{} },
+        .{ "\"a\"", .string, .{} },
+        .{ "\"b\"", .string, .{} },
     });
 }
 
@@ -1432,6 +1509,7 @@ test "semantic tokens - weird code" {
         \\0"" (}; @compileErrors.a
     , &.{
         .{ "0", .number, .{} },
+        .{ "a", .variable, .{} },
     });
     try testSemanticTokens(
         \\foo = asm (fn bar())

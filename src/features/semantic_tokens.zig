@@ -174,10 +174,13 @@ const Builder = struct {
         const delta = offsets.indexToPosition(delta_text, delta_text.len, self.encoding);
         const length = offsets.locLength(source, loc, self.encoding);
 
+        // assert that the `@intCast(length)` below is safe
+        comptime std.debug.assert(DocumentStore.max_document_size == std.math.maxInt(u32));
+
         try self.token_buffer.appendSlice(self.arena, &.{
-            @as(u32, @truncate(delta.line)),
-            @as(u32, @truncate(delta.character)),
-            @as(u32, @truncate(length)),
+            delta.line,
+            delta.character,
+            @intCast(length),
             @intFromEnum(token_type),
             @as(u16, @bitCast(token_modifiers)),
         });
@@ -264,13 +267,14 @@ fn colorIdentifierBasedOnType(
 }
 
 fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+    if (node == 0) return;
+
     const handle = builder.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-    if (node == 0 or node >= node_data.len) return;
 
     const tag = node_tags[node];
     const main_token = main_tokens[node];
@@ -364,10 +368,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, decl.layout_token, .keyword);
             try writeToken(builder, decl.ast.main_token, .keyword);
             if (decl.ast.enum_token) |enum_token| {
-                if (decl.ast.arg != 0)
-                    try writeNodeTokens(builder, decl.ast.arg)
-                else
-                    try writeToken(builder, enum_token, .keyword);
+                try writeToken(builder, enum_token, .keyword);
+                if (decl.ast.arg != 0) {
+                    try writeNodeTokens(builder, decl.ast.arg);
+                }
             } else try writeNodeTokens(builder, decl.ast.arg);
 
             for (decl.ast.members) |child| {
@@ -853,7 +857,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
-            const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle }) orelse return;
+            const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle }) orelse {
+                try writeTokenMod(builder, data.rhs, .variable, .{});
+                return;
+            };
             const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
             if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
                 switch (decl_type.decl) {
@@ -978,6 +985,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
         else
             container_field.ast.main_token + 1;
 
+        std.debug.assert(token_tags[eq_tok] == .equal);
         try writeToken(builder, eq_tok, .operator);
         try writeNodeTokens(builder, container_field.ast.value_expr);
     }

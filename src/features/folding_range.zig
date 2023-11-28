@@ -214,9 +214,15 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             => {
                 const switch_case = tree.fullSwitchCase(node).?.ast;
                 if (switch_case.values.len >= 4) {
-                    const first_value = tree.firstToken(switch_case.values[0]);
-                    const last_value = ast.lastToken(tree, switch_case.values[switch_case.values.len - 1]);
-                    try builder.add(null, first_value, last_value, .inclusive, .inclusive);
+                    const first_value = switch_case.values[0];
+                    const last_value = switch_case.values[switch_case.values.len - 1];
+
+                    const last_token = ast.lastToken(tree, last_value);
+                    const last_value_has_comma = last_token + 1 < tree.tokens.len and token_tags[last_token + 1] == .comma;
+
+                    const start_tok = tree.firstToken(first_value);
+                    const end_tok = last_token + @intFromBool(last_value_has_comma);
+                    try builder.add(null, start_tok, end_tok, .inclusive, .inclusive);
                 }
             },
 
