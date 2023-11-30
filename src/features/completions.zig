@@ -890,7 +890,7 @@ fn completeFileSystemStringLiteral(
                 }, {});
             }
         } else if (DocumentStore.isBuildFile(handle.uri)) blk: {
-            const build_file = store.getBuildFile(handle.uri).?;
+            const build_file = store.getBuildFile(handle.uri) orelse break :blk;
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
 
