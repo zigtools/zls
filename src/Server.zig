@@ -1240,6 +1240,9 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
+    // semantic tokens can be quite expensive to compute on large files
+    // and disabling callsite references can help with bringing the cost down.
+    analyser.collect_callsite_references = false;
 
     return try semantic_tokens.writeSemanticTokens(
         arena,
