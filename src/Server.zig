@@ -1219,6 +1219,13 @@ fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: typ
 fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: types.WillSaveTextDocumentParams) Error!?[]types.TextEdit {
     if (server.getAutofixMode() != .will_save_wait_until) return null;
 
+    switch (request.reason) {
+        .Manual => {},
+        .AfterDelay,
+        .FocusOut,
+        => return null,
+    }
+
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var text_edits = try server.autofix(arena, handle);
