@@ -551,7 +551,7 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         while (true) : (i -= 1) {
             if (i == 0) break :found underscore_position;
             switch (text[i]) {
-                ' ' => {},
+                ' ', '\t' => {},
                 '\n' => break :found i,
                 else => break :found underscore_position,
             }
