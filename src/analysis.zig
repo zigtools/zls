@@ -594,7 +594,7 @@ fn findReturnStatement(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Inde
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
-fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, fn_body: ?Ast.Node.Index) error{OutOfMemory}!?TypeWithHandle {
+pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, fn_body: ?Ast.Node.Index) error{OutOfMemory}!?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
@@ -666,7 +666,7 @@ pub fn resolveAddressOf(analyser: *Analyser, type_handle: TypeWithHandle) error{
     };
 }
 
-fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: ErrorUnionSide) error{OutOfMemory}!?TypeWithHandle {
+pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: ErrorUnionSide) error{OutOfMemory}!?TypeWithHandle {
     const rhs_node = switch (rhs.type.data) {
         .other => |n| n,
         .error_union => |t| return switch (side) {

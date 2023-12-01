@@ -1004,6 +1004,38 @@ test "completion - switch cases" {
         .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum() anyerror!SomeEnum {}
+        \\test {
+        \\    switch (try retEnum()) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\    pub fn retEnum() anyerror!SomeEnum {}
+        \\};
+        \\test {
+        \\    switch (try SomeEnum.retEnum()) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
 }
 
 test "completion - error set" {
@@ -1171,6 +1203,53 @@ test "completion - struct init" {
         .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?S" },
         .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(s: *S) void { s = .{.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(s: *S) void { s.* = .{.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() S {}
+        \\test { foo(){.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() anyerror!S {}
+        \\test { try foo(){.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const nmspc = struct {
+        \\    fn foo() anyerror!S {}
+        \\};
+        \\test { try nmspc.foo(){.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const nmspc = struct {
+        \\    fn foo() type {
+        \\        return struct {
+        \\            alpha: u32,
+        \\        };
+        \\    }
+        \\};
+        \\test { nmspc.foo(){.<cursor>} }
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
     // Aliases
     try testCompletion(

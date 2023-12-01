@@ -1040,6 +1040,7 @@ const EnumLiteralContext = struct {
     likely: Likely,
     identifier_token_index: Ast.TokenIndex = 0,
     fn_arg_index: usize = 0,
+    need_ret_type: bool = false,
 };
 
 fn getEnumLiteralContext(
@@ -1066,7 +1067,7 @@ fn getEnumLiteralContext(
             dot_context.identifier_token_index = token_index;
         },
         .l_brace, .comma, .l_paren => {
-            dot_context = getStructInitContext(tree, dot_token_index) orelse getSwitchContext(tree, dot_token_index) orelse return null;
+            dot_context = getSwitchOrStructInitContext(tree, dot_token_index) orelse return null;
         },
         else => return null,
     }
@@ -1076,7 +1077,7 @@ fn getEnumLiteralContext(
 /// Looks for an identifier that can be passed to `collectContainerNodes()`
 /// Returns the token index of the identifer
 /// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
-fn getStructInitContext(
+fn getSwitchOrStructInitContext(
     tree: Ast,
     dot_index: Ast.TokenIndex,
 ) ?EnumLiteralContext {
@@ -1095,6 +1096,7 @@ fn getStructInitContext(
     var likely: EnumLiteralContext.Likely = .struct_field;
 
     var fn_arg_index: usize = 0;
+    var need_ret_type: bool = false;
 
     // The following logic is weird because we assume at least one .l_brace and/or .l_paren
     // => a couple of helpful constants:
@@ -1140,7 +1142,38 @@ fn getStructInitContext(
                 break :find_identifier;
             },
             // We're fishing for a `f(some, other{}, .<cursor>enum)`
-            .r_paren => parens_depth += 1,
+            .r_paren => {
+                parens_depth += 1;
+                if (braces_depth == one_opening) { // The opening brace is preceded by a r_paren => evaluate
+                    need_ret_type = true;
+                    var token_index = upper_index - 1; // if `switch` we need the last token of the condition
+                    parens_depth = even;
+                    // Walk backwards counting parens until one_opening then check the preceding token's tag
+                    while (token_index > 0) : (token_index -= 1) {
+                        switch (token_tags[token_index]) {
+                            .r_paren => parens_depth += 1,
+                            .l_paren => {
+                                parens_depth -= 1;
+                                if (parens_depth == one_opening)
+                                    switch (token_tags[token_index - 1]) {
+                                        .keyword_switch => {
+                                            likely = .enum_literal;
+                                            upper_index -= 1; // eat the switch's .r_paren
+                                            break :find_identifier;
+                                        },
+                                        .identifier => {
+                                            upper_index = token_index - 1; // the fn name
+                                            break :find_identifier;
+                                        },
+                                        else => return null,
+                                    };
+                            },
+                            .semicolon => return null,
+                            else => {},
+                        }
+                    }
+                }
+            },
             .l_paren => parens_depth -= 1,
             .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
                 fn_arg_index += 1;
@@ -1167,58 +1200,7 @@ fn getStructInitContext(
         .likely = likely,
         .identifier_token_index = upper_index,
         .fn_arg_index = fn_arg_index,
-    };
-}
-
-/// Returns the (last) token index of nearest preceding `switch` condition
-fn getSwitchContext(
-    tree: Ast,
-    dot_index: Ast.TokenIndex,
-) ?EnumLiteralContext {
-    const token_tags = tree.tokens.items(.tag);
-    var token_index = dot_index;
-
-    // The following logic is weird because we assume at least one .l_brace
-    // => a couple of helpful constants:
-    const even = 1; // we haven't found an opening brace so the count is even
-    const one_opening = 0; // an unmatched opening brace makes the depth 0
-
-    // look for .r_paren followed by .l_brace, skipping matches at braces_depth 'even'+
-    var braces_depth: i32 = even;
-    find_r_paren_l_brace: while (token_index > 0) : (token_index -= 1) {
-        switch (token_tags[token_index]) {
-            .r_brace => braces_depth += 1,
-            .l_brace => {
-                braces_depth -= 1;
-                if (braces_depth < one_opening) return null;
-            },
-            .r_paren => {
-                if (braces_depth == one_opening and token_tags[token_index + 1] == .l_brace) break :find_r_paren_l_brace;
-            },
-            else => {},
-        }
-    }
-    // need at least `const name = switch(some_enum)` => 6 tokens min
-    if (token_index < 5) return null else token_index -= 1; // eat the `)`
-    const switch_condition_end_index = token_index;
-    // The following logic is just to make sure this is a switch and not a `for`
-    var parens_depth: i32 = even;
-    find_switch: while (token_index > 0) : (token_index -= 1) {
-        switch (token_tags[token_index]) {
-            .r_paren => parens_depth += 1,
-            .l_paren => {
-                parens_depth -= 1;
-                if (parens_depth == one_opening and token_tags[token_index - 1] == .keyword_switch) break :find_switch;
-            },
-            .semicolon => return null,
-            else => {},
-        }
-    }
-    if (token_index == 0) return null;
-
-    return EnumLiteralContext{
-        .likely = .enum_literal,
-        .identifier_token_index = switch_condition_end_index,
+        .need_ret_type = need_ret_type,
     };
 }
 
@@ -1281,14 +1263,17 @@ fn collectVarAccessContainerNodes(
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
 ) error{OutOfMemory}!void {
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
-    const type_expr = try symbol_decl.resolveType(analyser) orelse return;
+    const result = try symbol_decl.resolveType(analyser) orelse return;
+    const type_expr = try analyser.resolveDerefType(result) orelse result;
     if (type_expr.isFunc()) {
         const fn_proto_node = type_expr.type.data.other; // this assumes that function types can only be Ast nodes
-        if (dot_context.likely == .enum_literal) { // => we need f()'s return type
+        if (dot_context.likely == .enum_literal or dot_context.need_ret_type) { // => we need f()'s return type
             var buf: [1]Ast.Node.Index = undefined;
             const full_fn_proto = type_expr.handle.tree.fullFnProto(&buf, fn_proto_node).?;
-            if (full_fn_proto.ast.return_type == 0) return;
-            const node_type = try analyser.resolveTypeOfNode(.{ .node = full_fn_proto.ast.return_type, .handle = type_expr.handle }) orelse return;
+            const has_body = type_expr.handle.tree.nodes.items(.tag)[type_expr.type.data.other] == .fn_decl;
+            const body = type_expr.handle.tree.nodes.items(.data)[type_expr.type.data.other].rhs;
+            var node_type = try analyser.resolveReturnType(full_fn_proto, type_expr.handle, if (has_body) body else null) orelse return;
+            if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
         }
@@ -1304,39 +1289,6 @@ fn collectVarAccessContainerNodes(
     try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
 }
 
-/// Currently used to handle cases where a fn's return type is the needed
-/// container node and some use-cases
-fn collectFieldAccessContainerNodesHelper(
-    analyser: *Analyser,
-    arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    loc: offsets.Loc,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
-) error{OutOfMemory}!void {
-    const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
-    const container = try analyser.resolveDerefType(result) orelse result;
-    if (container.isEnumType() or container.isUnionType()) {
-        try types_with_handles.append(arena, container);
-        return;
-    }
-    // fns w/ ret type E!T, eg `if (try Analyser.getPositionContext(..) == .` or `switch (try Analyser.getPositionContext(..)) {.`
-    if (container.type.data == .error_union and container.type.data.error_union.type.data == .other) {
-        const node_type = try analyser.resolveTypeOfNode(.{ .node = container.type.data.error_union.type.data.other, .handle = container.handle }) orelse return;
-        if (node_type.isEnumType() or node_type.isUnionType()) {
-            try types_with_handles.append(arena, node_type);
-            return;
-        }
-    }
-    // XXX use-case: resolves `if (symbol_decl.decl != .`
-    if (container.type.data == .other) {
-        const node_type = try analyser.resolveTypeOfNode(.{ .node = container.type.data.other, .handle = container.handle }) orelse return;
-        if (node_type.isEnumType() or node_type.isUnionType()) {
-            try types_with_handles.append(arena, node_type);
-            return;
-        }
-    }
-}
-
 fn collectFieldAccessContainerNodes(
     analyser: *Analyser,
     arena: std.mem.Allocator,
@@ -1350,8 +1302,16 @@ fn collectFieldAccessContainerNodes(
     // `abc.method() == .` => fails, `abc.method(.{}){.}` => ok
     // it also fails for `abc.xyz.*` ... currently we take advantage of this quirk
     const name_loc = Analyser.identifierLocFromPosition(loc.end, handle) orelse {
-        if (dot_context.likely != .enum_literal) return;
-        try collectFieldAccessContainerNodesHelper(analyser, arena, handle, loc, types_with_handles);
+        const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
+        const container = try analyser.resolveDerefType(result) orelse result;
+        if (try analyser.resolveUnwrapErrorUnionType(container, .right)) |unwrapped| {
+            if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
+                try types_with_handles.append(arena, unwrapped);
+                return;
+            }
+        }
+        // if (dot_context.likely == .enum_literal and !(container.isEnumType() or container.isUnionType())) return;
+        try container.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -1366,6 +1326,14 @@ fn collectFieldAccessContainerNodes(
             const fn_proto_node = node_type.type.data.other; // this assumes that function types can only be Ast nodes
             var buf: [1]Ast.Node.Index = undefined;
             const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, fn_proto_node).?;
+            if (dot_context.need_ret_type) { // => we need f()'s return type
+                const has_body = node_type.handle.tree.nodes.items(.tag)[node_type.type.data.other] == .fn_decl;
+                const body = node_type.handle.tree.nodes.items(.data)[node_type.type.data.other].rhs;
+                node_type = try analyser.resolveReturnType(full_fn_proto, node_type.handle, if (has_body) body else null) orelse continue;
+                if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
+                try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+                continue;
+            }
             var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
             var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
             // don't have the luxury of referencing an `Ast.full.Call`
@@ -1373,6 +1341,7 @@ fn collectFieldAccessContainerNodes(
             const additional_index: usize = blk: {
                 // NOTE: `loc` points to offsets within `handle`, not `node_type.decl.handle`
                 const field_access_slice = handle.tree.source[loc.start..loc.end];
+                if (field_access_slice[0] == '@') break :blk 1; // assume `@import("..").some.Other{.}`
                 var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
                 const first_symbol = symbol_iter.next() orelse continue;
                 const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
@@ -1408,7 +1377,7 @@ fn collectEnumLiteralContainerNodes(
 ) error{OutOfMemory}!void {
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);
-    const el_dot_context = getStructInitContext(handle.tree, dot_index) orelse return;
+    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index) orelse return;
     const containers = try collectContainerNodes(
         analyser,
         arena,
