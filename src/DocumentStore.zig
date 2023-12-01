@@ -1423,7 +1423,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
                 }
             }
         } else if (isBuildFile(handle.uri)) blk: {
-            const build_file = self.getBuildFile(handle.uri).?;
+            const build_file = self.getBuildFile(handle.uri) orelse break :blk;
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
 
