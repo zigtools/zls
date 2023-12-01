@@ -9,8 +9,8 @@
             .hash = "122002462f37b67a54fa1ab712d870d4637dae0d94437c0077b148e1fb75616c573d",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/86f5435f63961dcdba8b76e47b44e2381671fb09.tar.gz",
-            .hash = "122014b1776beda990cdc7bdbecc6960bdce9eb762d6dc7cc6664517f171becc17dd",
+            .url = "https://github.com/ziglibs/diffz/archive/77ccba4b4ab2d5a89b2e1fe6cfe4ce7bb7361efb.tar.gz",
+            .hash = "122020da93490cefb22ff4b6a2a814d7572ef042e38b17f841d7195b92d69ff3be93",
         },
     },
     .paths = .{""},

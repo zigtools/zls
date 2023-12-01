@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// compiler: rework std.atomic
-const min_zig_string = "0.12.0-dev.1710+2bffd8101";
+/// Remove all usages of `std.mem.copy` and remove `std.mem.set` (#18143)
+const min_zig_string = "0.12.0-dev.1767+1e42a3de89";
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {
