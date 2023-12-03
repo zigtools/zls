@@ -3648,14 +3648,14 @@ fn formatId(
     writer: anytype,
 ) @TypeOf(writer).Error!void {
     _ = options;
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, InternPool.Struct.Field);
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx.string);
     ctx.ip.string_pool.mutex.lock();
     defer ctx.ip.string_pool.mutex.unlock();
     try writer.print("{}", .{std.zig.fmtId(ctx.ip.string_pool.stringToSliceUnsafe(ctx.string))});
 }
 
-pub fn fmtId(ip: *InternPool, field: String) std.fmt.Formatter(formatId) {
-    return .{ .data = .{ .ip = ip, .string = field } };
+pub fn fmtId(ip: *InternPool, string: String) std.fmt.Formatter(formatId) {
+    return .{ .data = .{ .ip = ip, .string = string } };
 }
 
 // ---------------------------------------------
