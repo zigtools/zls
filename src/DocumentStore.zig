@@ -871,39 +871,57 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
     const build_file_path = try URI.parse(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
 
-    const args = try self.prepareBuildRunnerArgs(build_file_uri);
-    defer {
-        for (args) |arg| self.allocator.free(arg);
-        self.allocator.free(args);
-    }
+    var build_dir = try std.fs.openDirAbsolute(std.fs.path.dirname(build_file_path).?, .{});
+    defer build_dir.close();
 
-    const zig_run_result = blk: {
-        const tracy_zone2 = tracy.trace(@src());
-        defer tracy_zone2.end();
-        break :blk try std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = args,
-            .cwd = std.fs.path.dirname(build_file_path).?,
-            .max_output_bytes = 1024 * 1024,
-        });
+    // TODO: non-standard zig-cache?
+    const zls_build_info = build_dir.readFileAlloc(self.allocator, "zig-cache/zls-build-info.json", std.math.maxInt(usize)) catch |err| switch (err) {
+        error.FileNotFound => @as(?[]const u8, null), // NOTE: cast required or peer-type resolution fails :/
+        else => return err,
     };
-    defer self.allocator.free(zig_run_result.stdout);
-    defer self.allocator.free(zig_run_result.stderr);
 
-    errdefer blk: {
-        const joined = std.mem.join(self.allocator, " ", args) catch break :blk;
-        defer self.allocator.free(joined);
+    const out = if (zls_build_info) |zbi| out: {
+        log.info("Resolving build information via zls-build-info.json", .{});
+        break :out zbi;
+    } else out: {
+        log.info("Resolving build information via build runner", .{});
 
-        log.err(
-            "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
-            .{ joined, zig_run_result.stderr },
-        );
-    }
+        const args = try self.prepareBuildRunnerArgs(build_file_uri);
+        defer {
+            for (args) |arg| self.allocator.free(arg);
+            self.allocator.free(args);
+        }
 
-    switch (zig_run_result.term) {
-        .Exited => |exit_code| if (exit_code != 0) return error.RunFailed,
-        else => return error.RunFailed,
-    }
+        const zig_run_result = blk: {
+            const tracy_zone2 = tracy.trace(@src());
+            defer tracy_zone2.end();
+            break :blk try std.process.Child.run(.{
+                .allocator = self.allocator,
+                .argv = args,
+                .cwd = std.fs.path.dirname(build_file_path).?,
+                .max_output_bytes = 1024 * 1024,
+            });
+        };
+        defer self.allocator.free(zig_run_result.stderr);
+
+        errdefer blk: {
+            const joined = std.mem.join(self.allocator, " ", args) catch break :blk;
+            defer self.allocator.free(joined);
+
+            log.err(
+                "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
+                .{ joined, zig_run_result.stderr },
+            );
+        }
+
+        switch (zig_run_result.term) {
+            .Exited => |exit_code| if (exit_code != 0) return error.RunFailed,
+            else => return error.RunFailed,
+        }
+
+        break :out zig_run_result.stdout;
+    };
+    defer self.allocator.free(out);
 
     const parse_options = std.json.ParseOptions{
         // We ignore unknown fields so people can roll
@@ -916,7 +934,7 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
     const build_config = std.json.parseFromSlice(
         BuildConfig,
         self.allocator,
-        zig_run_result.stdout,
+        out,
         parse_options,
     ) catch return error.RunFailed;
     errdefer build_config.deinit();

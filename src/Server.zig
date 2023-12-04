@@ -1097,6 +1097,13 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
 
         try build_config_file.writeAll(@embedFile("build_runner/BuildConfig.zig"));
 
+        const pacakges_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, "Packages.zig" });
+
+        const pacakges_path_file = try std.fs.createFileAbsolute(pacakges_path, .{});
+        defer pacakges_path_file.close();
+
+        try pacakges_path_file.writeAll(@embedFile("build_runner/Packages.zig"));
+
         try build_runner_file.writeAll(
             switch (build_runner_version) {
                 inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
