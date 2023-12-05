@@ -445,6 +445,9 @@ pub fn declNameTokenToSlice(tree: Ast, name_token: Ast.TokenIndex) ?[]const u8 {
 /// const other = decl.middle.other;
 ///```
 pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var node_trail: NodeSet = .{};
     defer node_trail.deinit(analyser.gpa);
     return try analyser.resolveVarDeclAliasInternal(node_handle, &node_trail);
@@ -2188,6 +2191,9 @@ pub const TypeWithHandle = struct {
 };
 
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     analyser.bound_type_params.clearRetainingCapacity();
     return analyser.resolveTypeOfNodeInternal(node_handle);
 }
@@ -2995,6 +3001,9 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) error{OutOfMemory}!?TypeWithHandle {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
@@ -3009,6 +3018,9 @@ pub const DeclWithHandle = struct {
 
                 // handle anytype
                 if (param.type_expr == 0) {
+                    const tracy_zone_inner = tracy.traceNamed(@src(), "resolveCallsiteReferences");
+                    defer tracy_zone_inner.end();
+
                     const is_cimport = std.mem.eql(u8, std.fs.path.basename(self.handle.uri), "cimport.zig");
 
                     if (is_cimport or !analyser.collect_callsite_references) return null;
