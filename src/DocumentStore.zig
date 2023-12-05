@@ -653,7 +653,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 }
 
-/// Invalidates a build files.
+/// Invalidates a build file.
 /// **Thread safe** takes an exclusive lock
 pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
     std.debug.assert(std.process.can_spawn);
@@ -673,6 +673,23 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutO
         return;
     };
     build_file.setBuildConfig(build_config);
+}
+
+/// **Thread safe** takes an exclusive lock
+pub fn invalidateZlsBuildInfo(self: *DocumentStore, zls_build_info_uri: Uri) error{OutOfMemory}!void {
+    const zls_build_info_path = URI.parse(self.allocator, zls_build_info_uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return,
+    };
+    defer self.allocator.free(zls_build_info_path);
+
+    const build_file_path = try std.fs.path.join(self.allocator, &.{ std.fs.path.dirname(std.fs.path.dirname(zls_build_info_path).?).?, "build.zig" });
+    defer self.allocator.free(build_file_path);
+
+    const build_file_uri = try URI.fromPath(self.allocator, build_file_path);
+    defer self.allocator.free(build_file_uri);
+
+    try self.invalidateBuildFile(build_file_uri);
 }
 
 /// The `DocumentStore` represents a graph structure where every

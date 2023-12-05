@@ -79,6 +79,7 @@ const ClientCapabilities = struct {
     /// https://github.com/zigtools/zls/pull/261
     max_detail_length: u32 = 1024 * 1024,
     workspace_folders: []types.URI = &.{},
+    supports_workspace_didChangeWatchedFiles: bool = false,
 
     fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
         for (self.workspace_folders) |uri| allocator.free(uri);
@@ -479,6 +480,10 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
                 server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
         }
+
+        if (workspace.didChangeWatchedFiles) |did_change_watched_files| {
+            server.client_capabilities.supports_workspace_didChangeWatchedFiles = did_change_watched_files.dynamicRegistration orelse false;
+        }
     }
 
     if (request.workspaceFolders) |workspace_folders| {
@@ -618,7 +623,18 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
     server.status = .initialized;
 
     if (!server.recording_enabled and server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
-        try server.registerCapability("workspace/didChangeConfiguration");
+        try server.registerCapability("workspace/didChangeConfiguration", .{});
+    }
+
+    if (server.client_capabilities.supports_workspace_didChangeWatchedFiles) {
+        try server.registerCapability("workspace/didChangeWatchedFiles", .{
+            .watchers = &.{
+                .{
+                    .globPattern = .{ .Pattern = "**/zig-cache/zls-build-info.json" },
+                    .kind = .Change,
+                },
+            },
+        });
     }
 
     if (server.client_capabilities.supports_configuration)
@@ -650,7 +666,23 @@ fn setTraceHandler(server: *Server, _: std.mem.Allocator, request: types.SetTrac
     }
 }
 
-fn registerCapability(server: *Server, method: []const u8) Error!void {
+pub fn RegistrationOptions(comptime method: []const u8) type {
+    for (types.notification_metadata) |notif| {
+        if (std.mem.eql(u8, method, notif.method)) return notif.registration.Options orelse void;
+    }
+
+    for (types.request_metadata) |req| {
+        if (std.mem.eql(u8, method, req.method)) return req.registration.Options orelse void;
+    }
+
+    @compileError("No registration options available for method " ++ method);
+}
+
+fn registerCapability(
+    server: *Server,
+    comptime method: []const u8,
+    registration_options: RegistrationOptions(method),
+) Error!void {
     const id = try std.fmt.allocPrint(server.allocator, "register-{s}", .{method});
     defer server.allocator.free(id);
 
@@ -659,12 +691,15 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
     const json_message = try server.sendToClientRequest(
         .{ .string = id },
         "client/registerCapability",
-        types.RegistrationParams{ .registrations = &.{
-            types.Registration{
-                .id = id,
-                .method = method,
+        .{
+            .registrations = &.{
+                .{
+                    .id = id,
+                    .method = method,
+                    .registerOptions = registration_options,
+                },
             },
-        } },
+        },
     );
     server.allocator.free(json_message);
 }
@@ -1142,6 +1177,16 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         try f.writeAll(result.stdout);
 
         config.builtin_path = try std.fs.path.join(config_arena, &.{ config.global_cache_path.?, "builtin.zig" });
+    }
+}
+
+fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
+    _ = arena;
+
+    for (notification.changes) |change| {
+        if (std.mem.indexOf(u8, change.uri, "zls-build-info.json") != null) {
+            try server.document_store.invalidateZlsBuildInfo(change.uri);
+        }
     }
 }
 
@@ -1712,6 +1757,7 @@ pub const Message = struct {
         @"textDocument/didClose": types.DidCloseTextDocumentParams,
         @"workspace/didChangeWorkspaceFolders": types.DidChangeWorkspaceFoldersParams,
         @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
+        @"workspace/didChangeWatchedFiles": types.DidChangeWatchedFilesParams,
         unknown: []const u8,
     };
 
@@ -1870,6 +1916,7 @@ pub const Message = struct {
                 .@"textDocument/didClose",
                 .@"workspace/didChangeWorkspaceFolders",
                 .@"workspace/didChangeConfiguration",
+                .@"workspace/didChangeWatchedFiles",
                 => return true,
                 .unknown => return false,
             },
@@ -2082,6 +2129,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
         .@"workspace/didChangeWorkspaceFolders" => try server.didChangeWorkspaceFoldersHandler(arena, params),
         .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
+        .@"workspace/didChangeWatchedFiles" => try server.didChangeWatchedFilesHandler(arena, params),
         .unknown => return,
     };
 }
