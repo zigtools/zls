@@ -337,6 +337,9 @@ pub fn callsiteReferences(
     /// search other files for references
     workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(Callsite) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(decl_handle.decl == .ast_node);
 
     var builder = CallBuilder{
