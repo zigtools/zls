@@ -1,4 +1,12 @@
-//! Build step to extract build info
+//! Build step to extract build info for ZLS
+//!
+//! Simply depend on the steps you want ZLS
+//! to draw information from and then invoke
+//! this step somewhere (we recommend adding it
+//! your install step so ZLS is always synced
+//! with the latest build)
+//!
+//! See https://github.com/zigtools/zls-as-step-demo
 
 const ExtractBuildInfo = @This();
 const std = @import("std");
@@ -12,27 +20,11 @@ const Packages = @import("Packages.zig");
 const build_runner = @import("root");
 const dependencies = build_runner.dependencies;
 
-pub const Mode = enum {
-    /// Entire build graph; hacky and you shouldn't use it if you can avoid it
-    /// TODO implement this
-    all,
-    /// Steps this step depends on
-    dependencies,
-};
-
 step: Step,
-mode: Mode,
 
 pub const base_id = .custom;
 
-pub const Options = struct {
-    mode: Mode = .dependencies,
-};
-
-pub fn create(
-    owner: *Build,
-    options: Options,
-) *ExtractBuildInfo {
+pub fn create(owner: *Build) *ExtractBuildInfo {
     const self = owner.allocator.create(ExtractBuildInfo) catch @panic("OOM");
     self.* = .{
         .step = Step.init(.{
@@ -41,7 +33,6 @@ pub fn create(
             .owner = owner,
             .makeFn = make,
         }),
-        .mode = options.mode,
     };
     return self;
 }
@@ -120,7 +111,6 @@ fn processModules(
 fn make(step: *Step, prog_node: *std.Progress.Node) !void {
     _ = prog_node;
     const b = step.owner;
-    const self = @fieldParentPtr(ExtractBuildInfo, "step", step);
 
     var packages = Packages{ .allocator = b.allocator };
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
@@ -140,10 +130,7 @@ fn make(step: *Step, prog_node: *std.Progress.Node) !void {
         }
     }
 
-    switch (self.mode) {
-        .all => @panic("TODO :/"),
-        .dependencies => try processStep(step.owner, &packages, &include_dirs, step),
-    }
+    try processStep(step.owner, &packages, &include_dirs, step);
 
     var out = try std.fs.createFileAbsolute(try b.cache_root.join(b.allocator, &.{"zls-build-info.json"}), .{});
     defer out.close();
