@@ -25,8 +25,9 @@ resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?TypeWithHandle)
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 /// used to detect recursion
 use_trail: NodeSet = .{},
+collect_callsite_references: bool,
 /// handle of the doc where the request originated
-root_handle: ?*DocumentStore.Handle = undefined,
+root_handle: ?*DocumentStore.Handle,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
@@ -36,6 +37,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool, root
         .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
         .ip = ip,
+        .collect_callsite_references = true,
         .root_handle = root_handle,
     };
 }
@@ -3007,6 +3009,10 @@ pub const DeclWithHandle = struct {
 
                 // handle anytype
                 if (param.type_expr == 0) {
+                    const is_cimport = std.mem.eql(u8, std.fs.path.basename(self.handle.uri), "cimport.zig");
+
+                    if (is_cimport or !analyser.collect_callsite_references) return null;
+
                     // protection against recursive callsite resolution
                     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
                     if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
@@ -3051,14 +3057,21 @@ pub const DeclWithHandle = struct {
 
                         if (real_param_idx >= call.ast.params.len) continue;
 
-                        const ty = try analyser.resolveTypeOfNode(.{
-                            // TODO?: this is a """heuristic based approach"""
-                            // perhaps it would be better to use proper self detection
-                            // maybe it'd be a perf issue and this is fine?
-                            // you figure it out future contributor <3
-                            .node = call.ast.params[real_param_idx],
-                            .handle = handle,
-                        }) orelse continue;
+                        const ty = blk: {
+                            // don't resolve callsite references while resolving callsite references
+                            const old_collect_callsite_references = analyser.collect_callsite_references;
+                            defer analyser.collect_callsite_references = old_collect_callsite_references;
+                            analyser.collect_callsite_references = false;
+
+                            break :blk try analyser.resolveTypeOfNode(.{
+                                // TODO?: this is a """heuristic based approach"""
+                                // perhaps it would be better to use proper self detection
+                                // maybe it'd be a perf issue and this is fine?
+                                // you figure it out future contributor <3
+                                .node = call.ast.params[real_param_idx],
+                                .handle = handle,
+                            }) orelse continue;
+                        };
 
                         const loc = offsets.tokenToPosition(tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
                         try possible.append(analyser.arena.allocator(), .{
