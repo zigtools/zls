@@ -304,7 +304,7 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
 
     try actions.append(builder.arena, .{
         .title = "use 'const'",
-        .kind = .@"source.fixAll",
+        .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{
             builder.createTextEditLoc(var_keyword_loc, "const"),
