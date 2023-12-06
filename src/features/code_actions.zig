@@ -240,7 +240,8 @@ fn handleUnusedCapture(
                 } else if (c == '(') {
                     depth += 1;
                 } else if (source[block_start] == ')') {
-                    depth = std.math.sub(usize, depth, 1) catch return;
+                    // don't need to worry about overflow cause depth is always > 0 here
+                    depth -= 1;
                 },
                 .ws2 => if (!std.ascii.isWhitespace(c)) break,
             }
@@ -495,6 +496,7 @@ const DiagnosticKind = union(enum) {
 
     fn parse(diagnostic_message: []const u8) ?DiagnosticKind {
         const msg = diagnostic_message;
+
         if (std.mem.startsWith(u8, msg, "unused ")) {
             return DiagnosticKind{
                 .unused = parseEnum(IdCat, msg["unused ".len..]) orelse return null,
