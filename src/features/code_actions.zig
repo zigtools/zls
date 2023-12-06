@@ -222,6 +222,30 @@ fn handleUnusedCapture(
             else => |c| if (!std.ascii.isWhitespace(c) and !is_comment) break,
         }
     }
+
+    // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
+    if (source[block_start] == ':') {
+        block_start += 1;
+        var depth: usize = 1;
+        var state = enum { ws, continue_stmt, ws2 }.ws;
+        while (block_start < source.len) : (block_start += 1) {
+            const c = source[block_start];
+            switch (state) {
+                .ws => if (c == '(') {
+                    state = .continue_stmt;
+                } else if (!std.ascii.isWhitespace(c)) return,
+                // search for matching rparen at depth 0
+                .continue_stmt => if (depth == 0) {
+                    state = .ws2;
+                } else if (c == '(') {
+                    depth += 1;
+                } else if (source[block_start] == ')') {
+                    depth = std.math.sub(usize, depth, 1) catch return;
+                },
+                .ws2 => if (!std.ascii.isWhitespace(c)) break,
+            }
+        }
+    }
     if (source[block_start] != '{') {
         return;
     }
@@ -471,7 +495,6 @@ const DiagnosticKind = union(enum) {
 
     fn parse(diagnostic_message: []const u8) ?DiagnosticKind {
         const msg = diagnostic_message;
-
         if (std.mem.startsWith(u8, msg, "unused ")) {
             return DiagnosticKind{
                 .unused = parseEnum(IdCat, msg["unused ".len..]) orelse return null,

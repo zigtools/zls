@@ -102,6 +102,28 @@ test "code actions - discard capture with comment" {
     );
 }
 
+test "code actions - discard capture - while loop with continue" {
+    try testAutofix(
+        \\const std = @import("std");
+        \\test {
+        \\    var lines = std.mem.tokenizeSequence(u8, "", "\n");
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += 1) {}
+        \\}
+        \\
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    var lines = std.mem.tokenizeSequence(u8, "", "\n");
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += 1) {
+        \\        _ = line;
+        \\    }
+        \\}
+        \\
+    );
+}
+
 test "code actions - remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
