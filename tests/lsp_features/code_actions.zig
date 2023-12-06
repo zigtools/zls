@@ -24,7 +24,7 @@ test "code actions - discard value" {
         \\    _ = bar;
         \\}
         \\
-    , &.{});
+    );
 }
 
 test "code actions - discard function parameter" {
@@ -38,7 +38,7 @@ test "code actions - discard function parameter" {
         \\    _ = c;
         \\}
         \\
-    , &.{});
+    );
 }
 
 test "code actions - discard captures" {
@@ -79,7 +79,7 @@ test "code actions - discard captures" {
         \\    };
         \\}
         \\
-    , &.{});
+    );
 }
 
 test "code actions - discard capture with comment" {
@@ -99,7 +99,7 @@ test "code actions - discard capture with comment" {
         \\    }
         \\}
         \\
-    , &.{});
+    );
 }
 
 test "code actions - remove pointless discard" {
@@ -127,36 +127,15 @@ test "code actions - remove pointless discard" {
         \\    return 0;
         \\}
         \\
-    , &.{});
+    );
 }
 
-test "code actions - correct unnecessary uses of var" {
-    try testAutofix(
-        \\test {
-        \\    var foo = 5;
-        \\    _ = foo;
-        \\}
-        \\
-    ,
-        \\test {
-        \\    const foo = 5;
-        \\    _ = foo;
-        \\}
-        \\
-    , &.{"use 'const'"});
+fn testAutofix(before: []const u8, after: []const u8) !void {
+    try testAutofixOptions(before, after, true); // diagnostics come from our AstGen fork
+    try testAutofixOptions(before, after, false); // diagnostics come from calling zig ast-check
 }
 
-fn testAutofix(before: []const u8, after: []const u8, ignore_messages: []const []const u8) !void {
-    try testAutofixOptions(before, after, true, ignore_messages); // diagnostics come from our AstGen fork
-    try testAutofixOptions(before, after, false, ignore_messages); // diagnostics come from calling zig ast-check
-}
-
-fn testAutofixOptions(
-    before: []const u8,
-    after: []const u8,
-    want_zir: bool,
-    ignore_messages: []const []const u8,
-) !void {
+fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
     ctx.server.config.enable_ast_check_diagnostics = true;
@@ -188,9 +167,6 @@ fn testAutofixOptions(
 
     for (response) |action| {
         const code_action = action.CodeAction;
-        for (ignore_messages) |message| {
-            if (std.mem.eql(u8, code_action.title, message)) return;
-        }
         if (code_action.kind.? != .@"source.fixAll") continue;
         const workspace_edit = code_action.edit.?;
         const changes = workspace_edit.changes.?.map;
