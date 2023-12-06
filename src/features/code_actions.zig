@@ -222,6 +222,33 @@ fn handleUnusedCapture(
             else => |c| if (!std.ascii.isWhitespace(c) and !is_comment) break,
         }
     }
+
+    // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
+    if (source[block_start] == ':') {
+        var depth: i32 = 0;
+        var token_index = offsets.sourceIndexToTokenIndex(builder.handle.tree, block_start);
+        const token_tags = builder.handle.tree.tokens.items(.tag);
+        std.debug.assert(token_tags[token_index] == .colon);
+        token_index += 1;
+        while (token_index < token_tags.len) : (token_index += 1) {
+            const tag = token_tags[token_index];
+            switch (tag) {
+                .l_paren => {
+                    depth += 1;
+                },
+                .r_paren => {
+                    if (depth == 1) {
+                        token_index += 1;
+                        break;
+                    }
+                    depth -= 1;
+                },
+                else => {},
+            }
+        }
+        if (token_index >= token_tags.len) return;
+        block_start = builder.handle.tree.tokens.items(.start)[token_index];
+    }
     if (source[block_start] != '{') {
         return;
     }

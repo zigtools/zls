@@ -102,6 +102,61 @@ test "code actions - discard capture with comment" {
     );
 }
 
+test "code actions - discard capture - while loop with continue" {
+    try testAutofix(
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += 1) {}
+        \\}
+        \\
+    ,
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += 1) {
+        \\        _ = line;
+        \\    }
+        \\}
+        \\
+    );
+
+    try testAutofix(
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += (1 * (2 + 1))) {}
+        \\}
+        \\
+    ,
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += (1 * (2 + 1))) {
+        \\        _ = line;
+        \\    }
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += ")))".len) {}
+        \\}
+        \\
+    ,
+        \\test {
+        \\    var lines: ?[]const u8 = "";
+        \\    var linei: usize = 0;
+        \\    while (lines.next()) |line| : (linei += ")))".len) {
+        \\        _ = line;
+        \\    }
+        \\}
+        \\
+    );
+}
+
 test "code actions - remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
