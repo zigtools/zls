@@ -225,27 +225,29 @@ fn handleUnusedCapture(
 
     // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
     if (source[block_start] == ':') {
-        block_start += 1;
-        var depth: usize = 1;
-        var state = enum { ws, continue_stmt, ws2 }.ws;
-        while (block_start < source.len) : (block_start += 1) {
-            const c = source[block_start];
-            switch (state) {
-                .ws => if (c == '(') {
-                    state = .continue_stmt;
-                } else if (!std.ascii.isWhitespace(c)) return,
-                // search for matching rparen at depth 0
-                .continue_stmt => if (depth == 0) {
-                    state = .ws2;
-                } else if (c == '(') {
+        var depth: i32 = 0;
+        var token_index = offsets.sourceIndexToTokenIndex(builder.handle.tree, block_start);
+        const token_tags = builder.handle.tree.tokens.items(.tag);
+        std.debug.assert(token_tags[token_index] == .colon);
+        token_index += 1;
+        while (token_index < token_tags.len) : (token_index += 1) {
+            const tag = token_tags[token_index];
+            switch (tag) {
+                .l_paren => {
                     depth += 1;
-                } else if (source[block_start] == ')') {
-                    // don't need to worry about overflow cause depth is always > 0 here
+                },
+                .r_paren => {
+                    if (depth == 1) {
+                        token_index += 1;
+                        break;
+                    }
                     depth -= 1;
                 },
-                .ws2 => if (!std.ascii.isWhitespace(c)) break,
+                else => {},
             }
         }
+        if (token_index >= token_tags.len) return;
+        block_start = builder.handle.tree.tokens.items(.start)[token_index];
     }
     if (source[block_start] != '{') {
         return;
