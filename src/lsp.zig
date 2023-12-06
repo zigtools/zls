@@ -77,7 +77,7 @@ pub fn Map(comptime Key: type, comptime Value: type) type {
 pub fn UnionParser(comptime T: type) type {
     return struct {
         pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!T {
-            const json_value = try std.json.parseFromTokenSourceLeaky(std.json.Value, allocator, source, options);
+            const json_value = try std.json.Value.jsonParse(allocator, source, options);
             return try jsonParseFromValue(allocator, json_value, options);
         }
 
