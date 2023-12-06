@@ -1520,6 +1520,16 @@ test "semantic tokens - weird code" {
         .{ "fn", .keyword, .{} },
         .{ "bar", .function, .{ .declaration = true } },
     });
+    // Incomplete builtin function as type expr
+    try testSemanticTokens(
+        \\fn foo(self: @This) void {self.}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+        .{ "self", .parameter, .{} },
+    });
 }
 
 const TokenData = struct {

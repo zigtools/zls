@@ -491,6 +491,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
     const resolved = switch (node_tags[node_handle.node]) {
         .identifier => blk: {
             const name_token = main_tokens[node_handle.node];
+            if (token_tags[name_token] != .identifier) return null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
@@ -3214,6 +3215,7 @@ pub const DeclWithHandle = struct {
                     }
                     return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
                 } else if (node_tags[param.type_expr] == .identifier) {
+                    if (tree.tokens.items(.tag)[main_tokens[param.type_expr]] != .identifier) return null;
                     const param_type_name = offsets.identifierTokenToNameSlice(tree, main_tokens[param.type_expr]);
                     if (param.name_token) |name_tok| {
                         const name = offsets.identifierTokenToNameSlice(tree, name_tok);
