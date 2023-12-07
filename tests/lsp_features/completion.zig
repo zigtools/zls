@@ -1672,6 +1672,24 @@ test "completion - enum completion on out of bound parameter index" {
     , &.{});
 }
 
+test "completion - delegated declaration" {
+    try testCompletion(
+        \\fn fooImpl(_: Foo) void {}
+        \\fn barImpl(_: *const Foo) void {}
+        \\fn bazImpl(_: u32) void {}
+        \\const Foo = struct {
+        \\    pub const foo = fooImpl;
+        \\    pub const bar = barImpl;
+        \\    pub const baz = bazImpl;
+        \\};
+        \\const foo = Foo{};
+        \\const baz = foo.<cursor>;
+    , &.{
+        .{ .label = "foo", .kind = .Function, .detail = "fn fooImpl(_: Foo) void" },
+        .{ .label = "bar", .kind = .Function, .detail = "fn barImpl(_: *const Foo) void" },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
