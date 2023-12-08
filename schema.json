@@ -27,7 +27,7 @@
         "enable_autofix": {
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "boolean",
-            "default": "true"
+            "default": "false"
         },
         "semantic_tokens": {
             "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",

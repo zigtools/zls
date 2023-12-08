@@ -17,7 +17,7 @@ enable_ast_check_diagnostics: bool = true,
 enable_build_on_save: bool = false,
 
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
-enable_autofix: bool = true,
+enable_autofix: bool = false,
 
 /// Set level of semantic tokens. Partial only includes information that requires semantic analysis.
 semantic_tokens: enum {
