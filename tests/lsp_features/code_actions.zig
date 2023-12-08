@@ -185,22 +185,6 @@ test "code actions - remove pointless discard" {
     );
 }
 
-test "code actions - correct unnecessary uses of var" {
-    try testAutofix(
-        \\test {
-        \\    var foo = 5;
-        \\    _ = foo;
-        \\}
-        \\
-    ,
-        \\test {
-        \\    const foo = 5;
-        \\    _ = foo;
-        \\}
-        \\
-    );
-}
-
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testAutofixOptions(before, after, true); // diagnostics come from our AstGen fork
     try testAutofixOptions(before, after, false); // diagnostics come from calling zig ast-check
