@@ -892,10 +892,10 @@ pub fn interpret(
                     } };
                 }
 
-                const import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+                const import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle(), import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
-                const import_handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
+                const import_handle = interpreter.document_store.getOrLoadHandle(import_uri, true) orelse return error.ImportFailure;
                 const import_interpreter = try import_handle.getComptimeInterpreter(interpreter.document_store, interpreter.ip);
 
                 if (import_interpreter.mutex.tryLock()) {

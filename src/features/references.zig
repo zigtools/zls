@@ -159,7 +159,7 @@ fn gatherReferences(
 
         var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
         defer handle_dependencies.deinit(allocator);
-        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
+        try analyser.store.collectDependencies(allocator, handle, &handle_dependencies);
 
         try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
         for (handle_dependencies.items) |uri| {
@@ -174,7 +174,7 @@ fn gatherReferences(
         if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
         const handle = switch (handle_behavior) {
             .get => analyser.store.getHandle(uri),
-            .get_or_load => analyser.store.getOrLoadHandle(uri),
+            .get_or_load => analyser.store.getOrLoadHandle(uri, true),
         } orelse continue;
 
         try builder.collectReferences(handle, 0);

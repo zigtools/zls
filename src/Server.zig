@@ -142,14 +142,25 @@ pub const Status = enum {
 const Job = union(enum) {
     incoming_message: std.json.Parsed(Message),
     generate_diagnostics: DocumentStore.Uri,
-    load_build_configuration: DocumentStore.Uri,
+    load_handle: DocumentStore.Uri,
+    find_potential_build_files: DocumentStore.Uri,
+    load_build_configuration: struct {
+        build_file_uri: DocumentStore.Uri,
+        maybe_handle_uri: ?DocumentStore.Uri = null,
+    },
     run_build_on_save,
 
     fn deinit(self: Job, allocator: std.mem.Allocator) void {
         switch (self) {
             .incoming_message => |parsed_message| parsed_message.deinit(),
-            .generate_diagnostics => |uri| allocator.free(uri),
-            .load_build_configuration => |uri| allocator.free(uri),
+            .load_handle,
+            .find_potential_build_files,
+            .generate_diagnostics,
+            => |uri| allocator.free(uri),
+            .load_build_configuration => |params| {
+                allocator.free(params.build_file_uri);
+                if (params.maybe_handle_uri) |handle_uri| allocator.free(handle_uri);
+            },
             .run_build_on_save => {},
         }
     }
@@ -168,7 +179,10 @@ const Job = union(enum) {
     fn syncMode(self: Job) SynchronizationMode {
         return switch (self) {
             .incoming_message => |parsed_message| if (parsed_message.value.isBlocking()) .exclusive else .shared,
-            .generate_diagnostics => .shared,
+            .load_handle,
+            .generate_diagnostics,
+            => .shared,
+            .find_potential_build_files,
             .load_build_configuration,
             .run_build_on_save,
             => .atomic,
@@ -681,7 +695,7 @@ fn invalidateAllBuildFiles(server: *Server) error{OutOfMemory}!void {
     try server.job_queue.ensureUnusedCapacity(server.document_store.build_files.count());
     for (server.document_store.build_files.keys()) |build_file_uri| {
         server.job_queue.writeItemAssumeCapacity(.{
-            .load_build_configuration = try server.allocator.dupe(u8, build_file_uri),
+            .load_build_configuration = .{ .build_file_uri = try server.allocator.dupe(u8, build_file_uri) },
         });
     }
 }
@@ -1195,7 +1209,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 
     if (std.process.can_spawn and DocumentStore.isBuildFile(uri)) {
         try server.pushJob(.{
-            .load_build_configuration = try server.allocator.dupe(u8, uri),
+            .load_build_configuration = .{ .build_file_uri = try server.allocator.dupe(u8, uri) },
         });
     }
 
@@ -1777,9 +1791,14 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
     if (zig_builtin.single_threaded) {
         server.thread_pool = {};
     } else {
+        var num_logical_cpus = std.Thread.getCpuCount() catch 8;
+        if (num_logical_cpus < 4) num_logical_cpus = 4;
         try server.thread_pool.init(.{
             .allocator = allocator,
-            .n_jobs = 4, // what is a good value here?
+            .n_jobs = @min(
+                9, // + 1, main thread = total 10
+                (num_logical_cpus - 3), // < 12 cores => - 1, main thread; - 1, music player; - 1, msgs client :)
+            ),
         });
     }
 
@@ -2023,6 +2042,12 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             const response = server.processMessageReportError(parsed_message.value) orelse return;
             server.allocator.free(response);
         },
+        .find_potential_build_files => |handle_uri| {
+            server.document_store.findPotentialBuildFiles(handle_uri) catch return;
+        },
+        .load_handle => |uri| {
+            _ = server.document_store.getOrLoadHandle(uri, true);
+        },
         .generate_diagnostics => |uri| {
             const handle = server.document_store.getHandle(uri) orelse return;
             var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
@@ -2031,10 +2056,10 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
             server.allocator.free(json_message);
         },
-        .load_build_configuration => |build_file_uri| {
+        .load_build_configuration => |params| {
             std.debug.assert(std.process.can_spawn);
             if (!std.process.can_spawn) return;
-            server.document_store.invalidateBuildFile(build_file_uri) catch return;
+            server.document_store.invalidateBuildFile(params.build_file_uri, params.maybe_handle_uri) catch return;
         },
         .run_build_on_save => {
             std.debug.assert(std.process.can_spawn);

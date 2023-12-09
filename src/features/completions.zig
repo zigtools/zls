@@ -550,6 +550,7 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     const type_handle = (try analyser.getFieldAccessType(handle, source_index, loc)) orelse return null;
+    analyser.load_handles_immediately = false;
     try typeToCompletion(server, analyser, arena, &completions, type_handle, handle, null);
     try formatCompletionDetails(server, arena, completions.items);
 
@@ -738,7 +739,7 @@ fn completeError(server: *Server, arena: std.mem.Allocator, handle: *DocumentSto
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.document_store.errorCompletionItems(arena, handle.*);
+    return try server.document_store.errorCompletionItems(arena, handle);
 }
 
 fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
@@ -808,7 +809,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     if (token_tags[dot_token_index - 1] == .number_literal or token_tags[dot_token_index - 1] != .equal) return &.{};
 
     // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
-    const enum_completions = try document_store.enumCompletionItems(arena, handle.*);
+    const enum_completions = try document_store.enumCompletionItems(arena, handle);
     return enum_completions;
 }
 
@@ -820,7 +821,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
 fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
     store: *DocumentStore,
-    handle: DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
     var completions: DocumentScope.CompletionSet = .{};
@@ -893,10 +894,10 @@ fn completeFileSystemStringLiteral(
     }
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
-        if (handle.associated_build_file) |uri| blk: {
+        if (handle.getAssociatedBuildFileUri(store, true)) |uri| blk: {
             const build_file = store.getBuildFile(uri).?;
-            const build_config = build_file.tryLockConfig() orelse break :blk;
-            defer build_file.unlockConfig();
+            const build_config = build_file.getConfig() orelse break :blk;
+            defer build_file.unlockShared();
 
             try completions.ensureUnusedCapacity(arena, build_config.packages.len);
             for (build_config.packages) |pkg| {
@@ -908,8 +909,8 @@ fn completeFileSystemStringLiteral(
             }
         } else if (DocumentStore.isBuildFile(handle.uri)) blk: {
             const build_file = store.getBuildFile(handle.uri) orelse break :blk;
-            const build_config = build_file.tryLockConfig() orelse break :blk;
-            defer build_file.unlockConfig();
+            const build_config = build_file.getConfig() orelse break :blk;
+            defer build_file.unlockShared();
 
             try completions.ensureUnusedCapacity(arena, build_config.deps_build_roots.len);
             for (build_config.deps_build_roots) |dbr| {
@@ -970,7 +971,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .string_literal,
         => blk: {
             if (pos_context == .string_literal and !DocumentStore.isBuildFile(handle.uri)) break :blk null;
-            break :blk completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
+            break :blk completeFileSystemStringLiteral(arena, &server.document_store, handle, pos_context) catch |err| {
                 log.err("failed to get file system completions: {}", .{err});
                 return null;
             };

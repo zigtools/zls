@@ -28,6 +28,7 @@ use_trail: NodeSet = .{},
 collect_callsite_references: bool,
 /// handle of the doc where the request originated
 root_handle: ?*DocumentStore.Handle,
+load_handles_immediately: bool = true,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
@@ -1476,7 +1477,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     else => return null,
                 };
 
-                const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
+                const new_handle = analyser.store.getOrLoadHandle(builtin_uri, true) orelse return null;
                 const new_handle_document_scope = try new_handle.getDocumentScope();
 
                 const decl_index = new_handle_document_scope.getScopeDeclaration(.{
@@ -1507,22 +1508,22 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
                 const import_uri = (try analyser.store.uriFromImportStr(
                     analyser.arena.allocator(),
-                    handle.*,
+                    handle,
                     import_str[1 .. import_str.len - 1],
                 )) orelse (try analyser.store.uriFromImportStr(
                     analyser.arena.allocator(),
-                    if (analyser.root_handle) |root_handle| root_handle.* else return null,
+                    if (analyser.root_handle) |root_handle| root_handle else return null,
                     import_str[1 .. import_str.len - 1],
                 )) orelse return null;
 
-                const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
+                const new_handle = analyser.store.getOrLoadHandle(import_uri, analyser.load_handles_immediately) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
             } else if (std.mem.eql(u8, call_name, "@cImport")) {
-                const cimport_uri = (try analyser.store.resolveCImport(handle.*, node)) orelse return null;
+                const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
 
-                const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
+                const new_handle = analyser.store.getOrLoadHandle(cimport_uri, analyser.load_handles_immediately) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
@@ -2533,8 +2534,8 @@ pub fn getFieldAccessType(
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
-                    const uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), curr_handle.*, import_str) orelse return null;
-                    const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
+                    const uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), curr_handle, import_str) orelse return null;
+                    const node_handle = analyser.store.getOrLoadHandle(uri, true) orelse return null;
                     current_type = TypeWithHandle.typeVal(NodeWithHandle{ .handle = node_handle, .node = 0 });
                     _ = tokenizer.next(); // eat the .r_paren
                 } else {
@@ -3168,7 +3169,7 @@ pub const DeclWithHandle = struct {
                     var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
 
                     for (refs.items) |ref| {
-                        const handle = analyser.store.getOrLoadHandle(ref.uri).?;
+                        const handle = analyser.store.getOrLoadHandle(ref.uri, analyser.load_handles_immediately).?;
 
                         var call_buf: [1]Ast.Node.Index = undefined;
                         const call = tree.fullCall(&call_buf, ref.call_node).?;
