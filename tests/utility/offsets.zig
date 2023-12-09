@@ -65,17 +65,17 @@ test "offsets - tokenIndexToLoc" {
 }
 
 test "offsets - identifierIndexToNameLoc" {
-    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice("", 0));
-    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" ", 0));
-    try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" world", 0));
+    try std.testing.expectEqualStrings("", try offsets.identifierIndexToNameSlice("", 0));
+    try std.testing.expectEqualStrings("", try offsets.identifierIndexToNameSlice(" ", 0));
+    try std.testing.expectEqualStrings("", try offsets.identifierIndexToNameSlice(" world", 0));
 
-    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("hello", 0));
-    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("hello world", 0));
-    try std.testing.expectEqualStrings("world", offsets.identifierIndexToNameSlice("hello world", 6));
+    try std.testing.expectEqualStrings("hello", try offsets.identifierIndexToNameSlice("hello", 0));
+    try std.testing.expectEqualStrings("hello", try offsets.identifierIndexToNameSlice("hello world", 0));
+    try std.testing.expectEqualStrings("world", try offsets.identifierIndexToNameSlice("hello world", 6));
 
-    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("@\"hello\"", 0));
-    try std.testing.expectEqualStrings("hello", offsets.identifierIndexToNameSlice("@\"hello\" world", 0));
-    try std.testing.expectEqualStrings("world", offsets.identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
+    try std.testing.expectEqualStrings("hello", try offsets.identifierIndexToNameSlice("@\"hello\"", 0));
+    try std.testing.expectEqualStrings("hello", try offsets.identifierIndexToNameSlice("@\"hello\" world", 0));
+    try std.testing.expectEqualStrings("world", try offsets.identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
 }
 
 test "offsets - lineLocAtIndex" {

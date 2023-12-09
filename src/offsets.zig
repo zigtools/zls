@@ -127,11 +127,11 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     return @intCast(upper_index);
 }
 
-fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
+fn identifierIndexToLoc(tree: Ast, source_index: usize) error{NotAnIdentifier}!Loc {
     var index: usize = source_index;
     if (tree.source[index] == '@') {
         index += 1;
-        std.debug.assert(tree.source[index] == '\"');
+        if (tree.source[index] != '\"') return error.NotAnIdentifier;
         index += 1;
         while (true) : (index += 1) {
             if (tree.source[index] == '\"') {
@@ -150,9 +150,9 @@ fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
     return .{ .start = source_index, .end = index };
 }
 
-pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
+pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) error{NotAnIdentifier}!Loc {
     if (text[source_index] == '@') {
-        std.debug.assert(text[source_index + 1] == '\"');
+        if (text[source_index + 1] != '\"') return error.NotAnIdentifier;
         const start_index = source_index + 2;
         var index: usize = start_index;
         while (true) : (index += 1) {
@@ -173,17 +173,17 @@ pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
     }
 }
 
-pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []const u8 {
-    return locToSlice(text, identifierIndexToNameLoc(text, source_index));
+pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) error{NotAnIdentifier}![]const u8 {
+    return locToSlice(text, try identifierIndexToNameLoc(text, source_index));
 }
 
-pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc {
-    std.debug.assert(tree.tokens.items(.tag)[identifier_token] == .identifier);
+pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) error{NotAnIdentifier}!Loc {
+    if (tree.tokens.items(.tag)[identifier_token] != .identifier) return error.NotAnIdentifier;
     return identifierIndexToNameLoc(tree.source, tree.tokens.items(.start)[identifier_token]);
 }
 
-pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) []const u8 {
-    return locToSlice(tree.source, identifierTokenToNameLoc(tree, identifier_token));
+pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) error{NotAnIdentifier}![]const u8 {
+    return locToSlice(tree.source, try identifierTokenToNameLoc(tree, identifier_token));
 }
 
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
@@ -203,7 +203,7 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     // Many tokens can be determined entirely by their tag.
     if (tag == .identifier) {
         // fast path for identifiers
-        return identifierIndexToLoc(tree, start);
+        return identifierIndexToLoc(tree, start) catch unreachable;
     } else if (tag.lexeme()) |lexeme| {
         return .{
             .start = start,

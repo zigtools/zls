@@ -995,7 +995,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
     const handle = builder.handle;
     const tree = handle.tree;
 
-    const name = offsets.identifierTokenToNameSlice(tree, name_token);
+    const name = offsets.identifierTokenToNameSlice(tree, name_token) catch return;
     const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
 
     if (!is_escaped_identifier) {

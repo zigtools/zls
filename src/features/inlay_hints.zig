@@ -337,7 +337,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     switch (node_tags[call.ast.fn_expr]) {
         .identifier => {
             const name_token = main_tokens[call.ast.fn_expr];
-            const name = offsets.identifierTokenToNameSlice(tree, name_token);
+            const name = offsets.identifierTokenToNameSlice(tree, name_token) catch return;
             const source_index = offsets.tokenToIndex(tree, name_token);
 
             if (try builder.analyser.lookupSymbolGlobal(handle, name, source_index)) |decl_handle| {
@@ -359,7 +359,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
                 .end = rhs_loc.end,
             })) |type_handle| {
                 const container_handle = try builder.analyser.resolveDerefType(type_handle) orelse type_handle;
-                const symbol = offsets.identifierTokenToNameSlice(tree, rhsToken);
+                const symbol = offsets.identifierTokenToNameSlice(tree, rhsToken) catch return;
                 if (try container_handle.lookupSymbol(builder.analyser, symbol)) |decl_handle| {
                     try writeCallHint(builder, call, decl_handle);
                 }
