@@ -242,8 +242,13 @@ pub fn isSelfFunction(analyser: *Analyser, func_type: TypeWithHandle, container:
     const func_decl = try analyser.resolveFuncProtoOfCallable(func_type) orelse return false;
     if (func_decl.type.is_type_val) return false;
 
+    const fn_node = func_decl.type.data.other; // this assumes that function types can only be Ast nodes
+
     var buf: [1]Ast.Node.Index = undefined;
-    const func = func_decl.handle.tree.fullFnProto(&buf, func_decl.type.data.other) orelse return false;
+    const func = func_decl.handle.tree.fullFnProto(&buf, fn_node).?;
+
+    // Non-decl prototypes cannot have a self parameter.
+    if (func.name_token == null) return false;
 
     return analyser.firstParamIs(func_decl.handle, func, container);
 }
@@ -254,8 +259,6 @@ pub fn firstParamIs(
     func: Ast.full.FnProto,
     expected: TypeWithHandle,
 ) error{OutOfMemory}!bool {
-    // Non-decl prototypes cannot have a self parameter.
-    if (func.name_token == null) return false;
     if (func.ast.params.len == 0) return false;
 
     const tree = handle.tree;
