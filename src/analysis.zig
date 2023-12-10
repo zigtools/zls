@@ -3262,11 +3262,9 @@ fn iterateSymbolsContainerInternal(
                     if (instance_access) {
                         // allow declarations which evaluate to functions where
                         // the first parameter has the type of the container:
-                        const alias = try analyser.resolveVarDeclAlias(
+                        const alias_type = try analyser.resolveTypeOfNode(
                             NodeWithHandle{ .node = node, .handle = handle },
                         ) orelse continue;
-
-                        const alias_type = try alias.resolveType(analyser) orelse continue;
 
                         const container_type = TypeWithHandle.typeVal(container_handle);
                         if (!try analyser.isSelfFunction(alias_type, container_type)) continue;
