@@ -486,6 +486,19 @@ test "hover - primitive" {
         \\```
     );
     try testHover(
+        \\const a = true;
+        \\const b = false;
+        \\const c = true;
+        \\const f<cursor>oo = if (a) b else c;
+    ,
+        \\```zig
+        \\const foo = if (a) b else c
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
         \\const f<cursor>oo = null;
     ,
         \\```zig
@@ -513,6 +526,16 @@ test "hover - primitive" {
         \\```
         \\```zig
         \\(i7)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo: u7 = 42;
+    ,
+        \\```zig
+        \\const foo: u7 = 42
+        \\```
+        \\```zig
+        \\(u7)
         \\```
     );
 }
