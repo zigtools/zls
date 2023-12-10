@@ -977,19 +977,35 @@ const primitives = std.ComptimeStringMap(InternPool.Index, .{
     .{ "void", .void_type },
 });
 
-pub fn resolvePrimitiveType(identifier_name: []const u8) ?InternPool.Index {
-    if (primitives.get(identifier_name)) |primitive| return primitive;
+pub fn resolvePrimitiveType(analyser: *Analyser, handle: *DocumentStore.Handle, identifier_name: []const u8) ?TypeWithHandle {
+    if (primitives.get(identifier_name)) |primitive| {
+        const primitive_type = analyser.ip.indexToKey(primitive).typeOf();
+        const is_type = primitive_type == .type_type;
+        const ip_index = if (is_type) primitive else primitive_type;
+        return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = ip_index } }, .is_type_val = is_type },
+            .handle = handle,
+        };
+    }
 
     if (identifier_name.len < 2) return null;
     const first_c = identifier_name[0];
-    if (first_c != 'i' and first_c != 'u') return null;
+    const signedness: std.builtin.Signedness = switch (first_c) {
+        'i' => .signed,
+        'u' => .unsigned,
+        else => return null,
+    };
     for (identifier_name[1..]) |c| {
         switch (c) {
             '0'...'9' => {},
             else => return null,
         }
     }
-    return .unknown_type; // TODO
+    const bits = std.fmt.parseInt(u16, identifier_name[1..], 10) catch return null;
+    return TypeWithHandle{
+        .type = .{ .data = .{ .int = .{ .signedness = signedness, .bits = bits } }, .is_type_val = true },
+        .handle = handle,
+    };
 }
 
 const FindBreaks = struct {
@@ -1107,12 +1123,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
             if (!is_escaped_identifier) {
                 if (std.mem.eql(u8, name, "_")) return null;
-                if (resolvePrimitiveType(name)) |primitive| {
-                    const is_type = analyser.ip.indexToKey(primitive).typeOf() == .type_type;
-                    return TypeWithHandle{
-                        .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
-                        .handle = handle,
-                    };
+                if (analyser.resolvePrimitiveType(handle, name)) |primitive| {
+                    return primitive;
                 }
             }
 
@@ -1806,14 +1818,14 @@ pub const Type = struct {
     };
 
     data: union(enum) {
-        /// *T, [*]T, [T], [*c]T
+        /// `*T`, `[*]T`, `[T]`, `[*c]T`
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
             is_const: bool,
             elem_ty: *TypeWithHandle,
         },
 
-        /// ?T
+        /// `?T`
         optional: *TypeWithHandle,
 
         /// Return type of `fn foo() !Foo`
@@ -1831,13 +1843,16 @@ pub const Type = struct {
         /// Branching types
         either: []const EitherEntry,
 
-        /// Primitive type: `u8`, `bool`, `type`, etc.
-        /// Primitive value: `true`, `false`, `null`, `undefined`
+        /// - Primitive type: `u8`, `bool`, `type`, etc.
+        /// - Primitive value: `true`, `false`, `null`, `undefined`
         ip_index: struct {
             node: ?Ast.Node.Index = null,
             /// this stores both the type and the value
             index: InternPool.Index,
         },
+
+        /// Integer types not covered by `InternPool.Index`: `i2`, `u3`, etc.
+        int: InternPool.Int,
     },
     /// If true, the type `type`, the attached data is the value of the type value.
     /// ```zig
@@ -1880,6 +1895,10 @@ pub const Type = struct {
                 std.hash.autoHash(hasher, payload.node);
                 std.hash.autoHash(hasher, payload.index);
             },
+            .int => |int| {
+                std.hash.autoHash(hasher, int.signedness);
+                std.hash.autoHash(hasher, int.bits);
+            },
         }
     }
 
@@ -1918,6 +1937,12 @@ pub const Type = struct {
 
                 if (a_payload.index != b_payload.index) return false;
                 if (!std.meta.eql(a_payload.node, b_payload.node)) return false;
+            },
+            .int => |a_int| {
+                const b_int = b.data.int;
+
+                if (a_int.signedness != b_int.signedness) return false;
+                if (a_int.bits != b_int.bits) return false;
             },
         }
 
@@ -4315,20 +4340,16 @@ fn addReferencedTypes(
                 return try std.fmt.allocPrint(allocator, "error{{{}}}", .{std.zig.fmtId(identifier)});
             },
 
-            .identifier => {
-                const name_token = main_tokens[p];
-                const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
-                if (is_escaped_identifier) return null;
-                const primitive = Analyser.resolvePrimitiveType(name) orelse return null;
-                return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip.*)});
-            },
-
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 
         .ip_index => |payload| {
             return try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.*)});
+        },
+
+        .int => |int| return switch (int.signedness) {
+            .signed => try std.fmt.allocPrint(allocator, "i{}", .{int.bits}),
+            .unsigned => try std.fmt.allocPrint(allocator, "u{}", .{int.bits}),
         },
 
         .either => {}, // TODO

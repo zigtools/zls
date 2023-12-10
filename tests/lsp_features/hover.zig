@@ -464,6 +464,59 @@ test "hover - integer overflow on top level container" {
     );
 }
 
+test "hover - primitive" {
+    try testHover(
+        \\const f<cursor>oo = true;
+    ,
+        \\```zig
+        \\const foo = true
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = false;
+    ,
+        \\```zig
+        \\const foo = false
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = null;
+    ,
+        \\```zig
+        \\const foo = null
+        \\```
+        \\```zig
+        \\(@TypeOf(null))
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = undefined;
+    ,
+        \\```zig
+        \\const foo = undefined
+        \\```
+        \\```zig
+        \\(@TypeOf(undefined))
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo: i7 = 42;
+    ,
+        \\```zig
+        \\const foo: i7 = 42
+        \\```
+        \\```zig
+        \\(i7)
+        \\```
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
