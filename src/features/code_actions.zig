@@ -413,11 +413,12 @@ fn createDiscardText(
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
 
     const new_text_len =
-        1 +
+        "\n".len +
         indent.len +
         additional_indent.len +
-        "_ = ;".len +
+        "_ = ".len +
         identifier_name.len +
+        "; // autofix".len +
         if (add_suffix_newline) 1 + indent.len else 0;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
@@ -426,7 +427,7 @@ fn createDiscardText(
     new_text.appendSliceAssumeCapacity(additional_indent);
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
-    new_text.appendAssumeCapacity(';');
+    new_text.appendSliceAssumeCapacity("; // autofix");
     if (add_suffix_newline) {
         new_text.appendAssumeCapacity('\n');
         new_text.appendSliceAssumeCapacity(indent);
@@ -547,12 +548,19 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         while (i < text.len) : (i += 1) {
             switch (text[i]) {
                 ' ' => continue,
-                ';' => break :found i + 1,
+                ';' => break :found i,
                 else => return null,
             }
         }
         return null;
     };
+
+    // check if the colon is followed by the autofix comment
+    const autofix_comment_start = std.mem.indexOfNonePos(u8, text, colon_position + ";".len, " ") orelse return null;
+    if (!std.mem.startsWith(u8, text[autofix_comment_start..], "//")) return null;
+    const autofix_str_start = std.mem.indexOfNonePos(u8, text, autofix_comment_start + "//".len, " ") orelse return null;
+    if (!std.mem.startsWith(u8, text[autofix_str_start..], "autofix")) return null;
+    const autofix_comment_end = std.mem.indexOfNonePos(u8, text, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
 
     // check if the identifier is precede by a equal sign and then an underscore
     var i: usize = loc.start - 1;
@@ -587,7 +595,7 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
 
     return offsets.Loc{
         .start = start_position,
-        .end = colon_position,
+        .end = autofix_comment_end,
     };
 }
 
