@@ -694,7 +694,7 @@ fn requestConfiguration(server: *Server) Error!void {
 
     const configuration_items = comptime config: {
         var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
-        inline for (std.meta.fields(Config), 0..) |field, index| {
+        for (std.meta.fields(Config), 0..) |field, index| {
             comp_config[index] = .{
                 .section = "zls." ++ field.name,
             };
@@ -2337,7 +2337,7 @@ fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetad
 const RequestMethodSet = blk: {
     @setEvalBranchQuota(5000);
     var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
-    inline for (types.request_metadata, &kvs_list) |meta, *kv| {
+    for (types.request_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
     break :blk std.ComptimeStringMap(void, &kvs_list);
@@ -2346,7 +2346,7 @@ const RequestMethodSet = blk: {
 const NotificationMethodSet = blk: {
     @setEvalBranchQuota(5000);
     var kvs_list: [types.notification_metadata.len]struct { []const u8 } = undefined;
-    inline for (types.notification_metadata, &kvs_list) |meta, *kv| {
+    for (types.notification_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
     break :blk std.ComptimeStringMap(void, &kvs_list);
