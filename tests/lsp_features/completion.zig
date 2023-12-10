@@ -673,6 +673,22 @@ test "completion - struct" {
         .{ .label = "S", .kind = .Constant, .detail = "const S = struct" },
         .{ .label = "Mode", .kind = .Constant, .detail = "const Mode = enum" },
     });
+
+    try testCompletion(
+        \\fn fooImpl(_: Foo) void {}
+        \\fn barImpl(_: *const Foo) void {}
+        \\fn bazImpl(_: u32) void {}
+        \\const Foo = struct {
+        \\    pub const foo = fooImpl;
+        \\    pub const bar = barImpl;
+        \\    pub const baz = bazImpl;
+        \\};
+        \\const foo = Foo{};
+        \\const baz = foo.<cursor>;
+    , &.{
+        .{ .label = "foo", .kind = .Function, .detail = "fn fooImpl(_: Foo) void" },
+        .{ .label = "bar", .kind = .Function, .detail = "fn barImpl(_: *const Foo) void" },
+    });
 }
 
 test "completion - union" {

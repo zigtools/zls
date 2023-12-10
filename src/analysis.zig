@@ -232,8 +232,33 @@ pub fn isInstanceCall(
 }
 
 pub fn hasSelfParam(analyser: *Analyser, handle: *DocumentStore.Handle, func: Ast.full.FnProto) error{OutOfMemory}!bool {
+    const token_starts = handle.tree.tokens.items(.start);
+    const in_container = try innermostContainer(handle, token_starts[func.ast.fn_token]);
+    return analyser.firstParamIs(handle, func, in_container);
+}
+
+pub fn isSelfFunction(analyser: *Analyser, func_type: TypeWithHandle, container: TypeWithHandle) error{OutOfMemory}!bool {
+    if (!func_type.isFunc()) return false;
+    const func_decl = try analyser.resolveFuncProtoOfCallable(func_type) orelse return false;
+    if (func_decl.type.is_type_val) return false;
+
+    const fn_node = func_decl.type.data.other; // this assumes that function types can only be Ast nodes
+
+    var buf: [1]Ast.Node.Index = undefined;
+    const func = func_decl.handle.tree.fullFnProto(&buf, fn_node).?;
+
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
+
+    return analyser.firstParamIs(func_decl.handle, func, container);
+}
+
+pub fn firstParamIs(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    func: Ast.full.FnProto,
+    expected: TypeWithHandle,
+) error{OutOfMemory}!bool {
     if (func.ast.params.len == 0) return false;
 
     const tree = handle.tree;
@@ -241,14 +266,11 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *DocumentStore.Handle, func: As
     const param = ast.nextFnParam(&it).?;
     if (param.type_expr == 0) return false;
 
-    const token_starts = tree.tokens.items(.start);
-    const in_container = try innermostContainer(handle, token_starts[func.ast.fn_token]);
-
     if (try analyser.resolveTypeOfNodeInternal(.{
         .node = param.type_expr,
         .handle = handle,
     })) |resolved_type| {
-        if (std.meta.eql(in_container, resolved_type))
+        if (resolved_type.eql(expected))
             return true;
     }
 
@@ -257,7 +279,7 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *DocumentStore.Handle, func: As
             .node = ptr_type.ast.child_type,
             .handle = handle,
         })) |resolved_prefix_op| {
-            if (std.meta.eql(in_container, resolved_prefix_op))
+            if (resolved_prefix_op.eql(expected))
                 return true;
         }
     }
@@ -3217,6 +3239,7 @@ fn iterateSymbolsContainerInternal(
 
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+
         switch (decl) {
             .ast_node => |node| switch (node_tags[node]) {
                 .container_field_init,
@@ -3236,7 +3259,16 @@ fn iterateSymbolsContainerInternal(
                 .simple_var_decl,
                 .aligned_var_decl,
                 => {
-                    if (instance_access) continue;
+                    if (instance_access) {
+                        // allow declarations which evaluate to functions where
+                        // the first parameter has the type of the container:
+                        const alias_type = try analyser.resolveTypeOfNode(
+                            NodeWithHandle{ .node = node, .handle = handle },
+                        ) orelse continue;
+
+                        const container_type = TypeWithHandle.typeVal(container_handle);
+                        if (!try analyser.isSelfFunction(alias_type, container_type)) continue;
+                    }
                 },
                 else => {},
             },
