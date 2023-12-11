@@ -39,6 +39,17 @@ test "code actions - discard function parameter" {
         \\}
         \\
     );
+    try testAutofix(
+        \\fn foo(a: void, b: void, c: void,) void {}
+        \\
+    ,
+        \\fn foo(a: void, b: void, c: void,) void {
+        \\    _ = a; // autofix
+        \\    _ = b; // autofix
+        \\    _ = c; // autofix
+        \\}
+        \\
+    );
 }
 
 test "code actions - discard captures" {

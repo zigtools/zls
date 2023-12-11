@@ -166,15 +166,15 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     // ) void { ... }
     // We have to be able to detect both cases.
     const fn_proto_param = payload.get(tree).?;
-    const param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
+    const last_param_token = ast.paramLastToken(tree, fn_proto_param);
 
-    const found_comma = std.mem.startsWith(
-        u8,
-        std.mem.trimLeft(u8, tree.source[param_end..], " \n"),
-        ",",
-    );
+    const potential_comma_token = last_param_token + 1;
+    const found_comma = potential_comma_token < tree.tokens.len and tree.tokens.items(.tag)[potential_comma_token] == .comma;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, !found_comma);
+    const potential_r_paren_token = last_param_token + @intFromBool(found_comma) + 1;
+    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokens.items(.tag)[potential_r_paren_token] == .r_paren;
+
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, is_last_param);
 
     const index = token_starts[node_tokens[block]] + 1;
 
