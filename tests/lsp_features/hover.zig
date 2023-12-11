@@ -464,6 +464,28 @@ test "hover - integer overflow on top level container" {
     );
 }
 
+test "hover - combine doc comments of declaration and definition" {
+    try testHover(
+        \\/// Foo
+        \\const f<cursor>oo = bar.baz;
+        \\const bar = struct {
+        \\    /// Bar
+        \\    const baz = struct {};
+        \\};
+    ,
+        \\```zig
+        \\const baz = struct
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\ Foo
+        \\
+        \\ Bar
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });

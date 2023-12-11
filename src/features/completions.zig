@@ -80,10 +80,10 @@ fn typeToCompletion(
             .{ .node = n, .handle = type_handle.handle },
             orig_handle,
             null,
-            null,
             type_handle.type.is_type_val,
             null,
             either_descriptor,
+            null,
         ),
         .ip_index => |payload| try analyser_completions.dotCompletions(
             arena,
@@ -105,7 +105,7 @@ fn completionDoc(
     server: *Server,
     arena: std.mem.Allocator,
     either_descriptor: ?[]const u8,
-    doc_comments: ?[]const u8,
+    doc_comments: []const []const u8,
 ) error{OutOfMemory}!std.meta.FieldType(types.CompletionItem, .documentation) {
     var list = std.ArrayList(u8).init(arena);
     const writer = list.writer();
@@ -113,8 +113,8 @@ fn completionDoc(
     if (either_descriptor) |ed|
         try writer.print("`Conditionally available: {s}`", .{ed});
 
-    if (doc_comments) |dc| {
-        if (either_descriptor != null)
+    for (doc_comments) |dc| {
+        if (list.items.len != 0)
             try writer.writeAll("\n\n");
         try writer.writeAll(dc);
     }
@@ -136,10 +136,10 @@ fn nodeToCompletion(
     node_handle: Analyser.NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
     orig_name: ?[]const u8,
-    orig_doc: ?[]const u8,
     is_type_val: bool,
     parent_is_type_val: ?bool,
     either_descriptor: ?[]const u8,
+    orig_docs: ?std.ArrayListUnmanaged([]const u8),
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -151,7 +151,10 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    var doc_comments = orig_doc orelse (try Analyser.getDocComments(arena, handle.tree, node));
+    var doc_strings = orig_docs orelse std.ArrayListUnmanaged([]const u8){};
+    if (try Analyser.getDocComments(arena, handle.tree, node)) |doc|
+        try doc_strings.append(arena, doc);
+
     if (try analyser.resolveVarDeclAlias(node_handle)) |result| {
         const context = DeclToCompletionContext{
             .server = server,
@@ -160,22 +163,22 @@ fn nodeToCompletion(
             .completions = list,
             .orig_handle = orig_handle,
             .orig_name = Analyser.getDeclName(tree, node),
-            .orig_doc = doc_comments,
             .either_descriptor = either_descriptor,
+            .orig_docs = doc_strings,
         };
         return try declToCompletion(context, result);
     }
-    if (doc_comments == null) {
-        if (try analyser.resolveTypeOfNode(node_handle)) |resolved_type| {
-            doc_comments = try resolved_type.docComments(arena);
-        }
+
+    if (try analyser.resolveTypeOfNode(node_handle)) |resolved_type| {
+        if (try resolved_type.docComments(arena)) |doc|
+            try doc_strings.append(arena, doc);
     }
 
     const doc = try completionDoc(
         server,
         arena,
         either_descriptor,
-        doc_comments,
+        doc_strings.items,
     );
 
     if (ast.isContainer(tree, node)) {
@@ -346,9 +349,9 @@ const DeclToCompletionContext = struct {
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *DocumentStore.Handle,
     orig_name: ?[]const u8 = null,
-    orig_doc: ?[]const u8 = null,
     parent_is_type_val: ?bool = null,
     either_descriptor: ?[]const u8 = null,
+    orig_docs: ?std.ArrayListUnmanaged([]const u8) = null,
 };
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
@@ -383,10 +386,10 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             .{ .node = node, .handle = decl_handle.handle },
             context.orig_handle,
             context.orig_name,
-            context.orig_doc,
             false,
             context.parent_is_type_val,
             context.either_descriptor,
+            context.orig_docs,
         ),
         .param_payload => |pay| {
             const param = pay.get(tree).?;
@@ -395,7 +398,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 context.server,
                 context.arena,
                 context.either_descriptor,
-                try decl_handle.docComments(context.arena),
+                if (try decl_handle.docComments(context.arena)) |doc| &.{doc} else &.{},
             );
 
             try context.completions.append(context.arena, .{
@@ -430,7 +433,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 context.server,
                 context.arena,
                 context.either_descriptor,
-                try decl_handle.docComments(context.arena),
+                if (try decl_handle.docComments(context.arena)) |doc| &.{doc} else &.{},
             );
 
             try context.completions.append(context.arena, .{

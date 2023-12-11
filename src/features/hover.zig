@@ -18,7 +18,17 @@ fn hoverSymbol(
     arena: std.mem.Allocator,
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
-    original_doc_str: ?[]const u8,
+) error{OutOfMemory}!?[]const u8 {
+    var doc_strings = std.ArrayListUnmanaged([]const u8){};
+    return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings);
+}
+
+fn hoverSymbolRecursive(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    decl_handle: Analyser.DeclWithHandle,
+    markup_kind: types.MarkupKind,
+    doc_strings: *std.ArrayListUnmanaged([]const u8),
 ) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -28,14 +38,15 @@ fn hoverSymbol(
 
     var type_references = Analyser.ReferencedType.Set.init(arena);
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
-    var doc_str = original_doc_str orelse try decl_handle.docComments(arena);
+    if (try decl_handle.docComments(arena)) |doc|
+        try doc_strings.append(arena, doc);
 
     var is_fn = false;
 
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| def: {
             if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
-                return try hoverSymbol(analyser, arena, result, markup_kind, doc_str);
+                return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 
             var buf: [1]Ast.Node.Index = undefined;
@@ -99,9 +110,8 @@ fn hoverSymbol(
 
     var resolved_type_str: []const u8 = "unknown";
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
-        if (doc_str == null) {
-            doc_str = try resolved_type.docComments(arena);
-        }
+        if (try resolved_type.docComments(arena)) |doc|
+            try doc_strings.append(arena, doc);
         try analyser.referencedTypes(
             resolved_type,
             &resolved_type_str,
@@ -118,8 +128,8 @@ fn hoverSymbol(
         } else {
             try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         }
-        if (doc_str) |doc|
-            try writer.print("\n{s}", .{doc});
+        for (doc_strings.items) |doc|
+            try writer.print("\n\n{s}", .{doc});
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -135,8 +145,8 @@ fn hoverSymbol(
         } else {
             try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
         }
-        if (doc_str) |doc|
-            try writer.print("\n{s}", .{doc});
+        for (doc_strings.items) |doc|
+            try writer.print("\n\n{s}", .{doc});
     }
 
     return hover_text.items;
@@ -161,7 +171,7 @@ fn hoverDefinitionLabel(
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
         .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
@@ -247,7 +257,7 @@ fn hoverDefinitionGlobal(
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
         .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
@@ -273,7 +283,7 @@ fn hoverDefinitionEnumLiteral(
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
         .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
@@ -301,7 +311,7 @@ fn hoverDefinitionFieldAccess(
 
     for (decls) |decl| {
         try content.append(arena, .{
-            .string = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse continue,
+            .string = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse continue,
         });
     }
 
