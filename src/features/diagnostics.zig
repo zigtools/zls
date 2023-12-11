@@ -11,6 +11,7 @@ const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
+const code_actions = @import("code_actions.zig");
 const tracy = @import("../tracy.zig");
 
 const Module = @import("../stage2/Module.zig");
@@ -42,6 +43,10 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 
     if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
         try getAstCheckDiagnostics(server, arena, handle, &diagnostics);
+    }
+
+    if (server.config.enable_autofix) {
+        try code_actions.collectAutoDiscardDiagnostics(tree, arena, &diagnostics, server.offset_encoding);
     }
 
     if (server.config.warn_style) {

@@ -65,6 +65,50 @@ pub const Builder = struct {
     }
 };
 
+pub fn collectAutoDiscardDiagnostics(
+    tree: Ast,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const token_tags = tree.tokens.items(.tag);
+    const token_starts = tree.tokens.items(.start);
+
+    // search for the following pattern:
+    // _ = some_identifier; // autofix
+
+    var i: usize = 0;
+    while (i < tree.tokens.len) {
+        const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
+            std.zig.Token.Tag,
+            token_tags,
+            i,
+            &.{ .identifier, .equal, .identifier, .semicolon },
+        ) orelse break);
+        defer i = first_token + 4;
+
+        const underscore_token = first_token;
+        const identifier_token = first_token + 2;
+        const semicolon_token = first_token + 3;
+
+        if (!std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) continue;
+
+        const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, token_starts[semicolon_token] + 1, " ") orelse continue;
+        if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) continue;
+        const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
+        if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
+
+        try diagnostics.append(arena, .{
+            .range = offsets.tokenToRange(tree, identifier_token, offset_encoding),
+            .severity = .Information,
+            .code = null,
+            .source = "zls",
+            .message = "auto discard for unused variable",
+            // TODO add a relatedInformation that shows where the discarded identifier comes from
+        });
+    }
+}
+
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
