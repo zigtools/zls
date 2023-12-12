@@ -1318,55 +1318,11 @@ fn gotoDefinitionHandler(
     arena: std.mem.Allocator,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
-    return server.gotoHandler(arena, .definition, request);
-}
-
-fn gotoHandler(
-    server: *Server,
-    arena: std.mem.Allocator,
-    kind: goto.GotoKind,
-    request: types.DefinitionParams,
-) Error!ResultType("textDocument/definition") {
-    if (request.position.character == 0) return null;
-
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
-    defer analyser.deinit();
-
-    const response = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null;
-    if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
-        return .{
-            .array_of_DefinitionLink = response,
-        };
-    }
-
-    switch (response.len) {
-        0 => return null,
-        1 => {
-            return .{
-                .Definition = .{ .Location = .{
-                    .uri = response[0].targetUri,
-                    .range = response[0].targetSelectionRange,
-                } },
-            };
-        },
-        else => {
-            const locations = try arena.alloc(types.Location, response.len);
-            for (locations, response) |*location, definition_link| {
-                location.uri = definition_link.targetUri;
-                location.range = definition_link.targetSelectionRange;
-            }
-            return .{
-                .Definition = .{ .array_of_Location = locations },
-            };
-        },
-    }
+    return goto.gotoHandler(server, arena, .definition, request);
 }
 
 fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
-    const response = (try server.gotoHandler(arena, .type_definition, .{
+    const response = (try goto.gotoHandler(server, arena, .type_definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1379,7 +1335,7 @@ fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
-    const response = (try server.gotoHandler(arena, .definition, .{
+    const response = (try goto.gotoHandler(server, arena, .definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1392,7 +1348,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
-    const response = (try server.gotoHandler(arena, .declaration, .{
+    const response = (try goto.gotoHandler(server, arena, .declaration, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1445,7 +1401,8 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
-    return if (diff.edits(arena, handle.tree.source, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
+    const text_edits = try diff.edits(arena, handle.tree.source, formatted, server.offset_encoding);
+    return text_edits.items;
 }
 
 fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
