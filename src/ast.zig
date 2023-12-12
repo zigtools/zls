@@ -1314,6 +1314,24 @@ pub fn iterateChildren(
     comptime Error: type,
     comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
 ) Error!void {
+    const ctx = struct {
+        fn inner(ctx: *const anyopaque, t: Ast, n: Ast.Node.Index) anyerror!void {
+            return callback(@as(*const @TypeOf(context), @alignCast(@ptrCast(ctx))).*, t, n);
+        }
+    };
+    if (iterateChildrenTypeErased(tree, node, @ptrCast(&context), &ctx.inner)) |_| {
+        return;
+    } else |err| {
+        return @as(Error, @errorCast(err));
+    }
+}
+
+fn iterateChildrenTypeErased(
+    tree: Ast,
+    node: Ast.Node.Index,
+    context: *const anyopaque,
+    callback: *const fn (*const anyopaque, Ast, Ast.Node.Index) anyerror!void,
+) anyerror!void {
     const node_tags = tree.nodes.items(.tag);
     const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -1690,14 +1708,18 @@ pub fn iterateChildrenRecursive(
     comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
 ) Error!void {
     const RecursiveContext = struct {
-        fn recursive_callback(ctx: @TypeOf(context), ast: Ast, child_node: Ast.Node.Index) Error!void {
+        fn recursive_callback(ctx: *const anyopaque, ast: Ast, child_node: Ast.Node.Index) anyerror!void {
             if (child_node == 0) return;
-            try callback(ctx, ast, child_node);
-            try iterateChildren(ast, child_node, ctx, Error, recursive_callback);
+            try callback(@as(*const @TypeOf(context), @alignCast(@ptrCast(ctx))).*, ast, child_node);
+            try iterateChildrenTypeErased(ast, child_node, ctx, recursive_callback);
         }
     };
 
-    try iterateChildren(tree, node, context, Error, RecursiveContext.recursive_callback);
+    if (iterateChildrenTypeErased(tree, node, @ptrCast(&context), RecursiveContext.recursive_callback)) |_| {
+        return;
+    } else |err| {
+        return @as(Error, @errorCast(err));
+    }
 }
 
 /// returns the children of the given node.
