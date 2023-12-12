@@ -15,10 +15,10 @@ const log = std.log.scoped(.zls_translate_c);
 ///
 /// **Example**
 /// ```zig
-/// const glfw = @cImport(
-///     @cDefine("GLFW_INCLUDE_VULKAN", {})
-///     @cInclude("GLFW/glfw3.h")
-/// );
+/// const glfw = @cImport({
+///     @cDefine("GLFW_INCLUDE_VULKAN", {});
+///     @cInclude("GLFW/glfw3.h");
+/// });
 /// ```
 /// gets converted into:
 /// ```c
