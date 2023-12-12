@@ -479,7 +479,9 @@ pub const ErrorMessage = struct {
 };
 
 allocator: std.mem.Allocator,
+/// the DocumentStore assumes that `config` is not modified while calling one of its functions.
 config: *const Config,
+/// the DocumentStore assumes that `runtime_zig_version` is not modified while calling one of its functions.
 runtime_zig_version: *const ?ZigVersionWrapper,
 lock: std.Thread.RwLock = .{},
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
@@ -508,6 +510,7 @@ pub fn deinit(self: *DocumentStore) void {
 
 /// Returns a handle to the given document
 /// **Thread safe** takes a shared lock
+/// This function does not protect against data races from modifying the Handle
 pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     self.lock.lockShared();
     defer self.lock.unlockShared();
@@ -517,6 +520,7 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 /// Returns a handle to the given document
 /// Will load the document from disk if it hasn't been already
 /// **Thread safe** takes an exclusive lock
+/// This function does not protect against data races from modifying the Handle
 pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -554,6 +558,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 }
 
 /// **Thread safe** takes a shared lock
+/// This function does not protect against data races from modifying the BuildFile
 pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     self.lock.lockShared();
     defer self.lock.unlockShared();
@@ -562,6 +567,7 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
+/// This function does not protect against data races from modifying the BuildFile
 fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     if (self.getBuildFile(uri)) |build_file| return build_file;
 
@@ -609,7 +615,8 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
     _ = try self.createAndStoreDocument(uri, duped_text, true);
 }
 
-/// **Thread safe** takes an exclusive lock
+/// **Thread safe** takes a shared lock, takes an exclusive lock (with `tryLock`)
+/// Assumes that no other thread is currently accessing the given document
 pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -637,9 +644,11 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     self.garbageCollectionBuildFiles() catch {};
 }
 
-/// Takes ownership of `new_text` which has to be allocated
-/// with this DocumentStore's allocator
-/// **Thread safe** takes a shared lock
+/// Takes ownership of `new_text` which has to be allocated with this DocumentStore's allocator.
+/// Assumes that a document with the given `uri` is in the DocumentStore.
+///
+/// **Thread safe** takes a shared lock when called on different documents
+/// **Not thread safe** when called on the same document
 pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -654,7 +663,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 }
 
 /// Invalidates a build files.
-/// **Thread safe** takes an exclusive lock
+/// **Thread safe** takes a shared lock
 pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
     std.debug.assert(std.process.can_spawn);
     if (!std.process.can_spawn) return;
