@@ -809,6 +809,11 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     return enum_completions;
 }
 
+/// asserts that `pos_context` is one of the following:
+///  - `.import_string_literal`
+///  - `.cinclude_string_literal`
+///  - `.embedfile_string_literal`
+///  - `.string_literal`
 fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
     store: *DocumentStore,
@@ -817,7 +822,15 @@ fn completeFileSystemStringLiteral(
 ) ![]types.CompletionItem {
     var completions: DocumentScope.CompletionSet = .{};
 
-    const loc = pos_context.loc().?;
+    const loc = switch (pos_context) {
+        .import_string_literal,
+        .cinclude_string_literal,
+        .embedfile_string_literal,
+        .string_literal,
+        => |loc| loc,
+        else => unreachable,
+    };
+
     var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
 
     var separator_index = completing.len;
@@ -852,6 +865,7 @@ fn completeFileSystemStringLiteral(
                 .import_string_literal => ".zig",
                 .cinclude_string_literal => ".h",
                 .embedfile_string_literal => null,
+                .string_literal => null,
                 else => unreachable,
             };
             switch (entry.kind) {
@@ -950,9 +964,13 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
-            log.err("failed to get file system completions: {}", .{err});
-            return null;
+        .string_literal,
+        => blk: {
+            if (pos_context == .string_literal and !DocumentStore.isBuildFile(handle.uri)) break :blk null;
+            break :blk completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
+                log.err("failed to get file system completions: {}", .{err});
+                return null;
+            };
         },
         else => null,
     };
@@ -968,6 +986,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
             pos_context != .import_string_literal and
             pos_context != .cinclude_string_literal and
             pos_context != .embedfile_string_literal and
+            pos_context != .string_literal and
             pos_context.loc() != null and
             lookahead_context.loc() != null and
             pos_context.loc().?.end != lookahead_context.loc().?.end)
