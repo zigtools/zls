@@ -19,6 +19,7 @@ const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const Transport = @import("Transport.zig");
 const known_folders = @import("known-folders");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
+const URI = @import("uri.zig");
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -56,6 +57,8 @@ client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper = null,
 recording_enabled: bool = false,
 replay_enabled: bool = false,
+build_runner_failures: std.AutoHashMapUnmanaged(i64, []const u8) = .{},
+build_runner_failures_lock: std.Thread.Mutex = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -753,6 +756,52 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     server.updateConfiguration(new_config) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
+}
+
+fn handleShowBuildRunnerFailure(server: *Server, millis: i64, json: std.json.Value) Error!void {
+    const res = std.json.parseFromValue(?types.MessageActionItem, server.allocator, json, .{}) catch return error.ParseError;
+    defer res.deinit();
+
+    server.build_runner_failures_lock.lock();
+    defer server.build_runner_failures_lock.unlock();
+
+    const stderr = (server.build_runner_failures.fetchRemove(millis) orelse return).value;
+    defer server.allocator.free(stderr);
+
+    if (res.value != null) {
+        const request_id = try std.fmt.allocPrint(
+            server.allocator,
+            "show_document-{d}",
+            .{millis},
+        );
+
+        const cache = std.fs.cwd().makeOpenPath("zig-cache", .{}) catch return;
+        cache.writeFile2(.{
+            .sub_path = "build_runner_failure.txt",
+            .data = stderr,
+        }) catch return;
+
+        var cwd_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const cwd = std.os.getcwd(&cwd_buf) catch return;
+
+        const joined_path = std.fs.path.join(server.allocator, &.{ cwd, "zig-cache/build_runner_failure.txt" }) catch return;
+        defer server.allocator.free(joined_path);
+
+        const uri = URI.fromPath(server.allocator, joined_path) catch return;
+        defer server.allocator.free(uri);
+
+        const json_message = server.sendToClientRequest(
+            .{ .string = request_id },
+            "window/showDocument",
+            types.ShowDocumentParams{
+                .uri = uri,
+                .takeFocus = true,
+            },
+        ) catch return;
+
+        server.allocator.free(request_id);
+        server.allocator.free(json_message);
+    }
 }
 
 fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {
@@ -1952,6 +2001,9 @@ pub fn destroy(server: *Server) void {
     server.client_capabilities.deinit(server.allocator);
     if (server.runtime_zig_version) |zig_version| zig_version.free();
     server.config_arena.promote(server.allocator).deinit();
+    var it = server.build_runner_failures.iterator();
+    while (it.next()) |v| server.allocator.free(v.value_ptr.*);
+    server.build_runner_failures.deinit(server.allocator);
     server.allocator.destroy(server);
 }
 
@@ -2185,7 +2237,32 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
         .load_build_configuration => |build_file_uri| {
             std.debug.assert(std.process.can_spawn);
             if (!std.process.can_spawn) return;
-            server.document_store.invalidateBuildFile(build_file_uri) catch return;
+
+            var stderr: ?[]const u8 = null;
+            server.document_store.invalidateBuildFile(build_file_uri, &stderr) catch |err| switch (err) {
+                error.RunFailed => {
+                    server.build_runner_failures_lock.lock();
+                    defer server.build_runner_failures_lock.unlock();
+
+                    const millis = std.time.milliTimestamp();
+                    server.build_runner_failures.put(server.allocator, millis, stderr.?) catch return;
+
+                    const request_id = std.fmt.allocPrint(server.allocator, "build_runner_failure-{d}", .{millis}) catch return;
+
+                    const json_message = server.sendToClientRequest(
+                        .{ .string = request_id },
+                        "window/showMessageRequest",
+                        types.ShowMessageRequestParams{
+                            .type = .Error,
+                            .message = "ZLS failed to run your Zig build file. If normal use of your Zig build file succeeds, this likely means that your ZLS and Zig versions are incompatible.",
+                            .actions = &.{.{ .title = "See full error log" }},
+                        },
+                    ) catch return;
+                    server.allocator.free(request_id);
+                    server.allocator.free(json_message);
+                },
+                else => return,
+            };
         },
         .run_build_on_save => {
             std.debug.assert(std.process.can_spawn);
@@ -2280,6 +2357,10 @@ fn handleResponse(server: *Server, response: Message.Response) Error!void {
     if (std.mem.eql(u8, id, "semantic_tokens_refresh")) {
         //
     } else if (std.mem.startsWith(u8, id, "register")) {
+        //
+    } else if (std.mem.startsWith(u8, id, "build_runner_failure")) {
+        try server.handleShowBuildRunnerFailure(std.fmt.parseInt(i64, id[std.mem.indexOf(u8, id, "-").? + 1 ..], 10) catch return error.ParseError, response.data.result);
+    } else if (std.mem.startsWith(u8, id, "show_document")) {
         //
     } else if (std.mem.eql(u8, id, "apply_edit")) {
         //

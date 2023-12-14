@@ -655,7 +655,12 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 
 /// Invalidates a build files.
 /// **Thread safe** takes an exclusive lock
-pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
+/// Caller owns `failure_stderr` if specified
+pub fn invalidateBuildFile(
+    self: *DocumentStore,
+    build_file_uri: Uri,
+    failure_stderr: ?*?[]const u8,
+) error{ OutOfMemory, RunFailed }!void {
     std.debug.assert(std.process.can_spawn);
     if (!std.process.can_spawn) return;
 
@@ -663,9 +668,9 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutO
     if (self.config.build_runner_path == null) return;
     if (self.config.global_cache_path == null) return;
 
-    const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
+    const build_config = loadBuildConfiguration(self, build_file_uri, failure_stderr) catch |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
-        return;
+        return error.RunFailed;
     };
 
     const build_file = self.getBuildFile(build_file_uri) orelse {
@@ -860,7 +865,11 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
 }
 
 /// Runs the build.zig and extracts include directories and packages
-pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.Parsed(BuildConfig) {
+pub fn loadBuildConfiguration(
+    self: *DocumentStore,
+    build_file_uri: Uri,
+    failure_stderr: ?*?[]const u8,
+) !std.json.Parsed(BuildConfig) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -887,8 +896,15 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
             .max_output_bytes = 1024 * 1024,
         });
     };
-    defer self.allocator.free(zig_run_result.stdout);
-    defer self.allocator.free(zig_run_result.stderr);
+    defer {
+        self.allocator.free(zig_run_result.stdout);
+
+        if (failure_stderr) |stderr| {
+            stderr.* = zig_run_result.stderr;
+        } else {
+            self.allocator.free(zig_run_result.stderr);
+        }
+    }
 
     errdefer blk: {
         const joined = std.mem.join(self.allocator, " ", args) catch break :blk;
