@@ -15,6 +15,7 @@ const Completion = struct {
     label: []const u8,
     kind: types.CompletionItemKind,
     detail: ?[]const u8 = null,
+    documentation: ?[]const u8 = null,
 };
 
 const CompletionSet = std.StringArrayHashMapUnmanaged(Completion);
@@ -1688,6 +1689,55 @@ test "completion - enum completion on out of bound parameter index" {
     , &.{});
 }
 
+test "completion - combine doc comments of declaration and definition" {
+    try testCompletion(
+        \\const foo = struct {
+        \\    /// A
+        \\    const bar = fizz.buzz;
+        \\};
+        \\const fizz = struct {
+        \\    /// B
+        \\    const buzz = struct {};
+        \\};
+        \\test {
+        \\    foo.<cursor>
+        \\}
+    , &.{
+        .{
+            .label = "bar",
+            .kind = .Constant,
+            .detail = "const buzz = struct",
+            .documentation =
+            \\ A
+            \\
+            \\ B
+            ,
+        },
+    });
+}
+
+test "hover - top-level doc comment" {
+    try testCompletion(
+        \\//! B
+        \\
+        \\/// A
+        \\const Foo = @This();
+        \\
+        \\const Bar = <cursor>
+    , &.{
+        .{
+            .label = "Foo",
+            .kind = .Constant,
+            .detail = "const Foo = @This()",
+            .documentation =
+            \\ A
+            \\
+            \\ B
+            ,
+        },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
@@ -1695,6 +1745,8 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
 
     var ctx = try Context.init();
     defer ctx.deinit();
+
+    ctx.server.client_capabilities.completion_doc_supports_md = true;
 
     const test_uri = try ctx.addDocument(text);
 
@@ -1754,6 +1806,12 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
                 if (actual_completion.kind) |kind| @tagName(kind) else null,
             });
             return error.InvalidCompletionKind;
+        }
+
+        if (expected_completion.documentation != null and actual_completion.documentation != null) {
+            const markup_context = actual_completion.documentation.?.MarkupContent;
+            try std.testing.expectEqual(types.MarkupKind.markdown, markup_context.kind);
+            try std.testing.expectEqualStrings(expected_completion.documentation.?, markup_context.value);
         }
 
         if (expected_completion.detail == null) continue;

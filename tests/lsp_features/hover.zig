@@ -112,6 +112,19 @@ test "hover - block label" {
         \\(i32)
         \\```
     );
+    try testHover(
+        \\const foo: i32 = undefined;
+        \\const bar = baz: {
+        \\    break :b<cursor>az foo;
+        \\};
+    ,
+        \\```zig
+        \\baz
+        \\```
+        \\```zig
+        \\(i32)
+        \\```
+    );
 }
 
 test "hover - if capture" {
@@ -267,6 +280,22 @@ test "hover - for capture" {
     );
 }
 
+test "hover - enum literal" {
+    try testHover(
+        \\const E = enum { foo };
+        \\const e: E = .f<cursor>oo;
+    ,
+        \\```zig
+        \\foo
+        \\```
+        \\```zig
+        \\(E)
+        \\```
+        \\
+        \\Go to [E](file:///test.zig#L1)
+    );
+}
+
 test "hover - switch capture" {
     try testHover(
         \\const U = union(enum) { a: i32 };
@@ -360,6 +389,11 @@ test "hover - function" {
         \\fn foo() !i32
         \\```
     );
+    try testHoverWithOptions(.{ .markup_kind = .plaintext },
+        \\fn f<cursor>oo() i32 {}
+    ,
+        \\fn foo() i32
+    );
 }
 
 test "hover - optional" {
@@ -406,6 +440,7 @@ test "hover - var decl comments" {
         \\```zig
         \\(unknown)
         \\```
+        \\
         \\this is a comment
     );
 }
@@ -484,9 +519,52 @@ test "hover - combine doc comments of declaration and definition" {
         \\
         \\ Bar
     );
+    try testHoverWithOptions(.{ .markup_kind = .plaintext },
+        \\/// Foo
+        \\const f<cursor>oo = bar.baz;
+        \\const bar = struct {
+        \\    /// Bar
+        \\    const baz = struct {};
+        \\};
+    ,
+        \\const baz = struct
+        \\(type)
+        \\
+        \\ Foo
+        \\
+        \\ Bar
+    );
+}
+
+test "hover - top-level doc comment" {
+    try testHover(
+        \\//! B
+        \\
+        \\/// A
+        \\const S<cursor>elf = @This();
+    ,
+        \\```zig
+        \\const Self = @This()
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\ A
+        \\
+        \\ B
+    );
 }
 
 fn testHover(source: []const u8, expected: []const u8) !void {
+    try testHoverWithOptions(.{ .markup_kind = .markdown }, source, expected);
+}
+
+fn testHoverWithOptions(
+    options: struct { markup_kind: types.MarkupKind },
+    source: []const u8,
+    expected: []const u8,
+) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
@@ -494,7 +572,7 @@ fn testHover(source: []const u8, expected: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    ctx.server.client_capabilities.hover_supports_md = true;
+    ctx.server.client_capabilities.hover_supports_md = options.markup_kind == .markdown;
 
     const test_uri = "file:///test.zig";
     try ctx.server.sendNotificationSync(ctx.arena.allocator(), "textDocument/didOpen", .{
@@ -513,6 +591,6 @@ fn testHover(source: []const u8, expected: []const u8) !void {
 
     const markup_context = response.contents.MarkupContent;
 
-    try std.testing.expectEqual(types.MarkupKind.markdown, markup_context.kind);
+    try std.testing.expectEqual(options.markup_kind, markup_context.kind);
     try std.testing.expectEqualStrings(expected, markup_context.value);
 }

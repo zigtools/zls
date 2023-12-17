@@ -3723,6 +3723,19 @@ pub fn resolveExpressionTypeFromAncestors(
                 });
             }
         },
+        .global_var_decl,
+        .local_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => {
+            const var_decl = tree.fullVarDecl(ancestors[0]).?;
+            if (node == var_decl.ast.init_node) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = ancestors[0],
+                    .handle = handle,
+                });
+            }
+        },
         .if_simple,
         .@"if",
         => {
