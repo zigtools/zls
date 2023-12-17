@@ -419,49 +419,6 @@ pub const Key = union(enum) {
             },
         }
     }
-
-    pub fn tag(key: Key) Tag {
-        return switch (key) {
-            .simple_type => .simple_type,
-            .simple_value => .simple_value,
-
-            .int_type => |int_info| switch (int_info.signedness) {
-                .signed => .type_int_signed,
-                .unsigned => .type_int_unsigned,
-            },
-            .pointer_type => .type_pointer,
-            .array_type => .type_array,
-            .struct_type => .type_struct,
-            .optional_type => .type_optional,
-            .error_union_type => .type_error_union,
-            .error_set_type => .type_error_set,
-            .enum_type => .type_enum,
-            .function_type => .type_function,
-            .union_type => .type_union,
-            .tuple_type => .type_tuple,
-            .vector_type => .type_vector,
-            .anyframe_type => .type_anyframe,
-
-            .int_u64_value => .int_u64,
-            .int_i64_value => .int_i64,
-            .int_big_value => |big_int| if (big_int.int.positive) .int_big_positive else .int_big_negative,
-            .float_16_value => .float_f16,
-            .float_32_value => .float_f32,
-            .float_64_value => .float_f64,
-            .float_80_value => .float_f80,
-            .float_128_value => .float_f128,
-            .float_comptime_value => .float_comptime,
-
-            .optional_value => .optional_value,
-            .slice => .slice,
-            .aggregate => .aggregate,
-            .union_value => .union_value,
-            .error_value => .error_value,
-            .null_value => .null_value,
-            .undefined_value => .undefined_value,
-            .unknown_value => .unknown_value,
-        };
-    }
 };
 
 pub const Item = struct {
@@ -732,12 +689,12 @@ pub const Tag = enum(u8) {
     /// A optional value that is not null.
     /// data is index to OptionalValue.
     optional_value,
-    /// A aggregate (struct) value.
-    /// data is index to Aggregate.
-    aggregate,
     /// A slice value.
     /// data is index to Slice.
-    slice,
+    slice_value,
+    /// A aggregate (struct) value.
+    /// data is index to Aggregate.
+    aggregate_value,
     /// A union value.
     /// data is index to UnionValue.
     union_value,
@@ -1102,8 +1059,8 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
         .float_comptime => .{ .float_comptime_value = ip.extraData(f128, data) },
 
         .optional_value => .{ .optional_value = ip.extraData(Key.OptionalValue, data) },
-        .slice => .{ .slice = ip.extraData(Key.Slice, data) },
-        .aggregate => .{ .aggregate = ip.extraData(Key.Aggregate, data) },
+        .slice_value => .{ .slice = ip.extraData(Key.Slice, data) },
+        .aggregate_value => .{ .aggregate = ip.extraData(Key.Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(Key.UnionValue, data) },
         .error_value => .{ .error_value = ip.extraData(Key.ErrorValue, data) },
         .null_value => .{ .null_value = .{ .ty = @enumFromInt(data) } },
@@ -1117,40 +1074,146 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
     if (gop.found_existing) return @enumFromInt(gop.index);
 
-    const tag: Tag = key.tag();
-    const data: u32 = switch (key) {
-        .simple_type => |simple| @intFromEnum(simple),
-        .simple_value => |simple| @intFromEnum(simple),
+    const item: Item = switch (key) {
+        .simple_type => |simple| .{
+            .tag = .simple_type,
+            .data = @intFromEnum(simple),
+        },
+        .simple_value => |simple| .{
+            .tag = .simple_value,
+            .data = @intFromEnum(simple),
+        },
+        .int_type => |int_ty| switch (int_ty.signedness) {
+            .signed => .{ .tag = .type_int_signed, .data = int_ty.bits },
+            .unsigned => .{ .tag = .type_int_unsigned, .data = int_ty.bits },
+        },
+        .pointer_type => |pointer_ty| .{
+            .tag = .type_pointer,
+            .data = try ip.addExtra(gpa, Key.Pointer, pointer_ty),
+        },
+        .array_type => |array_ty| .{
+            .tag = .type_array,
+            .data = try ip.addExtra(gpa, Key.Array, array_ty),
+        },
+        .struct_type => |struct_index| .{
+            .tag = .type_struct,
+            .data = @intFromEnum(struct_index),
+        },
+        .optional_type => |optional_ty| .{
+            .tag = .type_optional,
+            .data = @intFromEnum(optional_ty.payload_type),
+        },
+        .error_union_type => |error_union_ty| .{
+            .tag = .type_error_union,
+            .data = try ip.addExtra(gpa, Key.ErrorUnion, error_union_ty),
+        },
+        .error_set_type => |error_set_ty| .{
+            .tag = .type_error_set,
+            .data = try ip.addExtra(gpa, Key.ErrorSet, error_set_ty),
+        },
+        .enum_type => |enum_index| .{
+            .tag = .type_enum,
+            .data = @intFromEnum(enum_index),
+        },
+        .function_type => |function_ty| .{
+            .tag = .type_function,
+            .data = try ip.addExtra(gpa, Key.Function, function_ty),
+        },
+        .union_type => |union_index| .{
+            .tag = .type_union,
+            .data = @intFromEnum(union_index),
+        },
+        .tuple_type => |tuple_ty| .{
+            .tag = .type_tuple,
+            .data = try ip.addExtra(gpa, Key.Tuple, tuple_ty),
+        },
+        .vector_type => |vector_ty| .{
+            .tag = .type_vector,
+            .data = try ip.addExtra(gpa, Key.Vector, vector_ty),
+        },
+        .anyframe_type => |anyframe_ty| .{
+            .tag = .type_anyframe,
+            .data = @intFromEnum(anyframe_ty.child),
+        },
 
-        .int_type => |int_ty| int_ty.bits,
-        .optional_type => |optional_ty| @intFromEnum(optional_ty.payload_type),
-        .anyframe_type => |anyframe_ty| @intFromEnum(anyframe_ty.child),
+        .int_u64_value => |int_val| .{
+            .tag = .int_u64,
+            .data = try ip.addExtra(gpa, Key.U64Value, int_val),
+        },
+        .int_i64_value => |int_val| .{
+            .tag = .int_i64,
+            .data = try ip.addExtra(gpa, Key.I64Value, int_val),
+        },
+        .int_big_value => |big_int_val| .{
+            .tag = if (big_int_val.int.positive) .int_big_positive else .int_big_negative,
+            .data = try ip.addExtra(gpa, Key.BigIntInternal, .{
+                .ty = big_int_val.ty,
+                .limbs = big_int_val.int.limbs,
+            }),
+        },
+        .float_16_value => |float_val| .{
+            .tag = .float_f16,
+            .data = @as(u16, @bitCast(float_val)),
+        },
+        .float_32_value => |float_val| .{
+            .tag = .float_f32,
+            .data = @bitCast(float_val),
+        },
+        .float_64_value => |float_val| .{
+            .tag = .float_f64,
+            .data = try ip.addExtra(gpa, f64, float_val),
+        },
+        .float_80_value => |float_val| .{
+            .tag = .float_f80,
+            .data = try ip.addExtra(gpa, f80, float_val),
+        },
+        .float_128_value => |float_val| .{
+            .tag = .float_f128,
+            .data = try ip.addExtra(gpa, f128, float_val),
+        },
+        .float_comptime_value => |float_val| .{
+            .tag = .float_comptime,
+            .data = try ip.addExtra(gpa, f128, float_val),
+        },
 
-        .struct_type => |struct_index| @intFromEnum(struct_index),
-        .enum_type => |enum_index| @intFromEnum(enum_index),
-        .union_type => |union_index| @intFromEnum(union_index),
-
-        .int_u64_value => |int_val| try ip.addExtra(gpa, int_val),
-        .int_i64_value => |int_val| try ip.addExtra(gpa, int_val),
-        .int_big_value => |big_int_val| try ip.addExtra(gpa, Key.BigIntInternal{
-            .ty = big_int_val.ty,
-            .limbs = big_int_val.int.limbs,
-        }),
-        .float_16_value => |float_val| @as(u16, @bitCast(float_val)),
-        .float_32_value => |float_val| @as(u32, @bitCast(float_val)),
-        .null_value => |null_val| @intFromEnum(null_val.ty),
-        .undefined_value => |undefined_val| @intFromEnum(undefined_val.ty),
+        .optional_value => |optional_val| .{
+            .tag = .optional_value,
+            .data = try ip.addExtra(gpa, Key.OptionalValue, optional_val),
+        },
+        .slice => |slice_val| .{
+            .tag = .slice_value,
+            .data = try ip.addExtra(gpa, Key.Slice, slice_val),
+        },
+        .aggregate => |aggregate_val| .{
+            .tag = .aggregate_value,
+            .data = try ip.addExtra(gpa, Key.Aggregate, aggregate_val),
+        },
+        .union_value => |union_val| .{
+            .tag = .union_value,
+            .data = try ip.addExtra(gpa, Key.UnionValue, union_val),
+        },
+        .error_value => |error_val| .{
+            .tag = .error_value,
+            .data = try ip.addExtra(gpa, Key.ErrorValue, error_val),
+        },
+        .null_value => |null_val| .{
+            .tag = .null_value,
+            .data = @intFromEnum(null_val.ty),
+        },
+        .undefined_value => |undefined_val| .{
+            .tag = .undefined_value,
+            .data = @intFromEnum(undefined_val.ty),
+        },
         .unknown_value => |unknown_val| blk: {
             assert(unknown_val.ty != .type_type); // use .unknown_type instead
-            break :blk @intFromEnum(unknown_val.ty);
+            break :blk .{
+                .tag = .unknown_value,
+                .data = @intFromEnum(unknown_val.ty),
+            };
         },
-        inline else => |data| try ip.addExtra(gpa, data),
     };
 
-    try ip.items.append(gpa, .{
-        .tag = tag,
-        .data = data,
-    });
+    try ip.items.append(gpa, item);
     return @enumFromInt(ip.items.len - 1);
 }
 
@@ -1226,8 +1289,7 @@ pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: Union) Allocator
     return @enumFromInt(ip.unions.count() - 1);
 }
 
-fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
-    const T = @TypeOf(extra);
+fn addExtra(ip: *InternPool, gpa: Allocator, comptime T: type, extra: T) Allocator.Error!u32 {
     comptime if (@sizeOf(T) <= 4) {
         @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
@@ -2610,8 +2672,8 @@ pub fn zigTypeTag(ip: *const InternPool, index: Index) std.builtin.TypeId {
         .float_f128,
         .float_comptime,
         .optional_value,
-        .aggregate,
-        .slice,
+        .slice_value,
+        .aggregate_value,
         .union_value,
         .null_value,
         .error_value,
@@ -2664,8 +2726,8 @@ pub fn typeOf(ip: *const InternPool, index: Index) Index {
         .int_big_positive,
         .int_big_negative,
         .optional_value,
-        .aggregate,
-        .slice,
+        .slice_value,
+        .aggregate_value,
         .union_value,
         .error_value,
         => std.mem.bytesToValue(Index, ip.extra.items[ip.items.items(.data)[@intFromEnum(index)]..][0..@sizeOf(Index)]),
@@ -2709,8 +2771,8 @@ pub fn isType(ip: *const InternPool, ty: Index) bool {
         .int_big_positive,
         .int_big_negative,
         .optional_value,
-        .aggregate,
-        .slice,
+        .slice_value,
+        .aggregate_value,
         .union_value,
         .error_value,
         .null_value,
