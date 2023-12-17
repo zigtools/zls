@@ -1808,10 +1808,21 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
             return error.InvalidCompletionKind;
         }
 
-        if (expected_completion.documentation != null and actual_completion.documentation != null) {
-            const markup_context = actual_completion.documentation.?.MarkupContent;
-            try std.testing.expectEqual(types.MarkupKind.markdown, markup_context.kind);
-            try std.testing.expectEqualStrings(expected_completion.documentation.?, markup_context.value);
+        if (expected_completion.documentation) |expected_doc| doc_blk: {
+            const actual_doc = if (actual_completion.documentation) |doc| blk: {
+                const markup_context = doc.MarkupContent;
+                try std.testing.expectEqual(types.MarkupKind.markdown, markup_context.kind);
+                break :blk markup_context.value;
+            } else null;
+
+            if (actual_doc != null and std.mem.eql(u8, expected_doc, actual_doc.?)) break :doc_blk;
+
+            try error_builder.msgAtIndex("label '{s}' should have doc '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                label,
+                expected_doc,
+                actual_doc,
+            });
+            return error.InvalidCompletionDoc;
         }
 
         if (expected_completion.detail == null) continue;

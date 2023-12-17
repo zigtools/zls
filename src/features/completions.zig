@@ -83,7 +83,7 @@ fn typeToCompletion(
             type_handle.type.is_type_val,
             null,
             either_descriptor,
-            null,
+            &.{},
         ),
         .ip_index => |payload| try analyser_completions.dotCompletions(
             arena,
@@ -139,7 +139,7 @@ fn nodeToCompletion(
     is_type_val: bool,
     parent_is_type_val: ?bool,
     either_descriptor: ?[]const u8,
-    orig_docs: ?std.ArrayListUnmanaged([]const u8),
+    orig_docs: []const []const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -151,7 +151,8 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    var doc_strings = orig_docs orelse std.ArrayListUnmanaged([]const u8){};
+    var doc_strings = std.ArrayListUnmanaged([]const u8){};
+    try doc_strings.appendSlice(arena, orig_docs);
     if (try Analyser.getDocComments(arena, handle.tree, node)) |doc|
         try doc_strings.append(arena, doc);
 
@@ -164,7 +165,7 @@ fn nodeToCompletion(
             .orig_handle = orig_handle,
             .orig_name = Analyser.getDeclName(tree, node),
             .either_descriptor = either_descriptor,
-            .orig_docs = doc_strings,
+            .orig_docs = doc_strings.items,
         };
         return try declToCompletion(context, result);
     }
@@ -351,7 +352,7 @@ const DeclToCompletionContext = struct {
     orig_name: ?[]const u8 = null,
     parent_is_type_val: ?bool = null,
     either_descriptor: ?[]const u8 = null,
-    orig_docs: ?std.ArrayListUnmanaged([]const u8) = null,
+    orig_docs: []const []const u8 = &.{},
 };
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {

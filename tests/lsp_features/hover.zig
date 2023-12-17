@@ -389,11 +389,11 @@ test "hover - function" {
         \\fn foo() !i32
         \\```
     );
-    try testHoverWithOptions(.{ .markup_kind = .plaintext },
+    try testHoverWithOptions(
         \\fn f<cursor>oo() i32 {}
     ,
         \\fn foo() i32
-    );
+    , .{ .markup_kind = .plaintext });
 }
 
 test "hover - optional" {
@@ -519,7 +519,7 @@ test "hover - combine doc comments of declaration and definition" {
         \\
         \\ Bar
     );
-    try testHoverWithOptions(.{ .markup_kind = .plaintext },
+    try testHoverWithOptions(
         \\/// Foo
         \\const f<cursor>oo = bar.baz;
         \\const bar = struct {
@@ -533,7 +533,7 @@ test "hover - combine doc comments of declaration and definition" {
         \\ Foo
         \\
         \\ Bar
-    );
+    , .{ .markup_kind = .plaintext });
 }
 
 test "hover - top-level doc comment" {
@@ -557,13 +557,13 @@ test "hover - top-level doc comment" {
 }
 
 fn testHover(source: []const u8, expected: []const u8) !void {
-    try testHoverWithOptions(.{ .markup_kind = .markdown }, source, expected);
+    try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }
 
 fn testHoverWithOptions(
-    options: struct { markup_kind: types.MarkupKind },
     source: []const u8,
     expected: []const u8,
+    options: struct { markup_kind: types.MarkupKind },
 ) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
