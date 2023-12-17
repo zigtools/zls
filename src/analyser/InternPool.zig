@@ -156,6 +156,50 @@ pub const Key = union(enum) {
         int: std.math.big.int.Const,
     };
 
+    const F64Value = packed struct {
+        a: u32,
+        b: u32,
+
+        fn pack(val: f64) F64Value {
+            return @bitCast(val);
+        }
+
+        fn unpack(val: F64Value) f64 {
+            return @bitCast(val);
+        }
+    };
+
+    const F80Value = packed struct {
+        a: u32,
+        b: u32,
+        c: u32,
+
+        fn pack(val: f80) F80Value {
+            // f80 -> u80 -> u96 -> F80Value
+            return @bitCast(@as(u96, @as(u80, @bitCast(val))));
+        }
+
+        fn unpack(val: F80Value) f80 {
+            // F80Value -> u96 -> u80 -> f80
+            return @bitCast(@as(u80, @truncate(@as(u96, @bitCast(val)))));
+        }
+    };
+
+    const F128Value = packed struct {
+        a: u32,
+        b: u32,
+        c: u32,
+        d: u32,
+
+        fn pack(val: f128) F128Value {
+            return @bitCast(val);
+        }
+
+        fn unpack(val: F128Value) f128 {
+            return @bitCast(val);
+        }
+    };
+
     pub const OptionalValue = struct {
         ty: Index,
         val: Index,
@@ -674,16 +718,16 @@ pub const Tag = enum(u8) {
     /// data is f32 bitcasted to u32.
     float_f32,
     /// A float value that can be represented by f64.
-    /// data is payload to f64.
+    /// data is payload to F64Value.
     float_f64,
     /// A float value that can be represented by f80.
-    /// data is payload to f80.
+    /// data is payload to F80Value.
     float_f80,
     /// A float value that can be represented by f128.
-    /// data is payload to f128.
+    /// data is payload to F128Value.
     float_f128,
     /// A comptime float value.
-    /// data is payload to f128.
+    /// data is payload to F128Value.
     float_comptime,
 
     /// A optional value that is not null.
@@ -1053,10 +1097,10 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
         } },
         .float_f16 => .{ .float_16_value = @bitCast(@as(u16, @intCast(data))) },
         .float_f32 => .{ .float_32_value = @bitCast(data) },
-        .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
-        .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
-        .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
-        .float_comptime => .{ .float_comptime_value = ip.extraData(f128, data) },
+        .float_f64 => .{ .float_64_value = ip.extraData(Key.F64Value, data).unpack() },
+        .float_f80 => .{ .float_80_value = ip.extraData(Key.F80Value, data).unpack() },
+        .float_f128 => .{ .float_128_value = ip.extraData(Key.F128Value, data).unpack() },
+        .float_comptime => .{ .float_comptime_value = ip.extraData(Key.F128Value, data).unpack() },
 
         .optional_value => .{ .optional_value = ip.extraData(Key.OptionalValue, data) },
         .slice_value => .{ .slice = ip.extraData(Key.Slice, data) },
@@ -1161,19 +1205,19 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .float_64_value => |float_val| .{
             .tag = .float_f64,
-            .data = try ip.addExtra(gpa, f64, float_val),
+            .data = try ip.addExtra(gpa, Key.F64Value, Key.F64Value.pack(float_val)),
         },
         .float_80_value => |float_val| .{
             .tag = .float_f80,
-            .data = try ip.addExtra(gpa, f80, float_val),
+            .data = try ip.addExtra(gpa, Key.F80Value, Key.F80Value.pack(float_val)),
         },
         .float_128_value => |float_val| .{
             .tag = .float_f128,
-            .data = try ip.addExtra(gpa, f128, float_val),
+            .data = try ip.addExtra(gpa, Key.F128Value, Key.F128Value.pack(float_val)),
         },
         .float_comptime_value => |float_val| .{
             .tag = .float_comptime,
-            .data = try ip.addExtra(gpa, f128, float_val),
+            .data = try ip.addExtra(gpa, Key.F128Value, Key.F128Value.pack(float_val)),
         },
 
         .optional_value => |optional_val| .{
