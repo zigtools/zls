@@ -3755,9 +3755,9 @@ fn formatId(
 ) @TypeOf(writer).Error!void {
     _ = options;
     if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx.string);
-    ctx.ip.string_pool.mutex.lock();
-    defer ctx.ip.string_pool.mutex.unlock();
-    try writer.print("{}", .{std.zig.fmtId(ctx.ip.string_pool.stringToSliceUnsafe(ctx.string))});
+    const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.string);
+    defer locked_string.release(&ctx.ip.string_pool);
+    try std.fmt.format(writer, "{}", .{std.zig.fmtId(locked_string.slice)});
 }
 
 pub fn fmtId(ip: *InternPool, string: String) std.fmt.Formatter(formatId) {
