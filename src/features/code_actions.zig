@@ -65,6 +65,50 @@ pub const Builder = struct {
     }
 };
 
+pub fn collectAutoDiscardDiagnostics(
+    tree: Ast,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const token_tags = tree.tokens.items(.tag);
+    const token_starts = tree.tokens.items(.start);
+
+    // search for the following pattern:
+    // _ = some_identifier; // autofix
+
+    var i: usize = 0;
+    while (i < tree.tokens.len) {
+        const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
+            std.zig.Token.Tag,
+            token_tags,
+            i,
+            &.{ .identifier, .equal, .identifier, .semicolon },
+        ) orelse break);
+        defer i = first_token + 4;
+
+        const underscore_token = first_token;
+        const identifier_token = first_token + 2;
+        const semicolon_token = first_token + 3;
+
+        if (!std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) continue;
+
+        const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, token_starts[semicolon_token] + 1, " ") orelse continue;
+        if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) continue;
+        const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
+        if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
+
+        try diagnostics.append(arena, .{
+            .range = offsets.tokenToRange(tree, identifier_token, offset_encoding),
+            .severity = .Information,
+            .code = null,
+            .source = "zls",
+            .message = "auto discard for unused variable",
+            // TODO add a relatedInformation that shows where the discarded identifier comes from
+        });
+    }
+}
+
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
@@ -122,15 +166,15 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     // ) void { ... }
     // We have to be able to detect both cases.
     const fn_proto_param = payload.get(tree).?;
-    const param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, fn_proto_param)).end;
+    const last_param_token = ast.paramLastToken(tree, fn_proto_param);
 
-    const found_comma = std.mem.startsWith(
-        u8,
-        std.mem.trimLeft(u8, tree.source[param_end..], " \n"),
-        ",",
-    );
+    const potential_comma_token = last_param_token + 1;
+    const found_comma = potential_comma_token < tree.tokens.len and tree.tokens.items(.tag)[potential_comma_token] == .comma;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, !found_comma);
+    const potential_r_paren_token = last_param_token + @intFromBool(found_comma) + 1;
+    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokens.items(.tag)[potential_r_paren_token] == .r_paren;
+
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, is_last_param);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -413,11 +457,12 @@ fn createDiscardText(
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
 
     const new_text_len =
-        1 +
+        "\n".len +
         indent.len +
         additional_indent.len +
-        "_ = ;".len +
+        "_ = ".len +
         identifier_name.len +
+        "; // autofix".len +
         if (add_suffix_newline) 1 + indent.len else 0;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
@@ -426,7 +471,7 @@ fn createDiscardText(
     new_text.appendSliceAssumeCapacity(additional_indent);
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
-    new_text.appendAssumeCapacity(';');
+    new_text.appendSliceAssumeCapacity("; // autofix");
     if (add_suffix_newline) {
         new_text.appendAssumeCapacity('\n');
         new_text.appendSliceAssumeCapacity(indent);
@@ -547,12 +592,19 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         while (i < text.len) : (i += 1) {
             switch (text[i]) {
                 ' ' => continue,
-                ';' => break :found i + 1,
+                ';' => break :found i,
                 else => return null,
             }
         }
         return null;
     };
+
+    // check if the colon is followed by the autofix comment
+    const autofix_comment_start = std.mem.indexOfNonePos(u8, text, colon_position + ";".len, " ") orelse return null;
+    if (!std.mem.startsWith(u8, text[autofix_comment_start..], "//")) return null;
+    const autofix_str_start = std.mem.indexOfNonePos(u8, text, autofix_comment_start + "//".len, " ") orelse return null;
+    if (!std.mem.startsWith(u8, text[autofix_str_start..], "autofix")) return null;
+    const autofix_comment_end = std.mem.indexOfNonePos(u8, text, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
 
     // check if the identifier is precede by a equal sign and then an underscore
     var i: usize = loc.start - 1;
@@ -587,7 +639,7 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
 
     return offsets.Loc{
         .start = start_position,
-        .end = colon_position,
+        .end = autofix_comment_end,
     };
 }
 

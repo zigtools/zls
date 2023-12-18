@@ -18,10 +18,10 @@ test "code actions - discard value" {
     ,
         \\test {
         \\    var foo = {};
-        \\    _ = foo;
+        \\    _ = foo; // autofix
         \\    const bar, var baz = .{ 1, 2 };
-        \\    _ = baz;
-        \\    _ = bar;
+        \\    _ = baz; // autofix
+        \\    _ = bar; // autofix
         \\}
         \\
     );
@@ -33,9 +33,20 @@ test "code actions - discard function parameter" {
         \\
     ,
         \\fn foo(a: void, b: void, c: void) void {
-        \\    _ = a;
-        \\    _ = b;
-        \\    _ = c;
+        \\    _ = a; // autofix
+        \\    _ = b; // autofix
+        \\    _ = c; // autofix
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo(a: void, b: void, c: void,) void {}
+        \\
+    ,
+        \\fn foo(a: void, b: void, c: void,) void {
+        \\    _ = a; // autofix
+        \\    _ = b; // autofix
+        \\    _ = c; // autofix
         \\}
         \\
     );
@@ -56,26 +67,26 @@ test "code actions - discard captures" {
     ,
         \\test {
         \\    for (0..10, 0..10, 0..10) |i, j, k| {
-        \\        _ = i;
-        \\        _ = j;
-        \\        _ = k;
+        \\        _ = i; // autofix
+        \\        _ = j; // autofix
+        \\        _ = k; // autofix
         \\    }
         \\    switch (union(enum) {}{}) {
         \\        inline .a => |cap, tag| {
-        \\            _ = cap;
-        \\            _ = tag;
+        \\            _ = cap; // autofix
+        \\            _ = tag; // autofix
         \\        },
         \\    }
         \\    if (null) |x| {
-        \\        _ = x;
+        \\        _ = x; // autofix
         \\    }
         \\    if (null) |v| {
-        \\        _ = v;
+        \\        _ = v; // autofix
         \\    } else |e| {
-        \\        _ = e;
+        \\        _ = e; // autofix
         \\    }
         \\    _ = null catch |e| {
-        \\        _ = e;
+        \\        _ = e; // autofix
         \\    };
         \\}
         \\
@@ -95,7 +106,7 @@ test "code actions - discard capture with comment" {
         \\    if (1 == 1) |a|
         \\    //a
         \\    {
-        \\        _ = a;
+        \\        _ = a; // autofix
         \\    }
         \\}
         \\
@@ -115,7 +126,7 @@ test "code actions - discard capture - while loop with continue" {
         \\    var lines: ?[]const u8 = "";
         \\    var linei: usize = 0;
         \\    while (lines.next()) |line| : (linei += 1) {
-        \\        _ = line;
+        \\        _ = line; // autofix
         \\    }
         \\}
         \\
@@ -133,7 +144,7 @@ test "code actions - discard capture - while loop with continue" {
         \\    var lines: ?[]const u8 = "";
         \\    var linei: usize = 0;
         \\    while (lines.next()) |line| : (linei += (1 * (2 + 1))) {
-        \\        _ = line;
+        \\        _ = line; // autofix
         \\    }
         \\}
         \\
@@ -150,7 +161,7 @@ test "code actions - discard capture - while loop with continue" {
         \\    var lines: ?[]const u8 = "";
         \\    var linei: usize = 0;
         \\    while (lines.next()) |line| : (linei += ")))".len) {
-        \\        _ = line;
+        \\        _ = line; // autofix
         \\    }
         \\}
         \\
@@ -160,13 +171,13 @@ test "code actions - discard capture - while loop with continue" {
 test "code actions - remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
-        \\    _ = a;
+        \\    _ = a; // autofix
         \\    const b: ?u32 = a;
-        \\    _ = b;
+        \\    _ = b; // autofix
         \\    const c = b;
-        \\    _ = c;
+        \\    _ = c; // autofix
         \\    if (c) |d| {
-        \\        _ = d;
+        \\        _ = d; // autofix
         \\        return d;
         \\    }
         \\    return 0;
@@ -180,6 +191,62 @@ test "code actions - remove pointless discard" {
         \\        return d;
         \\    }
         \\    return 0;
+        \\}
+        \\
+    );
+}
+
+test "code actions - remove discard of unknown identifier" {
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = a; // autofix
+        \\}
+        \\
+    ,
+        \\fn foo() void {
+        \\}
+        \\
+    );
+}
+
+test "code actions - ignore autofix comment whitespace" {
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = a; // autofix
+        \\}
+        \\
+    ,
+        \\fn foo() void {
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = a;// autofix
+        \\}
+        \\
+    ,
+        \\fn foo() void {
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = a;//autofix
+        \\}
+        \\
+    ,
+        \\fn foo() void {
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = a;   //   autofix  
+        \\}
+        \\
+    ,
+        \\fn foo() void {
         \\}
         \\
     );
