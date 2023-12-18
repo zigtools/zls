@@ -83,7 +83,7 @@ fn typeToCompletion(
             type_handle.type.is_type_val,
             null,
             either_descriptor,
-            &.{},
+            null,
         ),
         .ip_index => |payload| try analyser_completions.dotCompletions(
             arena,
@@ -139,7 +139,7 @@ fn nodeToCompletion(
     is_type_val: bool,
     parent_is_type_val: ?bool,
     either_descriptor: ?[]const u8,
-    orig_docs: []const []const u8,
+    doc_strings_0: ?*std.ArrayListUnmanaged([]const u8),
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -151,8 +151,8 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    var doc_strings = std.ArrayListUnmanaged([]const u8){};
-    try doc_strings.appendSlice(arena, orig_docs);
+    var doc_strings_1 = std.ArrayListUnmanaged([]const u8){};
+    const doc_strings = doc_strings_0 orelse &doc_strings_1;
     if (try Analyser.getDocComments(arena, handle.tree, node)) |doc|
         try doc_strings.append(arena, doc);
 
@@ -165,7 +165,7 @@ fn nodeToCompletion(
             .orig_handle = orig_handle,
             .orig_name = Analyser.getDeclName(tree, node),
             .either_descriptor = either_descriptor,
-            .orig_docs = doc_strings.items,
+            .doc_strings = doc_strings,
         };
         return try declToCompletion(context, result);
     }
@@ -352,7 +352,7 @@ const DeclToCompletionContext = struct {
     orig_name: ?[]const u8 = null,
     parent_is_type_val: ?bool = null,
     either_descriptor: ?[]const u8 = null,
-    orig_docs: []const []const u8 = &.{},
+    doc_strings: ?*std.ArrayListUnmanaged([]const u8) = null,
 };
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
@@ -390,7 +390,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             false,
             context.parent_is_type_val,
             context.either_descriptor,
-            context.orig_docs,
+            context.doc_strings,
         ),
         .param_payload => |pay| {
             const param = pay.get(tree).?;
