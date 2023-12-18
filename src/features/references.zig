@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_references);
 
+const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const types = @import("../lsp.zig");
@@ -9,7 +10,7 @@ const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const tracy = @import("../tracy.zig");
 
-pub fn labelReferences(
+fn labelReferences(
     allocator: std.mem.Allocator,
     decl: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
@@ -180,7 +181,7 @@ fn gatherReferences(
     }
 }
 
-pub fn symbolReferences(
+fn symbolReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
     decl_handle: Analyser.DeclWithHandle,
@@ -359,4 +360,121 @@ pub fn callsiteReferences(
     try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get_or_load);
 
     return builder.callsites;
+}
+
+pub const GeneralReferencesRequest = union(enum) {
+    rename: types.RenameParams,
+    references: types.ReferenceParams,
+    highlight: types.DocumentHighlightParams,
+
+    fn uri(self: @This()) []const u8 {
+        return switch (self) {
+            .rename => |rename| rename.textDocument.uri,
+            .references => |ref| ref.textDocument.uri,
+            .highlight => |highlight| highlight.textDocument.uri,
+        };
+    }
+
+    fn position(self: @This()) types.Position {
+        return switch (self) {
+            .rename => |rename| rename.position,
+            .references => |ref| ref.position,
+            .highlight => |highlight| highlight.position,
+        };
+    }
+};
+
+pub const GeneralReferencesResponse = union {
+    rename: types.WorkspaceEdit,
+    references: []types.Location,
+    highlight: []types.DocumentHighlight,
+};
+
+pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Server.Error!?GeneralReferencesResponse {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const handle = server.document_store.getHandle(request.uri()) orelse return null;
+
+    if (request.position().character <= 0) return null;
+
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
+    const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
+
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
+    defer analyser.deinit();
+
+    // TODO: Make this work with branching types
+    const decl = switch (pos_context) {
+        .var_access => try analyser.getSymbolGlobal(source_index, handle, name),
+        .field_access => |loc| z: {
+            const held_loc = offsets.locMerge(loc, name_loc);
+            const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
+            if (a) |b| {
+                if (b.len != 0) break :z b[0];
+            }
+
+            break :z null;
+        },
+        .label => try Analyser.getLabelGlobal(source_index, handle, name),
+        else => null,
+    } orelse return null;
+
+    const include_decl = switch (request) {
+        .references => |ref| ref.context.includeDeclaration,
+        else => true,
+    };
+
+    const locations = if (decl.decl == .label_decl)
+        try labelReferences(arena, decl, server.offset_encoding, include_decl)
+    else
+        try symbolReferences(
+            arena,
+            &analyser,
+            decl,
+            server.offset_encoding,
+            include_decl,
+            server.config.skip_std_references,
+            request != .highlight, // scan the entire workspace except for highlight
+        );
+
+    switch (request) {
+        .rename => |rename| {
+            var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
+
+            for (locations.items) |loc| {
+                const gop = try changes.getOrPutValue(arena, loc.uri, .{});
+                try gop.value_ptr.append(arena, .{
+                    .range = loc.range,
+                    .newText = rename.newName,
+                });
+            }
+
+            // TODO can we avoid having to move map from `changes` to `new_changes`?
+            var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
+            try new_changes.map.ensureTotalCapacity(arena, @intCast(changes.count()));
+
+            var changes_it = changes.iterator();
+            while (changes_it.next()) |entry| {
+                new_changes.map.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(arena));
+            }
+
+            return .{ .rename = .{ .changes = new_changes } };
+        },
+        .references => return .{ .references = locations.items },
+        .highlight => {
+            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(arena, locations.items.len);
+            const uri = handle.uri;
+            for (locations.items) |loc| {
+                if (!std.mem.eql(u8, loc.uri, uri)) continue;
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
+            return .{ .highlight = highlights.items };
+        },
+    }
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_goto);
 
+const Server = @import("../Server.zig");
 const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
@@ -236,30 +237,55 @@ fn gotoDefinitionString(
     };
 }
 
-pub fn goto(
-    analyser: *Analyser,
-    document_store: *DocumentStore,
+pub fn gotoHandler(
+    server: *Server,
     arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
     kind: GotoKind,
-    offset_encoding: offsets.Encoding,
-) !?[]const types.DefinitionLink {
-    const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
-    var links = std.ArrayListUnmanaged(types.DefinitionLink){};
+    request: types.DefinitionParams,
+) Server.Error!Server.ResultType("textDocument/definition") {
+    if (request.position.character == 0) return null;
 
-    try links.append(arena, switch (pos_context) {
-        .builtin => |loc| try gotoDefinitionBuiltin(document_store, handle, loc, offset_encoding),
-        .var_access => try gotoDefinitionGlobal(analyser, arena, handle, source_index, kind, offset_encoding),
-        .field_access => |loc| return try gotoDefinitionFieldAccess(analyser, arena, handle, source_index, loc, kind, offset_encoding),
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
+    defer analyser.deinit();
+
+    const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
+
+    const response = switch (pos_context) {
+        .builtin => |loc| try gotoDefinitionBuiltin(&server.document_store, handle, loc, server.offset_encoding),
+        .var_access => try gotoDefinitionGlobal(&analyser, arena, handle, source_index, kind, server.offset_encoding),
+        .field_access => |loc| blk: {
+            const links = try gotoDefinitionFieldAccess(&analyser, arena, handle, source_index, loc, kind, server.offset_encoding) orelse return null;
+            if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
+                return .{ .array_of_DefinitionLink = links };
+            }
+            switch (links.len) {
+                0 => unreachable,
+                1 => break :blk links[0],
+                else => return null,
+            }
+        },
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => try gotoDefinitionString(document_store, arena, pos_context, handle, offset_encoding),
-        .label => try gotoDefinitionLabel(analyser, arena, handle, source_index, kind, offset_encoding),
-        .enum_literal => try gotoDefinitionEnumLiteral(analyser, arena, handle, source_index, kind, offset_encoding),
+        => try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding),
+        .label => try gotoDefinitionLabel(&analyser, arena, handle, source_index, kind, server.offset_encoding),
+        .enum_literal => try gotoDefinitionEnumLiteral(&analyser, arena, handle, source_index, kind, server.offset_encoding),
         else => null,
-    } orelse return null);
+    } orelse return null;
 
-    return try links.toOwnedSlice(arena);
+    if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
+        return .{
+            .array_of_DefinitionLink = try arena.dupe(types.DefinitionLink, &.{response}),
+        };
+    }
+
+    return .{
+        .Definition = .{ .Location = .{
+            .uri = response.targetUri,
+            .range = response.targetSelectionRange,
+        } },
+    };
 }

@@ -1318,55 +1318,11 @@ fn gotoDefinitionHandler(
     arena: std.mem.Allocator,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
-    return server.gotoHandler(arena, .definition, request);
-}
-
-fn gotoHandler(
-    server: *Server,
-    arena: std.mem.Allocator,
-    kind: goto.GotoKind,
-    request: types.DefinitionParams,
-) Error!ResultType("textDocument/definition") {
-    if (request.position.character == 0) return null;
-
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
-    defer analyser.deinit();
-
-    const response = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null;
-    if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
-        return .{
-            .array_of_DefinitionLink = response,
-        };
-    }
-
-    switch (response.len) {
-        0 => return null,
-        1 => {
-            return .{
-                .Definition = .{ .Location = .{
-                    .uri = response[0].targetUri,
-                    .range = response[0].targetSelectionRange,
-                } },
-            };
-        },
-        else => {
-            const locations = try arena.alloc(types.Location, response.len);
-            for (locations, response) |*location, definition_link| {
-                location.uri = definition_link.targetUri;
-                location.range = definition_link.targetSelectionRange;
-            }
-            return .{
-                .Definition = .{ .array_of_Location = locations },
-            };
-        },
-    }
+    return goto.gotoHandler(server, arena, .definition, request);
 }
 
 fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
-    const response = (try server.gotoHandler(arena, .type_definition, .{
+    const response = (try goto.gotoHandler(server, arena, .type_definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1379,7 +1335,7 @@ fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
-    const response = (try server.gotoHandler(arena, .definition, .{
+    const response = (try goto.gotoHandler(server, arena, .definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1392,7 +1348,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
-    const response = (try server.gotoHandler(arena, .declaration, .{
+    const response = (try goto.gotoHandler(server, arena, .declaration, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1445,140 +1401,23 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
-    return if (diff.edits(arena, handle.tree.source, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
+    const text_edits = try diff.edits(arena, handle.tree.source, formatted, server.offset_encoding);
+    return text_edits.items;
 }
 
 fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
-    const response = try generalReferencesHandler(server, arena, .{ .rename = request });
+    const response = try references.referencesHandler(server, arena, .{ .rename = request });
     return if (response) |rep| rep.rename else null;
 }
 
 fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: types.ReferenceParams) Error!?[]types.Location {
-    const response = try generalReferencesHandler(server, arena, .{ .references = request });
+    const response = try references.referencesHandler(server, arena, .{ .references = request });
     return if (response) |rep| rep.references else null;
 }
 
 fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
-    const response = try generalReferencesHandler(server, arena, .{ .highlight = request });
+    const response = try references.referencesHandler(server, arena, .{ .highlight = request });
     return if (response) |rep| rep.highlight else null;
-}
-
-const GeneralReferencesRequest = union(enum) {
-    rename: types.RenameParams,
-    references: types.ReferenceParams,
-    highlight: types.DocumentHighlightParams,
-
-    fn uri(self: @This()) []const u8 {
-        return switch (self) {
-            .rename => |rename| rename.textDocument.uri,
-            .references => |ref| ref.textDocument.uri,
-            .highlight => |highlight| highlight.textDocument.uri,
-        };
-    }
-
-    fn position(self: @This()) types.Position {
-        return switch (self) {
-            .rename => |rename| rename.position,
-            .references => |ref| ref.position,
-            .highlight => |highlight| highlight.position,
-        };
-    }
-};
-
-const GeneralReferencesResponse = union {
-    rename: types.WorkspaceEdit,
-    references: []types.Location,
-    highlight: []types.DocumentHighlight,
-};
-
-// TODO: Move to src/features/references.zig?
-fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(request.uri()) orelse return null;
-
-    if (request.position().character <= 0) return null;
-
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
-    const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
-
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
-    defer analyser.deinit();
-
-    // TODO: Make this work with branching types
-    const decl = switch (pos_context) {
-        .var_access => try analyser.getSymbolGlobal(source_index, handle, name),
-        .field_access => |loc| z: {
-            const held_loc = offsets.locMerge(loc, name_loc);
-            const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
-            if (a) |b| {
-                if (b.len != 0) break :z b[0];
-            }
-
-            break :z null;
-        },
-        .label => try Analyser.getLabelGlobal(source_index, handle, name),
-        else => null,
-    } orelse return null;
-
-    const include_decl = switch (request) {
-        .references => |ref| ref.context.includeDeclaration,
-        else => true,
-    };
-
-    const locations = if (decl.decl == .label_decl)
-        try references.labelReferences(arena, decl, server.offset_encoding, include_decl)
-    else
-        try references.symbolReferences(
-            arena,
-            &analyser,
-            decl,
-            server.offset_encoding,
-            include_decl,
-            server.config.skip_std_references,
-            request != .highlight, // scan the entire workspace except for highlight
-        );
-
-    switch (request) {
-        .rename => |rename| {
-            var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
-
-            for (locations.items) |loc| {
-                const gop = try changes.getOrPutValue(arena, loc.uri, .{});
-                try gop.value_ptr.append(arena, .{
-                    .range = loc.range,
-                    .newText = rename.newName,
-                });
-            }
-
-            // TODO can we avoid having to move map from `changes` to `new_changes`?
-            var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.map.ensureTotalCapacity(arena, @intCast(changes.count()));
-
-            var changes_it = changes.iterator();
-            while (changes_it.next()) |entry| {
-                new_changes.map.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(arena));
-            }
-
-            return .{ .rename = .{ .changes = new_changes } };
-        },
-        .references => return .{ .references = locations.items },
-        .highlight => {
-            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(arena, locations.items.len);
-            const uri = handle.uri;
-            for (locations.items) |loc| {
-                if (!std.mem.eql(u8, loc.uri, uri)) continue;
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-            return .{ .highlight = highlights.items };
-        },
-    }
 }
 
 fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.InlayHintParams) Error!?[]types.InlayHint {
