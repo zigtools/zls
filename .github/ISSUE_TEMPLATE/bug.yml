@@ -25,10 +25,18 @@ body:
       placeholder: "b21039d51261923c665d3bc58fadc4b4d5e221ea"
     validations:
       required: true
+  - type: input
+    id: editor
+    attributes:
+      label: Client / Code Editor / Extensions
+      description: What client/code editor/extensions are you using, if any?
+      placeholder: "nvim 0.9.4 with CoC and ziglang/zig.vim"
+    validations:
+      required: false
   - type: textarea
     id: repro
     attributes:
-      label: Steps to Reproduce
+      label: Steps to Reproduce and Observed Behavior
       description: What exactly can someone else do, in order to observe the problem that you observed?
     validations:
       required: true
@@ -40,9 +48,10 @@ body:
     validations:
       required: true
   - type: textarea
-    id: actual
+    id: logs
     attributes:
-      label: Actual Behavior
-      description: What happened instead? Be sure to include all error messages if any.
+      label: Relevant log output
+      description: If applicable, include ZLS's log output [Guide](https://github.com/zigtools/zls/wiki/Guide:-How-to-view-ZLS-log-output). This will be automatically formatted into monospace, so no need for backticks.
+      render: shell
     validations:
-      required: true
+      required: false
