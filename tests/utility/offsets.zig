@@ -31,6 +31,24 @@ test "offsets - index <-> Position" {
     try testIndexPosition("a¶↉🠁\n", 11, 1, .{ 0, 0, 0 });
 }
 
+test "offsets - positionToIndex where character value is greater than the line length" {
+    try testPositionToIndex("", 0, 0, .{ 1, 1, 1 });
+
+    try testPositionToIndex("\n", 0, 0, .{ 1, 1, 1 });
+    try testPositionToIndex("\n", 0, 0, .{ 2, 2, 2 });
+    try testPositionToIndex("\n", 0, 0, .{ 3, 3, 3 });
+
+    try testPositionToIndex("\n", 1, 1, .{ 1, 1, 1 });
+    try testPositionToIndex("\n", 1, 1, .{ 2, 2, 2 });
+    try testPositionToIndex("\n", 1, 1, .{ 3, 3, 3 });
+
+    try testPositionToIndex("hello\nfrom\nzig\n", 5, 0, .{ 6, 6, 6 });
+    try testPositionToIndex("hello\nfrom\nzig\n", 10, 1, .{ 5, 5, 5 });
+
+    try testPositionToIndex("a¶↉🠁\na¶↉🠁", 21, 1, .{ 11, 6, 5 });
+    try testPositionToIndex("a¶↉🠁\na¶↉🠁\n", 21, 1, .{ 11, 6, 5 });
+}
+
 test "offsets - tokenToLoc" {
     try testTokenToLoc("foo", 0, 0, 3);
     try testTokenToLoc("foo\n", 0, 0, 3);
@@ -155,6 +173,16 @@ fn testIndexPosition(text: []const u8, index: usize, line: u32, characters: [3]u
     try std.testing.expectEqual(position8, offsets.indexToPosition(text, index, .@"utf-8"));
     try std.testing.expectEqual(position16, offsets.indexToPosition(text, index, .@"utf-16"));
     try std.testing.expectEqual(position32, offsets.indexToPosition(text, index, .@"utf-32"));
+
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position8, .@"utf-8"));
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position16, .@"utf-16"));
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position32, .@"utf-32"));
+}
+
+fn testPositionToIndex(text: []const u8, index: usize, line: u32, characters: [3]u32) !void {
+    const position8: types.Position = .{ .line = line, .character = characters[0] };
+    const position16: types.Position = .{ .line = line, .character = characters[1] };
+    const position32: types.Position = .{ .line = line, .character = characters[2] };
 
     try std.testing.expectEqual(index, offsets.positionToIndex(text, position8, .@"utf-8"));
     try std.testing.expectEqual(index, offsets.positionToIndex(text, position16, .@"utf-16"));

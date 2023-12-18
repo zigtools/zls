@@ -480,9 +480,11 @@ pub fn countCodeUnits(text: []const u8, encoding: Encoding) usize {
 }
 
 /// returns the number of (utf-8 code units / bytes) that represent `n` code units in `text`
+/// if `text` has less than `n` code units then the number of code units in
+/// `text` are returned, i.e. the result is being clamped.
 pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usize {
     switch (encoding) {
-        .@"utf-8" => return n,
+        .@"utf-8" => return @min(text.len, n),
         .@"utf-16" => {
             if (n == 0) return 0;
             var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
@@ -502,6 +504,7 @@ pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usi
             var i: usize = 0;
             var count: usize = 0;
             while (count != n) : (count += 1) {
+                if (i >= text.len) break;
                 i += std.unicode.utf8ByteSequenceLength(text[i]) catch unreachable;
             }
             return i;
