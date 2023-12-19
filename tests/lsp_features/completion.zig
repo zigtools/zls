@@ -16,6 +16,7 @@ const Completion = struct {
     kind: types.CompletionItemKind,
     detail: ?[]const u8 = null,
     documentation: ?[]const u8 = null,
+    insert_text: ?[]const u8 = null,
 };
 
 const CompletionSet = std.StringArrayHashMapUnmanaged(Completion);
@@ -1738,7 +1739,57 @@ test "hover - top-level doc comment" {
     });
 }
 
+test "completion - snippet - function with `self` parameter" {
+    try testCompletion(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Function, .detail = "fn f(self: S) void", .insert_text = "f()" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Function, .detail = "fn f(self: S) void", .insert_text = "f(${1:self: S})" },
+    });
+    try testCompletionWithOptions(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Function, .detail = "fn f(self: S) void", .insert_text = "f(${1:})" },
+    }, .{
+        .enable_argument_placeholders = false,
+    });
+}
+
+test "completion - snippets disabled" {
+    try testCompletionWithOptions(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Function, .detail = "fn f(self: S) void", .insert_text = "f" },
+    }, .{
+        .enable_snippets = false,
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
+    try testCompletionWithOptions(source, expected_completions, .{});
+}
+
+fn testCompletionWithOptions(source: []const u8, expected_completions: []const Completion, options: struct {
+    enable_argument_placeholders: bool = true,
+    enable_snippets: bool = true,
+}) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
@@ -1747,6 +1798,10 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
     defer ctx.deinit();
 
     ctx.server.client_capabilities.completion_doc_supports_md = true;
+    ctx.server.client_capabilities.supports_snippets = options.enable_snippets;
+
+    ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
+    ctx.server.config.enable_snippets = options.enable_snippets;
 
     const test_uri = try ctx.addDocument(text);
 
@@ -1823,6 +1878,21 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
                 actual_doc,
             });
             return error.InvalidCompletionDoc;
+        }
+
+        if (expected_completion.insert_text) |expected_insert| blk: {
+            try std.testing.expectEqual(
+                @as(?types.InsertTextFormat, if (options.enable_snippets) .Snippet else .PlainText),
+                actual_completion.insertTextFormat,
+            );
+            const actual_insert = actual_completion.insertText;
+            if (actual_insert != null and std.mem.eql(u8, expected_insert, actual_insert.?)) break :blk;
+            try error_builder.msgAtIndex("label '{s}' should have insert text '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                label,
+                expected_insert,
+                actual_insert,
+            });
+            return error.InvalidCompletionInsertText;
         }
 
         if (expected_completion.detail == null) continue;
