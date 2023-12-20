@@ -4,6 +4,7 @@ map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
 string_pool: StringPool = .{},
+lock: std.Thread.RwLock = .{},
 
 limbs: std.ArrayListUnmanaged(usize) = .{},
 
@@ -179,12 +180,13 @@ pub const Key = union(enum) {
             }
         }
 
-        pub fn getConst(int: BigInt, ip: *const InternPool) std.math.big.int.Const {
+        /// TODO this should be thread-safe
+        pub fn getConst(int: BigInt, ip: *InternPool) std.math.big.int.Const {
             switch (int.storage) {
                 .external => |external| return external,
                 .internal => |internal| return .{
                     .positive = internal.positive,
-                    .limbs = internal.limbs.get(ip),
+                    .limbs = internal.limbs.getUnprotectedSlice(ip),
                 },
             }
         }
@@ -279,17 +281,17 @@ pub const Key = union(enum) {
         limbs: LimbSlice,
     };
 
-    pub fn hash32(key: Key, ip: *const InternPool) u32 {
+    pub fn hash32(key: Key, ip: *InternPool) u32 {
         return @truncate(key.hash64(ip));
     }
 
-    pub fn hash64(key: Key, ip: *const InternPool) u64 {
+    pub fn hash64(key: Key, ip: *InternPool) u64 {
         var hasher = std.hash.Wyhash.init(0);
         key.hashWithHasher(&hasher, ip);
         return hasher.final();
     }
 
-    pub fn hashWithHasher(key: Key, hasher: anytype, ip: *const InternPool) void {
+    pub fn hashWithHasher(key: Key, hasher: anytype, ip: *InternPool) void {
         std.hash.autoHash(hasher, std.meta.activeTag(key));
         switch (key) {
             inline .simple_type,
@@ -337,10 +339,7 @@ pub const Key = union(enum) {
 
             .error_set_type => |error_set_type| {
                 std.hash.autoHash(hasher, error_set_type.owner_decl);
-                std.hash.autoHash(hasher, error_set_type.names.len);
-                for (0..error_set_type.names.len) |i| {
-                    std.hash.autoHash(hasher, error_set_type.names.at(@intCast(i), ip));
-                }
+                error_set_type.names.hashWithHasher(hasher, ip);
             },
             .function_type => |function_type| {
                 std.hash.autoHash(hasher, function_type.args_is_comptime);
@@ -348,39 +347,41 @@ pub const Key = union(enum) {
                 std.hash.autoHash(hasher, function_type.args_is_noalias);
                 std.hash.autoHash(hasher, function_type.return_type);
 
-                std.hash.autoHash(hasher, function_type.args.len);
-                for (0..function_type.args.len) |i| {
-                    std.hash.autoHash(hasher, function_type.args.at(@intCast(i), ip));
-                }
+                function_type.args.hashWithHasher(hasher, ip);
             },
             .tuple_type => |tuple_type| {
-                std.debug.assert(tuple_type.types.len == tuple_type.values.len);
-                std.hash.autoHash(hasher, tuple_type.types.len);
-                for (0..tuple_type.types.len) |i| {
-                    std.hash.autoHash(hasher, tuple_type.types.at(@intCast(i), ip));
-                    std.hash.autoHash(hasher, tuple_type.values.at(@intCast(i), ip));
-                }
+                assert(tuple_type.types.len == tuple_type.values.len);
+                tuple_type.types.hashWithHasher(hasher, ip);
+                tuple_type.values.hashWithHasher(hasher, ip);
             },
             .int_big_value => |int_big_value| {
                 std.hash.autoHash(hasher, int_big_value.ty);
                 std.hash.autoHash(hasher, int_big_value.isPositive());
-                const limbs = switch (int_big_value.storage) {
-                    .external => |int| int.limbs,
-                    .internal => |int| int.limbs.get(ip),
-                };
-                hasher.update(std.mem.sliceAsBytes(limbs));
+                switch (int_big_value.storage) {
+                    .external => |int| {
+                        hasher.update(std.mem.sliceAsBytes(int.limbs));
+                    },
+                    .internal => |int| {
+                        int.limbs.hashWithHasher(hasher, ip);
+                    },
+                }
             },
             .aggregate => |aggregate| {
                 std.hash.autoHash(hasher, aggregate.ty);
-                std.hash.autoHash(hasher, aggregate.values.len);
-                for (0..aggregate.values.len) |i| {
-                    std.hash.autoHash(hasher, aggregate.values.at(@intCast(i), ip));
-                }
+                aggregate.values.hashWithHasher(hasher, ip);
             },
         }
     }
 
-    pub fn eql(a: Key, b: Key, ip: *const InternPool) bool {
+    pub fn eql(a: Key, b: Key, ip: *InternPool) bool {
+        return eqlCustom(a, b, ip, true);
+    }
+
+    fn eqlNoLock(a: Key, b: Key, ip: *const InternPool) bool {
+        return eqlCustom(a, b, @constCast(ip), false);
+    }
+
+    fn eqlCustom(a: Key, b: Key, ip: *InternPool, should_lock: bool) bool {
         const a_tag = std.meta.activeTag(a);
         const b_tag = std.meta.activeTag(b);
         if (a_tag != b_tag) return false;
@@ -430,9 +431,14 @@ pub const Key = union(enum) {
                 if (a_info.owner_decl != b_info.owner_decl) return false;
 
                 if (a_info.names.len != b_info.names.len) return false;
-                for (0..a_info.names.len) |i| {
-                    const a_name = a_info.names.at(@intCast(i), ip);
-                    const b_name = b_info.names.at(@intCast(i), ip);
+
+                if (should_lock) ip.lock.lockShared();
+                defer if (should_lock) ip.lock.unlockShared();
+
+                for (
+                    a_info.names.getUnprotectedSlice(ip),
+                    b_info.names.getUnprotectedSlice(ip),
+                ) |a_name, b_name| {
                     if (a_name != b_name) return false;
                 }
 
@@ -452,9 +458,14 @@ pub const Key = union(enum) {
                 if (!a_info.args_is_noalias.eql(b_info.args_is_noalias)) return false;
 
                 if (a_info.args.len != b_info.args.len) return false;
-                for (0..a_info.args.len) |i| {
-                    const a_arg = a_info.args.at(@intCast(i), ip);
-                    const b_arg = b_info.args.at(@intCast(i), ip);
+
+                if (should_lock) ip.lock.lockShared();
+                defer if (should_lock) ip.lock.unlockShared();
+
+                for (
+                    a_info.args.getUnprotectedSlice(ip),
+                    b_info.args.getUnprotectedSlice(ip),
+                ) |a_arg, b_arg| {
                     if (a_arg != b_arg) return false;
                 }
 
@@ -463,17 +474,20 @@ pub const Key = union(enum) {
             .tuple_type => |a_info| {
                 const b_info = b.tuple_type;
 
-                std.debug.assert(a_info.types.len == b_info.types.len);
+                assert(a_info.types.len == b_info.types.len);
                 if (a_info.types.len != b_info.types.len) return false;
                 if (a_info.values.len != b_info.values.len) return false;
 
-                for (0..a_info.types.len) |i| {
-                    const a_ty = a_info.types.at(@intCast(i), ip);
-                    const b_ty = b_info.types.at(@intCast(i), ip);
-                    if (a_ty != b_ty) return false;
+                if (should_lock) ip.lock.lockShared();
+                defer if (should_lock) ip.lock.unlockShared();
 
-                    const a_val = a_info.values.at(@intCast(i), ip);
-                    const b_val = b_info.values.at(@intCast(i), ip);
+                for (
+                    a_info.types.getUnprotectedSlice(ip),
+                    b_info.types.getUnprotectedSlice(ip),
+                    a_info.values.getUnprotectedSlice(ip),
+                    b_info.values.getUnprotectedSlice(ip),
+                ) |a_ty, b_ty, a_val, b_val| {
+                    if (a_ty != b_ty) return false;
                     if (a_val != b_val) return false;
                 }
                 return true;
@@ -482,6 +496,10 @@ pub const Key = union(enum) {
                 const b_info = b.int_big_value;
 
                 if (a_info.ty != b_info.ty) return false;
+
+                if (should_lock) ip.lock.lockShared();
+                defer if (should_lock) ip.lock.unlockShared();
+
                 if (!a_info.getConst(ip).eql(b_info.getConst(ip))) return false;
 
                 return true;
@@ -492,9 +510,14 @@ pub const Key = union(enum) {
                 if (a_info.ty != b_info.ty) return false;
 
                 if (a_info.values.len != b_info.values.len) return false;
-                for (0..a_info.values.len) |i| {
-                    const a_val = a_info.values.at(@intCast(i), ip);
-                    const b_val = b_info.values.at(@intCast(i), ip);
+
+                if (should_lock) ip.lock.lockShared();
+                defer if (should_lock) ip.lock.unlockShared();
+
+                for (
+                    a_info.values.getUnprotectedSlice(ip),
+                    b_info.values.getUnprotectedSlice(ip),
+                ) |a_val, b_val| {
                     if (a_val != b_val) return false;
                 }
 
@@ -632,14 +655,31 @@ pub const Index = enum(u32) {
         };
 
         /// prefer using `dupe` when iterating over all elements.
-        pub fn at(slice: Slice, index: u32, ip: *const InternPool) Index {
+        pub fn at(slice: Slice, index: u32, ip: *InternPool) Index {
             assert(index < slice.len);
+            ip.lock.lockShared();
+            defer ip.lock.unlockShared();
             return @enumFromInt(ip.extra.items[slice.start + index]);
         }
 
-        pub fn dupe(slice: Slice, gpa: Allocator, ip: *const InternPool) error{OutOfMemory}![]Index {
+        pub fn dupe(slice: Slice, gpa: Allocator, ip: *InternPool) error{OutOfMemory}![]Index {
             if (slice.len == 0) return &.{};
-            return try gpa.dupe(Index, @ptrCast(ip.extra.items[slice.start..][0..slice.len]));
+            ip.lock.lockShared();
+            defer ip.lock.unlockShared();
+            return try gpa.dupe(Index, slice.getUnprotectedSlice(ip));
+        }
+
+        pub fn hashWithHasher(slice: Slice, hasher: anytype, ip: *InternPool) void {
+            std.hash.autoHash(hasher, slice.len);
+            if (slice.len == 0) return;
+            ip.lock.lockShared();
+            defer ip.lock.unlockShared();
+            hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
+        }
+
+        fn getUnprotectedSlice(slice: Slice, ip: *const InternPool) []const Index {
+            if (slice.len == 0) return &.{};
+            return @ptrCast(ip.extra.items[slice.start..][0..slice.len]);
         }
     };
 
@@ -673,14 +713,31 @@ pub const StringSlice = struct {
     };
 
     /// prefer using `dupe` when iterating over all elements.
-    pub fn at(slice: StringSlice, index: u32, ip: *const InternPool) String {
+    pub fn at(slice: StringSlice, index: u32, ip: *InternPool) String {
         assert(index < slice.len);
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
         return @enumFromInt(ip.extra.items[slice.start + index]);
     }
 
-    pub fn dupe(slice: StringSlice, gpa: Allocator, ip: *const InternPool) error{OutOfMemory}![]String {
+    pub fn dupe(slice: StringSlice, gpa: Allocator, ip: *InternPool) error{OutOfMemory}![]String {
         if (slice.len == 0) return &.{};
-        return try gpa.dupe(String, @ptrCast(ip.extra.items[slice.start..][0..slice.len]));
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
+        return try gpa.dupe(String, slice.getUnprotectedSlice(ip));
+    }
+
+    pub fn hashWithHasher(slice: StringSlice, hasher: anytype, ip: *InternPool) void {
+        std.hash.autoHash(hasher, slice.len);
+        if (slice.len == 0) return;
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
+        hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
+    }
+
+    fn getUnprotectedSlice(slice: StringSlice, ip: *const InternPool) []const String {
+        if (slice.len == 0) return &.{};
+        return @ptrCast(ip.extra.items[slice.start..][0..slice.len]);
     }
 };
 
@@ -693,7 +750,15 @@ pub const LimbSlice = struct {
         .len = 0,
     };
 
-    pub fn get(limbs: LimbSlice, ip: *const InternPool) []std.math.big.Limb {
+    pub fn hashWithHasher(slice: LimbSlice, hasher: anytype, ip: *InternPool) void {
+        std.hash.autoHash(hasher, slice.len);
+        if (slice.len == 0) return;
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
+        hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
+    }
+
+    fn getUnprotectedSlice(limbs: LimbSlice, ip: *InternPool) []std.math.big.Limb {
         if (limbs.len == 0) return &.{};
         return ip.limbs.items[limbs.start..][0..limbs.len];
     }
@@ -1110,7 +1175,15 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.unions.deinit(gpa);
 }
 
-pub fn indexToKey(ip: *const InternPool, index: Index) Key {
+pub fn indexToKey(ip: *InternPool, index: Index) Key {
+    assert(index != .none);
+
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
+    return ip.indexToKeyNoLock(index);
+}
+
+fn indexToKeyNoLock(ip: *const InternPool, index: Index) Key {
     assert(index != .none);
     const item = ip.items.get(@intFromEnum(index));
     const data = item.data;
@@ -1169,7 +1242,22 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
 }
 
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
-    const adapter: KeyAdapter = .{ .ip = ip };
+    const adapter: KeyAdapter = .{
+        .ip = ip,
+        .precomputed_hash = key.hash32(ip),
+    };
+
+    not_found: {
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
+
+        const index = ip.map.getIndexAdapted(key, adapter) orelse break :not_found;
+        return @enumFromInt(index);
+    }
+
+    ip.lock.lock();
+    defer ip.lock.unlock();
+
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
     if (gop.found_existing) return @enumFromInt(gop.index);
 
@@ -1319,14 +1407,22 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     return @enumFromInt(ip.items.len - 1);
 }
 
-pub fn contains(ip: *const InternPool, key: Key) ?Index {
-    const adapter: KeyAdapter = .{ .ip = &ip };
+pub fn contains(ip: *InternPool, key: Key) ?Index {
+    const adapter: KeyAdapter = .{
+        .ip = ip,
+        .precomputed_hash = key.hash32(ip),
+    };
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
     return @enumFromInt(index);
 }
 
 pub fn getIndexSlice(ip: *InternPool, gpa: Allocator, data: []const Index) error{OutOfMemory}!Index.Slice {
     if (data.len == 0) return Index.Slice.empty;
+
+    ip.lock.lock();
+    defer ip.lock.unlock();
 
     const start: u32 = @intCast(ip.extra.items.len);
     try ip.extra.appendSlice(gpa, @ptrCast(data));
@@ -1340,6 +1436,9 @@ pub fn getIndexSlice(ip: *InternPool, gpa: Allocator, data: []const Index) error
 pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) error{OutOfMemory}!StringSlice {
     if (data.len == 0) return StringSlice.empty;
 
+    ip.lock.lock();
+    defer ip.lock.unlock();
+
     const start: u32 = @intCast(ip.extra.items.len);
     try ip.extra.appendSlice(gpa, @ptrCast(data));
 
@@ -1349,8 +1448,7 @@ pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) err
     };
 }
 
-/// prefer `getBigInt` when creating new big ints to allow for deduplication.
-pub fn getLimbSlice(ip: *InternPool, gpa: Allocator, data: []const std.math.big.Limb) error{OutOfMemory}!LimbSlice {
+fn getLimbSlice(ip: *InternPool, gpa: Allocator, data: []const std.math.big.Limb) error{OutOfMemory}!LimbSlice {
     if (data.len == 0) return LimbSlice.empty;
 
     const start: u32 = @intCast(ip.limbs.items.len);
@@ -1362,44 +1460,68 @@ pub fn getLimbSlice(ip: *InternPool, gpa: Allocator, data: []const std.math.big.
     };
 }
 
-pub fn getDecl(ip: *const InternPool, index: InternPool.Decl.Index) *const InternPool.Decl {
+pub fn getDecl(ip: *InternPool, index: InternPool.Decl.Index) *const InternPool.Decl {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.decls.at(@intFromEnum(index));
 }
 pub fn getDeclMut(ip: *InternPool, index: InternPool.Decl.Index) *InternPool.Decl {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.decls.at(@intFromEnum(index));
 }
-pub fn getStruct(ip: *const InternPool, index: Struct.Index) *const Struct {
+pub fn getStruct(ip: *InternPool, index: Struct.Index) *const Struct {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.structs.at(@intFromEnum(index));
 }
 pub fn getStructMut(ip: *InternPool, index: Struct.Index) *Struct {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.structs.at(@intFromEnum(index));
 }
-pub fn getEnum(ip: *const InternPool, index: Enum.Index) *const Enum {
+pub fn getEnum(ip: *InternPool, index: Enum.Index) *const Enum {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.enums.at(@intFromEnum(index));
 }
 pub fn getEnumMut(ip: *InternPool, index: Enum.Index) *Enum {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.enums.at(@intFromEnum(index));
 }
-pub fn getUnion(ip: *const InternPool, index: Union.Index) *const Union {
+pub fn getUnion(ip: *InternPool, index: Union.Index) *const Union {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.unions.at(@intFromEnum(index));
 }
 pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return ip.unions.at(@intFromEnum(index));
 }
 
 pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: Decl) Allocator.Error!Decl.Index {
+    ip.lock.lock();
+    defer ip.lock.unlock();
     try ip.decls.append(gpa, decl);
     return @enumFromInt(ip.decls.count() - 1);
 }
 pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: Struct) Allocator.Error!Struct.Index {
+    ip.lock.lock();
+    defer ip.lock.unlock();
     try ip.structs.append(gpa, struct_info);
     return @enumFromInt(ip.structs.count() - 1);
 }
 pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: Enum) Allocator.Error!Enum.Index {
+    ip.lock.lock();
+    defer ip.lock.unlock();
     try ip.enums.append(gpa, enum_info);
     return @enumFromInt(ip.enums.count() - 1);
 }
 pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: Union) Allocator.Error!Union.Index {
+    ip.lock.lock();
+    defer ip.lock.unlock();
     try ip.unions.append(gpa, union_info);
     return @enumFromInt(ip.unions.count() - 1);
 }
@@ -1494,16 +1616,19 @@ fn extraData(ip: *const InternPool, comptime T: type, index: u32) T {
     return result;
 }
 
+/// assumes that the InternPool is already locked.
 const KeyAdapter = struct {
     ip: *const InternPool,
+    precomputed_hash: u32,
 
     pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
         _ = b_void;
-        return a.eql(ctx.ip.indexToKey(@enumFromInt(b_map_index)), ctx.ip);
+        return a.eqlNoLock(ctx.ip.indexToKeyNoLock(@enumFromInt(b_map_index)), ctx.ip);
     }
 
     pub fn hash(ctx: @This(), a: Key) u32 {
-        return a.hash32(ctx.ip);
+        _ = a;
+        return ctx.precomputed_hash;
     }
 };
 
@@ -2757,7 +2882,7 @@ fn coerceInMemoryAllowedPtrs(
     return .ok;
 }
 
-fn optionalPtrTy(ip: *const InternPool, ty: Index) Index {
+fn optionalPtrTy(ip: *InternPool, ty: Index) Index {
     switch (ip.indexToKey(ty)) {
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
             .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
@@ -2790,7 +2915,9 @@ inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
 // ---------------------------------------------
 
 /// TODO make the return type optional and return null on unknown type.
-pub fn zigTypeTag(ip: *const InternPool, index: Index) std.builtin.TypeId {
+pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
         .simple_type => switch (@as(SimpleType, @enumFromInt(ip.items.items(.data)[@intFromEnum(index)]))) {
             .f16,
@@ -2881,7 +3008,9 @@ pub fn zigTypeTag(ip: *const InternPool, index: Index) std.builtin.TypeId {
     };
 }
 
-pub fn typeOf(ip: *const InternPool, index: Index) Index {
+pub fn typeOf(ip: *InternPool, index: Index) Index {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     const data = ip.items.items(.data)[@intFromEnum(index)];
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
         .simple_value => switch (@as(SimpleValue, @enumFromInt(data))) {
@@ -2938,7 +3067,9 @@ pub fn typeOf(ip: *const InternPool, index: Index) Index {
     };
 }
 
-pub fn isType(ip: *const InternPool, ty: Index) bool {
+pub fn isType(ip: *InternPool, ty: Index) bool {
+    ip.lock.lockShared();
+    defer ip.lock.unlockShared();
     return switch (ip.items.items(.tag)[@intFromEnum(ty)]) {
         .simple_type,
         .type_int_signed,
@@ -2980,20 +3111,24 @@ pub fn isType(ip: *const InternPool, ty: Index) bool {
     };
 }
 
-pub fn isUnknown(ip: *const InternPool, index: Index) bool {
+pub fn isUnknown(ip: *InternPool, index: Index) bool {
     switch (index) {
         .unknown_type, .unknown_unknown => return true,
-        else => return ip.items.items(.tag)[@intFromEnum(index)] == .unknown_value,
+        else => {
+            ip.lock.lockShared();
+            defer ip.lock.unlockShared();
+            return ip.items.items(.tag)[@intFromEnum(index)] == .unknown_value;
+        },
     }
 }
 
-pub fn isUnknownDeep(ip: *const InternPool, gpa: Allocator, index: Index) Allocator.Error!bool {
+pub fn isUnknownDeep(ip: *InternPool, gpa: Allocator, index: Index) Allocator.Error!bool {
     var set = std.AutoHashMap(Index, void).init(gpa);
     defer set.deinit();
     return try ip.isUnknownDeepInternal(index, &set);
 }
 
-fn isUnknownDeepInternal(ip: *const InternPool, index: Index, set: *std.AutoHashMap(Index, void)) Allocator.Error!bool {
+fn isUnknownDeepInternal(ip: *InternPool, index: Index, set: *std.AutoHashMap(Index, void)) Allocator.Error!bool {
     const gop = try set.getOrPut(index);
     if (gop.found_existing) return false;
     return switch (ip.indexToKey(index)) {
@@ -3083,7 +3218,7 @@ fn isUnknownDeepInternal(ip: *const InternPool, index: Index, set: *std.AutoHash
 }
 
 /// Asserts the type is an integer, enum, error set, packed struct, or vector of one of them.
-pub fn intInfo(ip: *const InternPool, ty: Index, target: std.Target) std.builtin.Type.Int {
+pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.Int {
     var index = ty;
     while (true) switch (index) {
         .u1_type => return .{ .signedness = .unsigned, .bits = 1 },
@@ -3140,7 +3275,7 @@ pub fn intInfo(ip: *const InternPool, ty: Index, target: std.Target) std.builtin
 
 /// Asserts the type is a fixed-size float or comptime_float.
 /// Returns 128 for comptime_float types.
-pub fn floatBits(ip: *const InternPool, ty: Index, target: std.Target) u16 {
+pub fn floatBits(ip: *InternPool, ty: Index, target: std.Target) u16 {
     _ = ip;
     return switch (ty) {
         .f16_type => 16,
@@ -3154,7 +3289,7 @@ pub fn floatBits(ip: *const InternPool, ty: Index, target: std.Target) u16 {
     };
 }
 
-pub fn isFloat(ip: *const InternPool, ty: Index) bool {
+pub fn isFloat(ip: *InternPool, ty: Index) bool {
     _ = ip;
     return switch (ty) {
         .c_longdouble_type,
@@ -3169,35 +3304,35 @@ pub fn isFloat(ip: *const InternPool, ty: Index) bool {
     };
 }
 
-pub fn isSinglePointer(ip: *const InternPool, ty: Index) bool {
+pub fn isSinglePointer(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.size == .One,
         else => false,
     };
 }
 
-pub fn isManyPointer(ip: *const InternPool, ty: Index) bool {
+pub fn isManyPointer(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.size == .Many,
         else => false,
     };
 }
 
-pub fn isSlicePointer(ip: *const InternPool, ty: Index) bool {
+pub fn isSlicePointer(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.size == .Slice,
         else => false,
     };
 }
 
-pub fn isCPointer(ip: *const InternPool, ty: Index) bool {
+pub fn isCPointer(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.size == .C,
         else => false,
     };
 }
 
-pub fn isConstPointer(ip: *const InternPool, ty: Index) bool {
+pub fn isConstPointer(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.is_const,
         else => false,
@@ -3206,14 +3341,14 @@ pub fn isConstPointer(ip: *const InternPool, ty: Index) bool {
 
 /// For pointer-like optionals, returns true, otherwise returns the allowzero property
 /// of pointers.
-pub fn ptrAllowsZero(ip: *const InternPool, ty: Index) bool {
+pub fn ptrAllowsZero(ip: *InternPool, ty: Index) bool {
     if (ip.indexToKey(ty).pointer_type.flags.is_allowzero) return true;
     return ip.isPtrLikeOptional(ty);
 }
 
 /// Returns true if the type is optional and would be lowered to a single pointer
 /// address value, using 0 for null. Note that this returns true for C pointers.
-pub fn isPtrLikeOptional(ip: *const InternPool, ty: Index) bool {
+pub fn isPtrLikeOptional(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
             .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
@@ -3227,7 +3362,7 @@ pub fn isPtrLikeOptional(ip: *const InternPool, ty: Index) bool {
     };
 }
 
-pub fn isPtrAtRuntime(ip: *const InternPool, ty: Index) bool {
+pub fn isPtrAtRuntime(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.flags.size != .Slice,
         .optional_type => |optional_info| switch (ip.indexToKey(optional_info.payload_type)) {
@@ -3249,7 +3384,7 @@ pub fn isPtrAtRuntime(ip: *const InternPool, ty: Index) bool {
 /// For ?T,             returns T.
 /// For @vector(_, T),  returns T.
 /// For anyframe->T,    returns T.
-pub fn childType(ip: *const InternPool, ty: Index) Index {
+pub fn childType(ip: *InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.elem_type,
         .array_type => |array_info| array_info.child,
@@ -3272,7 +3407,7 @@ pub fn childType(ip: *const InternPool, ty: Index) Index {
 /// For ?T,             returns T.
 /// For @vector(_, T),  returns T.
 /// For anyframe->T,    returns T.
-pub fn elemType(ip: *const InternPool, ty: Index) Index {
+pub fn elemType(ip: *InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
             .One => ip.childType(pointer_info.elem_type),
@@ -3317,7 +3452,7 @@ pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) 
 }
 
 /// Asserts the type is an array, pointer or vector.
-pub fn sentinel(ip: *const InternPool, ty: Index) Index {
+pub fn sentinel(ip: *InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
         .pointer_type => |pointer_info| pointer_info.sentinel,
         .array_type => |array_info| array_info.sentinel,
@@ -3326,7 +3461,7 @@ pub fn sentinel(ip: *const InternPool, ty: Index) Index {
     };
 }
 
-pub fn getNamespace(ip: *const InternPool, ty: Index) NamespaceIndex {
+pub fn getNamespace(ip: *InternPool, ty: Index) NamespaceIndex {
     return switch (ip.indexToKey(ty)) {
         .struct_type => |struct_index| ip.getStruct(struct_index).namespace,
         .enum_type => |enum_index| ip.getEnum(enum_index).namespace,
@@ -3335,7 +3470,7 @@ pub fn getNamespace(ip: *const InternPool, ty: Index) NamespaceIndex {
     };
 }
 
-pub fn onePossibleValue(ip: *const InternPool, ty: Index) Index {
+pub fn onePossibleValue(ip: *InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
         .simple_type => |simple| switch (simple) {
             .f16,
@@ -3465,7 +3600,7 @@ pub fn onePossibleValue(ip: *const InternPool, ty: Index) Index {
     };
 }
 
-pub fn canHaveFields(ip: *const InternPool, ty: Index) bool {
+pub fn canHaveFields(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .simple_type => |simple| switch (simple) {
             .type => true, // TODO
@@ -3514,7 +3649,7 @@ pub fn canHaveFields(ip: *const InternPool, ty: Index) bool {
 }
 
 /// see `std.meta.trait.isIndexable`
-pub fn isIndexable(ip: *const InternPool, ty: Index) bool {
+pub fn isIndexable(ip: *InternPool, ty: Index) bool {
     return switch (ip.indexToKey(ty)) {
         .array_type, .vector_type => true,
         .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
@@ -3526,7 +3661,7 @@ pub fn isIndexable(ip: *const InternPool, ty: Index) bool {
     };
 }
 
-pub fn isNull(ip: *const InternPool, val: Index) bool {
+pub fn isNull(ip: *InternPool, val: Index) bool {
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
             .null_value => true,
@@ -3538,7 +3673,7 @@ pub fn isNull(ip: *const InternPool, val: Index) bool {
     };
 }
 
-pub fn isZero(ip: *const InternPool, val: Index) bool {
+pub fn isZero(ip: *InternPool, val: Index) bool {
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
             .null_value => true,
@@ -3559,7 +3694,7 @@ pub fn isZero(ip: *const InternPool, val: Index) bool {
 }
 
 /// If the value fits in the given integer, return it, otherwise null.
-pub fn toInt(ip: *const InternPool, val: Index, comptime T: type) !?T {
+pub fn toInt(ip: *InternPool, val: Index, comptime T: type) !?T {
     comptime assert(std.meta.trait.isIntegral(T));
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
@@ -4526,6 +4661,70 @@ test StringSlice {
     defer gpa.free(empty_string);
 
     try std.testing.expectEqualSlices(String, &.{}, empty_string);
+}
+
+test "test thread safety of InternPool" {
+    if (builtin.single_threaded) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    var pool: std.Thread.Pool = undefined;
+    try std.Thread.Pool.init(&pool, .{ .allocator = gpa });
+    defer pool.deinit();
+
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const index_start = ip.map.count();
+
+    const size: usize = 100;
+
+    const funcs = struct {
+        fn do(
+            intern_pool: *InternPool,
+            wait_group: *std.Thread.WaitGroup,
+            allocator: std.mem.Allocator,
+            count: usize,
+        ) void {
+            defer wait_group.finish();
+            // insert float_32_value from 0 to count + random work
+            for (0..count) |i| {
+                _ = intern_pool.get(allocator, .{ .float_32_value = @floatFromInt(i) }) catch @panic("OOM");
+                _ = intern_pool.indexToKey(@enumFromInt(i));
+            }
+            for (0..count) |i| {
+                _ = intern_pool.indexToKey(@enumFromInt(i));
+            }
+        }
+    };
+
+    var wait_group = std.Thread.WaitGroup{};
+    for (0..pool.threads.len) |_| {
+        wait_group.start();
+        try pool.spawn(funcs.do, .{ &ip, &wait_group, gpa, size });
+    }
+    pool.waitAndWork(&wait_group);
+
+    try std.testing.expectEqual(index_start + size, ip.map.count());
+
+    var found = try std.DynamicBitSetUnmanaged.initEmpty(gpa, size);
+    defer found.deinit(gpa);
+
+    // test that every value is in the InternPool
+    for (0..size) |i| {
+        try std.testing.expect(ip.contains(.{ .float_32_value = @floatFromInt(i) }) != null);
+    }
+
+    // test that every Index stores a unique float_32_value
+    for (0..size) |i| {
+        const index: Index = @enumFromInt(index_start + i);
+        const key = ip.indexToKey(index);
+        const value: usize = @intFromFloat(key.float_32_value);
+        try std.testing.expect(value < size);
+        try std.testing.expect(!found.isSet(value));
+        found.set(value);
+    }
+
+    try std.testing.expectEqual(found.capacity(), found.count());
 }
 
 test "coerceInMemoryAllowed integers and floats" {
