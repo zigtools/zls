@@ -7,32 +7,32 @@
         "enable_snippets": {
             "description": "Enables snippet completions when the client also supports them",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "enable_argument_placeholders": {
             "description": "Whether to enable function argument placeholder completions",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "enable_ast_check_diagnostics": {
             "description": "Whether to enable ast-check diagnostics",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "enable_build_on_save": {
             "description": "Whether to enable build-on-save diagnostics",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "build_on_save_step": {
             "description": "Select which step should be executed on build-on-save",
             "type": "string",
-            "default": "\"install\""
+            "default": "install"
         },
         "enable_autofix": {
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "semantic_tokens": {
             "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",
@@ -47,112 +47,112 @@
         "enable_inlay_hints": {
             "description": "Enables inlay hint support when the client also supports it",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "inlay_hints_show_variable_type_hints": {
             "description": "Enable inlay hints for variable types",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "inlay_hints_show_parameter_name": {
             "description": "Enable inlay hints for parameter names",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "inlay_hints_show_builtin": {
             "description": "Enable inlay hints for builtin functions",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "inlay_hints_exclude_single_argument": {
             "description": "Don't show inlay hints for single argument calls",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "inlay_hints_hide_redundant_param_names": {
             "description": "Hides inlay hints when parameter name matches the identifier (e.g. foo: foo)",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "inlay_hints_hide_redundant_param_names_last_token": {
             "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "warn_style": {
             "description": "Enables warnings for style guideline mismatches",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "highlight_global_var_declarations": {
             "description": "Whether to highlight global var declarations",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "dangerous_comptime_experiments_do_not_enable": {
             "description": "Whether to use the comptime interpreter",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "skip_std_references": {
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "prefer_ast_check_as_child_process": {
             "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",
             "type": "boolean",
-            "default": "true"
+            "default": true
         },
         "record_session": {
             "description": "When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`",
             "type": "boolean",
-            "default": "false"
+            "default": false
         },
         "record_session_path": {
             "description": "Output file path when `record_session` is set. The recommended file extension *.zlsreplay",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "replay_session_path": {
             "description": "Used when calling `zls replay` for specifying the replay file. If no extra argument is given `record_session_path` is used as the default path.",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "builtin_path": {
             "description": "Path to 'builtin;' useful for debugging, automatically set if let null",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "zig_lib_path": {
             "description": "Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "zig_exe_path": {
             "description": "Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "build_runner_path": {
             "description": "Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "global_cache_path": {
             "description": "Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls`",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "build_runner_global_cache_path": {
             "description": "Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`",
             "type": "string",
-            "default": "null"
+            "default": null
         },
         "completions_with_replace": {
             "description": "Completions confirm behavior. If 'true', replace the text after the cursor",
             "type": "boolean",
-            "default": "true"
+            "default": true
         }
     }
 }
