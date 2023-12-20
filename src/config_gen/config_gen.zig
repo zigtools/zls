@@ -16,7 +16,9 @@ const ConfigOption = struct {
     default: []const u8,
 
     fn getTypescriptType(self: ConfigOption) error{UnsupportedType}![]const u8 {
-        return if (std.mem.eql(u8, self.type, "?[]const u8"))
+        return if (std.mem.eql(u8, self.type, "[]const u8"))
+            "string"
+        else if (std.mem.eql(u8, self.type, "?[]const u8"))
             "string"
         else if (std.mem.eql(u8, self.type, "bool"))
             "boolean"

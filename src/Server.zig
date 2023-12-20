@@ -850,18 +850,28 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
 
     inline for (std.meta.fields(Config)) |field| {
         if (@field(new_cfg, field.name)) |new_config_value| {
-            if (@TypeOf(new_config_value) == []const u8) {
-                if (@field(server.config, field.name) == null or
-                    !std.mem.eql(u8, @field(server.config, field.name).?, new_config_value))
-                {
-                    log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
-                    @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
-                }
-            } else {
-                if (@field(server.config, field.name) != new_config_value) {
-                    log.info("set config option '{s}' to '{any}'", .{ field.name, new_config_value });
-                    @field(server.config, field.name) = new_config_value;
-                }
+            const old_config_value = @field(server.config, field.name);
+            switch (@TypeOf(old_config_value)) {
+                ?[]const u8 => {
+                    const override_old_value =
+                        if (old_config_value) |old_value| !std.mem.eql(u8, old_value, new_config_value) else true;
+                    if (override_old_value) {
+                        log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
+                        @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
+                    }
+                },
+                []const u8 => {
+                    if (!std.mem.eql(u8, old_config_value, new_config_value)) {
+                        log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
+                        @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
+                    }
+                },
+                else => {
+                    if (old_config_value != new_config_value) {
+                        log.info("set config option '{s}' to '{any}'", .{ field.name, new_config_value });
+                        @field(server.config, field.name) = new_config_value;
+                    }
+                },
             }
         }
     }
