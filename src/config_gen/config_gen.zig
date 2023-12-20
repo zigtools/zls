@@ -1001,7 +1001,7 @@ pub fn main() !void {
                 \\
                 \\    --help                               Prints this message
                 \\    --readme-path [path]                 Update readme file (see README.md)
-                \\    --generate-vscode-config [path]      Output zls-vscode configurations 
+                \\    --vscode-config-path [path]          Output zls-vscode configurations 
                 \\    --generate-config-path [path]        Output path to config file (see src/Config.zig)
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
                 \\    --generate-version-data [version]    Output version data file (default: master)
@@ -1075,7 +1075,7 @@ pub fn main() !void {
     if (vscode_config_path) |output_path| {
         try generateVSCodeConfigFile(gpa, config, output_path);
         try stderr.writeAll(
-            \\Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
+            \\Changing configuration options may also require editing the `package.json` from ziglang/vscode-zig at https://github.com/ziglang/vscode-zig/blob/master/package.json
             \\You can use `zig build gen -- --vscode-config-path /path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
             \\
         );
