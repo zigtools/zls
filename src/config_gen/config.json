@@ -25,6 +25,12 @@
             "default": "false"
         },
         {
+            "name": "build_on_save_step",
+            "description": "Select which step should be executed on build-on-save",
+            "type": "[]const u8",
+            "default": "\"install\""
+        },
+        {
             "name": "enable_autofix",
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "bool",

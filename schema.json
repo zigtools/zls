@@ -24,6 +24,11 @@
             "type": "boolean",
             "default": "false"
         },
+        "build_on_save_step": {
+            "description": "Select which step should be executed on build-on-save",
+            "type": "string",
+            "default": "\"install\""
+        },
         "enable_autofix": {
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "boolean",
