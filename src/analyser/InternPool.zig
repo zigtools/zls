@@ -2,7 +2,7 @@
 /// https://github.com/ziglang/zig/blob/master/src/InternPool.zig
 map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
-extra: std.ArrayListUnmanaged(u8) = .{},
+extra: std.ArrayListUnmanaged(u32) = .{},
 string_pool: StringPool = .{},
 
 limbs: std.ArrayListUnmanaged(usize) = .{},
@@ -22,7 +22,6 @@ const expectFmt = std.testing.expectFmt;
 
 pub const StringPool = @import("string_pool.zig").StringPool(.{});
 pub const String = StringPool.String;
-const encoding = @import("encoding.zig");
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
 
 pub const Key = union(enum) {
@@ -635,13 +634,12 @@ pub const Index = enum(u32) {
         /// prefer using `dupe` when iterating over all elements.
         pub fn at(slice: Slice, index: u32, ip: *const InternPool) Index {
             assert(index < slice.len);
-            return std.mem.bytesToValue(Index, ip.extra.items[slice.start + @sizeOf(u32) * index ..][0..@sizeOf(u32)]);
+            return @enumFromInt(ip.extra.items[slice.start + index]);
         }
 
         pub fn dupe(slice: Slice, gpa: Allocator, ip: *const InternPool) error{OutOfMemory}![]Index {
             if (slice.len == 0) return &.{};
-            const bytes: []align(4) const u8 = @alignCast(ip.extra.items[slice.start..][0 .. @sizeOf(u32) * slice.len]);
-            return try gpa.dupe(Index, std.mem.bytesAsSlice(Index, bytes));
+            return try gpa.dupe(Index, @ptrCast(ip.extra.items[slice.start..][0..slice.len]));
         }
     };
 
@@ -677,13 +675,12 @@ pub const StringSlice = struct {
     /// prefer using `dupe` when iterating over all elements.
     pub fn at(slice: StringSlice, index: u32, ip: *const InternPool) String {
         assert(index < slice.len);
-        return std.mem.bytesToValue(String, ip.extra.items[slice.start + @sizeOf(String) * index ..][0..@sizeOf(String)]);
+        return @enumFromInt(ip.extra.items[slice.start + index]);
     }
 
     pub fn dupe(slice: StringSlice, gpa: Allocator, ip: *const InternPool) error{OutOfMemory}![]String {
         if (slice.len == 0) return &.{};
-        const bytes: []align(4) const u8 = @alignCast(ip.extra.items[slice.start..][0 .. @sizeOf(String) * slice.len]);
-        return try gpa.dupe(String, std.mem.bytesAsSlice(String, bytes));
+        return try gpa.dupe(String, @ptrCast(ip.extra.items[slice.start..][0..slice.len]));
     }
 };
 
@@ -697,6 +694,7 @@ pub const LimbSlice = struct {
     };
 
     pub fn get(limbs: LimbSlice, ip: *const InternPool) []std.math.big.Limb {
+        if (limbs.len == 0) return &.{};
         return ip.limbs.items[limbs.start..][0..limbs.len];
     }
 };
@@ -1331,7 +1329,7 @@ pub fn getIndexSlice(ip: *InternPool, gpa: Allocator, data: []const Index) error
     if (data.len == 0) return Index.Slice.empty;
 
     const start: u32 = @intCast(ip.extra.items.len);
-    try ip.extra.appendSlice(gpa, std.mem.sliceAsBytes(data));
+    try ip.extra.appendSlice(gpa, @ptrCast(data));
 
     return .{
         .start = start,
@@ -1343,7 +1341,7 @@ pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) err
     if (data.len == 0) return StringSlice.empty;
 
     const start: u32 = @intCast(ip.extra.items.len);
-    try ip.extra.appendSlice(gpa, std.mem.sliceAsBytes(data));
+    try ip.extra.appendSlice(gpa, @ptrCast(data));
 
     return .{
         .start = start,
@@ -1412,15 +1410,88 @@ fn addExtra(ip: *InternPool, gpa: Allocator, comptime T: type, extra: T) Allocat
     };
 
     const result: u32 = @intCast(ip.extra.items.len);
-    var managed = ip.extra.toManaged(gpa);
-    defer ip.extra = managed.moveToUnmanaged();
-    try encoding.encode(&managed, T, extra);
+
+    const size = @divExact(@sizeOf(T), 4);
+
+    try ip.extra.ensureUnusedCapacity(gpa, size);
+    inline for (std.meta.fields(T)) |field| {
+        const item = @field(extra, field.name);
+        switch (field.type) {
+            Index,
+            Decl.Index,
+            Decl.OptionalIndex,
+            StringPool.String,
+            StringPool.OptionalString,
+            std.builtin.Type.Pointer.Size,
+            => ip.extra.appendAssumeCapacity(@intFromEnum(item)),
+
+            u32,
+            i32,
+            std.StaticBitSet(32),
+            Key.Pointer.Flags,
+            Key.Pointer.PackedOffset,
+            Key.Function.Flags,
+            => ip.extra.appendAssumeCapacity(@bitCast(item)),
+
+            u64,
+            i64,
+            => ip.extra.appendSliceAssumeCapacity(&@as([2]u32, @bitCast(item))),
+
+            Index.Slice,
+            StringSlice,
+            LimbSlice,
+            => ip.extra.appendSliceAssumeCapacity(&.{ item.start, item.len }),
+
+            else => @compileError("unexpected: " ++ @typeName(field.type)),
+        }
+    }
     return result;
 }
 
-fn extraData(ip: InternPool, comptime T: type, index: usize) T {
-    var bytes: []const u8 = ip.extra.items[index..];
-    return encoding.decode(&bytes, T);
+fn extraData(ip: *const InternPool, comptime T: type, index: u32) T {
+    var result: T = undefined;
+    var i: u32 = 0;
+    inline for (std.meta.fields(T)) |field| {
+        const item = ip.extra.items[index + i];
+        i += 1;
+        @field(result, field.name) = switch (field.type) {
+            Index,
+            StringPool.String,
+            StringPool.OptionalString,
+            Decl.Index,
+            Decl.OptionalIndex,
+            std.builtin.Type.Pointer.Size,
+            // std.builtin.AddressSpace,
+            // std.builtin.CallingConvention,
+            => @enumFromInt(item),
+
+            u32,
+            i32,
+            std.StaticBitSet(32),
+            Key.Pointer.Flags,
+            Key.Pointer.PackedOffset,
+            Key.Function.Flags,
+            => @bitCast(item),
+
+            u64,
+            i64,
+            => blk: {
+                defer i += 1;
+                break :blk @bitCast([2]u32{ item, ip.extra.items[index + i] });
+            },
+
+            Index.Slice,
+            StringSlice,
+            LimbSlice,
+            => blk: {
+                defer i += 1;
+                break :blk .{ .start = item, .len = ip.extra.items[index + i] };
+            },
+
+            else => @compileError("unexpected: " ++ @typeName(field.type)),
+        };
+    }
+    return result;
 }
 
 const KeyAdapter = struct {
@@ -2857,7 +2928,7 @@ pub fn typeOf(ip: *const InternPool, index: Index) Index {
         .aggregate_value,
         .union_value,
         .error_value,
-        => std.mem.bytesToValue(Index, ip.extra.items[ip.items.items(.data)[@intFromEnum(index)]..][0..@sizeOf(Index)]),
+        => @enumFromInt(ip.extra.items[ip.items.items(.data)[@intFromEnum(index)]]),
 
         // the type is the `data` field
         .null_value,
@@ -3962,6 +4033,10 @@ test "big int value" {
 
     try std.testing.expect(positive_big_int_value != negative_big_int_value);
     try std.testing.expectEqual(positive_big_int_value, another_positive_big_int_value);
+
+    try std.testing.expectEqual(Index.comptime_int_type, ip.typeOf(positive_big_int_value));
+    try std.testing.expectEqual(Index.comptime_int_type, ip.typeOf(negative_big_int_value));
+    try std.testing.expectEqual(Index.comptime_int_type, ip.typeOf(another_positive_big_int_value));
 
     try expectFmt("340282366920938463463374607431768211456", "{}", .{positive_big_int_value.fmt(&ip)});
     try expectFmt("-340282366920938463463374607431768211456", "{}", .{negative_big_int_value.fmt(&ip)});
