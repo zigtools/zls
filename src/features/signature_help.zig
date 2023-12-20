@@ -15,10 +15,12 @@ fn fnProtoToSignatureInfo(
     arena: std.mem.Allocator,
     commas: u32,
     skip_self_param: bool,
-    func_type: Analyser.TypeWithHandle,
+    func_type: Analyser.Type,
 ) !types.SignatureInformation {
-    const tree = func_type.handle.tree;
-    const fn_node = func_type.type.data.other; // this assumes that function types can only be Ast nodes
+    const fn_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
+    const fn_node = fn_node_handle.node;
+    const fn_handle = fn_node_handle.handle;
+    const tree = fn_handle.tree;
     var buffer: [1]Ast.Node.Index = undefined;
     const proto = tree.fullFnProto(&buffer, fn_node).?;
 
@@ -26,7 +28,7 @@ fn fnProtoToSignatureInfo(
     const proto_comments = (try Analyser.getDocComments(arena, tree, fn_node)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analyser.hasSelfParam(func_type.handle, proto);
+        const has_self_param = try analyser.hasSelfParam(fn_handle, proto);
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
@@ -239,9 +241,9 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
 
                 const loc = offsets.tokensToLoc(tree, expr_first_token, expr_last_token);
 
-                var type_handle = try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue;
+                var ty = try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue;
 
-                if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
+                if (try analyser.resolveFuncProtoOfCallable(ty)) |func_type| {
                     return try fnProtoToSignatureInfo(
                         analyser,
                         arena,
@@ -257,13 +259,13 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                 };
                 const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-                const skip_self_param = !type_handle.type.is_type_val;
-                type_handle = try analyser.resolveFieldAccess(type_handle, name) orelse {
+                const skip_self_param = !ty.is_type_val;
+                ty = try analyser.resolveFieldAccess(ty, name) orelse {
                     try symbol_stack.append(arena, .l_paren);
                     continue;
                 };
 
-                if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
+                if (try analyser.resolveFuncProtoOfCallable(ty)) |func_type| {
                     return try fnProtoToSignatureInfo(
                         analyser,
                         arena,

@@ -22,17 +22,17 @@ fn typeToCompletion(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
-    type_handle: Analyser.TypeWithHandle,
+    ty: Analyser.Type,
     orig_handle: *DocumentStore.Handle,
     either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    switch (type_handle.type.data) {
+    switch (ty.data) {
         .pointer => |info| switch (info.size) {
             .One => {
-                if (type_handle.type.is_type_val) return;
+                if (ty.is_type_val) return;
 
                 try list.append(arena, .{
                     .label = "*",
@@ -41,12 +41,12 @@ fn typeToCompletion(
                     .insertTextFormat = .PlainText,
                 });
 
-                if (try analyser.resolveDerefType(type_handle)) |child_ty| {
+                if (try analyser.resolveDerefType(ty)) |child_ty| {
                     try typeToCompletion(server, analyser, arena, list, child_ty, orig_handle, null);
                 }
             },
             .Slice => {
-                if (type_handle.type.is_type_val) return;
+                if (ty.is_type_val) return;
 
                 try list.append(arena, .{
                     .label = "len",
@@ -77,10 +77,10 @@ fn typeToCompletion(
             analyser,
             arena,
             list,
-            .{ .node = n, .handle = type_handle.handle },
+            n,
             orig_handle,
             null,
-            type_handle.type.is_type_val,
+            ty.is_type_val,
             null,
             either_descriptor,
             null,
@@ -90,8 +90,7 @@ fn typeToCompletion(
             list,
             analyser.ip,
             payload.index,
-            type_handle.type.is_type_val,
-            payload.node,
+            ty.is_type_val,
         ),
         .either => |bruh| {
             for (bruh) |a|
@@ -550,8 +549,8 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    const type_handle = (try analyser.getFieldAccessType(handle, source_index, loc)) orelse return null;
-    try typeToCompletion(server, analyser, arena, &completions, type_handle, handle, null);
+    const ty = (try analyser.getFieldAccessType(handle, source_index, loc)) orelse return null;
+    try typeToCompletion(server, analyser, arena, &completions, ty, handle, null);
     try formatCompletionDetails(server, arena, completions.items);
 
     return try completions.toOwnedSlice(arena);
@@ -1227,25 +1226,27 @@ fn getSwitchOrStructInitContext(
     };
 }
 
-/// Given a TypeWithHandle that is a container, adds it's `.container_field*`s to completions
+/// Given a Type that is a container, adds it's `.container_field*`s to completions
 pub fn collectContainerFields(
     arena: std.mem.Allocator,
-    container: Analyser.TypeWithHandle,
+    container: Analyser.Type,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
 ) error{OutOfMemory}!void {
-    const node = switch (container.type.data) {
+    const node_handle = switch (container.data) {
         .other => |n| n,
         else => return,
     };
+    const node = node_handle.node;
+    const handle = node_handle.handle;
     var buffer: [2]Ast.Node.Index = undefined;
-    const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse return;
+    const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
-        const field = container.handle.tree.fullContainerField(member) orelse continue;
-        const name = container.handle.tree.tokenSlice(field.ast.main_token);
+        const field = handle.tree.fullContainerField(member) orelse continue;
+        const name = handle.tree.tokenSlice(field.ast.main_token);
         try completions.append(arena, .{
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-            .detail = Analyser.getContainerFieldSignature(container.handle.tree, field),
+            .detail = Analyser.getContainerFieldSignature(handle.tree, field),
             .insertText = name,
             .insertTextFormat = .PlainText,
         });
@@ -1262,11 +1263,11 @@ fn collectContainerNodes(
     handle: *DocumentStore.Handle,
     source_index: usize,
     dot_context: *const EnumLiteralContext,
-) error{OutOfMemory}![]Analyser.TypeWithHandle {
+) error{OutOfMemory}![]Analyser.Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var types_with_handles = std.ArrayListUnmanaged(Analyser.TypeWithHandle){};
+    var types_with_handles = std.ArrayListUnmanaged(Analyser.Type){};
 
     switch (try Analyser.getPositionContext(arena, handle.tree.source, source_index, false)) {
         .var_access => |loc| try collectVarAccessContainerNodes(analyser, arena, handle, loc, dot_context, &types_with_handles),
@@ -1283,19 +1284,21 @@ fn collectVarAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: *const EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
     const result = try symbol_decl.resolveType(analyser) orelse return;
     const type_expr = try analyser.resolveDerefType(result) orelse result;
     if (type_expr.isFunc()) {
-        const fn_proto_node = type_expr.type.data.other; // this assumes that function types can only be Ast nodes
+        const fn_proto_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
+        const fn_proto_node = fn_proto_node_handle.node;
+        const fn_proto_handle = fn_proto_node_handle.handle;
         if (dot_context.likely == .enum_literal or dot_context.need_ret_type) { // => we need f()'s return type
             var buf: [1]Ast.Node.Index = undefined;
-            const full_fn_proto = type_expr.handle.tree.fullFnProto(&buf, fn_proto_node).?;
-            const has_body = type_expr.handle.tree.nodes.items(.tag)[type_expr.type.data.other] == .fn_decl;
-            const body = type_expr.handle.tree.nodes.items(.data)[type_expr.type.data.other].rhs;
-            var node_type = try analyser.resolveReturnType(full_fn_proto, type_expr.handle, if (has_body) body else null) orelse return;
+            const full_fn_proto = fn_proto_handle.tree.fullFnProto(&buf, fn_proto_node).?;
+            const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
+            const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
+            var node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse return;
             if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
@@ -1304,7 +1307,7 @@ fn collectVarAccessContainerNodes(
             .func = fn_proto_node,
             .param_index = @intCast(dot_context.fn_arg_index),
         } };
-        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = type_expr.handle };
+        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = fn_proto_handle };
         const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
         try types_with_handles.append(arena, param_type);
         return;
@@ -1318,7 +1321,7 @@ fn collectFieldAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: *const EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
     // XXX It could be any/all of the preceding logic, but this fn seems
     // inconsistent at returning name_loc for methods, ie
@@ -1346,19 +1349,21 @@ fn collectFieldAccessContainerNodes(
             if (try analyser.resolveOptionalChildType(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
-            const fn_proto_node = node_type.type.data.other; // this assumes that function types can only be Ast nodes
+            const fn_proto_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
+            const fn_proto_node = fn_proto_node_handle.node;
+            const fn_proto_handle = fn_proto_node_handle.handle;
             var buf: [1]Ast.Node.Index = undefined;
-            const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, fn_proto_node).?;
+            const full_fn_proto = fn_proto_handle.tree.fullFnProto(&buf, fn_proto_node).?;
             if (dot_context.need_ret_type) { // => we need f()'s return type
-                const has_body = node_type.handle.tree.nodes.items(.tag)[node_type.type.data.other] == .fn_decl;
-                const body = node_type.handle.tree.nodes.items(.data)[node_type.type.data.other].rhs;
-                node_type = try analyser.resolveReturnType(full_fn_proto, node_type.handle, if (has_body) body else null) orelse continue;
+                const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
+                const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
+                node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse continue;
                 if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
                 try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
                 continue;
             }
             var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
-            var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
+            var fn_param_iter = full_fn_proto.iterate(&fn_proto_handle.tree);
             // don't have the luxury of referencing an `Ast.full.Call`
             // check if the first symbol is a `T` or an instance_of_T
             const additional_index: usize = blk: {
@@ -1369,8 +1374,8 @@ fn collectFieldAccessContainerNodes(
                 const first_symbol = symbol_iter.next() orelse continue;
                 const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
                 const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
-                if (!symbol_type.type.is_type_val) { // then => instance_of_T
-                    if (try analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
+                if (!symbol_type.is_type_val) { // then => instance_of_T
+                    if (try analyser.hasSelfParam(fn_proto_handle, full_fn_proto)) break :blk 2;
                 }
                 break :blk 1; // is `T`, no SelfParam
             };
@@ -1380,8 +1385,8 @@ fn collectFieldAccessContainerNodes(
             const param_rcts = try collectContainerNodes(
                 analyser,
                 arena,
-                node_type.handle,
-                offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
+                fn_proto_handle,
+                offsets.nodeToLoc(fn_proto_handle.tree, param.type_expr).end,
                 dot_context,
             );
             for (param_rcts) |prct| try types_with_handles.append(arena, prct);
@@ -1396,7 +1401,7 @@ fn collectEnumLiteralContainerNodes(
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);

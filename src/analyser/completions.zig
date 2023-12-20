@@ -12,10 +12,8 @@ pub fn dotCompletions(
     ip: *InternPool,
     index: InternPool.Index,
     is_type_val: bool,
-    node: ?Ast.Node.Index,
 ) error{OutOfMemory}!void {
     std.debug.assert(index != .none);
-    _ = node;
 
     const index_key = ip.indexToKey(index);
     const val: InternPool.Key = if (is_type_val) index_key else .{ .unknown_value = .{ .ty = index } };

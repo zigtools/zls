@@ -357,8 +357,8 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, .{
                 .start = start,
                 .end = rhs_loc.end,
-            })) |type_handle| {
-                const container_handle = try builder.analyser.resolveDerefType(type_handle) orelse type_handle;
+            })) |ty| {
+                const container_handle = try builder.analyser.resolveDerefType(ty) orelse ty;
                 const symbol = offsets.identifierTokenToNameSlice(tree, rhsToken);
                 if (try container_handle.lookupSymbol(builder.analyser, symbol)) |decl_handle| {
                     try writeCallHint(builder, call, decl_handle);

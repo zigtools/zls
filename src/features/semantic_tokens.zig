@@ -222,12 +222,12 @@ fn fieldTokenType(
 
 fn colorIdentifierBasedOnType(
     builder: *Builder,
-    type_node: Analyser.TypeWithHandle,
+    type_node: Analyser.Type,
     target_tok: Ast.TokenIndex,
     is_parameter: bool,
     tok_mod: TokenModifiers,
 ) !void {
-    if (type_node.type.is_type_val) {
+    if (type_node.is_type_val) {
         const token_type: TokenType =
             if (type_node.isNamespace())
             .namespace
@@ -252,11 +252,11 @@ fn colorIdentifierBasedOnType(
         if (type_node.isGenericFunc()) {
             new_tok_mod.generic = true;
         }
-        const has_self_param = switch (type_node.type.data) {
-            .other => |node| blk: {
+        const has_self_param = switch (type_node.data) {
+            .other => |node_handle| blk: {
                 var buffer: [1]Ast.Node.Index = undefined;
-                const fn_proto = type_node.handle.tree.fullFnProto(&buffer, node).?;
-                break :blk try builder.analyser.hasSelfParam(type_node.handle, fn_proto);
+                const fn_proto = node_handle.handle.tree.fullFnProto(&buffer, node_handle.node).?;
+                break :blk try builder.analyser.hasSelfParam(node_handle.handle, fn_proto);
             },
             else => false,
         };
@@ -602,8 +602,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
-                )) |struct_type| switch (struct_type.type.data) {
-                    .other => |n| fieldTokenType(n, struct_type.handle, false),
+                )) |struct_type| switch (struct_type.data) {
+                    .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, false),
                     else => null,
                 } else null;
             }
@@ -866,8 +866,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type = switch (lhs_type.type.data) {
-                                .other => |n| fieldTokenType(n, lhs_type.handle, lhs_type.type.is_type_val),
+                            const tok_type = switch (lhs_type.data) {
+                                .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, lhs_type.is_type_val),
                                 else => null,
                             };
 
