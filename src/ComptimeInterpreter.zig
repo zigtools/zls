@@ -738,34 +738,31 @@ pub fn interpret(
 
             const number_type = if (nl == .float) Index.comptime_float_type else Index.comptime_int_type;
 
-            const value = try interpreter.ip.get(
-                interpreter.allocator,
-                switch (nl) {
-                    .float => Key{
-                        .float_comptime_value = try std.fmt.parseFloat(f128, s),
-                    },
-                    .int => if (s[0] == '-') Key{
-                        .int_i64_value = .{
-                            .ty = number_type,
-                            .int = try std.fmt.parseInt(i64, s, 0),
-                        },
-                    } else Key{
-                        .int_u64_value = .{
-                            .ty = number_type,
-                            .int = try std.fmt.parseInt(u64, s, 0),
-                        },
-                    },
-                    .big_int => |base| blk: {
-                        var big_int = try std.math.big.int.Managed.init(interpreter.allocator);
-                        defer big_int.deinit();
-                        const prefix_length: usize = if (base != .decimal) 2 else 0;
-                        try big_int.setString(@intFromEnum(base), s[prefix_length..]);
-                        std.debug.assert(number_type == .comptime_int_type);
-                        break :blk Key{ .int_big_value = .{ .ty = number_type, .int = big_int.toConst() } };
-                    },
-                    .failure => return error.CriticalAstFailure,
+            const value = switch (nl) {
+                .float => try interpreter.ip.get(
+                    interpreter.allocator,
+                    .{ .float_comptime_value = try std.fmt.parseFloat(f128, s) },
+                ),
+                .int => if (s[0] == '-')
+                    try interpreter.ip.get(
+                        interpreter.allocator,
+                        .{ .int_i64_value = .{ .ty = number_type, .int = try std.fmt.parseInt(i64, s, 0) } },
+                    )
+                else
+                    try interpreter.ip.get(
+                        interpreter.allocator,
+                        .{ .int_u64_value = .{ .ty = number_type, .int = try std.fmt.parseInt(u64, s, 0) } },
+                    ),
+                .big_int => |base| blk: {
+                    var big_int = try std.math.big.int.Managed.init(interpreter.allocator);
+                    defer big_int.deinit();
+                    const prefix_length: usize = if (base != .decimal) 2 else 0;
+                    try big_int.setString(@intFromEnum(base), s[prefix_length..]);
+                    std.debug.assert(number_type == .comptime_int_type);
+                    break :blk try interpreter.ip.getBigInt(interpreter.allocator, number_type, big_int.toConst());
                 },
-            );
+                .failure => return error.CriticalAstFailure,
+            };
 
             return InterpretResult{ .value = Value{
                 .interpreter = interpreter,

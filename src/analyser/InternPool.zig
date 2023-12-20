@@ -5,6 +5,8 @@ items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u8) = .{},
 string_pool: StringPool = .{},
 
+limbs: std.ArrayListUnmanaged(usize) = .{},
+
 decls: std.SegmentedList(InternPool.Decl, 0) = .{},
 structs: std.SegmentedList(InternPool.Struct, 0) = .{},
 enums: std.SegmentedList(InternPool.Enum, 0) = .{},
@@ -153,7 +155,40 @@ pub const Key = union(enum) {
 
     pub const BigInt = struct {
         ty: Index,
-        int: std.math.big.int.Const,
+        storage: union(enum) {
+            /// The limbs are stored outside of the `InternPool` and are managed by the caller of
+            /// the `Internpool.get` function.
+            /// Use this field when inserting a new BigInt into the `InternPool` instead of manually
+            /// storing the limbs in the `InternPool` with `getLimbSlice` because `Internpool.get`
+            /// function can perform deduplication of big ints to avoid storing the limbs twice.
+            /// See `InternPool.getBigInt`.
+            ///
+            /// This field will never be active as the returned `Key` from `InternPool.get`.
+            external: std.math.big.int.Const,
+            /// The limbs are stored in the `InternPool`.
+            /// This field will always be active as the returned `Key` from `InternPool.get`.
+            internal: struct {
+                positive: bool,
+                limbs: LimbSlice,
+            },
+        },
+
+        pub fn isPositive(int: BigInt) bool {
+            switch (int.storage) {
+                .external => |external| return external.positive,
+                .internal => |internal| return internal.positive,
+            }
+        }
+
+        pub fn getConst(int: BigInt, ip: *const InternPool) std.math.big.int.Const {
+            switch (int.storage) {
+                .external => |external| return external,
+                .internal => |internal| return .{
+                    .positive = internal.positive,
+                    .limbs = internal.limbs.get(ip),
+                },
+            }
+        }
     };
 
     const F64Value = packed struct {
@@ -242,7 +277,7 @@ pub const Key = union(enum) {
 
     const BigIntInternal = struct {
         ty: Index,
-        limbs: []const std.math.big.Limb,
+        limbs: LimbSlice,
     };
 
     pub fn hash32(key: Key, ip: *const InternPool) u32 {
@@ -329,7 +364,12 @@ pub const Key = union(enum) {
             },
             .int_big_value => |int_big_value| {
                 std.hash.autoHash(hasher, int_big_value.ty);
-                std.hash.autoHashStrat(hasher, int_big_value.int, .Deep);
+                std.hash.autoHash(hasher, int_big_value.isPositive());
+                const limbs = switch (int_big_value.storage) {
+                    .external => |int| int.limbs,
+                    .internal => |int| int.limbs.get(ip),
+                };
+                hasher.update(std.mem.sliceAsBytes(limbs));
             },
             .aggregate => |aggregate| {
                 std.hash.autoHash(hasher, aggregate.ty);
@@ -443,7 +483,7 @@ pub const Key = union(enum) {
                 const b_info = b.int_big_value;
 
                 if (a_info.ty != b_info.ty) return false;
-                if (!a_info.int.eql(b_info.int)) return false;
+                if (!a_info.getConst(ip).eql(b_info.getConst(ip))) return false;
 
                 return true;
             },
@@ -644,6 +684,20 @@ pub const StringSlice = struct {
         if (slice.len == 0) return &.{};
         const bytes: []align(4) const u8 = @alignCast(ip.extra.items[slice.start..][0 .. @sizeOf(String) * slice.len]);
         return try gpa.dupe(String, std.mem.bytesAsSlice(String, bytes));
+    }
+};
+
+pub const LimbSlice = struct {
+    start: u32,
+    len: u32,
+
+    pub const empty = LimbSlice{
+        .start = std.math.maxInt(u32),
+        .len = 0,
+    };
+
+    pub fn get(limbs: LimbSlice, ip: *const InternPool) []std.math.big.Limb {
+        return ip.limbs.items[limbs.start..][0..limbs.len];
     }
 };
 
@@ -1037,6 +1091,7 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.items.deinit(gpa);
     ip.extra.deinit(gpa);
     ip.string_pool.deinit(gpa);
+    ip.limbs.deinit(gpa);
 
     var struct_it = ip.structs.iterator(0);
     while (struct_it.next()) |item| {
@@ -1089,9 +1144,11 @@ pub fn indexToKey(ip: *const InternPool, index: Index) Key {
             const big_int = ip.extraData(Key.BigIntInternal, data);
             break :blk .{
                 .ty = big_int.ty,
-                .int = .{
-                    .positive = item.tag == .int_big_positive,
-                    .limbs = big_int.limbs,
+                .storage = .{
+                    .internal = .{
+                        .positive = item.tag == .int_big_positive,
+                        .limbs = big_int.limbs,
+                    },
                 },
             };
         } },
@@ -1189,10 +1246,13 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
             .data = try ip.addExtra(gpa, Key.I64Value, int_val),
         },
         .int_big_value => |big_int_val| .{
-            .tag = if (big_int_val.int.positive) .int_big_positive else .int_big_negative,
+            .tag = if (big_int_val.isPositive()) .int_big_positive else .int_big_negative,
             .data = try ip.addExtra(gpa, Key.BigIntInternal, .{
                 .ty = big_int_val.ty,
-                .limbs = big_int_val.int.limbs,
+                .limbs = switch (big_int_val.storage) {
+                    .external => |int| try ip.getLimbSlice(gpa, int.limbs),
+                    .internal => |int| int.limbs,
+                },
             }),
         },
         .float_16_value => |float_val| .{
@@ -1284,6 +1344,19 @@ pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) err
 
     const start: u32 = @intCast(ip.extra.items.len);
     try ip.extra.appendSlice(gpa, std.mem.sliceAsBytes(data));
+
+    return .{
+        .start = start,
+        .len = @intCast(data.len),
+    };
+}
+
+/// prefer `getBigInt` when creating new big ints to allow for deduplication.
+pub fn getLimbSlice(ip: *InternPool, gpa: Allocator, data: []const std.math.big.Limb) error{OutOfMemory}!LimbSlice {
+    if (data.len == 0) return LimbSlice.empty;
+
+    const start: u32 = @intCast(ip.limbs.items.len);
+    try ip.limbs.appendSlice(gpa, data);
 
     return .{
         .start = start,
@@ -1582,7 +1655,7 @@ fn intFitsInType(
             var big_int = std.math.big.int.Mutable.init(&buffer, value.int);
             return big_int.toConst().fitsInTwosComp(info.signedness, info.bits);
         },
-        .int_big_value => |int| return int.int.fitsInTwosComp(info.signedness, info.bits),
+        .int_big_value => |int| return int.getConst(ip).fitsInTwosComp(info.signedness, info.bits),
         else => unreachable,
     }
 }
@@ -1596,7 +1669,17 @@ fn coerceInt(
     switch (ip.indexToKey(val)) {
         .int_i64_value => |int| return try ip.get(gpa, .{ .int_i64_value = .{ .int = int.int, .ty = dest_ty } }),
         .int_u64_value => |int| return try ip.get(gpa, .{ .int_u64_value = .{ .int = int.int, .ty = dest_ty } }),
-        .int_big_value => |int| return try ip.get(gpa, .{ .int_big_value = .{ .int = int.int, .ty = dest_ty } }),
+        .int_big_value => |int| return try ip.get(gpa, .{
+            .int_big_value = .{
+                .ty = dest_ty,
+                .storage = .{
+                    .internal = .{
+                        .positive = int.storage.internal.positive,
+                        .limbs = int.storage.internal.limbs,
+                    },
+                },
+            },
+        }),
         .undefined_value => |info| return try ip.getUndefined(gpa, info.ty),
         .unknown_value => |info| return try ip.getUnknown(gpa, info.ty),
         else => unreachable,
@@ -3423,6 +3506,13 @@ pub fn toInt(ip: *const InternPool, val: Index, comptime T: type) !?T {
     };
 }
 
+pub fn getBigInt(ip: *InternPool, gpa: Allocator, ty: Index, int: std.math.big.int.Const) Allocator.Error!Index {
+    assert(ip.isType(ty));
+    return try ip.get(gpa, .{
+        .int_big_value = .{ .ty = ty, .storage = .{ .external = int } },
+    });
+}
+
 pub fn getNull(ip: *InternPool, gpa: Allocator, ty: Index) Allocator.Error!Index {
     if (ty == .none) return Index.null_value;
     assert(ip.isType(ty));
@@ -3692,7 +3782,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
         },
         .int_u64_value => |i| try writer.print("{d}", .{i.int}),
         .int_i64_value => |i| try writer.print("{d}", .{i.int}),
-        .int_big_value => |i| try writer.print("{d}", .{i.int}),
+        .int_big_value => |i| try writer.print("{d}", .{i.getConst(ip)}),
         .float_16_value => |float| try writer.print("{d}", .{float}),
         .float_32_value => |float| try writer.print("{d}", .{float}),
         .float_64_value => |float| try writer.print("{d}", .{float}),
@@ -3865,14 +3955,13 @@ test "big int value" {
 
     try result.pow(&a, 128);
 
-    const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = .{
-        .ty = .comptime_int_type,
-        .int = result.toConst(),
-    } });
-    const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = .{
-        .ty = .comptime_int_type,
-        .int = result.toConst().negate(),
-    } });
+    const positive_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst());
+    const negative_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst().negate());
+
+    const another_positive_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst());
+
+    try std.testing.expect(positive_big_int_value != negative_big_int_value);
+    try std.testing.expectEqual(positive_big_int_value, another_positive_big_int_value);
 
     try expectFmt("340282366920938463463374607431768211456", "{}", .{positive_big_int_value.fmt(&ip)});
     try expectFmt("-340282366920938463463374607431768211456", "{}", .{negative_big_int_value.fmt(&ip)});
