@@ -3170,7 +3170,8 @@ fn isUnknownDeepInternal(ip: *InternPool, index: Index, set: *std.AutoHashMap(In
             return false;
         },
         .function_type => |function_info| {
-            for (function_info.args) |arg_ty| {
+            for (0..function_info.args.len) |i| {
+                const arg_ty = function_info.args.at(@intCast(i), ip);
                 if (try ip.isUnknownDeepInternal(arg_ty, set)) return true;
             }
             if (try ip.isUnknownDeepInternal(function_info.return_type, set)) return true;
@@ -3185,7 +3186,11 @@ fn isUnknownDeepInternal(ip: *InternPool, index: Index, set: *std.AutoHashMap(In
             return false;
         },
         .tuple_type => |tuple_info| {
-            for (tuple_info.types, tuple_info.values) |ty, val| {
+            assert(tuple_info.types.len == tuple_info.values.len);
+
+            for (0..tuple_info.types.len) |i| {
+                const ty = tuple_info.types.at(@intCast(i), ip);
+                const val = tuple_info.values.at(@intCast(i), ip);
                 if (try ip.isUnknownDeepInternal(ty, set)) return true;
                 if (try ip.isUnknownDeepInternal(val, set)) return true;
             }
@@ -3447,7 +3452,10 @@ pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) 
     for (b_names) |name| set.putAssumeCapacity(name, {});
 
     return try ip.get(gpa, .{
-        .error_set_type = .{ .owner_decl = .none, .names = set.keys() },
+        .error_set_type = .{
+            .owner_decl = .none,
+            .names = try ip.getStringSlice(gpa, set.keys()),
+        },
     });
 }
 
@@ -3684,7 +3692,7 @@ pub fn isZero(ip: *InternPool, val: Index) bool {
         },
         .int_u64_value => |int_value| int_value.int == 0,
         .int_i64_value => |int_value| int_value.int == 0,
-        .int_big_value => |int_value| int_value.int.eqlZero(),
+        .int_big_value => |int_value| int_value.getConst(ip).eqlZero(),
 
         .null_value => true,
         .optional_value => false,

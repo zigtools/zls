@@ -5,5 +5,5 @@ pub const degibberish = @import("degibberish.zig");
 
 comptime {
     const std = @import("std");
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDeclsRecursive(@This());
 }

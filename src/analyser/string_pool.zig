@@ -152,14 +152,17 @@ pub fn StringPool(comptime config: Config) type {
             return .{ .slice = pool.stringToSliceUnsafe(index) };
         }
 
-        /// returns the underlying slice from an interned string
-        /// equal strings are guaranteed to share the same storage
-        ///
-        /// only callable when thread safety is disabled.
-        pub fn stringToSlice(pool: *Pool, index: String) [:0]const u8 {
-            if (config.thread_safe) @compileError("use stringToSliceLock instead");
-            return pool.stringToSliceUnsafe(index);
-        }
+        // usingnamespace is used here instead of doing a @compileError if
+        // `config.thread_safe` so that `std.testing.refAllDeclsRecursive` works.
+        usingnamespace if (config.thread_safe) struct {} else struct {
+            /// returns the underlying slice from an interned string
+            /// equal strings are guaranteed to share the same storage
+            ///
+            /// only callable when thread safety is disabled.
+            pub fn stringToSlice(pool: *Pool, index: String) [:0]const u8 {
+                return pool.stringToSliceUnsafe(index);
+            }
+        };
 
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage
@@ -230,16 +233,18 @@ const PrecomputedStringIndexAdapter = struct {
 
 test StringPool {
     const gpa = std.testing.allocator;
-    var pool = StringPool(.{ .thread_safe = false }){};
+    var pool = StringPool(.{}){};
     defer pool.deinit(gpa);
 
     const str = "All Your Codebase Are Belong To Us";
     const index = try pool.getOrPutString(gpa, str);
 
-    const locked_string = pool.stringToSliceLock(index);
-    defer locked_string.release(&pool);
+    {
+        const locked_string = pool.stringToSliceLock(index);
+        defer locked_string.release(&pool);
 
-    try std.testing.expectEqualStrings(str, locked_string.slice);
+        try std.testing.expectEqualStrings(str, locked_string.slice);
+    }
     try std.testing.expectFmt(str, "{}", .{index.fmt(&pool)});
 }
 
