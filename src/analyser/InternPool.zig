@@ -4,7 +4,7 @@ map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
 string_pool: StringPool = .{},
-lock: std.Thread.RwLock = .{},
+lock: RwLock = .{},
 
 limbs: std.ArrayListUnmanaged(usize) = .{},
 
@@ -24,6 +24,11 @@ const expectFmt = std.testing.expectFmt;
 pub const StringPool = @import("string_pool.zig").StringPool(.{});
 pub const String = StringPool.String;
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
+
+pub const RwLock = if (builtin.single_threaded)
+    std.Thread.RwLock.SingleThreadedRwLock
+else
+    std.Thread.RwLock.DefaultRwLock;
 
 pub const Key = union(enum) {
     simple_type: SimpleType,
