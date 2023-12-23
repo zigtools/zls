@@ -16,6 +16,9 @@ enable_ast_check_diagnostics: bool = true,
 /// Whether to enable build-on-save diagnostics
 enable_build_on_save: bool = false,
 
+/// Select which step should be executed on build-on-save
+build_on_save_step: []const u8 = "install",
+
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
 enable_autofix: bool = false,
 

@@ -13,10 +13,12 @@ const ConfigOption = struct {
     /// If this is set, the value `type` should to be `enum`
     @"enum": ?[]const []const u8 = null,
     /// used in Config.zig as the default initializer
-    default: []const u8,
+    default: std.json.Value,
 
     fn getTypescriptType(self: ConfigOption) error{UnsupportedType}![]const u8 {
-        return if (std.mem.eql(u8, self.type, "?[]const u8"))
+        return if (std.mem.eql(u8, self.type, "[]const u8"))
+            "string"
+        else if (std.mem.eql(u8, self.type, "?[]const u8"))
             "string"
         else if (std.mem.eql(u8, self.type, "bool"))
             "boolean"
@@ -61,10 +63,10 @@ const ConfigOption = struct {
         _ = options;
         if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
         if (config.@"enum" != null) {
-            try writer.writeByte('.');
+            try writer.print(".{s}", .{config.default.string});
+            return;
         }
-        const default = std.mem.trim(u8, config.default, &std.ascii.whitespace);
-        try writer.writeAll(default);
+        try std.json.stringify(config.default, .{}, writer);
     }
 
     fn fmtDefaultValue(self: ConfigOption) std.fmt.Formatter(formatDefaultValue) {
@@ -88,7 +90,7 @@ const SchemaEntry = struct {
     description: []const u8,
     type: []const u8,
     @"enum": ?[]const []const u8 = null,
-    default: []const u8,
+    default: std.json.Value,
 };
 
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
@@ -248,14 +250,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
         errdefer allocator.free(name);
 
-        const default: ?std.json.Value = blk: {
-            if (option.@"enum" != null) break :blk .{ .string = option.default };
-
-            var value = try std.json.parseFromSlice(std.json.Value, allocator, option.default, .{});
-            defer value.deinit();
-
-            break :blk if (value.value != .null) value.value else null;
-        };
+        const default: ?std.json.Value = if (option.default != .null) option.default else null;
 
         configuration.map.putAssumeCapacityNoClobber(name, .{
             .type = try option.getTypescriptType(),
@@ -999,7 +994,7 @@ pub fn main() !void {
                 \\
                 \\    --help                               Prints this message
                 \\    --readme-path [path]                 Update readme file (see README.md)
-                \\    --generate-vscode-config [path]      Output zls-vscode configurations 
+                \\    --vscode-config-path [path]          Output zls-vscode configurations 
                 \\    --generate-config-path [path]        Output path to config file (see src/Config.zig)
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
                 \\    --generate-version-data [version]    Output version data file (default: master)
@@ -1073,7 +1068,7 @@ pub fn main() !void {
     if (vscode_config_path) |output_path| {
         try generateVSCodeConfigFile(gpa, config, output_path);
         try stderr.writeAll(
-            \\Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
+            \\Changing configuration options may also require editing the `package.json` from ziglang/vscode-zig at https://github.com/ziglang/vscode-zig/blob/master/package.json
             \\You can use `zig build gen -- --vscode-config-path /path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
             \\
         );

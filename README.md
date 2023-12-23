@@ -60,6 +60,7 @@ The following options are currently available.
 | `enable_argument_placeholders` | `bool` | `true` | Whether to enable function argument placeholder completions |
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
 | `enable_build_on_save` | `bool` | `false` | Whether to enable build-on-save diagnostics |
+| `build_on_save_step` | `[]const u8` | `"install"` | Select which step should be executed on build-on-save |
 | `enable_autofix` | `bool` | `false` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
