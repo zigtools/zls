@@ -643,23 +643,22 @@ pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle:
 
     if (ast.hasInferredError(tree, fn_decl)) {
         const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-        child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
+        child_type_ptr.* = try child_type.instanceTypeVal(analyser) orelse return null;
         return TypeWithHandle{
             .type = .{ .data = .{ .error_union = child_type_ptr }, .is_type_val = false },
             .handle = handle,
         };
-    } else return child_type.instanceTypeVal();
+    } else return try child_type.instanceTypeVal(analyser);
 }
 
 /// `optional.?`
 pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    _ = analyser;
     if (optional.type.is_type_val) return null;
 
     switch (optional.type.data) {
         .optional => |child_ty| {
             std.debug.assert(child_ty.type.is_type_val);
-            return child_ty.instanceTypeVal();
+            return try child_ty.instanceTypeVal(analyser);
         },
         else => return null,
     }
@@ -706,13 +705,15 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, sid
     const tree = rhs.handle.tree;
     if (tree.nodes.items(.tag)[rhs_node] == .error_union) {
         const data = tree.nodes.items(.data)[rhs_node];
-        return ((try analyser.resolveTypeOfNodeInternal(.{
+        const node_with_handle = NodeWithHandle{
             .node = switch (side) {
                 .left => data.lhs,
                 .right => data.rhs,
             },
             .handle = rhs.handle,
-        })) orelse return null).instanceTypeVal();
+        };
+        const ty = try analyser.resolveTypeOfNodeInternal(node_with_handle) orelse return null;
+        return try ty.instanceTypeVal(analyser);
     }
 
     return null;
@@ -762,7 +763,7 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
             .node = container_decl.ast.arg,
             .handle = handle,
         })) orelse return null;
-        return tag_type.instanceTypeVal();
+        return try tag_type.instanceTypeVal(analyser);
     }
 
     return null;
@@ -777,12 +778,11 @@ pub fn resolveFuncProtoOfCallable(analyser: *Analyser, type_handle: TypeWithHand
 /// resolve a pointer dereference
 /// `pointer.*`
 pub fn resolveDerefType(analyser: *Analyser, pointer: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    _ = analyser;
     if (pointer.type.is_type_val) return null;
 
     switch (pointer.type.data) {
         .pointer => |info| switch (info.size) {
-            .One, .C => return info.elem_ty.instanceTypeVal(),
+            .One, .C => return try info.elem_ty.instanceTypeVal(analyser),
             .Many, .Slice => return null,
         },
         else => return null,
@@ -809,7 +809,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
                 if (!child_type.type.is_type_val) return null;
 
                 switch (rhs) {
-                    .Single => return child_type.instanceTypeVal(),
+                    .Single => return try child_type.instanceTypeVal(analyser),
                     .Range => {
                         const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
                         child_type_ptr.* = child_type;
@@ -821,7 +821,10 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
                 }
             },
             .for_range => return TypeWithHandle{
-                .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
+                .type = .{
+                    .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
+                    .is_type_val = false,
+                },
                 .handle = lhs.handle,
             },
             else => return null,
@@ -829,14 +832,14 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
         .pointer => |info| return switch (info.size) {
             .One => null,
             .Many => switch (rhs) {
-                .Single => info.elem_ty.instanceTypeVal(),
+                .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Range => TypeWithHandle{
                     .type = .{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
                     .handle = lhs.handle,
                 },
             },
             .Slice, .C => switch (rhs) {
-                .Single => info.elem_ty.instanceTypeVal(),
+                .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Range => lhs,
             },
         },
@@ -870,8 +873,8 @@ fn resolveTupleFieldType(analyser: *Analyser, type_handle: TypeWithHandle, index
     if (!field.ast.tuple_like)
         return null;
 
-    if (try analyser.resolveTypeOfNode(.{ .node = field.ast.type_expr, .handle = handle })) |t|
-        return t.instanceTypeVal();
+    if (try analyser.resolveTypeOfNode(.{ .node = field.ast.type_expr, .handle = handle })) |ty|
+        return try ty.instanceTypeVal(analyser);
 
     return null;
 }
@@ -890,7 +893,10 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
             .Slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return TypeWithHandle{
-                        .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
+                        .type = .{
+                            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
+                            .is_type_val = false,
+                        },
                         .handle = handle,
                     };
                 }
@@ -916,7 +922,10 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
             .string_literal,
             => if (std.mem.eql(u8, "len", name)) {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
+                    .type = .{
+                        .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
+                        .is_type_val = false,
+                    },
                     .handle = handle,
                 };
             },
@@ -999,19 +1008,28 @@ const primitives = std.ComptimeStringMap(InternPool.Index, .{
     .{ "void", .void_type },
 });
 
-pub fn resolvePrimitiveType(identifier_name: []const u8) ?InternPool.Index {
+pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{OutOfMemory}!?InternPool.Index {
     if (primitives.get(identifier_name)) |primitive| return primitive;
 
     if (identifier_name.len < 2) return null;
-    const first_c = identifier_name[0];
-    if (first_c != 'i' and first_c != 'u') return null;
+    const signedness: std.builtin.Signedness = switch (identifier_name[0]) {
+        'i' => .signed,
+        'u' => .unsigned,
+        else => return null,
+    };
     for (identifier_name[1..]) |c| {
         switch (c) {
             '0'...'9' => {},
             else => return null,
         }
     }
-    return .unknown_type; // TODO
+
+    const bits = std.fmt.parseUnsigned(u16, identifier_name[1..], 10) catch return null;
+
+    return try analyser.ip.get(analyser.gpa, .{ .int_type = .{
+        .bits = bits,
+        .signedness = signedness,
+    } });
 }
 
 const FindBreaks = struct {
@@ -1111,7 +1129,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     fallback_type = decl_type;
                     break :blk;
                 }
-                return decl_type.instanceTypeVal();
+                return try decl_type.instanceTypeVal(analyser);
             }
 
             if (var_decl.ast.init_node != 0) blk: {
@@ -1129,10 +1147,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
             if (!is_escaped_identifier) {
                 if (std.mem.eql(u8, name, "_")) return null;
-                if (resolvePrimitiveType(name)) |primitive| {
-                    const is_type = analyser.ip.typeOf(primitive) == .type_type;
+                if (try analyser.resolvePrimitive(name)) |primitive| {
                     return TypeWithHandle{
-                        .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
+                        .type = .{
+                            .data = .{ .ip_index = .{ .index = primitive } },
+                            .is_type_val = analyser.ip.typeOf(primitive) == .type_type,
+                        },
                         .handle = handle,
                     };
                 }
@@ -1273,21 +1293,24 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const container_type = try innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
             if (container_type.isEnumType())
-                return container_type.instanceTypeVal();
+                return try container_type.instanceTypeVal(analyser);
 
             if (container_type.isTaggedUnion()) {
                 var field = tree.fullContainerField(node).?;
                 field.convertToNonTupleLike(tree.nodes);
                 if (field.ast.type_expr == 0)
                     return TypeWithHandle{
-                        .type = .{ .data = .{ .ip_index = .{ .index = .void_type } }, .is_type_val = false },
+                        .type = .{
+                            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .void_type) } },
+                            .is_type_val = false,
+                        },
                         .handle = handle,
                     };
             }
 
             const base = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
-            return base_type.instanceTypeVal();
+            return try base_type.instanceTypeVal(analyser);
         },
         .@"comptime",
         .@"nosuspend",
@@ -1327,7 +1350,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .struct_init_comma,
                 .struct_init_one,
                 .struct_init_one_comma,
-                => base_type.instanceTypeVal(),
+                => try base_type.instanceTypeVal(analyser),
                 .slice,
                 .slice_sentinel,
                 .slice_open,
@@ -1427,10 +1450,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             });
             if (cast_map.has(call_name)) {
                 if (params.len < 1) return null;
-                return ((try analyser.resolveTypeOfNodeInternal(.{
+                const ty = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = params[0],
                     .handle = handle,
-                })) orelse return null).instanceTypeVal();
+                })) orelse return null;
+                return try ty.instanceTypeVal(analyser);
             }
 
             // Almost the same as the above, return a type value though.
@@ -1441,10 +1465,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     .node = params[0],
                     .handle = handle,
                 })) orelse return null;
-
-                if (resolved_type.type.is_type_val) return null;
-                resolved_type.type.is_type_val = true;
-                return resolved_type;
+                return resolved_type.typeOf(analyser);
             }
 
             if (std.mem.eql(u8, call_name, "@typeInfo")) {
@@ -1692,7 +1713,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .bool_not,
         .negation,
         => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .bool_type } }, .is_type_val = false },
+            .type = .{
+                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .bool_type) } },
+                .is_type_val = false,
+            },
             .handle = handle,
         },
 
@@ -1705,14 +1729,17 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         },
 
         .char_literal => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .comptime_int_type } }, .is_type_val = false },
+            .type = .{
+                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .comptime_int_type) } },
+                .is_type_val = false,
+            },
             .handle = handle,
         },
 
         .number_literal => {
             const bytes = offsets.tokenToSlice(tree, main_tokens[node]);
             const result = std.zig.parseNumberLiteral(bytes);
-            const index: InternPool.Index = switch (result) {
+            const ty: InternPool.Index = switch (result) {
                 .int,
                 .big_int,
                 => .comptime_int_type,
@@ -1720,22 +1747,34 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .failure => return null,
             };
             return TypeWithHandle{
-                .type = .{ .data = .{ .ip_index = .{ .index = index } }, .is_type_val = false },
+                .type = .{
+                    .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, ty) } },
+                    .is_type_val = false,
+                },
                 .handle = handle,
             };
         },
 
         .enum_literal => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .enum_literal_type } }, .is_type_val = false },
+            .type = .{
+                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .enum_literal_type) } },
+                .is_type_val = false,
+            },
             .handle = handle,
         },
         .unreachable_literal => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .noreturn_type } }, .is_type_val = false },
+            .type = .{
+                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .noreturn_type) } },
+                .is_type_val = false,
+            },
             .handle = handle,
         },
 
         .anyframe_literal => return TypeWithHandle{
-            .type = .{ .data = .{ .ip_index = .{ .index = .anyframe_type } }, .is_type_val = false },
+            .type = .{
+                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .anyframe_type) } },
+                .is_type_val = false,
+            },
             .handle = handle,
         },
 
@@ -2054,10 +2093,54 @@ pub const TypeWithHandle = struct {
         }
     }
 
-    pub fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
+    pub fn instanceTypeVal(self: TypeWithHandle, analyser: *Analyser) error{OutOfMemory}!?TypeWithHandle {
         if (!self.type.is_type_val) return null;
+        return switch (self.type.data) {
+            .ip_index => |payload| TypeWithHandle{
+                .type = .{
+                    .data = .{
+                        .ip_index = .{
+                            .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
+                            .node = payload.node,
+                        },
+                    },
+                    .is_type_val = false,
+                },
+                .handle = self.handle,
+            },
+            else => TypeWithHandle{
+                .type = .{ .data = self.type.data, .is_type_val = false },
+                .handle = self.handle,
+            },
+        };
+    }
+
+    pub fn typeOf(self: TypeWithHandle, analyser: *Analyser) TypeWithHandle {
+        if (self.type.is_type_val) {
+            return TypeWithHandle{
+                .type = .{
+                    .data = .{ .ip_index = .{ .index = .type_type } },
+                    .is_type_val = true,
+                },
+                .handle = self.handle,
+            };
+        }
+
+        if (self.type.data == .ip_index) {
+            return TypeWithHandle{
+                .type = .{
+                    .data = .{ .ip_index = .{ .index = analyser.ip.typeOf(self.type.data.ip_index.index) } },
+                    .is_type_val = true,
+                },
+                .handle = self.handle,
+            };
+        }
+
         return TypeWithHandle{
-            .type = .{ .data = self.type.data, .is_type_val = false },
+            .type = .{
+                .data = self.type.data,
+                .is_type_val = true,
+            },
             .handle = self.handle,
         };
     }
@@ -3138,9 +3221,10 @@ pub const DeclWithHandle = struct {
                             return null;
                     }
                 }
-                return ((try analyser.resolveTypeOfNodeInternal(
+                const ty = (try analyser.resolveTypeOfNodeInternal(
                     .{ .node = param.type_expr, .handle = self.handle },
-                )) orelse return null).instanceTypeVal();
+                )) orelse return null;
+                return try ty.instanceTypeVal(analyser);
             },
             .pointer_payload => |pay| {
                 const ty = (try analyser.resolveTypeOfNodeInternal(.{
@@ -4123,7 +4207,8 @@ pub fn referencedTypes(
         .ip_index => |payload| {
             const allocator = collector.referenced_types.allocator;
             const ip = analyser.ip;
-            resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(ip)});
+            const ty = ip.typeOf(payload.index);
+            resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{ty.fmt(ip)});
         },
         else => {},
     }
@@ -4370,7 +4455,7 @@ fn addReferencedTypes(
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
                 const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
                 if (is_escaped_identifier) return null;
-                const primitive = Analyser.resolvePrimitiveType(name) orelse return null;
+                const primitive = try analyser.resolvePrimitive(name) orelse return null;
                 return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip)});
             },
 
