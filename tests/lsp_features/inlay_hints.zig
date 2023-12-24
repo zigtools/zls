@@ -93,6 +93,12 @@ test "inlayhints - var decl" {
         \\const foo<comptime_int> = 5;
     , .Type);
     try testInlayHints(
+        \\const foo<bool> = true;
+    , .Type);
+    try testInlayHints(
+        \\const foo<@TypeOf(undefined)> = undefined;
+    , .Type);
+    try testInlayHints(
         \\const foo<**const [3:0]u8> = &"Bar";
     , .Type);
     try testInlayHints(

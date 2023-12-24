@@ -1000,7 +1000,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
 
     if (!is_escaped_identifier) {
         if (std.mem.eql(u8, name, "_")) return;
-        if (Analyser.resolvePrimitiveType(name)) |primitive| {
+        if (try builder.analyser.resolvePrimitive(name)) |primitive| {
             const is_type = builder.analyser.ip.typeOf(primitive) == .type_type;
             return try writeToken(builder, name_token, if (is_type) .type else .keywordLiteral);
         }
