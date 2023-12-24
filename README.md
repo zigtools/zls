@@ -65,7 +65,7 @@ The following options are currently available.
 | `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false` | Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
 | `warn_style` | `bool` | `false` | Enables warnings for style guideline mismatches |
 | `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations |
-| `dangerous_comptime_experiments_do_not_enable` | `bool` | `false` | Whether to use the comptime interpreter |
+| `analysis_backend` | `enum` | `.default` | Set the analysis backend that provides type information. Any option besides `default` is experimental. |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
 | `prefer_ast_check_as_child_process` | `bool` | `true` | Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork |
 | `record_session` | `bool` | `false` | When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay` |

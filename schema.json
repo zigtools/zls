@@ -89,10 +89,15 @@
             "type": "boolean",
             "default": false
         },
-        "dangerous_comptime_experiments_do_not_enable": {
-            "description": "Whether to use the comptime interpreter",
-            "type": "boolean",
-            "default": false
+        "analysis_backend": {
+            "description": "Set the analysis backend that provides type information. Any option besides `default` is experimental.",
+            "type": "string",
+            "enum": [
+                "default",
+                "comptime_interpreter",
+                "astgen_analyser"
+            ],
+            "default": "default"
         },
         "skip_std_references": {
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",

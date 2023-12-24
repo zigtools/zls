@@ -1194,7 +1194,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const body = func_tree.nodes.items(.data)[func_node].rhs;
             if (try analyser.resolveReturnType(fn_proto, func_handle, if (has_body) body else null)) |ret| {
                 return ret;
-            } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
+            } else if (analyser.store.config.analysis_backend == .comptime_interpreter) {
                 // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
                 // probably better to use it more liberally
                 // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`

@@ -313,7 +313,9 @@ const Context = struct {
         ip.* = try InternPool.init(allocator);
         errdefer ip.deinit(allocator);
 
-        config.* = .{};
+        config.* = .{
+            .analysis_backend = .comptime_interpreter,
+        };
         document_store.* = .{
             .allocator = allocator,
             .config = config,

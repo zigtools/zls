@@ -1384,7 +1384,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
     const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.config.dangerous_comptime_experiments_do_not_enable and
+    if (server.config.analysis_backend == .comptime_interpreter and
         server.client_capabilities.supports_publish_diagnostics)
     {
         try server.pushJob(.{

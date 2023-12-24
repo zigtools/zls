@@ -56,8 +56,12 @@ warn_style: bool = false,
 /// Whether to highlight global var declarations
 highlight_global_var_declarations: bool = false,
 
-/// Whether to use the comptime interpreter
-dangerous_comptime_experiments_do_not_enable: bool = false,
+/// Set the analysis backend that provides type information. Any option besides `default` is experimental.
+analysis_backend: enum {
+    default,
+    comptime_interpreter,
+    astgen_analyser,
+} = .default,
 
 /// When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
 skip_std_references: bool = false,
