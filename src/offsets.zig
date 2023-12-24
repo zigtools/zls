@@ -22,7 +22,7 @@ pub const Encoding = enum {
 pub const Loc = std.zig.Token.Loc;
 
 pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types.Position {
-    const last_line_start = if (std.mem.lastIndexOf(u8, text[0..index], "\n")) |line| line + 1 else 0;
+    const last_line_start = if (std.mem.lastIndexOfScalar(u8, text[0..index], '\n')) |line| line + 1 else 0;
     const line_count = std.mem.count(u8, text[0..last_line_start], "\n");
 
     return .{
@@ -377,6 +377,53 @@ pub fn lineLocAtPosition(text: []const u8, position: types.Position, encoding: E
 
 pub fn lineSliceAtPosition(text: []const u8, position: types.Position, encoding: Encoding) []const u8 {
     return locToSlice(text, lineLocAtPosition(text, position, encoding));
+}
+
+/// return the source location
+/// that starts `n` lines before the line at which `index` is located
+/// and    ends `n` lines after  the line at which `index` is located.
+/// `n == 0` is equivalent to calling `lineLocAtIndex`.
+pub fn multilineLocAtIndex(text: []const u8, index: usize, n: usize) Loc {
+    const start = blk: {
+        var i: usize = index;
+        var num_lines: usize = 0;
+        while (i != 0) : (i -= 1) {
+            if (text[i - 1] != '\n') continue;
+            if (num_lines >= n) break :blk i;
+            num_lines += 1;
+        }
+        break :blk 0;
+    };
+    const end = blk: {
+        var i: usize = index;
+        var num_lines: usize = 0;
+        while (i < text.len) : (i += 1) {
+            if (text[i] != '\n') continue;
+            if (num_lines >= n) break :blk i;
+            num_lines += 1;
+        }
+        break :blk text.len;
+    };
+
+    return .{
+        .start = start,
+        .end = end,
+    };
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineSliceAtIndex(text: []const u8, index: usize, n: usize) []const u8 {
+    return locToSlice(text, multilineLocAtIndex(text, index, n));
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineLocAtPosition(text: []const u8, position: types.Position, n: usize, encoding: Encoding) Loc {
+    return lineLocAtIndex(text, positionToIndex(text, position, n, encoding));
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineSliceAtPosition(text: []const u8, position: types.Position, n: usize, encoding: Encoding) []const u8 {
+    return locToSlice(text, multilineLocAtPosition(text, position, n, encoding));
 }
 
 pub fn lineLocUntilIndex(text: []const u8, index: usize) Loc {

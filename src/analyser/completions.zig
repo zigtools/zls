@@ -11,46 +11,48 @@ pub fn dotCompletions(
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     ip: *InternPool,
     index: InternPool.Index,
-    is_type_val: bool,
     node: ?Ast.Node.Index,
 ) error{OutOfMemory}!void {
     std.debug.assert(index != .none);
     _ = node;
 
-    const index_key = ip.indexToKey(index);
-    const val: InternPool.Key = if (is_type_val) index_key else .{ .unknown_value = .{ .ty = index } };
-    const ty: InternPool.Key = if (is_type_val) ip.indexToKey(index_key.typeOf()) else index_key;
+    const val: InternPool.Index = index;
+    const ty: InternPool.Index = ip.typeOf(index);
 
-    const inner_ty = switch (ty) {
-        .pointer_type => |info| if (info.size == .One) ip.indexToKey(info.elem_type) else ty,
+    const inner_ty = switch (ip.indexToKey(ty)) {
+        .pointer_type => |pointer_info| if (pointer_info.flags.size == .One) pointer_info.elem_type else ty,
         else => ty,
     };
 
-    switch (inner_ty) {
+    switch (ip.indexToKey(inner_ty)) {
         .simple_type => |simple| switch (simple) {
             .type => {
-                const namespace = val.getNamespace(ip.*);
+                if (val == .none) return;
+
+                const namespace = ip.getNamespace(val);
                 if (namespace != .none) {
                     // TODO lookup in namespace
                 }
-                switch (val) {
+
+                switch (ip.indexToKey(val)) {
                     .error_set_type => |error_set_info| {
-                        for (error_set_info.names) |name| {
-                            const error_name = ip.indexToKey(name).bytes;
-                            try completions.append(arena, .{
-                                .label = error_name,
+                        const names = try error_set_info.names.dupe(arena, ip);
+                        try completions.ensureUnusedCapacity(arena, names.len);
+                        for (names) |name| {
+                            completions.appendAssumeCapacity(.{
+                                .label = try std.fmt.allocPrint(arena, "{}", .{name.fmt(&ip.string_pool)}),
                                 .kind = .Constant,
-                                .detail = try std.fmt.allocPrint(arena, "error.{s}", .{std.zig.fmtId(error_name)}),
+                                .detail = try std.fmt.allocPrint(arena, "error.{}", .{ip.fmtId(name)}),
                             });
                         }
                     },
                     .union_type => {}, // TODO
                     .enum_type => |enum_index| {
                         const enum_info = ip.getEnum(enum_index);
-                        var field_it = enum_info.fields.iterator();
-                        while (field_it.next()) |entry| {
-                            try completions.append(arena, .{
-                                .label = entry.key_ptr.*,
+                        try completions.ensureUnusedCapacity(arena, enum_info.fields.count());
+                        for (enum_info.fields.keys()) |name| {
+                            completions.appendAssumeCapacity(.{
+                                .label = try std.fmt.allocPrint(arena, "{}", .{name.fmt(&ip.string_pool)}),
                                 .kind = .EnumMember,
                                 // include field.val?
                             });
@@ -62,48 +64,41 @@ pub fn dotCompletions(
             else => {},
         },
         .pointer_type => |pointer_info| {
-            if (pointer_info.size == .Slice) {
-                var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
-                many_ptr_info.pointer_type.size = .Many;
+            if (pointer_info.flags.size != .Slice) return;
 
-                try completions.append(arena, .{
+            const formatted = try std.fmt.allocPrint(arena, "{}", .{inner_ty.fmt(ip)});
+            std.debug.assert(std.mem.startsWith(u8, formatted, "[]"));
+
+            try completions.appendSlice(arena, &.{
+                .{
                     .label = "ptr",
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "ptr: {}", .{many_ptr_info.fmt(ip.*)}),
-                });
-                try completions.append(arena, .{
+                    .detail = try std.fmt.allocPrint(arena, "ptr: [*]{s}", .{formatted["[]".len..]}),
+                },
+                .{
                     .label = "len",
                     .kind = .Field,
                     .detail = "len: usize",
-                });
-            } else if (ip.indexToKey(pointer_info.elem_type) == .array_type) {
-                try completions.append(arena, .{
-                    .label = "len",
-                    .kind = .Field,
-                    .detail = "len: usize",
-                });
-            }
+                },
+            });
         },
         .array_type => |array_info| {
             try completions.append(arena, .{
                 .label = "len",
                 .kind = .Field,
-                .detail = try std.fmt.allocPrint(arena, "const len: usize ({d})", .{array_info.len}), // TODO how should this be displayed
+                .detail = try std.fmt.allocPrint(arena, "const len: usize = {d}", .{array_info.len}),
             });
         },
         .struct_type => |struct_index| {
             const struct_info = ip.getStruct(struct_index);
             try completions.ensureUnusedCapacity(arena, struct_info.fields.count());
-            var field_it = struct_info.fields.iterator();
-            while (field_it.next()) |entry| {
-                const label = entry.key_ptr.*;
-                const field = entry.value_ptr.*;
+            for (struct_info.fields.keys(), struct_info.fields.values()) |name, field| {
                 completions.appendAssumeCapacity(.{
-                    .label = label,
+                    .label = try std.fmt.allocPrint(arena, "{}", .{ip.fmtId(name)}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{s}: {}", .{
-                        label,
-                        fmtFieldDetail(field, ip),
+                    .detail = try std.fmt.allocPrint(arena, "{}: {}", .{
+                        name.fmt(&ip.string_pool),
+                        fmtFieldDetail(ip, field),
                     }),
                 });
             }
@@ -112,41 +107,44 @@ pub fn dotCompletions(
             try completions.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
-                .detail = try std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmt(ip.*)}),
+                .detail = try std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmt(ip)}),
             });
         },
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
-            for (enum_info.fields.keys(), enum_info.values.keys()) |field_name, field_value| {
-                try completions.append(arena, .{
-                    .label = field_name,
+            try completions.ensureUnusedCapacity(arena, enum_info.fields.count());
+            for (enum_info.fields.keys(), enum_info.values.keys()) |name, field_value| {
+                completions.appendAssumeCapacity(.{
+                    .label = try std.fmt.allocPrint(arena, "{}", .{ip.fmtId(name)}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_value.fmt(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_value.fmt(ip)}),
                 });
             }
         },
         .union_type => |union_index| {
             const union_info = ip.getUnion(union_index);
-            var field_it = union_info.fields.iterator();
-            while (field_it.next()) |entry| {
-                const label = entry.key_ptr.*;
-                const field = entry.value_ptr.*;
-                try completions.append(arena, .{
-                    .label = label,
+            try completions.ensureUnusedCapacity(arena, union_info.fields.count());
+            for (union_info.fields.keys(), union_info.fields.values()) |name, field| {
+                completions.appendAssumeCapacity(.{
+                    .label = try std.fmt.allocPrint(arena, "{}", .{ip.fmtId(name)}),
                     .kind = .Field,
                     .detail = if (field.alignment != 0)
-                        try std.fmt.allocPrint(arena, "{s}: align({d}) {}", .{ label, field.alignment, field.ty.fmt(ip.*) })
+                        try std.fmt.allocPrint(arena, "{}: align({d}) {}", .{ ip.fmtId(name), field.alignment, field.ty.fmt(ip) })
                     else
-                        try std.fmt.allocPrint(arena, "{s}: {}", .{ label, field.ty.fmt(ip.*) }),
+                        try std.fmt.allocPrint(arena, "{}: {}", .{ ip.fmtId(name), field.ty.fmt(ip) }),
                 });
             }
         },
         .tuple_type => |tuple_info| {
-            for (tuple_info.types, 0..) |tuple_ty, i| {
-                try completions.append(arena, .{
+            std.debug.assert(tuple_info.types.len == tuple_info.values.len);
+            const tuple_types = try tuple_info.types.dupe(arena, ip);
+
+            try completions.ensureUnusedCapacity(arena, tuple_info.types.len);
+            for (tuple_types, 0..) |tuple_ty, i| {
+                completions.appendAssumeCapacity(.{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmt(ip.*) }),
+                    .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmt(ip) }),
                 });
             }
         },
@@ -170,11 +168,11 @@ pub fn dotCompletions(
         .float_comptime_value,
         => {},
 
-        .bytes,
         .optional_value,
         .slice,
         .aggregate,
         .union_value,
+        .error_value,
         .null_value,
         .undefined_value,
         .unknown_value,
@@ -205,15 +203,168 @@ fn formatFieldDetail(
     if (field.alignment != 0) {
         try writer.print("align({d}) ", .{field.alignment});
     }
-    try writer.print("{}", .{field.ty.fmt(ctx.ip.*)});
+    try writer.print("{}", .{field.ty.fmt(ctx.ip)});
     if (field.default_value != .none) {
-        try writer.print(" = {},", .{field.default_value.fmt(ctx.ip.*)});
+        try writer.print(" = {},", .{field.default_value.fmt(ctx.ip)});
     }
 }
 
-pub fn fmtFieldDetail(field: InternPool.Struct.Field, ip: *InternPool) std.fmt.Formatter(formatFieldDetail) {
-    return .{ .data = .{
-        .ip = ip,
-        .item = field,
-    } };
+pub fn fmtFieldDetail(ip: *InternPool, field: InternPool.Struct.Field) std.fmt.Formatter(formatFieldDetail) {
+    return .{ .data = .{ .ip = ip, .item = field } };
+}
+
+test "dotCompletions - primitives" {
+    const gpa = std.testing.allocator;
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    try testCompletion(&ip, .bool_type, &.{});
+    try testCompletion(&ip, .bool_true, &.{});
+    try testCompletion(&ip, .zero_comptime_int, &.{});
+    try testCompletion(&ip, .unknown_type, &.{});
+    try testCompletion(&ip, .unknown_unknown, &.{});
+}
+
+test "dotCompletions - optional types" {
+    const gpa = std.testing.allocator;
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"?u32"), &.{
+        .{
+            .label = "?",
+            .kind = .Operator,
+            .detail = "u32",
+        },
+    });
+}
+
+test "dotCompletions - array types" {
+    const gpa = std.testing.allocator;
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const @"[3]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 3 } });
+    const @"[1]u8" = try ip.get(gpa, .{ .array_type = .{ .child = .u8_type, .len = 1 } });
+
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"[3]u32"), &.{
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "const len: usize = 3",
+        },
+    });
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"[1]u8"), &.{
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "const len: usize = 1",
+        },
+    });
+}
+
+test "dotCompletions - pointer types" {
+    const gpa = std.testing.allocator;
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = .u32_type,
+        .flags = .{
+            .size = .One,
+        },
+    } });
+    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = .u32_type,
+        .flags = .{
+            .size = .Slice,
+        },
+    } });
+    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = .u32_type,
+        .flags = .{
+            .size = .Slice,
+            .is_const = true,
+        },
+    } });
+
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"*u32"), &.{});
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"[]u32"), &.{
+        .{
+            .label = "ptr",
+            .kind = .Field,
+            .detail = "ptr: [*]u32",
+        },
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "len: usize",
+        },
+    });
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"[]const u32"), &.{
+        .{
+            .label = "ptr",
+            .kind = .Field,
+            .detail = "ptr: [*]const u32",
+        },
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "len: usize",
+        },
+    });
+}
+
+test "dotCompletions - single pointer indirection" {
+    const gpa = std.testing.allocator;
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 1 } });
+    const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = @"[1]u32",
+        .flags = .{
+            .size = .One,
+        },
+    } });
+    const @"**[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = @"*[1]u32",
+        .flags = .{
+            .size = .One,
+        },
+    } });
+    const @"[*][1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = @"[1]u32",
+        .flags = .{
+            .size = .Many,
+        },
+    } });
+
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"*[1]u32"), &.{
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "const len: usize = 1",
+        },
+    });
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"**[1]u32"), &.{});
+    try testCompletion(&ip, try ip.getUnknown(gpa, @"[*][1]u32"), &.{});
+}
+
+fn testCompletion(
+    ip: *InternPool,
+    index: InternPool.Index,
+    expected: []const types.CompletionItem,
+) !void {
+    const gpa = std.testing.allocator;
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+
+    try dotCompletions(arena, &completions, ip, index, null);
+
+    try std.testing.expectEqualDeep(expected, completions.items);
 }

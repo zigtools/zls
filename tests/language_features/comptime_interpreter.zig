@@ -134,7 +134,7 @@ test "ComptimeInterpreter - variable lookup" {
     defer context.deinit();
 
     const result = try context.interpret(context.findVar("bar"));
-    try expectEqualKey(context.interpreter.ip.*, .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, result.val);
+    try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, context.ip));
 }
 
 test "ComptimeInterpreter - field access" {
@@ -240,7 +240,7 @@ test "ComptimeInterpreter - call return struct" {
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
 
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.count());
-    try std.testing.expectEqualStrings("slay", struct_info.fields.keys()[0]);
+    try std.testing.expectFmt("slay", "{}", .{context.interpreter.ip.fmtId(struct_info.fields.keys()[0])});
     try std.testing.expect(struct_info.fields.values()[0].ty == Index.bool_type);
 }
 
@@ -260,7 +260,7 @@ test "ComptimeInterpreter - call comptime argument" {
     }});
     try std.testing.expect(result1.ty == .simple_type);
     try std.testing.expect(result1.ty.simple_type == .type);
-    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, result1.val.?);
+    try std.testing.expect(result1.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, context.ip));
 
     const result2 = try context.call(context.findFn("Foo"), &.{KV{
         .ty = .{ .simple_type = .bool },
@@ -268,7 +268,7 @@ test "ComptimeInterpreter - call comptime argument" {
     }});
     try std.testing.expect(result2.ty == .simple_type);
     try std.testing.expect(result2.ty.simple_type == .type);
-    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, result2.val.?);
+    try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, context.ip));
 }
 
 test "ComptimeInterpreter - call inner function" {
@@ -380,12 +380,12 @@ const Context = struct {
         const namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0); // root namespace
         const result = (try self.interpreter.call(namespace, func_node, args, .{})).result;
 
-        const val = self.interpreter.ip.indexToKey(result.value.index);
-        const ty = self.interpreter.ip.indexToKey(val.typeOf());
+        const val = result.value.index;
+        const ty = self.interpreter.ip.typeOf(val);
 
         return KV{
-            .ty = ty,
-            .val = val,
+            .ty = self.interpreter.ip.indexToKey(ty),
+            .val = self.interpreter.ip.indexToKey(val),
         };
     }
 
@@ -393,12 +393,12 @@ const Context = struct {
         const namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0); // root namespace
         const result = try (try self.interpreter.interpret(node, namespace, .{})).getValue();
 
-        const val = self.interpreter.ip.indexToKey(result.index);
-        const ty = self.interpreter.ip.indexToKey(val.typeOf());
+        const val = result.index;
+        const ty = self.interpreter.ip.typeOf(val);
 
         return KV{
-            .ty = ty,
-            .val = val,
+            .ty = self.interpreter.ip.indexToKey(ty),
+            .val = self.interpreter.ip.indexToKey(val),
         };
     }
 
@@ -438,8 +438,12 @@ fn testCall(
 
     const result = try context.call(context.findFn("Foo"), arguments);
 
-    try expectEqualKey(context.interpreter.ip.*, Key{ .simple_type = .type }, result.ty);
-    try expectEqualKey(context.interpreter.ip.*, expected_ty, result.val);
+    const ty = try context.ip.get(allocator, result.ty);
+    const val = if (result.val) |key| try context.ip.get(allocator, key) else .none;
+    const expected_ty_index = try context.ip.get(allocator, expected_ty);
+
+    try expectEqualIndex(context.interpreter.ip, .type_type, ty);
+    try expectEqualIndex(context.interpreter.ip, expected_ty_index, val);
 }
 
 fn testExpr(
@@ -456,19 +460,16 @@ fn testExpr(
 
     const result = try context.interpret(context.findVar("foobarbaz"));
 
-    try expectEqualKey(context.interpreter.ip.*, expected, result.val);
+    const expected_index = try context.ip.get(allocator, expected);
+    const val = if (result.val) |key| try context.ip.get(allocator, key) else .none;
+
+    try expectEqualIndex(context.interpreter.ip, expected_index, val);
 }
 
-fn expectEqualKey(ip: InternPool, expected: Key, actual: ?Key) !void {
-    if (actual) |actual_key| {
-        if (!expected.eql(actual_key)) {
-            std.debug.print("expected `{}`, found `{}`\n", .{ expected.fmt(ip), actual_key.fmt(ip) });
-            return error.TestExpectedEqual;
-        }
-    } else {
-        std.debug.print("expected `{}`, found null\n", .{expected.fmt(ip)});
-        return error.TestExpectedEqual;
-    }
+fn expectEqualIndex(ip: *InternPool, expected: Index, actual: Index) !void {
+    if (expected == actual) return;
+    std.debug.print("expected `{}`, found `{}`\n", .{ expected.fmtDebug(ip), actual.fmtDebug(ip) });
+    return error.TestExpectedEqual;
 }
 
 fn reportErrors(interpreter: *ComptimeInterpreter) void {

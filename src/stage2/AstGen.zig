@@ -1664,7 +1664,7 @@ fn structInitExpr(
                     return rvalue(gz, ri, val, node);
                 },
                 .none, .ref, .inferred_ptr => {
-                    return rvalue(gz, ri, .empty_struct_type, node);
+                    return rvalue(gz, ri, .empty_aggregate, node);
                 },
                 .destructure => |destructure| {
                     return astgen.failNodeNotes(node, "empty initializer cannot be destructured", .{}, &.{
