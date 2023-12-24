@@ -765,6 +765,40 @@ test "semantic tokens - container declarations" {
     });
 }
 
+test "semantic tokens - root struct" {
+    try testSemanticTokens(
+        \\alpha: u32,
+        \\beta: void,
+    , &.{
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+    });
+    try testSemanticTokens(
+        \\alpha: u32 = 3,
+        \\comptime beta: void = {},
+    , &.{
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "3", .number, .{} },
+        .{ "comptime", .keyword, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+    });
+    // broken code
+    try testSemanticTokens(
+        \\foo: bar. = undefined,
+    , &.{
+        .{ "foo", .property, .{ .declaration = true } },
+        .{ "bar", .variable, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+    });
+}
+
 test "semantic tokens - struct" {
     try testSemanticTokens(
         \\const Foo = struct {};
