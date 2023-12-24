@@ -504,53 +504,31 @@ pub fn interpret(
                     },
                     else => {},
                 },
-                .pointer_type => |pointer_info| {
-                    switch (pointer_info.flags.size) {
-                        .Many, .C => {},
-                        .One => {
-                            switch (interpreter.ip.indexToKey(pointer_info.elem_type)) {
-                                .array_type => |array_info| {
-                                    if (std.mem.eql(u8, field_name, "len")) {
-                                        return InterpretResult{
-                                            .value = Value{
-                                                .interpreter = interpreter,
-                                                .node_idx = data[node_idx].rhs,
-                                                .index = try interpreter.ip.get(interpreter.allocator, .{ .int_u64_value = .{
-                                                    .ty = .usize_type,
-                                                    .int = array_info.len,
-                                                } }),
-                                            },
-                                        };
-                                    }
-                                },
-                                else => {},
-                            }
-                        },
-                        .Slice => {
-                            if (std.mem.eql(u8, field_name, "ptr")) {
-                                var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
-                                many_ptr_info.pointer_type.flags.size = .Many;
-                                return InterpretResult{
-                                    .value = Value{
-                                        .interpreter = interpreter,
-                                        .node_idx = data[node_idx].rhs,
-                                        // TODO resolve ptr of Slice
-                                        .index = try interpreter.ip.get(interpreter.allocator, .{
-                                            .unknown_value = .{ .ty = try interpreter.ip.get(interpreter.allocator, many_ptr_info) },
-                                        }),
-                                    },
-                                };
-                            } else if (std.mem.eql(u8, field_name, "len")) {
-                                return InterpretResult{
-                                    .value = Value{
-                                        .interpreter = interpreter,
-                                        .node_idx = data[node_idx].rhs,
-                                        // TODO resolve length of Slice
-                                        .index = try interpreter.ip.getUnknown(interpreter.allocator, .usize_type),
-                                    },
-                                };
-                            }
-                        },
+                .pointer_type => |pointer_info| blk: {
+                    if (pointer_info.flags.size != .Slice) break :blk;
+
+                    if (std.mem.eql(u8, field_name, "ptr")) {
+                        var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
+                        many_ptr_info.pointer_type.flags.size = .Many;
+                        return InterpretResult{
+                            .value = Value{
+                                .interpreter = interpreter,
+                                .node_idx = data[node_idx].rhs,
+                                // TODO resolve ptr of Slice
+                                .index = try interpreter.ip.get(interpreter.allocator, .{
+                                    .unknown_value = .{ .ty = try interpreter.ip.get(interpreter.allocator, many_ptr_info) },
+                                }),
+                            },
+                        };
+                    } else if (std.mem.eql(u8, field_name, "len")) {
+                        return InterpretResult{
+                            .value = Value{
+                                .interpreter = interpreter,
+                                .node_idx = data[node_idx].rhs,
+                                // TODO resolve length of Slice
+                                .index = try interpreter.ip.getUnknown(interpreter.allocator, .usize_type),
+                            },
+                        };
                     }
                 },
                 .array_type => |array_info| {
