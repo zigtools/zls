@@ -1196,6 +1196,19 @@ test "semantic tokens - function" {
         .{ "=", .operator, .{} },
         .{ "T", .typeParameter, .{} },
     });
+    try testSemanticTokens(
+        \\fn foo(T: T) void {
+        \\    _ = T;
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "T", .parameter, .{ .declaration = true } },
+        .{ "T", .parameter, .{} },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .parameter, .{} },
+    });
 }
 
 test "semantic tokens - method" {

@@ -3212,13 +3212,6 @@ pub const DeclWithHandle = struct {
                         return resolved_type;
                     }
                     return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
-                } else if (node_tags[param.type_expr] == .identifier) {
-                    const param_type_name = offsets.identifierTokenToNameSlice(tree, main_tokens[param.type_expr]);
-                    if (param.name_token) |name_tok| {
-                        const name = offsets.identifierTokenToNameSlice(tree, name_tok);
-                        if (std.mem.eql(u8, param_type_name, name))
-                            return null;
-                    }
                 }
                 const ty = (try analyser.resolveTypeOfNodeInternal(
                     .{ .node = param.type_expr, .handle = self.handle },
