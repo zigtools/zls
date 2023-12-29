@@ -2103,17 +2103,20 @@ pub const TypeWithHandle = struct {
     pub fn instanceTypeVal(self: TypeWithHandle, analyser: *Analyser) error{OutOfMemory}!?TypeWithHandle {
         if (!self.type.is_type_val) return null;
         return switch (self.type.data) {
-            .ip_index => |payload| TypeWithHandle{
-                .type = .{
-                    .data = .{
-                        .ip_index = .{
-                            .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
-                            .node = payload.node,
+            .ip_index => |payload| {
+                if (payload.index == .unknown_type) return null;
+                return TypeWithHandle{
+                    .type = .{
+                        .data = .{
+                            .ip_index = .{
+                                .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
+                                .node = payload.node,
+                            },
                         },
+                        .is_type_val = payload.index == .type_type,
                     },
-                    .is_type_val = false,
-                },
-                .handle = self.handle,
+                    .handle = self.handle,
+                };
             },
             else => TypeWithHandle{
                 .type = .{ .data = self.type.data, .is_type_val = false },
@@ -2207,6 +2210,7 @@ pub const TypeWithHandle = struct {
         };
     }
 
+    /// returns whether the given type is of type `type`.
     pub fn isMetaType(self: TypeWithHandle) bool {
         if (!self.type.is_type_val) return false;
         switch (self.type.data) {
@@ -3207,16 +3211,17 @@ pub const DeclWithHandle = struct {
                     return maybe_type_handle;
                 }
 
-                if (isMetaType(tree, param.type_expr)) {
+                const param_type = try analyser.resolveTypeOfNodeInternal(
+                    .{ .node = param.type_expr, .handle = self.handle },
+                ) orelse return null;
+
+                if (param_type.isMetaType()) {
                     if (analyser.bound_type_params.get(.{ .func = pay.func, .param_index = pay.param_index })) |resolved_type| {
                         return resolved_type;
                     }
-                    return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
                 }
-                const ty = (try analyser.resolveTypeOfNodeInternal(
-                    .{ .node = param.type_expr, .handle = self.handle },
-                )) orelse return null;
-                return try ty.instanceTypeVal(analyser);
+
+                return try param_type.instanceTypeVal(analyser);
             },
             .pointer_payload => |pay| {
                 const ty = (try analyser.resolveTypeOfNodeInternal(.{

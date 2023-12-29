@@ -1209,6 +1209,25 @@ test "semantic tokens - function" {
         .{ "=", .operator, .{} },
         .{ "T", .parameter, .{} },
     });
+    try testSemanticTokens(
+        \\fn foo(comptime T: type, in: T) void {
+        \\    _ = T;
+        \\    _ = in;
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "T", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "in", .parameter, .{ .declaration = true } },
+        .{ "T", .typeParameter, .{} },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .typeParameter, .{} },
+        .{ "=", .operator, .{} },
+        .{ "in", .parameter, .{} },
+    });
 }
 
 test "semantic tokens - method" {
@@ -1240,7 +1259,7 @@ test "semantic tokens - builtin fuctions" {
         \\const foo = @as(type, u32);
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "@as", .builtin, .{} },
         .{ "type", .type, .{} },
