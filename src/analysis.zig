@@ -1380,7 +1380,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             })) orelse return null;
 
-            const symbol = tree.tokenSlice(datas[node].rhs);
+            const symbol = offsets.identifierTokenToNameSlice(tree, datas[node_handle.node].rhs);
 
             return try resolveFieldAccess(analyser, lhs, symbol);
         },

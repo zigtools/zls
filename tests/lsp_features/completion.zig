@@ -79,12 +79,28 @@ test "completion - symbol lookup on escaped identifiers" {
     , &.{
         .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
     });
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const Inner = Bar; };
+        \\const Inner = Outer.Inner;
+        \\const foo = Inner.<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
     // decl name:   escaped
     // symbol name: unescaped
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
         \\const Outer = struct { const @"Inner" = Bar; };
         \\const foo = Outer.Inner.<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const @"Inner" = Bar; };
+        \\const Inner = Outer.Inner;
+        \\const foo = Inner.<cursor>
     , &.{
         .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
     });
@@ -97,12 +113,28 @@ test "completion - symbol lookup on escaped identifiers" {
     , &.{
         .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
     });
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const Inner = Bar; };
+        \\const Inner = Outer.@"Inner";
+        \\const foo = Inner.<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
     // decl name:   escaped
     // symbol name: escaped
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
         \\const Outer = struct { const @"Inner" = Bar; };
         \\const foo = Outer.@"Inner".<cursor>
+    , &.{
+        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+    });
+    try testCompletion(
+        \\const Bar = struct { const Some = u32; };
+        \\const Outer = struct { const Inner = Bar; };
+        \\const Inner = Outer.@"Inner";
+        \\const foo = Inner.<cursor>
     , &.{
         .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
     });

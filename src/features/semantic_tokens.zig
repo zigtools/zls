@@ -852,6 +852,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const data = node_data[node];
             if (data.rhs == 0) return;
 
+            const symbol_name = offsets.identifierTokenToNameSlice(tree, data.rhs);
+
             try writeNodeTokens(builder, data.lhs);
 
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
@@ -862,7 +864,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 return;
             };
             const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
-            if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
+            if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
