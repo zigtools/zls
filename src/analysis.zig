@@ -1083,6 +1083,13 @@ const FindBreaks = struct {
 };
 
 /// Resolves the type of a node
+pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    return analyser.resolveTypeOfNodeInternal(node_handle);
+}
+
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
     const node_with_uri = NodeWithUri{
         .node = node_handle.node,
@@ -2300,14 +2307,6 @@ pub const TypeWithHandle = struct {
         return analyser.lookupSymbolContainer(node_handle, symbol, .other);
     }
 };
-
-pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    analyser.bound_type_params.clearRetainingCapacity();
-    return analyser.resolveTypeOfNodeInternal(node_handle);
-}
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {

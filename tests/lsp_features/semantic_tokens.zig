@@ -435,6 +435,63 @@ test "semantic tokens - call" {
     });
 }
 
+test "semantic tokens - function call on return value of generic function" {
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    fn foo() void {}
+        \\};
+        \\fn Map(comptime V: type) type {
+        \\    return struct {
+        \\        fn getValue() V {}
+        \\    };
+        \\}
+        \\const map = Map(S){};
+        \\const value = map.getValue();
+        \\const foo = value.foo();
+        //                  ^^^ resolving foo as a function here requires thatthe `V`
+        //                      function parameter of `Map` is still bound to `S`
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+
+        .{ "fn", .keyword, .{} },
+        .{ "Map", .type, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "V", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "type", .type, .{} },
+
+        .{ "return", .keyword, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "getValue", .function, .{ .declaration = true } },
+        .{ "V", .typeParameter, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "map", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Map", .type, .{} },
+        .{ "S", .namespace, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "value", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "map", .variable, .{} },
+        .{ "getValue", .function, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "value", .variable, .{} },
+        .{ "foo", .function, .{} },
+    });
+}
+
 test "semantic tokens - catch" {
     try testSemanticTokens(
         \\var alpha = a catch b;
