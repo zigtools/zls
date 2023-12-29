@@ -197,8 +197,9 @@ fn appendMessage(
         .level = level,
         .message = message,
     });
+    // the `a` parameter of this function makes no sense.
     std.sort.insertionContext(
-        file.messages.items.len -| 2,
+        0,
         file.messages.items.len,
         Context{ .items = file.messages.items, .source = file.source },
     );
@@ -296,7 +297,7 @@ const MsgItem = struct {
 
         // report messages on the same line in reverse order
         if (std.mem.indexOfScalar(u8, text, '\n') == null) {
-            return !is_less;
+            return lhs.loc.start > rhs.loc.start;
         }
 
         return is_less;
