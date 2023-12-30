@@ -738,7 +738,7 @@ fn completeError(server: *Server, arena: std.mem.Allocator, handle: *DocumentSto
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.document_store.errorCompletionItems(arena, handle.*);
+    return try globalSetCompletions(&server.document_store, arena, handle, .error_set);
 }
 
 fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
@@ -808,7 +808,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     if (token_tags[dot_token_index - 1] == .number_literal or token_tags[dot_token_index - 1] != .equal) return &.{};
 
     // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
-    const enum_completions = try document_store.enumCompletionItems(arena, handle.*);
+    const enum_completions = try globalSetCompletions(document_store, arena, handle, .enum_set);
     return enum_completions;
 }
 
@@ -823,7 +823,7 @@ fn completeFileSystemStringLiteral(
     handle: DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
-    var completions: DocumentScope.CompletionSet = .{};
+    var completions: CompletionSet = .{};
 
     const loc = switch (pos_context) {
         .import_string_literal,
@@ -1035,6 +1035,106 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
     }
 
     return .{ .isIncomplete = false, .items = completions };
+}
+
+// <--------------------------------------------------------------------------->
+//                    global error set / enum field set
+// <--------------------------------------------------------------------------->
+
+pub const CompletionSet = std.ArrayHashMapUnmanaged(types.CompletionItem, void, CompletionContext, false);
+
+const CompletionContext = struct {
+    pub fn hash(self: @This(), item: types.CompletionItem) u32 {
+        _ = self;
+        return std.array_hash_map.hashString(item.label);
+    }
+
+    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
+        _ = self;
+        _ = b_index;
+        return std.mem.eql(u8, a.label, b.label);
+    }
+};
+
+const CompletionNameAdapter = struct {
+    pub fn hash(ctx: @This(), name: []const u8) u32 {
+        _ = ctx;
+        return std.array_hash_map.hashString(name);
+    }
+
+    pub fn eql(ctx: @This(), a: []const u8, b: types.CompletionItem, b_map_index: usize) bool {
+        _ = ctx;
+        _ = b_map_index;
+        return std.mem.eql(u8, a, b.label);
+    }
+};
+
+/// Every `DocumentScope` store a set of all error names and a set of all enum field names.
+/// This function collects all of these sets from all dependencies and returns them as completions.
+fn globalSetCompletions(
+    store: *DocumentStore,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    kind: enum { error_set, enum_set },
+) error{OutOfMemory}![]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var dependencies = std.ArrayListUnmanaged(DocumentStore.Uri){};
+    try dependencies.append(arena, handle.uri);
+    try store.collectDependencies(arena, handle.*, &dependencies);
+
+    // TODO Better solution for deciding what tags to include
+    var result_set = CompletionSet{};
+
+    for (dependencies.items) |uri| {
+        // not every dependency is loaded which results in incomplete completion
+        const dependency_handle = store.getHandle(uri) orelse continue;
+        const document_scope: DocumentScope = try dependency_handle.getDocumentScope();
+        const curr_set: DocumentScope.IdentifierSet = switch (kind) {
+            .error_set => @field(document_scope, "global_error_set"),
+            .enum_set => @field(document_scope, "global_enum_set"),
+        };
+        try result_set.ensureUnusedCapacity(arena, curr_set.count());
+        for (curr_set.keys()) |identifier_token| {
+            const name = offsets.identifierTokenToNameSlice(dependency_handle.tree, identifier_token);
+
+            const gop = result_set.getOrPutAssumeCapacityAdapted(
+                name,
+                CompletionNameAdapter{},
+            );
+
+            if (!gop.found_existing) {
+                gop.key_ptr.* = types.CompletionItem{
+                    .label = name,
+                    // TODO check if client supports label_details_support
+                    .detail = switch (kind) {
+                        .error_set => try std.fmt.allocPrint(arena, "error.{}", .{std.zig.fmtId(name)}),
+                        .enum_set => null,
+                    },
+                    .kind = switch (kind) {
+                        .error_set => .Constant,
+                        .enum_set => .EnumMember,
+                    },
+                    .documentation = null, // will be set below
+                };
+            }
+
+            if (gop.key_ptr.documentation == null) {
+                if (try Analyser.getDocCommentsBeforeToken(arena, dependency_handle.tree, identifier_token)) |documentation| {
+                    gop.key_ptr.documentation = .{
+                        .MarkupContent = types.MarkupContent{
+                            // TODO check if client supports markdown
+                            .kind = .markdown,
+                            .value = documentation,
+                        },
+                    };
+                }
+            }
+        }
+    }
+
+    return result_set.keys();
 }
 
 // <--------------------------------------------------------------------------->
