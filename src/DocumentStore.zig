@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const types = @import("lsp.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
@@ -1455,40 +1454,4 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             error.UriBadScheme => return null,
         };
     }
-}
-
-/// **Thread safe** takes a shared lock
-fn tagStoreCompletionItems(self: *DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) error{OutOfMemory}![]types.CompletionItem {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var dependencies = std.ArrayListUnmanaged(Uri){};
-    try dependencies.append(arena, handle.uri);
-    try self.collectDependenciesInternal(arena, handle, &dependencies, true);
-
-    // TODO Better solution for deciding what tags to include
-    var result_set = DocumentScope.CompletionSet{};
-
-    for (dependencies.items) |uri| {
-        // not every dependency is loaded which results in incomplete completion
-        const hdl = self.getHandle(uri) orelse continue; // takes a shared lock
-        const document_scope = try hdl.getDocumentScope();
-        const curr_set = @field(document_scope, name);
-        try result_set.ensureUnusedCapacity(arena, curr_set.count());
-        for (curr_set.keys()) |completion| {
-            result_set.putAssumeCapacity(completion, {});
-        }
-    }
-
-    return result_set.keys();
-}
-
-/// **Thread safe** takes a shared lock
-pub fn errorCompletionItems(self: *DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
-    return try self.tagStoreCompletionItems(arena, handle, "error_completions");
-}
-
-/// **Thread safe** takes a shared lock
-pub fn enumCompletionItems(self: *DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
-    return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
 }

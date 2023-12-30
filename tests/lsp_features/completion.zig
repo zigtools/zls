@@ -934,6 +934,44 @@ test "completion - enum" {
     });
 }
 
+test "completion - global enum set" {
+    try testCompletion(
+        \\const SomeError = error{ e };
+        \\const E1 = enum {
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const E2 = enum {
+        \\    baz,
+        \\    ///hello
+        \\    qux,
+        \\};
+        \\const baz = .<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .EnumMember },
+        .{ .label = "bar", .kind = .EnumMember },
+        .{ .label = "baz", .kind = .EnumMember },
+        .{ .label = "qux", .kind = .EnumMember, .documentation = "hello" },
+    });
+    try testCompletion(
+        \\const SomeError = error{ e };
+        \\const Enum1 = enum {
+        \\    ///hello world
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const Enum2 = enum {
+        \\    foo,
+        \\    ///hallo welt
+        \\    bar,
+        \\};
+        \\const baz = .<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .EnumMember, .documentation = "hello world" },
+        .{ .label = "bar", .kind = .EnumMember, .documentation = "hallo welt" },
+    });
+}
+
 test "completion - switch cases" {
     // Because current logic is to list all enums if all else fails,
     // the following tests include an extra enum to ensure that we're not just 'getting lucky'
@@ -1059,17 +1097,6 @@ test "completion - switch cases" {
 test "completion - error set" {
     try testCompletion(
         \\const E = error {
-        \\    Foo,
-        \\    Bar,
-        \\};
-        \\const baz = error.<cursor>
-    , &.{
-        .{ .label = "Foo", .kind = .Constant, .detail = "error.Foo" },
-        .{ .label = "Bar", .kind = .Constant, .detail = "error.Bar" },
-    });
-
-    try testCompletion(
-        \\const E = error {
         \\    foo,
         \\    bar,
         \\};
@@ -1077,6 +1104,68 @@ test "completion - error set" {
     , &.{
         .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
         .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
+    });
+    try testCompletion(
+        \\const E1 = error {
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const E2 = error {
+        \\    baz,
+        \\    ///hello
+        \\    qux,
+        \\};
+        \\const baz = E2.<cursor>
+    , &.{
+        .{ .label = "baz", .kind = .Constant, .detail = "error.baz" },
+        .{ .label = "qux", .kind = .Constant, .detail = "error.qux", .documentation = "hello" },
+    });
+}
+
+test "completion - global error set" {
+    try testCompletion(
+        \\const SomeEnum = enum { e };
+        \\const Error1 = error {
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const Error2 = error {
+        \\    baz,
+        \\    ///hello
+        \\    qux,
+        \\};
+        \\const baz = error.<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
+        .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
+        .{ .label = "baz", .kind = .Constant, .detail = "error.baz" },
+        .{ .label = "qux", .kind = .Constant, .detail = "error.qux", .documentation = "hello" },
+    });
+    try testCompletion(
+        \\const SomeEnum = enum { e };
+        \\const Error1 = error {
+        \\    ///hello world
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const Error2 = error {
+        \\    foo,
+        \\    ///hallo welt
+        \\    bar,
+        \\};
+        \\const baz = error.<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant, .detail = "error.foo", .documentation = "hello world" },
+        .{ .label = "bar", .kind = .Constant, .detail = "error.bar", .documentation = "hallo welt" },
+    });
+    try testCompletion(
+        \\const Error = error {
+        \\    ///hello world
+        \\    @"some name",
+        \\};
+        \\const baz = error.<cursor>
+    , &.{
+        .{ .label = "some name", .kind = .Constant, .detail = "error.@\"some name\"", .documentation = "hello world" },
     });
 }
 
