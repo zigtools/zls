@@ -72,46 +72,23 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     std.debug.assert(source_index < tree.source.len);
 
     const tokens_start = tree.tokens.items(.start);
-    var upper_index = tokens_start.len - 1;
-    var mid: usize = upper_index / 2;
 
-    if (tokens_start.len < 600) {
-        const mid_tok_start = tokens_start[mid];
-        if (mid_tok_start < source_index) { // source_index is in upper half
-            const quart_index = mid + (mid / 2);
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) { // source_index is in upper fourth
-            } else { // source_index is in upper third
-                upper_index = quart_index;
-            }
-        } else { // source_index is in lower half
-            const quart_index = mid / 2;
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) { // source_index is in second/4
-                upper_index = mid;
-            } else { // source_index is in first/4
-                upper_index = quart_index;
-            }
-        }
-    } else {
-        // at which point to stop dividing and just iterate
-        // good results w/ 128 as well, anything lower/higher and the cost of
-        // dividing overruns the cost of iterating and vice versa
-        const threshold = 168;
+    // at which point to stop dividing and just iterate
+    // good results w/ 256 as well, anything lower/higher and the cost of
+    // dividing overruns the cost of iterating and vice versa
+    const threshold = 336;
 
-        var lower_index: usize = 0;
-        while (true) {
-            const mid_tok_start = tokens_start[mid];
-            if (mid_tok_start < source_index) { // source_index is in upper half
-                if ((upper_index - mid) < threshold) break;
-                lower_index = mid; // raise the lower_index to mid
-            } else { // source_index is in lower half
-                upper_index = mid; // lower the upper_index to mid
-                if ((mid - lower_index) < threshold) break;
-            }
-            mid = lower_index + (upper_index - lower_index) / 2;
+    var upper_index: Ast.TokenIndex = @intCast(tokens_start.len - 1); // The Ast always has a .eof token
+    var lower_index: Ast.TokenIndex = 0;
+    while (upper_index - lower_index > threshold) {
+        const mid = lower_index + (upper_index - lower_index) / 2;
+        if (tokens_start[mid] < source_index) {
+            lower_index = mid;
+        } else {
+            upper_index = mid;
         }
     }
+
     while (upper_index > 0) : (upper_index -= 1) {
         const token_start = tokens_start[upper_index];
         if (token_start > source_index) continue; // checking for equality here is suboptimal
@@ -124,7 +101,8 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
         break;
     }
 
-    return @intCast(upper_index);
+    std.debug.assert(upper_index < tree.tokens.len);
+    return upper_index;
 }
 
 fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
