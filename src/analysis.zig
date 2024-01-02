@@ -160,9 +160,14 @@ pub const FormatFunctionOptions = struct {
     /// only included if available
     include_name: bool,
     skip_first_param: bool = false,
-    include_parameter_modifiers: bool,
-    include_parameter_names: bool,
-    include_parameter_types: bool,
+    parameters: union(enum) {
+        collapse,
+        show: struct {
+            include_modifiers: bool,
+            include_names: bool,
+            include_types: bool,
+        },
+    },
     include_return_type: bool,
     snippet_placeholders: bool,
 };
@@ -197,69 +202,83 @@ pub fn formatFunction(
         _ = ast.nextFnParam(&it);
     }
 
-    var i: usize = 0;
-    while (ast.nextFnParam(&it)) |param| : (i += 1) {
-        if (i != 0) {
-            try writer.writeAll(", ");
-        }
-
-        if (data.snippet_placeholders) {
-            try writer.print("${{{d}:", .{i + 1});
-        }
-
-        // Note that parameter doc comments are being skipped
-
-        if (data.include_parameter_modifiers) {
-            if (param.comptime_noalias) |token_index| {
-                switch (token_tags[token_index]) {
-                    .keyword_comptime => try writer.writeAll("comptime "),
-                    .keyword_noalias => try writer.writeAll("noalias "),
-                    else => unreachable,
-                }
-            }
-        }
-
-        if (data.include_parameter_names) {
-            if (param.name_token) |name_token| {
-                const name = tree.tokenSlice(name_token);
+    switch (data.parameters) {
+        .collapse => {
+            const has_arguments = ast.nextFnParam(&it) != null;
+            if (has_arguments) {
                 if (data.snippet_placeholders) {
-                    try writer.print("{}", .{fmtSnippetPlaceholder(name)});
+                    try writer.writeAll("${1:...}");
                 } else {
-                    try writer.writeAll(name);
+                    try writer.writeAll("...");
                 }
             }
-        }
+        },
+        .show => |parameter_options| {
+            var i: usize = 0;
+            while (ast.nextFnParam(&it)) |param| : (i += 1) {
+                if (i != 0) {
+                    try writer.writeAll(", ");
+                }
 
-        if (data.include_parameter_types) {
-            try writer.writeAll(": ");
-
-            if (param.type_expr != 0) {
                 if (data.snippet_placeholders) {
-                    var curr_token = tree.firstToken(param.type_expr);
-                    const end_token = ast.lastToken(tree.*, param.type_expr);
-                    while (curr_token <= end_token) : (curr_token += 1) {
-                        const tag = token_tags[curr_token];
-                        const is_comma = tag == .comma;
+                    try writer.print("${{{d}:", .{i + 1});
+                }
 
-                        if (curr_token == end_token and is_comma) continue;
-                        try writer.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
-                        if (is_comma or tag == .keyword_const) try writer.writeByte(' ');
+                // Note that parameter doc comments are being skipped
+
+                if (parameter_options.include_modifiers) {
+                    if (param.comptime_noalias) |token_index| {
+                        switch (token_tags[token_index]) {
+                            .keyword_comptime => try writer.writeAll("comptime "),
+                            .keyword_noalias => try writer.writeAll("noalias "),
+                            else => unreachable,
+                        }
                     }
-                } else {
-                    try writer.writeAll(offsets.nodeToSlice(tree.*, param.type_expr));
                 }
-            } else if (param.anytype_ellipsis3) |token_index| {
-                switch (token_tags[token_index]) {
-                    .keyword_anytype => try writer.writeAll("anytype"),
-                    .ellipsis3 => try writer.writeAll("..."),
-                    else => unreachable,
+
+                if (parameter_options.include_names) {
+                    if (param.name_token) |name_token| {
+                        const name = tree.tokenSlice(name_token);
+                        if (data.snippet_placeholders) {
+                            try writer.print("{}", .{fmtSnippetPlaceholder(name)});
+                        } else {
+                            try writer.writeAll(name);
+                        }
+                    }
+                }
+
+                if (parameter_options.include_types) {
+                    try writer.writeAll(": ");
+
+                    if (param.type_expr != 0) {
+                        if (data.snippet_placeholders) {
+                            var curr_token = tree.firstToken(param.type_expr);
+                            const end_token = ast.lastToken(tree.*, param.type_expr);
+                            while (curr_token <= end_token) : (curr_token += 1) {
+                                const tag = token_tags[curr_token];
+                                const is_comma = tag == .comma;
+
+                                if (curr_token == end_token and is_comma) continue;
+                                try writer.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
+                                if (is_comma or tag == .keyword_const) try writer.writeByte(' ');
+                            }
+                        } else {
+                            try writer.writeAll(offsets.nodeToSlice(tree.*, param.type_expr));
+                        }
+                    } else if (param.anytype_ellipsis3) |token_index| {
+                        switch (token_tags[token_index]) {
+                            .keyword_anytype => try writer.writeAll("anytype"),
+                            .ellipsis3 => try writer.writeAll("..."),
+                            else => unreachable,
+                        }
+                    }
+                }
+
+                if (data.snippet_placeholders) {
+                    try writer.writeByte('}');
                 }
             }
-        }
-
-        if (data.snippet_placeholders) {
-            try writer.writeByte('}');
-        }
+        },
     }
     try writer.writeByte(')');
 

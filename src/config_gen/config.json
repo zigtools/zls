@@ -172,6 +172,12 @@
             "description": "Completions confirm behavior. If 'true', replace the text after the cursor",
             "type": "bool",
             "default": true
+        },
+        {
+            "name": "completion_label_details",
+            "description": "When false, the function signature of completion results is hidden. Improves readability in some editors",
+            "type": "bool",
+            "default": true
         }
     ]
 }

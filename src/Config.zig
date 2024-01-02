@@ -92,4 +92,7 @@ build_runner_global_cache_path: ?[]const u8 = null,
 /// Completions confirm behavior. If 'true', replace the text after the cursor
 completions_with_replace: bool = true,
 
+/// When false, the function signature of completion results is hidden. Improves readability in some editors
+completion_label_details: bool = true,
+
 // DO NOT EDIT
