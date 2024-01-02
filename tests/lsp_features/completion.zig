@@ -186,7 +186,7 @@ test "completion - function" {
             .label = "foo",
             .labelDetails = .{
                 .detail = "(alpha: u32, beta: []const u8)",
-                .description = null,
+                .description = "void",
             },
             .kind = .Function,
             .detail = "fn (alpha: u32, beta: []const u8) void",
@@ -206,7 +206,7 @@ test "completion - function" {
             .label = "foo",
             .labelDetails = .{
                 .detail = "(comptime T: type, value: anytype)",
-                .description = null,
+                .description = "void",
             },
             .kind = .Function,
             .detail = "fn (comptime T: type, value: anytype) void",
@@ -2239,6 +2239,49 @@ test "completion - snippets disabled" {
     });
 }
 
+test "completion - label details disabled" {
+    try testCompletionWithOptions(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{
+            .label = "f",
+            .labelDetails = .{
+                .detail = "()",
+                .description = "void",
+            },
+            .kind = .Method,
+            .detail = "fn (self: S) void",
+            .insert_text = "f()",
+        },
+    }, .{
+        .completion_label_details = false,
+    });
+    try testCompletionWithOptions(
+        \\const S = struct {
+        \\    fn f(self: S, value: u32) !void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{
+            .label = "f",
+            .labelDetails = .{
+                .detail = "(...)",
+                .description = "!void",
+            },
+            .kind = .Method,
+            .detail = "fn (self: S, value: u32) !void",
+            .insert_text = "f(${1:value: u32})",
+        },
+    }, .{
+        .completion_label_details = false,
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
@@ -2246,6 +2289,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
 fn testCompletionWithOptions(source: []const u8, expected_completions: []const Completion, options: struct {
     enable_argument_placeholders: bool = true,
     enable_snippets: bool = true,
+    completion_label_details: bool = true,
 }) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
@@ -2262,6 +2306,7 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
 
     ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
     ctx.server.config.enable_snippets = options.enable_snippets;
+    ctx.server.config.completion_label_details = options.completion_label_details;
 
     const test_uri = try ctx.addDocument(text);
 

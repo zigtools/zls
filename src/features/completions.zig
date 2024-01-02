@@ -266,9 +266,11 @@ fn nodeToCompletion(
                         .include_fn_keyword = false,
                         .include_name = true,
                         .skip_first_param = skip_self_param,
-                        .include_parameter_modifiers = false,
-                        .include_parameter_names = true,
-                        .include_parameter_types = true,
+                        .parameters = .{ .show = .{
+                            .include_modifiers = false,
+                            .include_names = true,
+                            .include_types = true,
+                        } },
                         .include_return_type = false,
                         .snippet_placeholders = true,
                     })});
@@ -302,21 +304,43 @@ fn nodeToCompletion(
             else
                 .Function;
 
-            const label_details: ?[]const u8 = if (use_label_details)
-                try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
+            const label_details: ?types.CompletionItemLabelDetails = blk: {
+                if (!use_label_details) break :blk null;
+
+                const detail = try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
                     .fn_proto = func,
                     .tree = &tree,
 
                     .include_fn_keyword = false,
                     .include_name = false,
-                    .include_parameter_modifiers = true,
-                    .include_parameter_names = true,
-                    .include_parameter_types = true,
+                    .skip_first_param = skip_self_param,
+                    .parameters = if (server.config.completion_label_details)
+                        .{ .show = .{
+                            .include_modifiers = true,
+                            .include_names = true,
+                            .include_types = true,
+                        } }
+                    else
+                        .collapse,
                     .include_return_type = false,
                     .snippet_placeholders = false,
-                })})
-            else
-                null;
+                })});
+
+                const description = description: {
+                    if (func.ast.return_type == 0) break :description null;
+                    const return_type_str = offsets.nodeToSlice(tree, func.ast.return_type);
+
+                    break :description if (ast.hasInferredError(tree, func))
+                        try std.fmt.allocPrint(arena, "!{s}", .{return_type_str})
+                    else
+                        return_type_str;
+                };
+
+                break :blk .{
+                    .detail = detail,
+                    .description = description,
+                };
+            };
 
             const details = try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
                 .fn_proto = func,
@@ -324,19 +348,18 @@ fn nodeToCompletion(
 
                 .include_fn_keyword = true,
                 .include_name = false,
-                .include_parameter_modifiers = true,
-                .include_parameter_names = true,
-                .include_parameter_types = true,
+                .parameters = .{ .show = .{
+                    .include_modifiers = true,
+                    .include_names = true,
+                    .include_types = true,
+                } },
                 .include_return_type = true,
                 .snippet_placeholders = false,
             })});
 
             try list.append(arena, .{
                 .label = func_name,
-                .labelDetails = if (use_label_details) .{
-                    .detail = label_details,
-                    .description = null,
-                } else null,
+                .labelDetails = label_details,
                 .kind = kind,
                 .documentation = doc,
                 .detail = details,
