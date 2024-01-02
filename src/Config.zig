@@ -95,4 +95,7 @@ build_runner_global_cache_path: ?[]const u8 = null,
 /// Completions confirm behavior. If 'true', replace the text after the cursor
 completions_with_replace: bool = true,
 
+/// When false, function signature in completion results will be truncated. Sublime Text default is false to prevent obstruction of the return type.
+completion_label_details: bool = true,
+
 // DO NOT EDIT

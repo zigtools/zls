@@ -376,6 +376,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
+            server.config.completion_label_details = false;
             server.client_capabilities.max_detail_length = 256;
             // TODO investigate why fixall doesn't work in sublime text
             server.client_capabilities.supports_code_action_fixall = false;

@@ -563,11 +563,11 @@ fn formatCompletionDetails(server: *const Server, arena: std.mem.Allocator, comp
     if (!server.client_capabilities.label_details_support) return;
 
     for (completions) |*item| {
-        try formatDetailedLabel(item, arena);
+        try formatDetailedLabel(server, item, arena);
     }
 }
 
-fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
+fn formatDetailedLabel(server: *const Server, item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
     // NOTE: this is not ideal, we should build a detailed label like we do for label/detail
     // because this implementation is very loose, nothing is formatted properly so we need to clean
     // things a little bit, which is quite messy
@@ -612,7 +612,23 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
         }
 
         item.detail = item.label;
-        item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
+        item.labelDetails = .{ .description = it[e + 1 ..] };
+
+        if (server.config.completion_label_details) {
+            item.labelDetails.?.detail = it[s .. e + 1];
+        } else {
+            item.labelDetails.?.detail = blk: {
+                switch (std.mem.count(u8, it[s..e], ":")) {
+                    0 => break :blk "()",
+                    1 => {
+                        const self_end = std.mem.indexOf(u8, it[s..e], ":").?;
+                        if (std.mem.eql(u8, "self", it[s..e][self_end - 4 .. self_end])) break :blk "()";
+                        break :blk "(…)";
+                    },
+                    else => break :blk "(…)",
+                }
+            };
+        }
 
         if (item.kind.? == .Constant) {
             if (std.mem.indexOf(u8, it, "= struct")) |_| {
