@@ -738,7 +738,7 @@ fn completeError(server: *Server, arena: std.mem.Allocator, handle: *DocumentSto
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.document_store.errorCompletionItems(arena, handle.*);
+    return try errorCompletionItems(&server.document_store, arena, handle.*);
 }
 
 fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
@@ -808,7 +808,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
     if (token_tags[dot_token_index - 1] == .number_literal or token_tags[dot_token_index - 1] != .equal) return &.{};
 
     // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
-    const enum_completions = try document_store.enumCompletionItems(arena, handle.*);
+    const enum_completions = try enumCompletionItems(document_store, arena, handle.*);
     return enum_completions;
 }
 
@@ -823,7 +823,7 @@ fn completeFileSystemStringLiteral(
     handle: DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
-    var completions: DocumentScope.CompletionSet = .{};
+    var completions: CompletionSet = .{};
 
     const loc = switch (pos_context) {
         .import_string_literal,
@@ -1415,4 +1415,112 @@ fn collectEnumLiteralContainerNodes(
         if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
+}
+
+const CompletionContext = struct {
+    pub fn hash(self: @This(), item: types.CompletionItem) u32 {
+        _ = self;
+        return @truncate(std.hash.Wyhash.hash(0, item.label));
+    }
+
+    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
+        _ = self;
+        _ = b_index;
+        return std.mem.eql(u8, a.label, b.label);
+    }
+};
+
+const CompletionSet = std.ArrayHashMapUnmanaged(
+    types.CompletionItem,
+    void,
+    CompletionContext,
+    false,
+);
+
+/// **Thread safe** takes a shared lock
+fn errorCompletionItems(
+    store: *DocumentStore,
+    arena: std.mem.Allocator,
+    handle: DocumentStore.Handle,
+) error{OutOfMemory}![]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var dependencies = std.ArrayListUnmanaged([]const u8){};
+    try dependencies.append(arena, handle.uri);
+    try store.collectDependencies(arena, handle, &dependencies);
+
+    // TODO Better solution for deciding what tags to include
+    var result_set = CompletionSet{};
+
+    for (dependencies.items) |uri| {
+        // not every dependency is loaded which results in incomplete completion
+        const hdl = store.getHandle(uri) orelse continue; // takes a shared lock
+
+        const document_scope = try hdl.getDocumentScope();
+        const decl_data = document_scope.declarations.items(.data);
+
+        const curr_set = document_scope.enum_completions;
+        try result_set.ensureUnusedCapacity(arena, curr_set.count());
+
+        for (curr_set.keys()) |completion| {
+            const token = decl_data[@intFromEnum(completion)].error_token;
+            const name = offsets.identifierTokenToNameSlice(handle.tree, token);
+
+            result_set.putAssumeCapacity(.{
+                .label = name,
+                .kind = .Constant,
+                .detail = try std.fmt.allocPrint(arena, "error.{s}", .{name}),
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+            }, void{});
+        }
+    }
+
+    return result_set.keys();
+}
+
+/// **Thread safe** takes a shared lock
+fn enumCompletionItems(
+    store: *DocumentStore,
+    arena: std.mem.Allocator,
+    handle: DocumentStore.Handle,
+) error{OutOfMemory}![]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var dependencies = std.ArrayListUnmanaged([]const u8){};
+    try dependencies.append(arena, handle.uri);
+    try store.collectDependencies(arena, handle, &dependencies);
+
+    // TODO Better solution for deciding what tags to include
+    var result_set = CompletionSet{};
+
+    for (dependencies.items) |uri| {
+        // not every dependency is loaded which results in incomplete completion
+        const hdl = store.getHandle(uri) orelse continue; // takes a shared lock
+        const main_tokens = hdl.tree.nodes.items(.main_token);
+
+        const document_scope = try hdl.getDocumentScope();
+        const decl_data = document_scope.declarations.items(.data);
+
+        const curr_set = document_scope.enum_completions;
+        try result_set.ensureUnusedCapacity(arena, curr_set.count());
+
+        for (curr_set.keys()) |completion| {
+            const decl = decl_data[@intFromEnum(completion)].ast_node;
+            const doc = try Analyser.getDocComments(arena, handle.tree, decl);
+            const name = offsets.identifierTokenToNameSlice(handle.tree, main_tokens[decl]);
+
+            result_set.putAssumeCapacity(.{
+                .label = name,
+                .kind = .EnumMember,
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+                .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
+            }, void{});
+        }
+    }
+
+    return result_set.keys();
 }

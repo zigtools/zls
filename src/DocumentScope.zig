@@ -14,31 +14,9 @@ declarations: std.MultiArrayList(Declaration) = .{},
 /// used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
-// TODO: make this lighter;
-// error completions: just store the name, the logic has no other moving parts
-// enum completions: same, but determine whether to store docs somewhere or fetch them on-demand (on-demand likely better)
-error_completions: CompletionSet = .{},
-enum_completions: CompletionSet = .{},
 
-const CompletionContext = struct {
-    pub fn hash(self: @This(), item: types.CompletionItem) u32 {
-        _ = self;
-        return @truncate(std.hash.Wyhash.hash(0, item.label));
-    }
-
-    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
-        _ = self;
-        _ = b_index;
-        return std.mem.eql(u8, a.label, b.label);
-    }
-};
-
-pub const CompletionSet = std.ArrayHashMapUnmanaged(
-    types.CompletionItem,
-    void,
-    CompletionContext,
-    false,
-);
+error_completions: std.AutoArrayHashMapUnmanaged(Declaration.Index, void) = .{},
+enum_completions: std.AutoArrayHashMapUnmanaged(Declaration.Index, void) = .{},
 
 /// Every `index` inside this `ArrayhashMap` is equivalent to a `Declaration.Index`
 /// This means that every declaration is only the child of a single scope
@@ -350,23 +328,7 @@ pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
     scope.declarations.deinit(allocator);
     scope.declaration_lookup_map.deinit(allocator);
     scope.extra.deinit(allocator);
-
-    for (scope.enum_completions.keys()) |item| {
-        if (item.detail) |detail| allocator.free(detail);
-        switch (item.documentation orelse continue) {
-            .string => |str| allocator.free(str),
-            .MarkupContent => |content| allocator.free(content.value),
-        }
-    }
     scope.enum_completions.deinit(allocator);
-
-    for (scope.error_completions.keys()) |item| {
-        if (item.detail) |detail| allocator.free(detail);
-        switch (item.documentation orelse continue) {
-            .string => |str| allocator.free(str),
-            .MarkupContent => |content| allocator.free(content.value),
-        }
-    }
     scope.error_completions.deinit(allocator);
 }
 
@@ -675,19 +637,11 @@ noinline fn walkContainerDecl(
                 if (is_enum_or_tagged_union) {
                     if (std.mem.eql(u8, name, "_")) continue;
 
-                    const doc = try Analyser.getDocComments(allocator, tree, decl);
-                    errdefer if (doc) |d| allocator.free(d);
-                    // TODO: Fix allocation; just store indices
-                    const gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
-                        .label = name,
-                        .kind = .EnumMember,
-                        .insertText = name,
-                        .insertTextFormat = .PlainText,
-                        .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
-                    });
-                    if (gop_res.found_existing) {
-                        if (doc) |d| allocator.free(d);
-                    }
+                    try context.doc_scope.enum_completions.put(
+                        context.allocator,
+                        @enumFromInt(context.doc_scope.declarations.len - 1),
+                        void{},
+                    );
                 }
             },
             .fn_proto,
@@ -754,17 +708,12 @@ noinline fn walkErrorSetNode(
             .identifier => {
                 const name = offsets.identifierTokenToNameSlice(tree, tok_i);
                 try scope.pushDeclaration(name, .{ .error_token = tok_i }, .other);
-                const gop = try context.doc_scope.error_completions.getOrPut(context.allocator, .{
-                    .label = name,
-                    .kind = .Constant,
-                    //.detail =
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
-                });
-                // TODO: use arena
-                if (!gop.found_existing) {
-                    gop.key_ptr.detail = try std.fmt.allocPrint(context.allocator, "error.{s}", .{name});
-                }
+
+                try context.doc_scope.error_completions.put(
+                    context.allocator,
+                    @enumFromInt(context.doc_scope.declarations.len - 1),
+                    void{},
+                );
             },
             else => {},
         }

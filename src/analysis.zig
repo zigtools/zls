@@ -1,7 +1,6 @@
 const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
-const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const URI = @import("uri.zig");
 const log = std.log.scoped(.zls_analysis);
