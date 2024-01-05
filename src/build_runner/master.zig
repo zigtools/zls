@@ -390,6 +390,14 @@ const copied_from_zig = struct {
                         return null;
                 }
             },
+            .generated_dirname => |gen| {
+                var dirname = getPath(.{ .generated = gen.generated }, builder) orelse return null;
+                var i: usize = 0;
+                while (i <= gen.up) : (i += 1) {
+                    dirname = std.fs.path.dirname(dirname) orelse return null;
+                }
+                return dirname;
+            },
             .dependency => |dep| return dep.dependency.builder.pathJoin(&[_][]const u8{
                 dep.dependency.builder.build_root.path.?,
                 dep.sub_path,
