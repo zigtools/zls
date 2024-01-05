@@ -11,7 +11,6 @@ The Zig Language Server (zls) is a tool that implements Microsoft's Language Ser
 
 - [Installation](#installation)
   - [From Source](#from-source)
-    - [Build Options](#build-options)
   - [Configuration Options](#configuration-options)
   - [Per-build Configuration Options](#per-build-configuration-options)
     - [`BuildOption`](#buildoption)
@@ -35,12 +34,6 @@ git clone https://github.com/zigtools/zls
 cd zls
 zig build -Doptimize=ReleaseSafe
 ```
-
-#### Build Options
-
-| Option | Type | Default Value | What it Does |
-| --- | --- | --- | --- |
-| `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
 ### Configuration Options
 
