@@ -1553,7 +1553,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
                 try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
 
-            return Type.fromEither(analyser.arena.allocator(), either.items, handle);
+            return Type.fromEither(analyser.arena.allocator(), either.items);
         },
         .@"switch",
         .switch_comma,
@@ -1579,7 +1579,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     });
             }
 
-            return Type.fromEither(analyser.arena.allocator(), either.items, handle);
+            return Type.fromEither(analyser.arena.allocator(), either.items);
         },
         .@"while",
         .while_simple,
@@ -1927,9 +1927,7 @@ pub const Type = struct {
         };
     }
 
-    pub fn fromEither(arena: std.mem.Allocator, entries: []const Type.EitherEntry, handle: *DocumentStore.Handle) error{OutOfMemory}!?Type {
-        _ = handle; // autofix
-
+    pub fn fromEither(arena: std.mem.Allocator, entries: []const Type.EitherEntry) error{OutOfMemory}!?Type {
         if (entries.len == 0)
             return null;
 
@@ -3085,7 +3083,7 @@ pub const DeclWithHandle = struct {
                         });
                     }
 
-                    const maybe_type = try Type.fromEither(analyser.arena.allocator(), possible.items, self.handle);
+                    const maybe_type = try Type.fromEither(analyser.arena.allocator(), possible.items);
                     if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
                     return maybe_type;
                 }
