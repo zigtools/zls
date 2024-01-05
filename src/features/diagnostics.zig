@@ -225,6 +225,7 @@ pub fn generateBuildOnSaveDiagnostics(
     const base_args = &[_][]const u8{
         server.config.zig_exe_path orelse return,
         "build",
+        server.config.build_on_save_step,
         "--zig-lib-dir",
         server.config.zig_lib_path orelse return,
         "--cache-dir",

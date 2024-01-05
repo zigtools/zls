@@ -137,7 +137,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const node_datas = tree.nodes.items(.data);
     const node_tokens = tree.nodes.items(.main_token);
 
-    const token_starts = tree.tokens.items(.start);
+    const token_tags = tree.tokens.items(.tag);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -169,20 +169,20 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const last_param_token = ast.paramLastToken(tree, fn_proto_param);
 
     const potential_comma_token = last_param_token + 1;
-    const found_comma = potential_comma_token < tree.tokens.len and tree.tokens.items(.tag)[potential_comma_token] == .comma;
+    const found_comma = potential_comma_token < tree.tokens.len and token_tags[potential_comma_token] == .comma;
 
-    const potential_r_paren_token = last_param_token + @intFromBool(found_comma) + 1;
-    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokens.items(.tag)[potential_r_paren_token] == .r_paren;
+    const potential_r_paren_token = potential_comma_token + @intFromBool(found_comma);
+    const is_last_param = potential_r_paren_token < tree.tokens.len and token_tags[potential_r_paren_token] == .r_paren;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true, is_last_param);
-
-    const index = token_starts[node_tokens[block]] + 1;
+    const insert_token = node_tokens[block];
+    const add_suffix_newline = is_last_param and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
     const action1 = types.CodeAction{
         .title = "discard function parameter",
         .kind = .@"source.fixAll",
         .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     };
 
     // TODO fix formatting
@@ -204,7 +204,6 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const tree = builder.handle.tree;
     const token_tags = tree.tokens.items(.tag);
-    const token_starts = tree.tokens.items(.start);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -218,20 +217,18 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
         else => return,
     };
 
-    const first_token = tree.firstToken(node);
-    const last_token = ast.lastToken(tree, node) + 1;
+    const insert_token = ast.lastToken(tree, node) + 1;
 
-    if (last_token >= tree.tokens.len) return;
-    if (token_tags[last_token] != .semicolon) return;
+    if (insert_token >= tree.tokens.len) return;
+    if (token_tags[insert_token] != .semicolon) return;
 
-    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false, false);
-    const index = token_starts[last_token] + 1;
+    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, false);
 
     try actions.append(builder.arena, .{
         .title = "discard value",
         .kind = .@"source.fixAll",
         .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     });
 }
 
@@ -244,82 +241,65 @@ fn handleUnusedCapture(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const source = builder.handle.tree.source;
+    const tree = builder.handle.tree;
+    const token_tags = tree.tokens.items(.tag);
+
+    const source = tree.source;
     const capture_loc = getCaptureLoc(source, loc) orelse return;
 
-    // look for next non-whitespace after last '|'. if its a '{' we can insert discards.
-    // this means bare loop/switch captures (w/out curlies) aren't supported.
-    var block_start = capture_loc.end + 1;
-    var is_comment = false;
-    while (block_start < source.len) : (block_start += 1) {
-        switch (source[block_start]) {
-            '/' => if (block_start + 1 < source.len and source[block_start + 1] == '/') {
-                is_comment = true;
-                // we already know the next character is a `/` so lets skip that iteration
-                block_start += 1;
-            },
-            // if we go to a new line, drop the is_comment boolean
-            '\n' => if (is_comment) {
-                is_comment = false;
-            },
-            //If the character is not a whitespace, and we're not in a comment then break out of the loop
-            else => |c| if (!std.ascii.isWhitespace(c) and !is_comment) break,
-        }
-    }
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start);
+    if (token_tags[identifier_token] != .identifier) return;
+
+    const identifier_name = offsets.locToSlice(source, loc);
+
+    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(std.zig.Token.Tag, token_tags, identifier_token, .pipe) orelse return);
+
+    var lbrace_token = capture_end + 1;
 
     // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
-    if (source[block_start] == ':') {
-        var depth: i32 = 0;
-        var token_index = offsets.sourceIndexToTokenIndex(builder.handle.tree, block_start);
-        const token_tags = builder.handle.tree.tokens.items(.tag);
-        std.debug.assert(token_tags[token_index] == .colon);
+    if (token_tags[capture_end + 1] == .colon) {
+        var token_index = capture_end + 2;
+        if (token_index >= token_tags.len) return;
+        if (token_tags[token_index] != .l_paren) return;
         token_index += 1;
-        while (token_index < token_tags.len) : (token_index += 1) {
+
+        var depth: u32 = 1;
+        while (true) : (token_index += 1) {
             const tag = token_tags[token_index];
             switch (tag) {
+                .eof => return,
                 .l_paren => {
                     depth += 1;
                 },
                 .r_paren => {
-                    if (depth == 1) {
+                    depth -= 1;
+                    if (depth == 0) {
                         token_index += 1;
                         break;
                     }
-                    depth -= 1;
                 },
                 else => {},
             }
         }
-        if (token_index >= token_tags.len) return;
-        block_start = builder.handle.tree.tokens.items(.start)[token_index];
-    }
-    if (source[block_start] != '{') {
-        return;
+        lbrace_token = token_index;
     }
 
-    const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
-    const identifier_name = source[loc.start..loc.end];
+    if (lbrace_token + 1 >= tree.tokens.len) return;
+    if (token_tags[lbrace_token] != .l_brace) return;
 
-    var capture_end = loc.end;
-    var is_last: bool = false;
-    while (capture_end < source.len) : (capture_end += 1) {
-        switch (source[capture_end]) {
-            ' ', '\n' => continue,
-            '|' => {
-                is_last = true;
-                break;
-            },
-            else => break,
-        }
-    }
+    const is_last_capture = token_tags[identifier_token + 1] == .pipe;
+
+    const insert_token = lbrace_token;
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const new_text = try createDiscardText(builder, identifier_name, block_start, true, is_last);
+    const add_suffix_newline = is_last_capture and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+
+    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
     const action1 = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
         .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(block_start_loc, new_text)}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     };
     const action2 = .{
         .title = "discard capture name",
@@ -437,16 +417,31 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
     return new_text.toOwnedSlice(allocator);
 }
 
-// returns a discard string `\n{indent}_ = identifier_name;`
+/// returns a discard string `_ = identifier_name; // autofix` with appropriate newlines and
+/// indentation so that a discard is on a new line after the `insert_token`.
+///
+/// `add_block_indentation` is used to add one level of indentation to the discard.
+/// `add_suffix_newline` is used to add a traling newline with indentation.
 fn createDiscardText(
     builder: *Builder,
     identifier_name: []const u8,
-    declaration_start: usize,
+    insert_token: Ast.TokenIndex,
     add_block_indentation: bool,
     add_suffix_newline: bool,
-) ![]const u8 {
+) !struct {
+    /// insert index
+    usize,
+    /// new text
+    []const u8,
+} {
+    const tree = builder.handle.tree;
+    const insert_token_end = offsets.tokenToLoc(tree, insert_token).end;
+    const source_until_next_token = tree.source[0..tree.tokens.items(.start)[insert_token + 1]];
+    // skip comments between the insert tokena and the token after it
+    const insert_index = std.mem.indexOfScalarPos(u8, source_until_next_token, insert_token_end, '\n') orelse source_until_next_token.len;
+
     const indent = find_indent: {
-        const line = offsets.lineSliceUntilIndex(builder.handle.tree.source, declaration_start);
+        const line = offsets.lineSliceUntilIndex(tree.source, insert_index);
         for (line, 0..) |char, i| {
             if (!std.ascii.isWhitespace(char)) {
                 break :find_indent line[0..i];
@@ -454,7 +449,7 @@ fn createDiscardText(
         }
         break :find_indent line;
     };
-    const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
+    const additional_indent = if (add_block_indentation) detectIndentation(tree.source) else "";
 
     const new_text_len =
         "\n".len +
@@ -477,7 +472,7 @@ fn createDiscardText(
         new_text.appendSliceAssumeCapacity(indent);
     }
 
-    return new_text.toOwnedSlice(builder.arena);
+    return .{ insert_index, try new_text.toOwnedSlice(builder.arena) };
 }
 
 fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
@@ -664,7 +659,7 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     return .{ .start = start_pipe_position, .end = end_pipe_position };
 }
 
-test "getCaptureLoc" {
+test getCaptureLoc {
     {
         const text = "|i|";
         const caploc = getCaptureLoc(text, .{ .start = 1, .end = 2 }) orelse

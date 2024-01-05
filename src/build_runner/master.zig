@@ -69,7 +69,10 @@ pub fn main() !void {
     cache.addPrefix(global_cache_directory);
     cache.hash.addBytes(builtin.zig_version_string);
 
-    const host = try std.zig.system.NativeTargetInfo.detect(.{});
+    const host: std.Build.ResolvedTarget = .{
+        .query = .{},
+        .result = try std.zig.system.resolveTargetQuery(.{}),
+    };
 
     const builder = try Build.create(
         allocator,
@@ -247,36 +250,39 @@ fn processStep(
         return;
     };
 
-    if (exe.root_src) |src| {
+    if (exe.root_module.root_source_file) |src| {
         if (copied_from_zig.getPath(src, builder)) |path| {
             _ = try packages.addPackage("root", path);
         }
     }
-    try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
+    try processIncludeDirs(builder, include_dirs, exe.root_module.include_dirs.items);
     try processPkgConfig(builder.allocator, include_dirs, exe);
-    try processModules(builder, packages, exe.modules);
+    try processModules(builder, packages, exe.root_module.import_table);
 }
 
 fn processModules(
     builder: *Build,
     packages: *Packages,
-    modules: std.StringArrayHashMap(*Build.Module),
+    modules: std.StringArrayHashMapUnmanaged(*Build.Module),
 ) !void {
     for (modules.keys(), modules.values()) |name, mod| {
-        const path = copied_from_zig.getPath(mod.source_file, mod.builder) orelse continue;
+        const path = copied_from_zig.getPath(
+            mod.root_source_file orelse continue,
+            mod.owner,
+        ) orelse continue;
 
         const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
         if (already_added) continue;
 
-        try processModules(builder, packages, mod.dependencies);
+        try processModules(builder, packages, mod.import_table);
     }
 }
 
 fn processIncludeDirs(
     builder: *Build,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    dirs: []Build.Step.Compile.IncludeDir,
+    dirs: []Build.Module.IncludeDir,
 ) !void {
     for (dirs) |dir| {
         switch (dir) {
@@ -312,7 +318,7 @@ fn processPkgConfig(
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     exe: *Build.Step.Compile,
 ) !void {
-    for (exe.link_objects.items) |link_object| {
+    for (exe.root_module.link_objects.items) |link_object| {
         if (link_object != .system_lib) continue;
         const system_lib = link_object.system_lib;
 
@@ -383,6 +389,14 @@ const copied_from_zig = struct {
                     else
                         return null;
                 }
+            },
+            .generated_dirname => |gen| {
+                var dirname = getPath(.{ .generated = gen.generated }, builder) orelse return null;
+                var i: usize = 0;
+                while (i <= gen.up) : (i += 1) {
+                    dirname = std.fs.path.dirname(dirname) orelse return null;
+                }
+                return dirname;
             },
             .dependency => |dep| return dep.dependency.builder.pathJoin(&[_][]const u8{
                 dep.dependency.builder.build_root.path.?,

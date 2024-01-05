@@ -27,6 +27,36 @@ test "code actions - discard value" {
     );
 }
 
+test "code actions - discard value with comments" {
+    try testAutofix(
+        \\test {
+        \\    const a = {}; // a comment
+        \\    const b = {} // a comment
+        \\    ;
+        \\    const c = // a comment
+        \\    {};
+        \\    const d // a comment
+        \\    = {};
+        \\}
+        \\
+    ,
+        \\test {
+        \\    const a = {}; // a comment
+        \\    _ = a; // autofix
+        \\    const b = {} // a comment
+        \\    ;
+        \\    _ = b; // autofix
+        \\    const c = // a comment
+        \\    {};
+        \\    _ = c; // autofix
+        \\    const d // a comment
+        \\    = {};
+        \\    _ = d; // autofix
+        \\}
+        \\
+    );
+}
+
 test "code actions - discard function parameter" {
     try testAutofix(
         \\fn foo(a: void, b: void, c: void) void {}
@@ -47,6 +77,31 @@ test "code actions - discard function parameter" {
         \\    _ = a; // autofix
         \\    _ = b; // autofix
         \\    _ = c; // autofix
+        \\}
+        \\
+    );
+}
+
+test "code actions - discard function parameter with comments" {
+    try testAutofix(
+        \\fn foo(a: void) void { // a comment
+        \\}
+        \\
+    ,
+        \\fn foo(a: void) void { // a comment
+        \\    _ = a; // autofix
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo(a: void) void {
+        \\    // a comment
+        \\}
+        \\
+    ,
+        \\fn foo(a: void) void {
+        \\    _ = a; // autofix
+        \\    // a comment
         \\}
         \\
     );
@@ -96,17 +151,71 @@ test "code actions - discard captures" {
 test "code actions - discard capture with comment" {
     try testAutofix(
         \\test {
+        \\    if (1 == 1) |a| // a comment
+        \\    {}
+        \\    for (0..10, 0..10, 0..10) |i, j, k| // a commment
+        \\    {}
+        \\}
+        \\
+    ,
+        \\test {
+        \\    if (1 == 1) |a| // a comment
+        \\    {
+        \\        _ = a; // autofix
+        \\    }
+        \\    for (0..10, 0..10, 0..10) |i, j, k| // a commment
+        \\    {
+        \\        _ = i; // autofix
+        \\        _ = j; // autofix
+        \\        _ = k; // autofix
+        \\    }
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\test {
         \\    if (1 == 1) |a|
-        \\    //a
+        \\    // a comment
+        \\    {}
+        \\    for (0..10, 0..10, 0..10) |i, j, k|
+        \\    // a commment
         \\    {}
         \\}
         \\
     ,
         \\test {
         \\    if (1 == 1) |a|
-        \\    //a
+        \\    // a comment
         \\    {
         \\        _ = a; // autofix
+        \\    }
+        \\    for (0..10, 0..10, 0..10) |i, j, k|
+        \\    // a commment
+        \\    {
+        \\        _ = i; // autofix
+        \\        _ = j; // autofix
+        \\        _ = k; // autofix
+        \\    }
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\test {
+        \\    if (1 == 1) |a| { // a comment
+        \\    }
+        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a commment
+        \\    }
+        \\}
+        \\
+    ,
+        \\test {
+        \\    if (1 == 1) |a| { // a comment
+        \\        _ = a; // autofix
+        \\    }
+        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a commment
+        \\        _ = i; // autofix
+        \\        _ = j; // autofix
+        \\        _ = k; // autofix
         \\    }
         \\}
         \\

@@ -3,6 +3,7 @@ const zls = @import("zls");
 
 const types = zls.types;
 const offsets = zls.offsets;
+const Loc = offsets.Loc;
 
 const Ast = std.zig.Ast;
 
@@ -91,6 +92,23 @@ test "offsets - lineLocAtIndex" {
     try std.testing.expectEqualStrings("foo", offsets.lineSliceAtIndex("foo\n", 3));
 }
 
+test "offsets - multilineLocAtIndex" {
+    const text =
+        \\line0
+        \\line1
+        \\line2
+        \\line3
+        \\line4
+    ;
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 0), offsets.multilineSliceAtIndex(text, 0, 0));
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 5), offsets.multilineSliceAtIndex(text, 5, 0));
+    try std.testing.expectEqualStrings(offsets.lineSliceAtIndex(text, 6), offsets.multilineSliceAtIndex(text, 6, 0));
+
+    try std.testing.expectEqualStrings("line1\nline2\nline3", offsets.multilineSliceAtIndex(text, 15, 1));
+    try std.testing.expectEqualStrings("line0\nline1", offsets.multilineSliceAtIndex(text, 3, 1));
+    try std.testing.expectEqualStrings("line3\nline4", offsets.multilineSliceAtIndex(text, 27, 1));
+}
+
 test "offsets - lineLocUntilIndex" {
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("\n", 0));
@@ -113,7 +131,7 @@ test "offsets - convertPositionEncoding" {
     try testConvertPositionEncoding("a¶↉🠁\na¶↉🠁", 1, 6, .{ 6, 3, 3 });
 }
 test "offsets - locIntersect" {
-    const a = offsets.Loc{ .start = 2, .end = 5 };
+    const a = Loc{ .start = 2, .end = 5 };
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 0, .end = 2 }) == false);
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 1, .end = 3 }) == true);
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 2, .end = 4 }) == true);
@@ -123,7 +141,7 @@ test "offsets - locIntersect" {
 }
 
 test "offsets - locInside" {
-    const outer = offsets.Loc{ .start = 2, .end = 5 };
+    const outer = Loc{ .start = 2, .end = 5 };
     try std.testing.expect(offsets.locInside(.{ .start = 0, .end = 2 }, outer) == false);
     try std.testing.expect(offsets.locInside(.{ .start = 1, .end = 3 }, outer) == false);
     try std.testing.expect(offsets.locInside(.{ .start = 2, .end = 4 }, outer) == true);
@@ -133,13 +151,13 @@ test "offsets - locInside" {
 }
 
 test "offsets - locMerge" {
-    const a = offsets.Loc{ .start = 2, .end = 5 };
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 0, .end = 2 }), .{ .start = 0, .end = 5 });
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 1, .end = 3 }), .{ .start = 1, .end = 5 });
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 2, .end = 4 }), .{ .start = 2, .end = 5 });
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 3, .end = 5 }), .{ .start = 2, .end = 5 });
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 4, .end = 6 }), .{ .start = 2, .end = 6 });
-    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 5, .end = 7 }), .{ .start = 2, .end = 7 });
+    const a = Loc{ .start = 2, .end = 5 };
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 0, .end = 2 }), Loc{ .start = 0, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 1, .end = 3 }), Loc{ .start = 1, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 2, .end = 4 }), Loc{ .start = 2, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 3, .end = 5 }), Loc{ .start = 2, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 4, .end = 6 }), Loc{ .start = 2, .end = 6 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 5, .end = 7 }), Loc{ .start = 2, .end = 7 });
 }
 
 test "offsets - advancePosition" {

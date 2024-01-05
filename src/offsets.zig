@@ -22,7 +22,7 @@ pub const Encoding = enum {
 pub const Loc = std.zig.Token.Loc;
 
 pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types.Position {
-    const last_line_start = if (std.mem.lastIndexOf(u8, text[0..index], "\n")) |line| line + 1 else 0;
+    const last_line_start = if (std.mem.lastIndexOfScalar(u8, text[0..index], '\n')) |line| line + 1 else 0;
     const line_count = std.mem.count(u8, text[0..last_line_start], "\n");
 
     return .{
@@ -72,46 +72,23 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     std.debug.assert(source_index < tree.source.len);
 
     const tokens_start = tree.tokens.items(.start);
-    var upper_index = tokens_start.len - 1;
-    var mid: usize = upper_index / 2;
 
-    if (tokens_start.len < 600) {
-        const mid_tok_start = tokens_start[mid];
-        if (mid_tok_start < source_index) { // source_index is in upper half
-            const quart_index = mid + (mid / 2);
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) { // source_index is in upper fourth
-            } else { // source_index is in upper third
-                upper_index = quart_index;
-            }
-        } else { // source_index is in lower half
-            const quart_index = mid / 2;
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) { // source_index is in second/4
-                upper_index = mid;
-            } else { // source_index is in first/4
-                upper_index = quart_index;
-            }
-        }
-    } else {
-        // at which point to stop dividing and just iterate
-        // good results w/ 128 as well, anything lower/higher and the cost of
-        // dividing overruns the cost of iterating and vice versa
-        const threshold = 168;
+    // at which point to stop dividing and just iterate
+    // good results w/ 256 as well, anything lower/higher and the cost of
+    // dividing overruns the cost of iterating and vice versa
+    const threshold = 336;
 
-        var lower_index: usize = 0;
-        while (true) {
-            const mid_tok_start = tokens_start[mid];
-            if (mid_tok_start < source_index) { // source_index is in upper half
-                if ((upper_index - mid) < threshold) break;
-                lower_index = mid; // raise the lower_index to mid
-            } else { // source_index is in lower half
-                upper_index = mid; // lower the upper_index to mid
-                if ((mid - lower_index) < threshold) break;
-            }
-            mid = lower_index + (upper_index - lower_index) / 2;
+    var upper_index: Ast.TokenIndex = @intCast(tokens_start.len - 1); // The Ast always has a .eof token
+    var lower_index: Ast.TokenIndex = 0;
+    while (upper_index - lower_index > threshold) {
+        const mid = lower_index + (upper_index - lower_index) / 2;
+        if (tokens_start[mid] < source_index) {
+            lower_index = mid;
+        } else {
+            upper_index = mid;
         }
     }
+
     while (upper_index > 0) : (upper_index -= 1) {
         const token_start = tokens_start[upper_index];
         if (token_start > source_index) continue; // checking for equality here is suboptimal
@@ -124,7 +101,8 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
         break;
     }
 
-    return @intCast(upper_index);
+    std.debug.assert(upper_index < tree.tokens.len);
+    return upper_index;
 }
 
 fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
@@ -377,6 +355,53 @@ pub fn lineLocAtPosition(text: []const u8, position: types.Position, encoding: E
 
 pub fn lineSliceAtPosition(text: []const u8, position: types.Position, encoding: Encoding) []const u8 {
     return locToSlice(text, lineLocAtPosition(text, position, encoding));
+}
+
+/// return the source location
+/// that starts `n` lines before the line at which `index` is located
+/// and    ends `n` lines after  the line at which `index` is located.
+/// `n == 0` is equivalent to calling `lineLocAtIndex`.
+pub fn multilineLocAtIndex(text: []const u8, index: usize, n: usize) Loc {
+    const start = blk: {
+        var i: usize = index;
+        var num_lines: usize = 0;
+        while (i != 0) : (i -= 1) {
+            if (text[i - 1] != '\n') continue;
+            if (num_lines >= n) break :blk i;
+            num_lines += 1;
+        }
+        break :blk 0;
+    };
+    const end = blk: {
+        var i: usize = index;
+        var num_lines: usize = 0;
+        while (i < text.len) : (i += 1) {
+            if (text[i] != '\n') continue;
+            if (num_lines >= n) break :blk i;
+            num_lines += 1;
+        }
+        break :blk text.len;
+    };
+
+    return .{
+        .start = start,
+        .end = end,
+    };
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineSliceAtIndex(text: []const u8, index: usize, n: usize) []const u8 {
+    return locToSlice(text, multilineLocAtIndex(text, index, n));
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineLocAtPosition(text: []const u8, position: types.Position, n: usize, encoding: Encoding) Loc {
+    return lineLocAtIndex(text, positionToIndex(text, position, n, encoding));
+}
+
+/// see `multilineLocAtIndex`
+pub fn multilineSliceAtPosition(text: []const u8, position: types.Position, n: usize, encoding: Encoding) []const u8 {
+    return locToSlice(text, multilineLocAtPosition(text, position, n, encoding));
 }
 
 pub fn lineLocUntilIndex(text: []const u8, index: usize) Loc {
