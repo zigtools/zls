@@ -362,7 +362,7 @@ fn testCompletion(
     const arena = arena_allocator.allocator();
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    try dotCompletions(arena, &completions, ip, index, null);
+    try dotCompletions(arena, &completions, ip, index);
 
     try std.testing.expectEqualDeep(expected, completions.items);
 }
