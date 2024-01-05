@@ -7,15 +7,16 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 /// Remove all usages of `std.mem.copy` and remove `std.mem.set` (#18143)
 const min_zig_string = "0.12.0-dev.1767+1e42a3de89";
 
-pub fn build(b: *std.build.Builder) !void {
-    comptime {
-        const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
-        if (current_zig.order(min_zig) == .lt) {
-            @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
-        }
+const Build = blk: {
+    const current_zig = builtin.zig_version;
+    const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
+    if (current_zig.order(min_zig) == .lt) {
+        @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
     }
+    break :blk std.Build;
+};
 
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -110,15 +111,15 @@ pub fn build(b: *std.build.Builder) !void {
     exe.pie = pie;
     b.installArtifact(exe);
 
-    exe.addModule("build_options", exe_options_module);
-    exe.addModule("known-folders", known_folders_module);
-    exe.addModule("diffz", diffz_module);
+    exe.root_module.addImport("build_options", exe_options_module);
+    exe.root_module.addImport("known-folders", known_folders_module);
+    exe.root_module.addImport("diffz", diffz_module);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/public/TracyClient.cpp";
 
         // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-        const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)
+        const tracy_c_flags: []const []const u8 = if (target.result.isMinGW())
             &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
         else
             &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
@@ -131,7 +132,7 @@ pub fn build(b: *std.build.Builder) !void {
         exe.linkLibCpp();
         exe.linkLibC();
 
-        if (target.isWindows()) {
+        if (target.result.os.tag == .windows) {
             exe.linkSystemLibrary("dbghelp");
             exe.linkSystemLibrary("ws2_32");
         }
@@ -140,6 +141,7 @@ pub fn build(b: *std.build.Builder) !void {
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
+        .target = b.host,
         .single_threaded = true,
     });
 
@@ -172,16 +174,16 @@ pub fn build(b: *std.build.Builder) !void {
         break :blk b.fmt("version_data_{s}_{d}.zig", .{ data_version, timestamp });
     };
     gen_version_data_cmd.addArg("--generate-version-data-path");
-    const version_data_path: std.build.LazyPath = if (override_version_data_file_path) |path|
+    const version_data_path: std.Build.LazyPath = if (override_version_data_file_path) |path|
         .{ .cwd_relative = path }
     else
         gen_version_data_cmd.addOutputFileArg(version_data_file_name);
-    const version_data_module = b.addModule("version_data", .{ .source_file = version_data_path });
-    exe.addModule("version_data", version_data_module);
+    const version_data_module = b.addModule("version_data", .{ .root_source_file = version_data_path });
+    exe.root_module.addImport("version_data", version_data_module);
 
     const zls_module = b.addModule("zls", .{
-        .source_file = .{ .path = "src/zls.zig" },
-        .dependencies = &.{
+        .root_source_file = .{ .path = "src/zls.zig" },
+        .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "build_options", .module = build_options_module },
@@ -202,9 +204,9 @@ pub fn build(b: *std.build.Builder) !void {
     tests.use_llvm = use_llvm;
     tests.use_lld = use_llvm;
 
-    tests.addModule("zls", zls_module);
-    tests.addModule("build_options", build_options_module);
-    tests.addModule("test_options", test_options_module);
+    tests.root_module.addImport("zls", zls_module);
+    tests.root_module.addImport("build_options", build_options_module);
+    tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     var src_tests = b.addTest(.{
@@ -216,14 +218,14 @@ pub fn build(b: *std.build.Builder) !void {
     });
     src_tests.use_llvm = use_llvm;
     src_tests.use_lld = use_llvm;
-    src_tests.addModule("build_options", build_options_module);
-    src_tests.addModule("test_options", test_options_module);
+    src_tests.root_module.addImport("build_options", build_options_module);
+    src_tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
         const include_pattern = b.fmt("--include-pattern=/src", .{});
         const exclude_pattern = b.fmt("--exclude-pattern=/src/stage2", .{});
-        const args = &[_]std.build.RunStep.Arg{
+        const args = &[_]std.Build.Step.Run.Arg{
             .{ .bytes = b.dupe("kcov") },
             .{ .bytes = b.dupe("--collect-only") },
             .{ .bytes = b.dupe(include_pattern) },
@@ -239,7 +241,7 @@ pub fn build(b: *std.build.Builder) !void {
         tests_run.argv.insertSlice(0, args) catch @panic("OOM");
         src_tests_run.argv.insertSlice(0, args) catch @panic("OOM");
 
-        var merge_step = std.build.RunStep.create(b, "merge kcov");
+        var merge_step = std.Build.Step.Run.create(b, "merge kcov");
         merge_step.has_side_effects = true;
         merge_step.addArgs(&.{
             "kcov",

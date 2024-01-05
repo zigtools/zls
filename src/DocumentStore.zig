@@ -1290,7 +1290,7 @@ pub fn collectIncludeDirs(
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
 
-    const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
+    const target_info = try std.zig.system.resolveTargetQuery(.{});
     const native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
