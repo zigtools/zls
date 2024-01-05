@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// Remove all usages of `std.mem.copy` and remove `std.mem.set` (#18143)
-const min_zig_string = "0.12.0-dev.1767+1e42a3de89";
+/// build/LazyPath: Add dirname (#18371)
+const min_zig_string = "0.12.0-dev.2046+d3a163f86";
 
 const Build = blk: {
     const current_zig = builtin.zig_version;
