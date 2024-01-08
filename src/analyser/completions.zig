@@ -11,10 +11,8 @@ pub fn dotCompletions(
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     ip: *InternPool,
     index: InternPool.Index,
-    node: ?Ast.Node.Index,
 ) error{OutOfMemory}!void {
     std.debug.assert(index != .none);
-    _ = node;
 
     const val: InternPool.Index = index;
     const ty: InternPool.Index = ip.typeOf(index);
@@ -364,7 +362,7 @@ fn testCompletion(
     const arena = arena_allocator.allocator();
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    try dotCompletions(arena, &completions, ip, index, null);
+    try dotCompletions(arena, &completions, ip, index);
 
     try std.testing.expectEqualDeep(expected, completions.items);
 }
