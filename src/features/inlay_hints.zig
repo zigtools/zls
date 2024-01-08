@@ -300,7 +300,7 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
     defer tracy_zone.end();
 
     const tree = builder.handle.tree;
-    const full_for = tree.fullFor(for_node).?;
+    const full_for = ast.fullFor(tree, for_node).?;
     const token_tags = tree.tokens.items(.tag);
     var capture_token = full_for.payload_token;
     for (full_for.ast.inputs) |_| {
