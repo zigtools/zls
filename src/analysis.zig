@@ -2170,6 +2170,7 @@ pub const Type = struct {
         const node_handle = switch (self.data) {
             .other => |n| n,
             .either => |entries| {
+                // TODO: Return all options instead of first valid one
                 for (entries) |entry| {
                     if (try entry.type_with_handle.lookupSymbol(analyser, symbol)) |decl| {
                         return decl;
@@ -2330,18 +2331,9 @@ pub fn getFieldAccessType(
                             return null;
 
                         const symbol = offsets.identifierIndexToNameSlice(tokenizer.buffer, after_period.loc.start);
-                        const current_type_nodes = try deref_type.getAllTypesWithHandles(analyser.arena.allocator());
 
-                        // TODO: Return all options instead of first valid one
-                        // (this would require a huge rewrite and im lazy)
-                        for (current_type_nodes) |ty| {
-                            if (try ty.lookupSymbol(analyser, symbol)) |child| {
-                                current_type.? = (try child.resolveType(analyser)) orelse continue;
-                                break;
-                            } else continue;
-                        } else {
-                            return null;
-                        }
+                        const child = try deref_type.lookupSymbol(analyser, symbol) orelse continue;
+                        current_type = try child.resolveType(analyser) orelse continue;
                     },
                     .question_mark => {
                         current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;
