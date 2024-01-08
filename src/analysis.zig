@@ -46,6 +46,7 @@ pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.resolved_callsites.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
+    std.debug.assert(self.use_trail.count() == 0);
     self.use_trail.deinit(self.gpa);
     self.arena.deinit();
 }
@@ -3182,7 +3183,7 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) !?Scope.Index {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(
+pub fn iterateSymbolsContainer(
     analyser: *Analyser,
     container_handle: NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
@@ -3269,6 +3270,7 @@ fn iterateUsingnamespaceContainerSymbols(
 ) !void {
     const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
     if (gop.found_existing) return;
+    defer std.debug.assert(analyser.use_trail.remove(.{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri }));
 
     const handle = usingnamespace_node.handle;
     const tree = handle.tree;
@@ -3284,7 +3286,7 @@ fn iterateUsingnamespaceContainerSymbols(
 
     switch (use_expr.data) {
         .other => |expr| {
-            try analyser.iterateSymbolsContainerInternal(
+            try analyser.iterateSymbolsContainer(
                 expr,
                 orig_handle,
                 callback,
@@ -3296,7 +3298,7 @@ fn iterateUsingnamespaceContainerSymbols(
             for (entries) |entry| {
                 switch (entry.type_with_handle.data) {
                     .other => |expr| {
-                        try analyser.iterateSymbolsContainerInternal(
+                        try analyser.iterateSymbolsContainer(
                             expr,
                             orig_handle,
                             callback,
@@ -3337,18 +3339,6 @@ fn iterateEnclosingScopes(document_scope: *const DocumentScope, source_index: us
         .current_scope = @enumFromInt(0),
         .source_index = source_index,
     };
-}
-
-pub fn iterateSymbolsContainer(
-    analyser: *Analyser,
-    container_handle: NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    comptime callback: anytype,
-    context: anytype,
-    instance_access: bool,
-) error{OutOfMemory}!void {
-    analyser.use_trail.clearRetainingCapacity();
-    return try analyser.iterateSymbolsContainerInternal(container_handle, orig_handle, callback, context, instance_access);
 }
 
 pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
@@ -3449,10 +3439,10 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) er
 }
 
 fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
-    analyser.use_trail.clearRetainingCapacity();
     for (uses) |index| {
         const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = index, .uri = handle.uri });
         if (gop.found_existing) continue;
+        defer std.debug.assert(analyser.use_trail.remove(.{ .node = index, .uri = handle.uri }));
 
         const tree = handle.tree;
         if (tree.nodes.items(.data).len <= index) continue;
