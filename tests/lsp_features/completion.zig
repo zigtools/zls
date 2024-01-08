@@ -400,6 +400,13 @@ test "completion - optional" {
     });
 }
 
+test "completion - optional type" {
+    try testCompletion(
+        \\const foo = ?u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+}
+
 test "completion - pointer" {
     try testCompletion(
         \\const foo: *u32 = undefined;
