@@ -513,6 +513,42 @@ test "completion - address of" {
     });
 }
 
+test "completion - pointer type" {
+    try testCompletion(
+        \\const foo = *u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = [*]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = []u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = [*c]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+}
+
+test "completion - array" {
+    try testCompletion(
+        \\const foo: [3]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        // TODO detail should show "const len: usize = 3"
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+    });
+}
+
+test "completion - array type" {
+    try testCompletion(
+        \\const foo = [3]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+}
+
 test "completion - captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
