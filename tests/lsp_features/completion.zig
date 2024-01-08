@@ -1702,6 +1702,51 @@ test "completion - usingnamespace" {
     });
 }
 
+test "completion - anytype resolution based on callsite-references" {
+    try testCompletion(
+        \\const Writer1 = struct {
+        \\    fn write1() void {}
+        \\    fn writeAll1() void {}
+        \\};
+        \\const Writer2 = struct {
+        \\    fn write2() void {}
+        \\    fn writeAll2() void {}
+        \\};
+        \\fn caller(a: Writer1, b: Writer2) void {
+        \\    callee(a);
+        \\    callee(b);
+        \\}
+        \\fn callee(writer: anytype) void {
+        \\    writer.<cursor>
+        \\}
+    , &.{
+        .{ .label = "write1", .kind = .Function, .detail = "fn write1() void" },
+        .{ .label = "write2", .kind = .Function, .detail = "fn write2() void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn writeAll1() void" },
+        .{ .label = "writeAll2", .kind = .Function, .detail = "fn writeAll2() void" },
+    });
+    try testCompletion(
+        \\const Writer1 = struct {
+        \\    fn write1() void {}
+        \\    fn writeAll1() void {}
+        \\};
+        \\const Writer2 = struct {
+        \\    fn write2() void {}
+        \\    fn writeAll2() void {}
+        \\};
+        \\fn caller(a: Writer1, b: Writer2) void {
+        \\    callee(a);
+        \\    // callee(b);
+        \\}
+        \\fn callee(writer: anytype) void {
+        \\    writer.<cursor>
+        \\}
+    , &.{
+        .{ .label = "write1", .kind = .Function, .detail = "fn write1() void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn writeAll1() void" },
+    });
+}
+
 test "builtin fn `field`" {
     try testCompletion(
         \\pub const chip_mod = struct {
