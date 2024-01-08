@@ -1051,6 +1051,13 @@ const FindBreaks = struct {
 };
 
 /// Resolves the type of a node
+pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    return analyser.resolveTypeOfNodeInternal(node_handle);
+}
+
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
     const node_with_uri = NodeWithUri{
         .node = node_handle.node,
@@ -1340,7 +1347,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             })) orelse return null;
 
-            const symbol = tree.tokenSlice(datas[node].rhs);
+            const symbol = offsets.identifierTokenToNameSlice(tree, datas[node_handle.node].rhs);
 
             return try resolveFieldAccess(analyser, lhs, symbol);
         },
@@ -1994,14 +2001,17 @@ pub const Type = struct {
     pub fn instanceTypeVal(self: Type, analyser: *Analyser) error{OutOfMemory}!?Type {
         if (!self.is_type_val) return null;
         return switch (self.data) {
-            .ip_index => |payload| Type{
-                .data = .{
-                    .ip_index = .{
-                        .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
-                        .node = payload.node,
+            .ip_index => |payload| {
+                if (payload.index == .unknown_type) return null;
+                return Type{
+                    .data = .{
+                        .ip_index = .{
+                            .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
+                            .node = payload.node,
+                        },
                     },
-                },
-                .is_type_val = false,
+                    .is_type_val = payload.index == .type_type,
+                };
             },
             else => Type{ .data = self.data, .is_type_val = false },
         };
@@ -2085,6 +2095,7 @@ pub const Type = struct {
         };
     }
 
+    /// returns whether the given type is of type `type`.
     pub fn isMetaType(self: Type) bool {
         if (!self.is_type_val) return false;
         switch (self.data) {
@@ -2180,14 +2191,6 @@ pub const Type = struct {
         return analyser.lookupSymbolContainer(node_handle, symbol, .other);
     }
 };
-
-pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    analyser.bound_type_params.clearRetainingCapacity();
-    return analyser.resolveTypeOfNodeInternal(node_handle);
-}
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
@@ -3088,23 +3091,17 @@ pub const DeclWithHandle = struct {
                     return maybe_type;
                 }
 
-                if (isMetaType(tree, param.type_expr)) {
+                const param_type = try analyser.resolveTypeOfNodeInternal(
+                    .{ .node = param.type_expr, .handle = self.handle },
+                ) orelse return null;
+
+                if (param_type.isMetaType()) {
                     if (analyser.bound_type_params.get(.{ .func = pay.func, .param_index = pay.param_index })) |resolved_type| {
                         return resolved_type;
                     }
-                    return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
-                } else if (node_tags[param.type_expr] == .identifier) {
-                    const param_type_name = offsets.identifierTokenToNameSlice(tree, main_tokens[param.type_expr]);
-                    if (param.name_token) |name_tok| {
-                        const name = offsets.identifierTokenToNameSlice(tree, name_tok);
-                        if (std.mem.eql(u8, param_type_name, name))
-                            return null;
-                    }
                 }
-                const ty = (try analyser.resolveTypeOfNodeInternal(
-                    .{ .node = param.type_expr, .handle = self.handle },
-                )) orelse return null;
-                return try ty.instanceTypeVal(analyser);
+
+                return try param_type.instanceTypeVal(analyser);
             },
             .pointer_payload => |pay| {
                 const ty = (try analyser.resolveTypeOfNodeInternal(.{

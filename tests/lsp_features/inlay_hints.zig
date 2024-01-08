@@ -142,6 +142,15 @@ test "inlayhints - var decl" {
     , .Type);
 }
 
+test "inlayhints - generic function parameter" {
+    // TODO there should be an inlay hint that shows `T`
+    try testInlayHints(
+        \\fn foo(comptime T: type, param: T) void {
+        \\    const val = param;
+        \\}
+    , .Type);
+}
+
 test "inlayhints - capture values" {
     try testInlayHints(
         \\fn a() void {

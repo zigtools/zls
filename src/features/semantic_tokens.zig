@@ -852,6 +852,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const data = node_data[node];
             if (data.rhs == 0) return;
 
+            const symbol_name = offsets.identifierTokenToNameSlice(tree, data.rhs);
+
             try writeNodeTokens(builder, data.lhs);
 
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
@@ -862,7 +864,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 return;
             };
             const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
-            if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
+            if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
@@ -978,15 +980,9 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     }
 
     if (container_field.ast.value_expr != 0) {
-        const eq_tok: Ast.TokenIndex = if (container_field.ast.align_expr != 0)
-            ast.lastToken(tree, container_field.ast.align_expr) + 2
-        else if (container_field.ast.type_expr != 0)
-            ast.lastToken(tree, container_field.ast.type_expr) + 1
-        else
-            container_field.ast.main_token + 1;
-
-        std.debug.assert(token_tags[eq_tok] == .equal);
-        try writeToken(builder, eq_tok, .operator);
+        const equal_token = tree.firstToken(container_field.ast.value_expr) - 1;
+        std.debug.assert(token_tags[equal_token] == .equal);
+        try writeToken(builder, equal_token, .operator);
         try writeNodeTokens(builder, container_field.ast.value_expr);
     }
 }
