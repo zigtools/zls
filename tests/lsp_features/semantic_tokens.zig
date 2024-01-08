@@ -435,6 +435,63 @@ test "semantic tokens - call" {
     });
 }
 
+test "semantic tokens - function call on return value of generic function" {
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    fn foo() void {}
+        \\};
+        \\fn Map(comptime V: type) type {
+        \\    return struct {
+        \\        fn getValue() V {}
+        \\    };
+        \\}
+        \\const map = Map(S){};
+        \\const value = map.getValue();
+        \\const foo = value.foo();
+        //                  ^^^ resolving foo as a function here requires thatthe `V`
+        //                      function parameter of `Map` is still bound to `S`
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+
+        .{ "fn", .keyword, .{} },
+        .{ "Map", .type, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "V", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "type", .type, .{} },
+
+        .{ "return", .keyword, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "getValue", .function, .{ .declaration = true } },
+        .{ "V", .typeParameter, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "map", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Map", .type, .{} },
+        .{ "S", .namespace, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "value", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "map", .variable, .{} },
+        .{ "getValue", .function, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "value", .variable, .{} },
+        .{ "foo", .function, .{} },
+    });
+}
+
 test "semantic tokens - catch" {
     try testSemanticTokens(
         \\var alpha = a catch b;
@@ -762,6 +819,40 @@ test "semantic tokens - container declarations" {
 
         .{ "test", .keyword, .{} },
         .{ "return", .keyword, .{} },
+    });
+}
+
+test "semantic tokens - root struct" {
+    try testSemanticTokens(
+        \\alpha: u32,
+        \\beta: void,
+    , &.{
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+    });
+    try testSemanticTokens(
+        \\alpha: u32 = 3,
+        \\comptime beta: void = {},
+    , &.{
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "3", .number, .{} },
+        .{ "comptime", .keyword, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+    });
+    // broken code
+    try testSemanticTokens(
+        \\foo: bar. = undefined,
+    , &.{
+        .{ "foo", .property, .{ .declaration = true } },
+        .{ "bar", .variable, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
     });
 }
 
@@ -1105,6 +1196,38 @@ test "semantic tokens - function" {
         .{ "=", .operator, .{} },
         .{ "T", .typeParameter, .{} },
     });
+    try testSemanticTokens(
+        \\fn foo(T: T) void {
+        \\    _ = T;
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "T", .parameter, .{ .declaration = true } },
+        .{ "T", .parameter, .{} },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .parameter, .{} },
+    });
+    try testSemanticTokens(
+        \\fn foo(comptime T: type, in: T) void {
+        \\    _ = T;
+        \\    _ = in;
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "T", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "in", .parameter, .{ .declaration = true } },
+        .{ "T", .typeParameter, .{} },
+        .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .typeParameter, .{} },
+        .{ "=", .operator, .{} },
+        .{ "in", .parameter, .{} },
+    });
 }
 
 test "semantic tokens - method" {
@@ -1136,7 +1259,7 @@ test "semantic tokens - builtin fuctions" {
         \\const foo = @as(type, u32);
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "@as", .builtin, .{} },
         .{ "type", .type, .{} },
