@@ -133,6 +133,16 @@ test "hover - string literal" {
         \\(*const [26:0]u8)
         \\```
     );
+    try testHover(
+        \\const f<cursor>oo = "hello".*;
+    ,
+        \\```zig
+        \\const foo = "hello".*
+        \\```
+        \\```zig
+        \\([5:0]u8)
+        \\```
+    );
 }
 
 test "hover - builtin" {

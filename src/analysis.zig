@@ -776,6 +776,16 @@ pub fn resolveDerefType(analyser: *Analyser, pointer: Type) error{OutOfMemory}!?
             .One, .C => return try info.elem_ty.instanceTypeVal(analyser),
             .Many, .Slice => return null,
         },
+        .ip_index => |payload| {
+            const ty = analyser.ip.typeOf(payload.index);
+            switch (analyser.ip.indexToKey(ty)) {
+                .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
+                    .One, .C => return try Type.typeValFromIP(analyser, pointer_info.elem_type),
+                    .Many, .Slice => return null,
+                },
+                else => return null,
+            }
+        },
         else => return null,
     }
 }
