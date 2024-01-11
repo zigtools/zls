@@ -250,22 +250,25 @@ fn processStep(
         return;
     };
 
+    try processPkgConfig(builder.allocator, include_dirs, exe);
+
     if (exe.root_module.root_source_file) |src| {
         if (copied_from_zig.getPath(src, builder)) |path| {
             _ = try packages.addPackage("root", path);
         }
     }
-    try processIncludeDirs(builder, include_dirs, exe.root_module.include_dirs.items);
-    try processPkgConfig(builder.allocator, include_dirs, exe);
-    try processModules(builder, packages, exe.root_module.import_table);
+    try processModule(builder, packages, include_dirs, exe.root_module);
 }
 
-fn processModules(
+fn processModule(
     builder: *Build,
     packages: *Packages,
-    modules: std.StringArrayHashMapUnmanaged(*Build.Module),
-) !void {
-    for (modules.keys(), modules.values()) |name, mod| {
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    module: Build.Module,
+) anyerror!void {
+    try processIncludeDirs(builder, include_dirs, module.include_dirs.items);
+
+    for (module.import_table.keys(), module.import_table.values()) |name, mod| {
         const path = copied_from_zig.getPath(
             mod.root_source_file orelse continue,
             mod.owner,
@@ -275,7 +278,7 @@ fn processModules(
         // if the package has already been added short circuit here or recursive modules will ruin us
         if (already_added) continue;
 
-        try processModules(builder, packages, mod.import_table);
+        try processModule(builder, packages, include_dirs, mod.*);
     }
 }
 
