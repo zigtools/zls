@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// build/LazyPath: Add dirname (#18371)
-const min_zig_string = "0.12.0-dev.2046+d3a163f86";
+/// std.heap: add runtime safety for calling `stackFallback(N).get` multiple times
+const min_zig_string = "0.12.0-dev.2138+828d23956";
 
 const Build = blk: {
     const current_zig = builtin.zig_version;
