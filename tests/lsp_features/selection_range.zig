@@ -15,12 +15,20 @@ test "selectionRange - empty" {
     try testSelectionRange("<>", &.{});
 }
 
-test "seletionRange - smoke" {
+test "selectionRange - smoke" {
     try testSelectionRange(
         \\fn main() void {
         \\    const x = 1 <>+ 1;
         \\}
     , &.{ "1 + 1", "const x = 1 + 1", "{\n    const x = 1 + 1;\n}" });
+}
+
+test "selectionRange - function parameter" {
+    try testSelectionRange(
+        \\fn f(x: i32, y: <>struct {}, z: f32) void {
+        \\
+        \\}
+    , &.{ "struct {}", "y: struct {}", "fn f(x: i32, y: struct {}, z: f32) void" });
 }
 
 fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
