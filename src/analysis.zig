@@ -1873,7 +1873,10 @@ pub const Type = struct {
             .error_union,
             .union_tag,
             => |t| t.hashWithHasher(hasher),
-            .other => |idx| std.hash.autoHash(hasher, idx),
+            .other => |node_handle| {
+                std.hash.autoHash(hasher, node_handle.node);
+                hasher.update(node_handle.handle.uri);
+            },
             .either => |entries| {
                 for (entries) |entry| {
                     hasher.update(entry.descriptor);
