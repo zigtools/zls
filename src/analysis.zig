@@ -677,11 +677,8 @@ pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{
 }
 
 pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
-    if (ty.is_type_val) return null;
-
     const base_type_ptr = try analyser.arena.allocator().create(Type);
-
-    base_type_ptr.* = Type{ .data = ty.data, .is_type_val = true };
+    base_type_ptr.* = ty.typeOf(analyser);
     return Type{ .data = .{ .pointer = .{ .size = .One, .is_const = false, .elem_ty = base_type_ptr } }, .is_type_val = false };
 }
 
