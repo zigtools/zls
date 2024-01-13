@@ -494,6 +494,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
     const resolved = switch (node_tags[node_handle.node]) {
         .identifier => blk: {
             const name_token = main_tokens[node_handle.node];
+            if (tree.tokens.items(.tag)[name_token] != .identifier) break :blk null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
@@ -2467,7 +2468,10 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
             return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
         },
         .error_value => tree.tokenSlice(data[node].rhs),
-        .identifier => offsets.identifierTokenToNameSlice(tree, main_token),
+        .identifier => {
+            if (tree.tokens.items(.tag)[main_token] != .identifier) return null;
+            return offsets.identifierTokenToNameSlice(tree, main_token);
+        },
         .fn_proto,
         .fn_proto_multi,
         .fn_proto_one,
@@ -4350,6 +4354,7 @@ fn addReferencedTypes(
                 const tree = handle.tree;
 
                 const name_token = tree.nodes.items(.main_token)[node];
+                if (tree.tokens.items(.tag)[name_token] != .identifier) return null;
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
                 const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
                 if (is_escaped_identifier) return null;
