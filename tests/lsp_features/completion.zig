@@ -485,6 +485,27 @@ test "completion - pointer" {
     });
 }
 
+test "completion - address of" {
+    try testCompletion(
+        \\const value: u32 = undefined;
+        \\const value_ptr = &value;
+        \\const foo = value_ptr.<cursor>;
+    , &.{
+        // TODO detail should be 'u32'
+        .{ .label = "*", .kind = .Operator },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const value: S = undefined;
+        \\const value_ptr = &value;
+        \\const foo = value_ptr.<cursor>;
+    , &.{
+        // TODO detail should be 'S'
+        .{ .label = "*", .kind = .Operator },
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+}
+
 test "completion - captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
