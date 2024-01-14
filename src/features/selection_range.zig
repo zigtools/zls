@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
+const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 
@@ -24,11 +25,33 @@ pub fn generateSelectionRanges(
         const index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
 
         locs.clearRetainingCapacity();
-        for (0..handle.tree.nodes.len) |i| {
+        for (0..handle.tree.nodes.len, handle.tree.nodes.items(.tag)) |i, tag| {
             const node = @as(Ast.Node.Index, @intCast(i));
             const loc = offsets.nodeToLoc(handle.tree, node);
-            if (loc.start <= index and index <= loc.end) {
-                try locs.append(arena, loc);
+
+            if (!(loc.start <= index and index <= loc.end)) continue;
+
+            try locs.append(arena, loc);
+            switch (tag) {
+                // Function parameters are not stored in the AST explicitly, iterate over them
+                // manually.
+                .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
+                    var buffer: [1]Ast.Node.Index = undefined;
+                    const fn_proto = handle.tree.fullFnProto(&buffer, node).?;
+                    var it = fn_proto.iterate(&handle.tree);
+
+                    while (ast.nextFnParam(&it)) |param| {
+                        const param_loc = offsets.tokensToLoc(
+                            handle.tree,
+                            ast.paramFirstToken(handle.tree, param),
+                            ast.paramLastToken(handle.tree, param),
+                        );
+                        if (param_loc.start <= index and index <= param_loc.end) {
+                            try locs.append(arena, param_loc);
+                        }
+                    }
+                },
+                else => {},
             }
         }
 
