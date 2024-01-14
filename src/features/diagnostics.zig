@@ -41,7 +41,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         });
     }
 
-    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
+    if (tree.errors.len == 0) {
         try getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     }
 
@@ -368,7 +368,6 @@ pub fn getAstCheckDiagnostics(
     handle: *DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) error{OutOfMemory}!void {
-    std.debug.assert(server.config.enable_ast_check_diagnostics);
     std.debug.assert(handle.tree.errors.len == 0);
 
     if (server.config.prefer_ast_check_as_child_process and

@@ -13,12 +13,6 @@
             "default": true
         },
         {
-            "name": "enable_ast_check_diagnostics",
-            "description": "Whether to enable ast-check diagnostics",
-            "type": "bool",
-            "default": true
-        },
-        {
             "name": "enable_build_on_save",
             "description": "Whether to enable build-on-save diagnostics",
             "type": "bool",
@@ -115,7 +109,7 @@
         },
         {
             "name": "prefer_ast_check_as_child_process",
-            "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",
+            "description": "Favor using `zig ast-check` instead of ZLS's fork",
             "type": "bool",
             "default": true
         },
