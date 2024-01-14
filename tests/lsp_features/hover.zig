@@ -21,6 +21,56 @@ test "hover - literal" {
         \\```
     );
     try testHover(
+        \\const f<cursor>oo = true;
+    ,
+        \\```zig
+        \\const foo = true
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = false;
+    ,
+        \\```zig
+        \\const foo = false
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = null;
+    ,
+        \\```zig
+        \\const foo = null
+        \\```
+        \\```zig
+        \\(@TypeOf(null))
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = unreachable;
+    ,
+        \\```zig
+        \\const foo = unreachable
+        \\```
+        \\```zig
+        \\(noreturn)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo = undefined;
+    ,
+        \\```zig
+        \\const foo = undefined
+        \\```
+        \\```zig
+        \\(@TypeOf(undefined))
+        \\```
+    );
+    try testHover(
         \\const f<cursor>oo = 'e';
     ,
         \\```zig

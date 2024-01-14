@@ -805,14 +805,11 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, 
                     },
                 }
             },
-            .for_range => return Type{
-                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
-                .is_type_val = false,
-            },
+            .for_range => return try Type.typeValFromIP(analyser, .usize_type),
             else => return null,
         },
         .pointer => |info| return switch (info.size) {
-            .One => null,
+            .One => null, // TODO resolve single item pointer to array
             .Many => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
@@ -868,10 +865,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             .One, .Many, .C => {},
             .Slice => {
                 if (std.mem.eql(u8, "len", name)) {
-                    return Type{
-                        .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
-                        .is_type_val = false,
-                    };
+                    return try Type.typeValFromIP(analyser, .usize_type);
                 }
 
                 if (std.mem.eql(u8, "ptr", name)) {
@@ -891,10 +885,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             .multiline_string_literal,
             .string_literal,
             => if (std.mem.eql(u8, "len", name)) {
-                return Type{
-                    .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .usize_type) } },
-                    .is_type_val = false,
-                };
+                return try Type.typeValFromIP(analyser, .usize_type);
             },
 
             .container_decl,
@@ -1275,10 +1266,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 var field = tree.fullContainerField(node).?;
                 field.convertToNonTupleLike(tree.nodes);
                 if (field.ast.type_expr == 0)
-                    return Type{
-                        .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .void_type) } },
-                        .is_type_val = false,
-                    };
+                    return try Type.typeValFromIP(analyser, .void_type);
             }
 
             const base = .{ .node = datas[node].lhs, .handle = handle };
@@ -1667,20 +1655,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .bool_or,
         .bool_not,
         .negation,
-        => return Type{
-            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .bool_type) } },
-            .is_type_val = false,
-        },
+        => return try Type.typeValFromIP(analyser, .bool_type),
 
         .multiline_string_literal,
         .string_literal,
         .error_value, // TODO
         => return Type{ .data = .{ .other = .{ .node = node, .handle = handle } }, .is_type_val = false },
 
-        .char_literal => return Type{
-            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .comptime_int_type) } },
-            .is_type_val = false,
-        },
+        .char_literal => return try Type.typeValFromIP(analyser, .comptime_int_type),
 
         .number_literal => {
             const bytes = offsets.tokenToSlice(tree, main_tokens[node]);
@@ -1692,25 +1674,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .float => .comptime_float_type,
                 .failure => return null,
             };
-            return Type{
-                .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, ty) } },
-                .is_type_val = false,
-            };
+            return try Type.typeValFromIP(analyser, ty);
         },
 
-        .enum_literal => return Type{
-            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .enum_literal_type) } },
-            .is_type_val = false,
-        },
-        .unreachable_literal => return Type{
-            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .noreturn_type) } },
-            .is_type_val = false,
-        },
-
-        .anyframe_literal => return Type{
-            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, .anyframe_type) } },
-            .is_type_val = false,
-        },
+        .enum_literal => return try Type.typeValFromIP(analyser, .enum_literal_type),
+        .unreachable_literal => return try Type.typeValFromIP(analyser, .noreturn_type),
+        .anyframe_literal => return try Type.typeValFromIP(analyser, .anyframe_type),
 
         .mul,
         .div,
@@ -1933,6 +1902,14 @@ pub const Type = struct {
         return .{
             .data = .{ .other = node_handle },
             .is_type_val = true,
+        };
+    }
+
+    pub fn typeValFromIP(analyser: *Analyser, ty: InternPool.Index) error{OutOfMemory}!Type {
+        std.debug.assert(analyser.ip.isType(ty));
+        return Type{
+            .data = .{ .ip_index = .{ .index = try analyser.ip.getUnknown(analyser.gpa, ty) } },
+            .is_type_val = ty == .type_type,
         };
     }
 
@@ -2170,6 +2147,7 @@ pub const Type = struct {
         const node_handle = switch (self.data) {
             .other => |n| n,
             .either => |entries| {
+                // TODO: Return all options instead of first valid one
                 for (entries) |entry| {
                     if (try entry.type_with_handle.lookupSymbol(analyser, symbol)) |decl| {
                         return decl;
@@ -2330,18 +2308,9 @@ pub fn getFieldAccessType(
                             return null;
 
                         const symbol = offsets.identifierIndexToNameSlice(tokenizer.buffer, after_period.loc.start);
-                        const current_type_nodes = try deref_type.getAllTypesWithHandles(analyser.arena.allocator());
 
-                        // TODO: Return all options instead of first valid one
-                        // (this would require a huge rewrite and im lazy)
-                        for (current_type_nodes) |ty| {
-                            if (try ty.lookupSymbol(analyser, symbol)) |child| {
-                                current_type.? = (try child.resolveType(analyser)) orelse continue;
-                                break;
-                            } else continue;
-                        } else {
-                            return null;
-                        }
+                        const child = try deref_type.lookupSymbol(analyser, symbol) orelse continue;
+                        current_type = try child.resolveType(analyser) orelse continue;
                     },
                     .question_mark => {
                         current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;

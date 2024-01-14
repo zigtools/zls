@@ -65,6 +65,7 @@ fn typeToCompletion(
             .Many, .C => {},
         },
         .optional => |_| {
+            if (ty.is_type_val) return;
             try list.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
@@ -95,7 +96,9 @@ fn typeToCompletion(
             for (bruh) |a|
                 try typeToCompletion(server, analyser, arena, list, a.type_with_handle, orig_handle, a.descriptor);
         },
-        else => {},
+        .error_union,
+        .union_tag,
+        => {},
     }
 }
 

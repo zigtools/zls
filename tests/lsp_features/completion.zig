@@ -400,6 +400,13 @@ test "completion - optional" {
     });
 }
 
+test "completion - optional type" {
+    try testCompletion(
+        \\const foo = ?u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+}
+
 test "completion - pointer" {
     try testCompletion(
         \\const foo: *u32 = undefined;
@@ -504,6 +511,42 @@ test "completion - address of" {
         .{ .label = "*", .kind = .Operator },
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
+}
+
+test "completion - pointer type" {
+    try testCompletion(
+        \\const foo = *u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = [*]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = []u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const foo = [*c]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
+}
+
+test "completion - array" {
+    try testCompletion(
+        \\const foo: [3]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        // TODO detail should show "const len: usize = 3"
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+    });
+}
+
+test "completion - array type" {
+    try testCompletion(
+        \\const foo = [3]u32;
+        \\const bar = foo.<cursor>
+    , &.{});
 }
 
 test "completion - captures" {
@@ -1699,6 +1742,51 @@ test "completion - usingnamespace" {
         .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
         .{ .label = "chip1fn1", .kind = .Function, .detail = "fn chip1fn1() void" },
         .{ .label = "chip1fn2", .kind = .Function, .detail = "fn chip1fn2(_: u32) void" },
+    });
+}
+
+test "completion - anytype resolution based on callsite-references" {
+    try testCompletion(
+        \\const Writer1 = struct {
+        \\    fn write1() void {}
+        \\    fn writeAll1() void {}
+        \\};
+        \\const Writer2 = struct {
+        \\    fn write2() void {}
+        \\    fn writeAll2() void {}
+        \\};
+        \\fn caller(a: Writer1, b: Writer2) void {
+        \\    callee(a);
+        \\    callee(b);
+        \\}
+        \\fn callee(writer: anytype) void {
+        \\    writer.<cursor>
+        \\}
+    , &.{
+        .{ .label = "write1", .kind = .Function, .detail = "fn write1() void" },
+        .{ .label = "write2", .kind = .Function, .detail = "fn write2() void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn writeAll1() void" },
+        .{ .label = "writeAll2", .kind = .Function, .detail = "fn writeAll2() void" },
+    });
+    try testCompletion(
+        \\const Writer1 = struct {
+        \\    fn write1() void {}
+        \\    fn writeAll1() void {}
+        \\};
+        \\const Writer2 = struct {
+        \\    fn write2() void {}
+        \\    fn writeAll2() void {}
+        \\};
+        \\fn caller(a: Writer1, b: Writer2) void {
+        \\    callee(a);
+        \\    // callee(b);
+        \\}
+        \\fn callee(writer: anytype) void {
+        \\    writer.<cursor>
+        \\}
+    , &.{
+        .{ .label = "write1", .kind = .Function, .detail = "fn write1() void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn writeAll1() void" },
     });
 }
 
