@@ -10,9 +10,6 @@ enable_snippets: bool = true,
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 
-/// Whether to enable ast-check diagnostics
-enable_ast_check_diagnostics: bool = true,
-
 /// Whether to enable build-on-save diagnostics
 enable_build_on_save: bool = false,
 
@@ -62,7 +59,7 @@ dangerous_comptime_experiments_do_not_enable: bool = false,
 /// When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
 skip_std_references: bool = false,
 
-/// Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork
+/// Favor using `zig ast-check` instead of ZLS's fork
 prefer_ast_check_as_child_process: bool = true,
 
 /// When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`

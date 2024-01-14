@@ -370,7 +370,6 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     var ctx = try Context.init();
     defer ctx.deinit();
     ctx.server.config.enable_autofix = true;
-    ctx.server.config.enable_ast_check_diagnostics = true;
     ctx.server.config.prefer_ast_check_as_child_process = !want_zir;
 
     const uri = try ctx.addDocument(before);

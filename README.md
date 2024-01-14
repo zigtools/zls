@@ -51,7 +51,6 @@ The following options are currently available.
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `true` | Enables snippet completions when the client also supports them |
 | `enable_argument_placeholders` | `bool` | `true` | Whether to enable function argument placeholder completions |
-| `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
 | `enable_build_on_save` | `bool` | `false` | Whether to enable build-on-save diagnostics |
 | `build_on_save_step` | `[]const u8` | `"install"` | Select which step should be executed on build-on-save |
 | `enable_autofix` | `bool` | `false` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
@@ -67,7 +66,7 @@ The following options are currently available.
 | `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations |
 | `dangerous_comptime_experiments_do_not_enable` | `bool` | `false` | Whether to use the comptime interpreter |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
-| `prefer_ast_check_as_child_process` | `bool` | `true` | Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork |
+| `prefer_ast_check_as_child_process` | `bool` | `true` | Favor using `zig ast-check` instead of ZLS's fork |
 | `record_session` | `bool` | `false` | When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay` |
 | `record_session_path` | `?[]const u8` | `null` | Output file path when `record_session` is set. The recommended file extension *.zlsreplay |
 | `replay_session_path` | `?[]const u8` | `null` | Used when calling `zls replay` for specifying the replay file. If no extra argument is given `record_session_path` is used as the default path. |

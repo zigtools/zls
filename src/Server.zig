@@ -328,7 +328,6 @@ fn getAutofixMode(server: *Server) enum {
 
 /// caller owns returned memory.
 fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
-    if (!server.config.enable_ast_check_diagnostics) return .{};
     if (handle.tree.errors.len != 0) return .{};
 
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
@@ -934,9 +933,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         server.showMessage(.Warning, "zig executable could not be found", .{});
     }
 
-    if (server.config.enable_ast_check_diagnostics and
-        server.config.prefer_ast_check_as_child_process)
-    {
+    if (server.config.prefer_ast_check_as_child_process) {
         if (!std.process.can_spawn) {
             log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
@@ -1491,7 +1488,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
+    if (handle.tree.errors.len == 0) {
         try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     }
 
