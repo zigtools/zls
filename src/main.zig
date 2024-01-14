@@ -102,7 +102,12 @@ fn updateConfig(
         const json_message = try transport.readJsonMessage(allocator);
         defer allocator.free(json_message);
 
-        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        const new_config = try std.json.parseFromSlice(
+            Config,
+            allocator,
+            json_message,
+            .{ .allocate = .alloc_always },
+        );
         defer allocator.destroy(new_config.arena);
         config.arena.promote(allocator).deinit();
         config.arena = new_config.arena.state;

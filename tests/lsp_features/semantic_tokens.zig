@@ -1626,6 +1626,22 @@ test "semantic tokens - assembly" {
     });
 }
 
+test "semantic tokens - recursive usingnamespace" {
+    // this test is supposed to check against infinite recursion when resolving usingnamespace
+    try testSemanticTokens(
+        \\const A = struct {
+        \\    usingnamespace A;
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "A", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "usingnamespace", .keyword, .{} },
+        .{ "A", .namespace, .{} },
+    });
+}
+
 test "semantic tokens - weird code" {
     // the expected output is irrelevant, just ensure no crash
     try testSemanticTokens(
