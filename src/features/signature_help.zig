@@ -69,7 +69,13 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
     //   to scan up to find a function or builtin call
     const first_token = tree.firstToken(innermost_block);
     // We start by finding the token that includes the current cursor position
-    const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
+    const last_token = blk: {
+        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
+        switch (token_tags[last_token]) {
+            .l_brace, .l_paren, .l_bracket => break :blk last_token,
+            else => break :blk last_token - 1,
+        }
+    };
 
     // We scan the tokens from last to first, adding and removing open and close
     //   delimiter tokens to a stack, while keeping track of commas corresponding
