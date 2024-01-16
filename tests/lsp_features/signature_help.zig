@@ -24,7 +24,27 @@ test "signature help - simple" {
     , "fn foo(a: u32, b: u32) void", 0);
     try testSignatureHelp(
         \\fn foo(a: u32, b: u32) void {
+        \\    foo(<cursor>,0)
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
         \\    foo(0,<cursor>)
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,<cursor>55)
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,5<cursor>5)
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,55<cursor>)
         \\}
     , "fn foo(a: u32, b: u32) void", 1);
 }
@@ -37,12 +57,32 @@ test "signature help - syntax error resistance" {
     , "fn foo(a: u32, b: u32) void", 0);
     try testSignatureHelp(
         \\fn foo(a: u32, b: u32) void {
+        \\    foo(5<cursor>
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(5<cursor>5
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(<cursor>55
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
         \\    foo(<cursor>;
         \\}
     , "fn foo(a: u32, b: u32) void", 0);
     try testSignatureHelp(
         \\fn foo(a: u32, b: u32) void {
-        \\    foo(<cursor>);
+        \\    foo(<cursor>,
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(<cursor>,;
         \\}
     , "fn foo(a: u32, b: u32) void", 0);
 }
@@ -204,7 +244,7 @@ fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_ac
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri = try ctx.addDocument(source);
+    const test_uri = try ctx.addDocument(text);
 
     const params = types.SignatureHelpParams{
         .textDocument = .{ .uri = test_uri },
