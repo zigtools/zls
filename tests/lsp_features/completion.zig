@@ -2478,6 +2478,9 @@ test "builtin fn `field`" {
     , &.{
         .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
     });
+}
+
+test "completion - builtin fns return type" {
     try testCompletion(
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
@@ -2511,6 +2514,211 @@ test "builtin fn `field`" {
         \\}
     , &.{
         .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
+    });
+    try testCompletion(
+        \\test {
+        \\    const src = @src();
+        \\    src.<cursor>
+        \\}
+    , &.{
+        .{ .label = "module", .kind = .Field, .detail = "[:0]const u8" },
+        .{ .label = "file", .kind = .Field, .detail = "[:0]const u8" },
+        .{ .label = "fn_name", .kind = .Field, .detail = "[:0]const u8" },
+        .{ .label = "line", .kind = .Field, .detail = "u32" },
+        .{ .label = "column", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\test {
+        \\    const ti = @typeInfo().<cursor>;
+        \\}
+    , &.{
+        .{ .label = "type", .kind = .Field, .detail = "void" },
+        .{ .label = "void", .kind = .Field, .detail = "void" },
+        .{ .label = "bool", .kind = .Field, .detail = "void" },
+        .{ .label = "noreturn", .kind = .Field, .detail = "void" },
+        .{ .label = "int", .kind = .Struct, .detail = "Int" },
+        .{ .label = "float", .kind = .Struct, .detail = "Float" },
+        .{ .label = "pointer", .kind = .Struct, .detail = "Pointer" },
+        .{ .label = "array", .kind = .Struct, .detail = "Array" },
+        .{ .label = "@\"struct\"", .kind = .Struct, .detail = "Struct" },
+        .{ .label = "comptime_float", .kind = .Field, .detail = "void" },
+        .{ .label = "comptime_int", .kind = .Field, .detail = "void" },
+        .{ .label = "undefined", .kind = .Field, .detail = "void" },
+        .{ .label = "null", .kind = .Field, .detail = "void" },
+        .{ .label = "optional", .kind = .Struct, .detail = "Optional" },
+        .{ .label = "error_union", .kind = .Struct, .detail = "ErrorUnion" },
+        .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
+        .{ .label = "@\"enum\"", .kind = .Struct, .detail = "Enum" },
+        .{ .label = "@\"union\"", .kind = .Struct, .detail = "Union" },
+        .{ .label = "@\"fn\"", .kind = .Struct, .detail = "Fn" },
+        .{ .label = "@\"opaque\"", .kind = .Struct, .detail = "Opaque" },
+        .{ .label = "frame", .kind = .Struct, .detail = "Frame" },
+        .{ .label = "@\"anyframe\"", .kind = .Struct, .detail = "AnyFrame" },
+        .{ .label = "vector", .kind = .Struct, .detail = "Vector" },
+        .{ .label = "enum_literal", .kind = .Field, .detail = "void" },
+    });
+}
+
+test "completion - builtin fns taking an enum arg" {
+    try testCompletion(
+        \\test {
+        \\    @Type(.{.<cursor>
+        \\}
+    , &.{
+        .{ .label = "type", .kind = .Field, .detail = "void" },
+        .{ .label = "void", .kind = .Field, .detail = "void" },
+        .{ .label = "bool", .kind = .Field, .detail = "void" },
+        .{ .label = "noreturn", .kind = .Field, .detail = "void" },
+        .{ .label = "int", .kind = .Field, .detail = "Int" },
+        .{ .label = "float", .kind = .Field, .detail = "Float" },
+        .{ .label = "pointer", .kind = .Field, .detail = "Pointer" },
+        .{ .label = "array", .kind = .Field, .detail = "Array" },
+        .{ .label = "@\"struct\"", .kind = .Field, .detail = "Struct" },
+        .{ .label = "comptime_float", .kind = .Field, .detail = "void" },
+        .{ .label = "comptime_int", .kind = .Field, .detail = "void" },
+        .{ .label = "undefined", .kind = .Field, .detail = "void" },
+        .{ .label = "null", .kind = .Field, .detail = "void" },
+        .{ .label = "optional", .kind = .Field, .detail = "Optional" },
+        .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
+        .{ .label = "error_set", .kind = .Field, .detail = "ErrorSet" },
+        .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
+        .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
+        .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },
+        .{ .label = "@\"opaque\"", .kind = .Field, .detail = "Opaque" },
+        .{ .label = "frame", .kind = .Field, .detail = "Frame" },
+        .{ .label = "@\"anyframe\"", .kind = .Field, .detail = "AnyFrame" },
+        .{ .label = "vector", .kind = .Field, .detail = "Vector" },
+        .{ .label = "enum_literal", .kind = .Field, .detail = "void" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @Type(.{.Struct = .{.<cursor>
+        \\}
+    , &.{
+        .{ .label = "layout", .kind = .Field, .detail = "ContainerLayout" },
+        .{ .label = "backing_integer", .kind = .Field, .detail = "?type = null" },
+        .{ .label = "fields", .kind = .Field, .detail = "[]const StructField" },
+        .{ .label = "decls", .kind = .Field, .detail = "[]const Declaration" },
+        .{ .label = "is_tuple", .kind = .Field, .detail = "bool" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @setFloatMode(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "strict", .kind = .EnumMember, .detail = "strict" },
+        .{ .label = "optimized", .kind = .EnumMember, .detail = "optimized" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @prefetch(, .{.<cursor>})
+        \\}
+    , &.{
+        .{ .label = "rw", .kind = .Field, .detail = "Rw = .read" },
+        .{ .label = "locality", .kind = .Field, .detail = "u2 = 3" },
+        .{ .label = "cache", .kind = .Field, .detail = "Cache = .data" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @reduce(.<cursor>
+        \\}
+    , &.{
+        .{ .label = "And", .kind = .EnumMember, .detail = "And" },
+        .{ .label = "Or", .kind = .EnumMember, .detail = "Or" },
+        .{ .label = "Xor", .kind = .EnumMember, .detail = "Xor" },
+        .{ .label = "Min", .kind = .EnumMember, .detail = "Min" },
+        .{ .label = "Max", .kind = .EnumMember, .detail = "Max" },
+        .{ .label = "Add", .kind = .EnumMember, .detail = "Add" },
+        .{ .label = "Mul", .kind = .EnumMember, .detail = "Mul" },
+    });
+    try testCompletionTextEdit(.{
+        .source = "comptime { @export(foo ,.<cursor>",
+        .label = "name",
+        .expected_insert_line = "comptime { @export(foo ,.{ .name = ",
+        .expected_replace_line = "comptime { @export(foo ,.{ .name = ",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @extern(T , .<cursor>",
+        .label = "is_thread_local",
+        .expected_insert_line = "test { @extern(T , .{ .is_thread_local = ",
+        .expected_replace_line = "test { @extern(T , .{ .is_thread_local = ",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @fence(.<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @fence(.acq_rel",
+        .expected_replace_line = "test { @fence(.acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @cmpxchgWeak(1,2,3,4, .<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",
+        .expected_replace_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @cmpxchgStrong(1,2,3,4,5,.<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @cmpxchgStrong(1,2,3,4,5,.acq_rel",
+        .expected_replace_line = "test { @cmpxchgStrong(1,2,3,4,5,.acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicLoad(1,2,.<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicLoad(1,2,.acq_rel",
+        .expected_replace_line = "test { @atomicLoad(1,2,.acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicStore(1,2,3,.<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicStore(1,2,3,.acq_rel",
+        .expected_replace_line = "test { @atomicStore(1,2,3,.acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicRmw(1,2,.<cursor>",
+        .label = "Add",
+        .expected_insert_line = "test { @atomicRmw(1,2,.Add",
+        .expected_replace_line = "test { @atomicRmw(1,2,.Add",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicRmw(1,2,3,4,.<cursor>",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicRmw(1,2,3,4,.acq_rel",
+        .expected_replace_line = "test { @atomicRmw(1,2,3,4,.acq_rel",
+        .enable_snippets = false,
+    });
+    try testCompletion(
+        \\test {
+        \\    @call(.<cursor>
+        \\}
+    , &.{
+        .{ .label = "auto", .kind = .EnumMember, .detail = "auto" },
+        .{ .label = "async_kw", .kind = .EnumMember, .detail = "async_kw" },
+        .{ .label = "never_tail", .kind = .EnumMember, .detail = "never_tail" },
+        .{ .label = "never_inline", .kind = .EnumMember, .detail = "never_inline" },
+        .{ .label = "no_async", .kind = .EnumMember, .detail = "no_async" },
+        .{ .label = "always_tail", .kind = .EnumMember, .detail = "always_tail" },
+        .{ .label = "always_inline", .kind = .EnumMember, .detail = "always_inline" },
+        .{ .label = "compile_time", .kind = .EnumMember, .detail = "compile_time" },
+    });
+    try testCompletionTextEdit(.{
+        .source = "var a: u16 addrspace(.<cursor>",
+        .label = "constant",
+        .expected_insert_line = "var a: u16 addrspace(.constant",
+        .expected_replace_line = "var a: u16 addrspace(.constant",
+    });
+    try testCompletionTextEdit(.{
+        .source = "fn foo() callconv(.<cursor>",
+        .label = "AAPCS",
+        .expected_insert_line = "fn foo() callconv(.AAPCS",
+        .expected_replace_line = "fn foo() callconv(.AAPCS",
     });
 }
 
