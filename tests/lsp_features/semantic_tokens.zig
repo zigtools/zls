@@ -1659,6 +1659,11 @@ test "semantic tokens - weird code" {
         .{ "fn", .keyword, .{} },
         .{ "bar", .function, .{ .declaration = true } },
     });
+    try testSemanticTokens(
+        \\_ = async bar
+    , &.{
+        .{ "bar", .variable, .{} },
+    });
 }
 
 const TokenData = struct {

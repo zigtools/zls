@@ -981,8 +981,9 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
 
     if (container_field.ast.value_expr != 0) {
         const equal_token = tree.firstToken(container_field.ast.value_expr) - 1;
-        std.debug.assert(token_tags[equal_token] == .equal);
-        try writeToken(builder, equal_token, .operator);
+        if (token_tags[equal_token] == .equal) {
+            try writeToken(builder, equal_token, .operator);
+        }
         try writeNodeTokens(builder, container_field.ast.value_expr);
     }
 }

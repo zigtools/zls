@@ -69,7 +69,7 @@ pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Enc
 }
 
 pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
-    std.debug.assert(source_index < tree.source.len);
+    std.debug.assert(source_index <= tree.source.len);
 
     const tokens_start = tree.tokens.items(.start);
 

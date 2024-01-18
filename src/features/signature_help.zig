@@ -73,7 +73,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
         const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
         switch (token_tags[last_token]) {
             .l_brace, .l_paren, .l_bracket => break :blk last_token,
-            else => break :blk last_token - 1,
+            else => break :blk last_token -| 1,
         }
     };
 
