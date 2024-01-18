@@ -646,6 +646,7 @@ pub const Index = enum(u32) {
     generic_poison,
     // unknown value of unknown type
     unknown_unknown,
+    ref_start_index,
 
     none = std.math.maxInt(u32),
     _,
@@ -706,6 +707,7 @@ comptime {
     assert(@intFromEnum(Zir.Inst.Ref.generic_poison_type) == @intFromEnum(Index.generic_poison_type));
     assert(@intFromEnum(Zir.Inst.Ref.undef) == @intFromEnum(Index.undefined_value));
     assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
+    assert(@intFromEnum(Zir.Inst.Ref.ref_start_index) == @intFromEnum(Index.ref_start_index));
 }
 
 pub const StringSlice = struct {
@@ -1126,6 +1128,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
         .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{ .ty = .unknown_type } } },
     };
+    comptime std.debug.assert(@intFromEnum(Index.ref_start_index) == items.len);
 
     const extra_count = 6 * @sizeOf(Key.Pointer) + @sizeOf(Key.ErrorUnion) + 4 * @sizeOf(Key.Function) + 8 * @sizeOf(Key.U64Value) + @sizeOf(Key.Aggregate);
 

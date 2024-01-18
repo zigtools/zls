@@ -8,6 +8,7 @@ const Ast = std.zig.Ast;
 const Module = @This();
 const DocumentStore = @import("../DocumentStore.zig");
 const Handle = DocumentStore.Handle;
+const BuiltinFn = std.zig.BuiltinFn;
 
 /// Canonical reference to a position within a source file.
 pub const SrcLoc = struct {
@@ -22,8 +23,8 @@ pub const SrcLoc = struct {
         return tree.firstToken(src_loc.parent_decl_node);
     }
 
-    pub fn declRelativeToNodeIndex(src_loc: SrcLoc, offset: i32) Ast.TokenIndex {
-        return @as(Ast.Node.Index, @bitCast(offset + @as(i32, @bitCast(src_loc.parent_decl_node))));
+    pub fn declRelativeToNodeIndex(src_loc: SrcLoc, offset: i32) Ast.Node.Index {
+        return @bitCast(offset + @as(i32, @bitCast(src_loc.parent_decl_node)));
     }
 
     pub const Span = struct {
@@ -143,6 +144,41 @@ pub const SrcLoc = struct {
             .node_offset_builtin_call_arg3 => |n| return src_loc.byteOffsetBuiltinCallArg(n, 3),
             .node_offset_builtin_call_arg4 => |n| return src_loc.byteOffsetBuiltinCallArg(n, 4),
             .node_offset_builtin_call_arg5 => |n| return src_loc.byteOffsetBuiltinCallArg(n, 5),
+            .node_offset_ptrcast_operand => |node_off| {
+                const tree = src_loc.handle.tree;
+                const main_tokens = tree.nodes.items(.main_token);
+                const node_datas = tree.nodes.items(.data);
+                const node_tags = tree.nodes.items(.tag);
+
+                var node = src_loc.declRelativeToNodeIndex(node_off);
+                while (true) {
+                    switch (node_tags[node]) {
+                        .builtin_call_two, .builtin_call_two_comma => {},
+                        else => break,
+                    }
+
+                    if (node_datas[node].lhs == 0) break; // 0 args
+                    if (node_datas[node].rhs != 0) break; // 2 args
+
+                    const builtin_token = main_tokens[node];
+                    const builtin_name = tree.tokenSlice(builtin_token);
+                    const info = BuiltinFn.list.get(builtin_name) orelse break;
+
+                    switch (info.tag) {
+                        else => break,
+                        .ptr_cast,
+                        .align_cast,
+                        .addrspace_cast,
+                        .const_cast,
+                        .volatile_cast,
+                        => {},
+                    }
+
+                    node = node_datas[node].lhs;
+                }
+
+                return nodeToSpan(tree, node);
+            },
             .node_offset_array_access_index => |node_off| {
                 const tree = src_loc.handle.tree;
                 const node_datas = tree.nodes.items(.data);
@@ -178,8 +214,21 @@ pub const SrcLoc = struct {
                 const node_datas = tree.nodes.items(.data);
                 const node_tags = tree.nodes.items(.tag);
                 const node = src_loc.declRelativeToNodeIndex(node_off);
+                var buf: [1]Ast.Node.Index = undefined;
                 const tok_index = switch (node_tags[node]) {
                     .field_access => node_datas[node].rhs,
+                    .call_one,
+                    .call_one_comma,
+                    .async_call_one,
+                    .async_call_one_comma,
+                    .call,
+                    .call_comma,
+                    .async_call,
+                    .async_call_comma,
+                    => blk: {
+                        const full = tree.fullCall(&buf, node).?;
+                        break :blk tree.lastToken(full.ast.fn_expr);
+                    },
                     else => tree.firstToken(node) - 2,
                 };
                 const start = tree.tokens.items(.start)[tok_index];
@@ -218,9 +267,16 @@ pub const SrcLoc = struct {
                     .while_simple,
                     .while_cont,
                     .@"while",
+                    => tree.fullWhile(node).?.ast.cond_expr,
+
                     .for_simple,
                     .@"for",
-                    => tree.fullWhile(node).?.ast.cond_expr,
+                    => {
+                        const inputs = tree.fullFor(node).?.ast.inputs;
+                        const start = tree.firstToken(inputs[0]);
+                        const end = tree.lastToken(inputs[inputs.len - 1]);
+                        return tokensToSpan(tree, start, end, start);
+                    },
 
                     .@"orelse" => node,
                     .@"catch" => node,
@@ -229,14 +285,14 @@ pub const SrcLoc = struct {
                 return nodeToSpan(tree, src_node);
             },
             .for_input => |for_input| {
-                const tree = try src_loc.handle.tree;
+                const tree = src_loc.handle.tree;
                 const node = src_loc.declRelativeToNodeIndex(for_input.for_node_offset);
                 const for_full = tree.fullFor(node).?;
                 const src_node = for_full.ast.inputs[for_input.input_index];
                 return nodeToSpan(tree, src_node);
             },
             .for_capture_from_input => |node_off| {
-                const tree = try src_loc.handle.tree;
+                const tree = src_loc.handle.tree;
                 const token_tags = tree.tokens.items(.tag);
                 const input_node = src_loc.declRelativeToNodeIndex(node_off);
                 // We have to actually linear scan the whole AST to find the for loop
@@ -276,6 +332,37 @@ pub const SrcLoc = struct {
                         else => continue,
                     }
                 } else unreachable;
+            },
+            .call_arg => |call_arg| {
+                const tree = src_loc.handle.tree;
+                const node = src_loc.declRelativeToNodeIndex(call_arg.call_node_offset);
+                var buf: [1]Ast.Node.Index = undefined;
+                const call_full = tree.fullCall(&buf, node).?;
+                const src_node = call_full.ast.params[call_arg.arg_index];
+                return nodeToSpan(tree, src_node);
+            },
+            .fn_proto_param => |fn_proto_param| {
+                const tree = src_loc.handle.tree;
+                const node = src_loc.declRelativeToNodeIndex(fn_proto_param.fn_proto_node_offset);
+                var buf: [1]Ast.Node.Index = undefined;
+                const full = tree.fullFnProto(&buf, node).?;
+                var it = full.iterate(&tree);
+                var i: usize = 0;
+                while (it.next()) |param| : (i += 1) {
+                    if (i == fn_proto_param.param_index) {
+                        if (param.anytype_ellipsis3) |token| return tokenToSpan(tree, token);
+                        const first_token = param.comptime_noalias orelse
+                            param.name_token orelse
+                            tree.firstToken(param.type_expr);
+                        return tokensToSpan(
+                            tree,
+                            first_token,
+                            tree.lastToken(param.type_expr),
+                            first_token,
+                        );
+                    }
+                }
+                unreachable;
             },
             .node_offset_bin_lhs => |node_off| {
                 const tree = src_loc.handle.tree;
@@ -340,12 +427,23 @@ pub const SrcLoc = struct {
                     }
                 } else unreachable;
             },
-            .node_offset_switch_prong_capture => |node_off| {
+            .node_offset_switch_prong_capture,
+            .node_offset_switch_prong_tag_capture,
+            => |node_off| {
                 const tree = src_loc.handle.tree;
                 const case_node = src_loc.declRelativeToNodeIndex(node_off);
                 const case = tree.fullSwitchCase(case_node).?;
-                const start_tok = case.payload_token.?;
                 const token_tags = tree.tokens.items(.tag);
+                const start_tok = switch (src_loc.lazy) {
+                    .node_offset_switch_prong_capture => case.payload_token.?,
+                    .node_offset_switch_prong_tag_capture => blk: {
+                        var tok = case.payload_token.?;
+                        if (token_tags[tok] == .asterisk) tok += 1;
+                        tok += 2; // skip over comma
+                        break :blk tok;
+                    },
+                    else => unreachable,
+                };
                 const end_tok = switch (token_tags[start_tok]) {
                     .asterisk => start_tok + 1,
                     else => start_tok,
@@ -617,6 +715,10 @@ pub const SrcLoc = struct {
         );
     }
 
+    fn tokenToSpan(tree: Ast, token: Ast.TokenIndex) Span {
+        return tokensToSpan(tree, token, token, token);
+    }
+
     fn tokensToSpan(tree: Ast, start: Ast.TokenIndex, end: Ast.TokenIndex, main: Ast.TokenIndex) Span {
         const token_starts = tree.tokens.items(.start);
         var start_tok = start;
@@ -716,6 +818,9 @@ pub const LazySrcLoc = union(enum) {
     node_offset_builtin_call_arg3: i32,
     node_offset_builtin_call_arg4: i32,
     node_offset_builtin_call_arg5: i32,
+    /// Like `node_offset_builtin_call_arg0` but recurses through arbitrarily many calls
+    /// to pointer cast builtins.
+    node_offset_ptrcast_operand: i32,
     /// The source location points to the index expression of an array access
     /// expression, found by taking this AST node index offset from the containing
     /// Decl AST node, which points to an array access AST node. Next, navigate
@@ -755,7 +860,8 @@ pub const LazySrcLoc = union(enum) {
     /// The payload is offset from the containing Decl AST node.
     /// The source location points to the field name of:
     ///  * a field access expression (`a.b`), or
-    ///  * the operand ("b" node) of a field initialization expression (`.a = b`)
+    ///  * the callee of a method call (`a.b()`), or
+    ///  * the operand ("b" node) of a field initialization expression (`.a = b`), or
     /// The Decl is determined contextually.
     node_offset_field_name: i32,
     /// The source location points to the pointer of a pointer deref expression,
@@ -815,6 +921,9 @@ pub const LazySrcLoc = union(enum) {
     /// The source location points to the capture of a switch_prong.
     /// The Decl is determined contextually.
     node_offset_switch_prong_capture: i32,
+    /// The source location points to the tag capture of a switch_prong.
+    /// The Decl is determined contextually.
+    node_offset_switch_prong_tag_capture: i32,
     /// The source location points to the align expr of a function type
     /// expression, found by taking this AST node index offset from the containing
     /// Decl AST node, which points to a function type AST node. Next, navigate to
@@ -927,12 +1036,31 @@ pub const LazySrcLoc = union(enum) {
     /// Next, navigate to the corresponding capture.
     /// The Decl is determined contextually.
     for_capture_from_input: i32,
+    /// The source location points to the argument node of a function call.
+    call_arg: struct {
+        decl: InternPool.DeclIndex,
+        /// Points to the function call AST node.
+        call_node_offset: i32,
+        /// The index of the argument the source location points to.
+        arg_index: u32,
+    },
+    fn_proto_param: struct {
+        decl: InternPool.DeclIndex,
+        /// Points to the function prototype AST node.
+        fn_proto_node_offset: i32,
+        /// The index of the parameter the source location points to.
+        param_index: u32,
+    },
 
     pub fn nodeOffset(node_offset: i32) LazySrcLoc {
         return .{ .node_offset = node_offset };
     }
 
-    pub fn toSrcLoc(lazy: LazySrcLoc, handle: *Handle, src_node: Ast.Node.Index) SrcLoc {
+    const Mod = struct {};
+    const InternPool = @import("../analyser/InternPool.zig");
+
+    /// Upgrade to a `SrcLoc` based on the `Decl` provided.
+    pub fn toSrcLoc(lazy: LazySrcLoc, handle: *Handle, decl: *const InternPool.Decl, mod: *Mod) SrcLoc {
         return switch (lazy) {
             .unneeded,
             .entire_file,
@@ -961,6 +1089,7 @@ pub const LazySrcLoc = union(enum) {
             .node_offset_builtin_call_arg3,
             .node_offset_builtin_call_arg4,
             .node_offset_builtin_call_arg5,
+            .node_offset_ptrcast_operand,
             .node_offset_array_access_index,
             .node_offset_slice_ptr,
             .node_offset_slice_start,
@@ -979,6 +1108,7 @@ pub const LazySrcLoc = union(enum) {
             .node_offset_switch_special_prong,
             .node_offset_switch_range,
             .node_offset_switch_prong_capture,
+            .node_offset_switch_prong_tag_capture,
             .node_offset_fn_type_align,
             .node_offset_fn_type_addrspace,
             .node_offset_fn_type_section,
@@ -1007,7 +1137,14 @@ pub const LazySrcLoc = union(enum) {
             .for_capture_from_input,
             => .{
                 .handle = handle,
-                .parent_decl_node = src_node,
+                .parent_decl_node = decl.node_idx,
+                .lazy = lazy,
+            },
+            inline .call_arg,
+            .fn_proto_param,
+            => |x| .{
+                .handle = handle,
+                .parent_decl_node = mod.declPtr(x.decl).node_idx,
                 .lazy = lazy,
             },
         };
