@@ -203,6 +203,7 @@ pub fn interpret(
             const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
                 .fields = .{},
                 .owner_decl = .none, // TODO
+                .zir_index = 0,
                 .namespace = container_namespace,
                 .layout = .Auto, // TODO
                 .backing_int_ty = .none, // TODO
@@ -272,6 +273,7 @@ pub fn interpret(
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = try interpreter.ip.string_pool.getOrPutString(interpreter.allocator, name),
                 .node_idx = node_idx,
+                .src_line = 0, // TODO
                 .index = .none,
                 .alignment = 0, // TODO
                 .address_space = .generic, // TODO
@@ -856,6 +858,7 @@ pub fn interpret(
                     const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
                         .fields = .{},
                         .owner_decl = .none, // TODO
+                        .zir_index = 0,
                         .namespace = .none,
                         .layout = .Auto,
                         .backing_int_ty = .none,
@@ -1059,6 +1062,7 @@ pub fn interpret(
                 const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                     .name = try interpreter.ip.string_pool.getOrPutString(interpreter.allocator, name),
                     .node_idx = node_idx,
+                    .src_line = 0, // TODO
                     .index = function_type,
                     .alignment = 0, // TODO
                     .address_space = .generic, // TODO
@@ -1252,6 +1256,7 @@ pub fn call(
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = try interpreter.ip.string_pool.getOrPutString(interpreter.allocator, name),
                 .node_idx = name_token,
+                .src_line = 0, // TODO
                 .index = arguments[arg_index].index,
                 .alignment = 0, // TODO
                 .address_space = .generic, // TODO

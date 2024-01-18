@@ -2779,6 +2779,10 @@ pub const Declaration = union(enum) {
     },
     /// always an identifier
     error_token: Ast.TokenIndex,
+    intern_pool_index: struct {
+        name: Ast.TokenIndex,
+        index: InternPool.Index,
+    },
 
     pub const Param = struct {
         param_index: u16,
@@ -2863,6 +2867,7 @@ pub const Declaration = union(enum) {
                 const payload_token = case.payload_token.?;
                 return payload_token + @intFromBool(tree.tokens.items(.tag)[payload_token] == .asterisk);
             },
+            .intern_pool_index => |payload| payload.name,
         };
     }
 };
@@ -2943,6 +2948,8 @@ pub const DeclWithHandle = struct {
             .label_decl,
             .error_token,
             => return null,
+
+            .intern_pool_index => return null, // TODO
         }
     }
 
@@ -3133,6 +3140,15 @@ pub const DeclWithHandle = struct {
                 return null;
             },
             .error_token => return null,
+            .intern_pool_index => |payload| {
+                if (payload.index == .none) return null;
+                if (try analyser.ip.isUnknownDeep(analyser.arena.allocator(), payload.index)) return null;
+
+                return Type{
+                    .data = .{ .ip_index = .{ .index = payload.index } },
+                    .is_type_val = analyser.ip.typeOf(payload.index) == .type_type,
+                };
+            },
         };
     }
 };
@@ -3558,6 +3574,40 @@ pub fn lookupSymbolFieldInit(
         field_name,
         .field,
     );
+}
+
+pub fn lookupDeclaration(
+    document_scope: DocumentScope,
+    source_index: usize,
+    symbol: []const u8,
+    symbol_kind: DocumentScope.DeclarationLookup.Kind,
+) Declaration.OptionalIndex {
+    var current_scope = innermostBlockScopeIndex(document_scope, source_index);
+
+    while (current_scope.unwrap()) |scope_index| {
+        defer current_scope = document_scope.getScopeParent(scope_index);
+        const decl_index = document_scope.getScopeDeclaration(.{
+            .scope = scope_index,
+            .name = symbol,
+            .kind = symbol_kind,
+        }).unwrap() orelse continue;
+        if (document_scope.declarations.items(.tags)[@intFromEnum(scope_index)] == .label_decl) continue;
+        return decl_index.toOptional();
+    }
+
+    return .none;
+}
+
+// this is incredibly inefficient but it works
+pub fn transferInternPoolData(from: *DocumentStore.Handle, to: *DocumentScope) void {
+    for (from.document_scope.decls.items) |from_decl| {
+        if (from_decl != .intern_pool_index) continue;
+        const name_token = from_decl.intern_pool_index.name;
+        const source_index = offsets.tokenToIndex(from.tree, name_token);
+        const symbol = offsets.tokenToSlice(from.tree, name_token);
+        const to_decl = lookupDeclaration(to.*, source_index, symbol, .other).unwrap() orelse continue;
+        to_decl.* = from_decl;
+    }
 }
 
 pub fn resolveExpressionType(

@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const SemaCases = @import("tests/SemaCases.zig");
 
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
@@ -70,9 +71,6 @@ pub fn build(b: *Build) !void {
 
     const exe_options = b.addOptions();
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
-    exe_options.addOption(bool, "enable_tracy", enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
@@ -82,6 +80,9 @@ pub fn build(b: *Build) !void {
 
     const build_options = b.addOptions();
     const build_options_module = build_options.createModule();
+    build_options.addOption(bool, "enable_tracy", enable_tracy);
+    build_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
+    build_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
     build_options.addOption([]const u8, "version_string", version_string);
     build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
 
@@ -111,7 +112,8 @@ pub fn build(b: *Build) !void {
     exe.pie = pie;
     b.installArtifact(exe);
 
-    exe.root_module.addImport("build_options", exe_options_module);
+    exe.root_module.addImport("exe_options", exe_options_module);
+    exe.root_module.addImport("build_options", build_options_module);
     exe.root_module.addImport("known-folders", known_folders_module);
     exe.root_module.addImport("diffz", diffz_module);
 
@@ -221,6 +223,18 @@ pub fn build(b: *Build) !void {
     src_tests.root_module.addImport("build_options", build_options_module);
     src_tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
+
+    var cases: SemaCases = .{ .allocator = b.allocator };
+    try cases.addCasesFromDir(b.pathFromRoot("tests/sema"), .{ .ignore_annotation = false });
+    try cases.addCasesFromDir(b.pathFromRoot("src"), .{ .ignore_annotation = true });
+
+    // TODO zig_lib_dir is not being resolved
+    if (b.zig_lib_dir) |dir_path| {
+        try cases.addCasesFromDir(dir_path.getPath(b), .{ .ignore_annotation = true });
+    }
+    const sema_test = cases.lowerToBuild(b, test_step, target);
+    sema_test.root_module.addImport("zls", zls_module);
+    sema_test.root_module.addImport("build_options", build_options_module);
 
     if (coverage) {
         const include_pattern = b.fmt("--include-pattern=/src", .{});

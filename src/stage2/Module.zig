@@ -364,6 +364,31 @@ pub const SrcLoc = struct {
                 }
                 unreachable;
             },
+            .container_field => |container_field| {
+                const tree = src_loc.handle.tree;
+                const node = src_loc.declRelativeToNodeIndex(0);
+                var buf: [2]Ast.Node.Index = undefined;
+                if (tree.fullContainerDecl(&buf, node)) |container_decl| {
+                    var field_index: usize = 0;
+                    for (container_decl.ast.members) |member_node| {
+                        const field = tree.fullContainerField(member_node) orelse continue;
+                        if (field_index != container_field.index) {
+                            field_index += 1;
+                            continue;
+                        }
+                        return switch (container_field.query) {
+                            .name => tokenToSpan(tree, field.ast.main_token),
+                            .type => nodeToSpan(tree, field.ast.type_expr),
+                            .value => nodeToSpan(tree, field.ast.value_expr),
+                            .alignment => nodeToSpan(tree, field.ast.align_expr),
+                        };
+                    }
+                    unreachable;
+                } else {
+                    // This type was generated using @Type
+                    return nodeToSpan(tree, node);
+                }
+            },
             .node_offset_bin_lhs => |node_off| {
                 const tree = src_loc.handle.tree;
                 const node = src_loc.declRelativeToNodeIndex(node_off);
@@ -1038,25 +1063,31 @@ pub const LazySrcLoc = union(enum) {
     for_capture_from_input: i32,
     /// The source location points to the argument node of a function call.
     call_arg: struct {
-        decl: InternPool.DeclIndex,
+        decl: InternPool.Decl.Index,
         /// Points to the function call AST node.
         call_node_offset: i32,
         /// The index of the argument the source location points to.
         arg_index: u32,
     },
     fn_proto_param: struct {
-        decl: InternPool.DeclIndex,
+        decl: InternPool.Decl.Index,
         /// Points to the function prototype AST node.
         fn_proto_node_offset: i32,
         /// The index of the parameter the source location points to.
         param_index: u32,
+    },
+    /// The source location points to a field in a container.
+    container_field: struct {
+        decl: InternPool.Decl.Index,
+        index: u32,
+        query: enum { name, type, value, alignment },
     },
 
     pub fn nodeOffset(node_offset: i32) LazySrcLoc {
         return .{ .node_offset = node_offset };
     }
 
-    const Mod = struct {};
+    const Mod = @import("../analyser/Module.zig");
     const InternPool = @import("../analyser/InternPool.zig");
 
     /// Upgrade to a `SrcLoc` based on the `Decl` provided.
@@ -1142,6 +1173,7 @@ pub const LazySrcLoc = union(enum) {
             },
             inline .call_arg,
             .fn_proto_param,
+            .container_field,
             => |x| .{
                 .handle = handle,
                 .parent_decl_node = mod.declPtr(x.decl).node_idx,

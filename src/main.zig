@@ -1,5 +1,6 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
+const exe_options = @import("exe_options");
 const build_options = @import("build_options");
 const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
@@ -15,7 +16,7 @@ const logger = std.log.scoped(.zls_main);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => @enumFromInt(@intFromEnum(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
+    else => @enumFromInt(@intFromEnum(exe_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
 pub const std_options = struct {
@@ -235,7 +236,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         return result;
     }
     if (specified.get(.@"minimum-build-version")) {
-        try stdout.writeAll(build_options.min_zig_string ++ "\n");
+        try stdout.writeAll(exe_options.min_zig_string ++ "\n");
         return result;
     }
     if (specified.get(.@"compiler-version")) {
@@ -285,13 +286,13 @@ const stack_frames = switch (zig_builtin.mode) {
 };
 
 pub fn main() !void {
-    var allocator_state = if (build_options.use_gpa)
+    var allocator_state = if (exe_options.use_gpa)
         std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
     else
         binned_allocator.BinnedAllocator(.{}){};
 
     defer {
-        if (build_options.use_gpa)
+        if (exe_options.use_gpa)
             std.debug.assert(allocator_state.deinit() == .ok)
         else
             allocator_state.deinit();
@@ -300,8 +301,8 @@ pub fn main() !void {
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
 
-    var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
-    const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
+    var failing_allocator_state = if (exe_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else void{};
+    const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
     defer allocator.free(result.zls_exe_path);

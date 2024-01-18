@@ -97,6 +97,12 @@ fn hoverSymbolRecursive(
 
             break :def ast.paramSlice(tree, param);
         },
+        .intern_pool_index => |payload| blk: {
+            const name = tree.tokenSlice(payload.name);
+            const ip = analyser.ip;
+            if (payload.index == .none or ip.isUnknown(payload.index)) break :blk name;
+            break :blk try std.fmt.allocPrint(arena, "{s}: {} = {}", .{ name, ip.typeOf(payload.index).fmt(ip), payload.index.fmt(ip) });
+        },
         .pointer_payload,
         .error_union_payload,
         .error_union_error,

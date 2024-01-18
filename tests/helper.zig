@@ -159,3 +159,154 @@ test "helper - collectReplacePlaceholders" {
         .{ .start = 3, .end = 6 },
     });
 }
+
+pub const AnnotatedSourceLoc = struct {
+    loc: offsets.Loc,
+    content: []const u8,
+};
+
+/// extract a list of special comment from a source file
+/// **Example**
+/// ```
+/// Some text where we want to highlight some locations
+/// //   ^^^^ some content
+/// in the text file.
+/// //          ^^^^ something else here
+/// ```
+/// passing the above content to this function will yield the following:
+/// ```zig
+/// [2]AnnotatedSourceLoc{
+///     .{
+///         .loc = .{ .start = 5, .end = 9 }, // this is the location of `text` in the source
+///         .content = "some content",
+///     },
+///     .{
+///         .loc = .{ .start = 87, .end = 91 }, // this is the location of `file` in the source
+///         .content = "something else here",
+///     },
+/// },
+/// ```
+pub fn collectAnnotatedSourceLocations(allocator: std.mem.Allocator, source: []const u8) error{ OutOfMemory, InvalidSourceLoc }![]AnnotatedSourceLoc {
+    var items = std.ArrayListUnmanaged(AnnotatedSourceLoc){};
+    errdefer items.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < source.len) {
+        defer i = std.mem.indexOfScalarPos(u8, source, i, '\n') orelse source.len;
+
+        i = skipWhitespace(source, i);
+        if (!std.mem.startsWith(u8, source[i..], "//")) continue;
+        i += 2;
+
+        i = skipWhitespace(source, i);
+        if (!std.mem.startsWith(u8, source[i..], "^")) continue;
+        var loc: offsets.Loc = .{ .start = i, .end = undefined };
+        i += 1;
+        while (i < source.len) : (i += 1) {
+            if (source[i] != '^') break;
+        }
+        loc.end = i;
+
+        const content_start = i;
+        const content_end = std.mem.indexOfScalarPos(u8, source, i, '\n') orelse source.len;
+        const content = source[content_start..content_end];
+
+        const loc_length = offsets.locLength(source, loc, .@"utf-8");
+        const start_pos = offsets.indexToPosition(source, loc.start, .@"utf-8");
+        if (start_pos.line == 0) return error.InvalidSourceLoc; // there is no previous line
+
+        var previous_line_start_pos = start_pos;
+        previous_line_start_pos.line -= 1;
+        const previous_line_start_index = offsets.positionToIndex(source, previous_line_start_pos, .@"utf-8");
+
+        const previous_line_loc = offsets.Loc{
+            .start = previous_line_start_index,
+            .end = previous_line_start_index + loc_length,
+        };
+
+        if (previous_line_loc.end >= source.len) return error.InvalidSourceLoc;
+        if (std.mem.indexOfScalar(u8, offsets.locToSlice(source, previous_line_loc), '\n') != null) return error.InvalidSourceLoc;
+
+        try items.append(allocator, .{
+            .loc = previous_line_loc,
+            .content = std.mem.trim(u8, content, &std.ascii.whitespace),
+        });
+    }
+    return items.toOwnedSlice(allocator);
+}
+
+fn testCollectAnnotatedSourceLocations(
+    source: []const u8,
+    expected: []const AnnotatedSourceLoc,
+) !void {
+    const allocator = std.testing.allocator;
+    const actual = try collectAnnotatedSourceLocations(allocator, source);
+    defer allocator.free(actual);
+
+    if (expected.len == actual.len) failed: {
+        for (expected, actual) |expected_item, actual_item| {
+            if (!std.meta.eql(expected_item.loc, actual_item.loc)) break :failed;
+            if (!std.mem.eql(u8, expected_item.content, actual_item.content)) break :failed;
+        }
+        return;
+    }
+    try std.testing.expectEqualSlices(AnnotatedSourceLoc, expected, actual);
+    unreachable; // expectEqualSlices is supposed to fail
+}
+
+test "helper - collectAnnotatedSourceLocations" {
+    const allocator = std.testing.allocator;
+
+    try testCollectAnnotatedSourceLocations("", &.{});
+    try testCollectAnnotatedSourceLocations("hello", &.{});
+    try testCollectAnnotatedSourceLocations(
+        \\ hello
+        \\^^^^ world
+        \\// and goodbye
+    , &.{});
+    try testCollectAnnotatedSourceLocations(
+        \\hello world
+        \\//    ^^^^^ here
+    , &[_]AnnotatedSourceLoc{
+        .{ .loc = .{ .start = 6, .end = 11 }, .content = "here" },
+    });
+    try testCollectAnnotatedSourceLocations(
+        \\
+        \\hello   rld
+        \\//    ^^^^^ here 
+        \\
+    , &[_]AnnotatedSourceLoc{
+        .{ .loc = .{ .start = 7, .end = 12 }, .content = "here" },
+    });
+    try testCollectAnnotatedSourceLocations(
+        \\Some text where we want to highlight some locations
+        \\//   ^^^^ some content
+        \\in the text file.
+        \\//          ^^^^ something else here
+    , &[_]AnnotatedSourceLoc{
+        .{ .loc = .{ .start = 5, .end = 9 }, .content = "some content" },
+        .{ .loc = .{ .start = 87, .end = 91 }, .content = "something else here" },
+    });
+
+    try std.testing.expectError(
+        error.InvalidSourceLoc,
+        collectAnnotatedSourceLocations(allocator,
+            \\hello worl
+            \\//    ^^^^^
+        ),
+    );
+    try std.testing.expectError(
+        error.InvalidSourceLoc,
+        collectAnnotatedSourceLocations(allocator,
+            \\//    ^^^^^
+        ),
+    );
+}
+
+fn skipWhitespace(source: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i < source.len) : (i += 1) {
+        if (std.mem.indexOfScalar(u8, &std.ascii.whitespace, source[i]) == null) break;
+    }
+    return i;
+}

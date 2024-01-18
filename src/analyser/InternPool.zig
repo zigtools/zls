@@ -675,6 +675,13 @@ pub const Index = enum(u32) {
             return try gpa.dupe(Index, slice.getUnprotectedSlice(ip));
         }
 
+        pub fn contains(slice: Slice, value: Index, ip: *InternPool) bool {
+            if (slice.len == 0) return false;
+            ip.lock.lockShared();
+            defer ip.lock.unlockShared();
+            return std.mem.indexOfScalar(Index, slice.getUnprotectedSlice(ip), value) != null;
+        }
+
         pub fn hashWithHasher(slice: Slice, hasher: anytype, ip: *InternPool) void {
             std.hash.autoHash(hasher, slice.len);
             if (slice.len == 0) return;
@@ -732,6 +739,13 @@ pub const StringSlice = struct {
         ip.lock.lockShared();
         defer ip.lock.unlockShared();
         return try gpa.dupe(String, slice.getUnprotectedSlice(ip));
+    }
+
+    pub fn contains(slice: StringSlice, value: String, ip: *InternPool) bool {
+        if (slice.len == 0) return false;
+        ip.lock.lockShared();
+        defer ip.lock.unlockShared();
+        return std.mem.indexOfScalar(String, slice.getUnprotectedSlice(ip), value) != null;
     }
 
     pub fn hashWithHasher(slice: StringSlice, hasher: anytype, ip: *InternPool) void {
@@ -951,13 +965,29 @@ pub const NamespaceIndex = enum(u32) {
 pub const Decl = struct {
     name: String,
     node_idx: std.zig.Ast.Node.Index,
+    src_line: u32,
+    zir_decl_index: u32 = 0,
     /// this stores both the type and the value
     index: InternPool.Index,
     alignment: u16,
     address_space: std.builtin.AddressSpace,
     src_namespace: InternPool.NamespaceIndex,
+    analysis: enum {
+        unreferenced,
+        in_progress,
+        complete,
+    } = .complete,
     is_pub: bool,
     is_exported: bool,
+    kind: Kind = undefined,
+
+    pub const Kind = enum {
+        @"usingnamespace",
+        @"test",
+        @"comptime",
+        named,
+        anon,
+    };
 
     pub const Index = enum(u32) {
         _,
@@ -994,6 +1024,7 @@ pub const FieldStatus = enum {
 pub const Struct = struct {
     fields: std.AutoArrayHashMapUnmanaged(String, Field),
     owner_decl: Decl.OptionalIndex,
+    zir_index: u32,
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .Auto,
     backing_int_ty: InternPool.Index,
@@ -1918,6 +1949,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
     var convert_to_slice = false;
     for (types[1..]) |candidate| {
         if (candidate == chosen) continue;
+        if (candidate == .unknown_type) return .none;
 
         const candidate_key: Key = ip.indexToKey(candidate);
         const chosen_key = ip.indexToKey(chosen);
@@ -3711,7 +3743,7 @@ pub fn isZero(ip: *InternPool, val: Index) bool {
 
 /// If the value fits in the given integer, return it, otherwise null.
 pub fn toInt(ip: *InternPool, val: Index, comptime T: type) !?T {
-    comptime assert(std.meta.trait.isIntegral(T));
+    comptime assert(@typeInfo(T) == .Int);
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
             .null_value => 0,
@@ -3722,7 +3754,7 @@ pub fn toInt(ip: *InternPool, val: Index, comptime T: type) !?T {
         },
         .int_u64_value => |int_value| std.math.cast(T, int_value.int),
         .int_i64_value => |int_value| std.math.cast(T, int_value.int),
-        .int_big_value => |int_value| int_value.int.to(T) catch null,
+        .int_big_value => |int_value| int_value.getConst(ip).to(T) catch null,
         .null_value => 0,
         else => null,
     };
@@ -4485,6 +4517,7 @@ test "struct value" {
     const struct_index = try ip.createStruct(gpa, .{
         .fields = .{},
         .owner_decl = .none,
+        .zir_index = 0,
         .namespace = .none,
         .layout = .Auto,
         .backing_int_ty = .none,
