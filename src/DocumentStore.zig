@@ -483,6 +483,7 @@ config: *const Config,
 /// the DocumentStore assumes that `runtime_zig_version` is not modified while calling one of its functions.
 runtime_zig_version: *const ?ZigVersionWrapper,
 lock: std.Thread.RwLock = .{},
+thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
@@ -670,6 +671,19 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutO
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
     if (self.config.global_cache_path == null) return;
+
+    const uri = try self.allocator.dupe(u8, build_file_uri);
+    errdefer self.allocator.free(uri);
+
+    if (builtin.single_threaded) {
+        self.invalidateBuildFileWorker(uri);
+    } else {
+        try self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, uri });
+    }
+}
+
+fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri) void {
+    defer self.allocator.free(build_file_uri);
 
     const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
@@ -1006,16 +1020,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
     }
 
     if (std.process.can_spawn) {
-        const Server = @import("Server.zig");
-        const server = @fieldParentPtr(Server, "document_store", self);
-
-        server.job_queue_lock.lock();
-        defer server.job_queue_lock.unlock();
-
-        try server.job_queue.ensureUnusedCapacity(1);
-        server.job_queue.writeItemAssumeCapacity(.{
-            .load_build_configuration = try server.allocator.dupe(u8, build_file.uri),
-        });
+        try self.invalidateBuildFile(build_file.uri);
     }
 
     return build_file;
