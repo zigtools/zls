@@ -58,12 +58,12 @@ test "ComptimeInterpreter - @TypeOf" {
 
 test "ComptimeInterpreter - string literal" {
     if (true) return error.SkipZigTest; // TODO
-    var context = try Context.init(
+    var tester = try Tester.init(
         \\const foobarbaz = "hello world!";
         \\
     );
-    defer context.deinit();
-    const result = try context.interpret(context.findVar("foobarbaz"));
+    defer tester.deinit();
+    const result = try tester.interpret(tester.findVar("foobarbaz"));
 
     try std.testing.expect(result.ty == .pointer_type);
 
@@ -127,14 +127,14 @@ test "ComptimeInterpreter - variable lookup" {
         \\}
     , .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 2 } });
 
-    var context = try Context.init(
+    var tester = try Tester.init(
         \\const bar = foo;
         \\const foo = 3;
     );
-    defer context.deinit();
+    defer tester.deinit();
 
-    const result = try context.interpret(context.findVar("bar"));
-    try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, context.ip));
+    const result = try tester.interpret(tester.findVar("bar"));
+    try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, tester.ip));
 }
 
 test "ComptimeInterpreter - field access" {
@@ -222,7 +222,7 @@ test "ComptimeInterpreter - call return primitive type" {
 }
 
 test "ComptimeInterpreter - call return struct" {
-    var context = try Context.init(
+    var tester = try Tester.init(
         \\pub fn Foo() type {
         \\    return struct {
         \\        slay: bool,
@@ -230,45 +230,45 @@ test "ComptimeInterpreter - call return struct" {
         \\    };
         \\}
     );
-    defer context.deinit();
-    const result = try context.call(context.findFn("Foo"), &.{});
+    defer tester.deinit();
+    const result = try tester.call(tester.findFn("Foo"), &.{});
 
     try std.testing.expect(result.ty == .simple_type);
     try std.testing.expect(result.ty.simple_type == .type);
-    const struct_info = context.interpreter.ip.getStruct(result.val.?.struct_type);
+    const struct_info = tester.ip.getStruct(result.val.?.struct_type);
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
 
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.count());
-    try std.testing.expectFmt("slay", "{}", .{context.interpreter.ip.fmtId(struct_info.fields.keys()[0])});
+    try std.testing.expectFmt("slay", "{}", .{tester.ip.fmtId(struct_info.fields.keys()[0])});
     try std.testing.expect(struct_info.fields.values()[0].ty == Index.bool_type);
 }
 
 test "ComptimeInterpreter - call comptime argument" {
-    var context = try Context.init(
+    var tester = try Tester.init(
         \\pub fn Foo(comptime my_arg: bool) type {
         \\    var abc = z: {break :z if (!my_arg) 123 else 0;};
         \\    if (abc == 123) return u69;
         \\    return u8;
         \\}
     );
-    defer context.deinit();
+    defer tester.deinit();
 
-    const result1 = try context.call(context.findFn("Foo"), &.{KV{
+    const result1 = try tester.call(tester.findFn("Foo"), &.{KV{
         .ty = .{ .simple_type = .bool },
         .val = .{ .simple_value = .bool_true },
     }});
     try std.testing.expect(result1.ty == .simple_type);
     try std.testing.expect(result1.ty.simple_type == .type);
-    try std.testing.expect(result1.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, context.ip));
+    try std.testing.expect(result1.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, tester.ip));
 
-    const result2 = try context.call(context.findFn("Foo"), &.{KV{
+    const result2 = try tester.call(tester.findFn("Foo"), &.{KV{
         .ty = .{ .simple_type = .bool },
         .val = .{ .simple_value = .bool_false },
     }});
     try std.testing.expect(result2.ty == .simple_type);
     try std.testing.expect(result2.ty.simple_type == .type);
-    try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, context.ip));
+    try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, tester.ip));
 }
 
 test "ComptimeInterpreter - call inner function" {
@@ -291,76 +291,40 @@ const KV = struct {
     val: ?Key,
 };
 
-const Context = struct {
-    config: *zls.Config,
-    document_store: *zls.DocumentStore,
-    ip: *InternPool,
-    interpreter: *ComptimeInterpreter,
+pub const Tester = struct {
+    context: Context,
+    handle: *zls.DocumentStore.Handle,
+    ip: *zls.analyser.InternPool,
+    interpreter: *zls.ComptimeInterpreter,
 
-    pub fn init(source: []const u8) !Context {
-        const config = try allocator.create(zls.Config);
-        errdefer allocator.destroy(config);
+    const Context = @import("../context.zig").Context;
 
-        var document_store = try allocator.create(zls.DocumentStore);
-        errdefer allocator.destroy(document_store);
+    pub fn init(source: []const u8) !Tester {
+        var context = try Context.init();
+        errdefer context.deinit();
 
-        var interpreter = try allocator.create(ComptimeInterpreter);
-        errdefer allocator.destroy(interpreter);
+        const uri = try context.addDocument(source);
+        const handle = context.server.document_store.getHandle(uri).?;
+        const interpreter = try handle.getComptimeInterpreter(&context.server.document_store, &context.server.ip);
 
-        var ip = try allocator.create(InternPool);
-        errdefer allocator.destroy(ip);
-
-        ip.* = try InternPool.init(allocator);
-        errdefer ip.deinit(allocator);
-
-        config.* = .{};
-        document_store.* = .{
-            .allocator = allocator,
-            .config = config,
-            .runtime_zig_version = &@as(?ZigVersionWrapper, null),
-        };
-        errdefer document_store.deinit();
-
-        const test_uri: []const u8 = switch (builtin.os.tag) {
-            .windows => "file:///C:\\test.zig",
-            else => "file:///test.zig",
-        };
-
-        _ = try document_store.openDocument(test_uri, source);
-
-        // TODO handle handle.tree.errors
-
-        interpreter.* = .{
-            .allocator = allocator,
-            .ip = ip,
-            .document_store = document_store,
-            .uri = test_uri,
-        };
-        errdefer interpreter.deinit();
-
+        // TODO report handle.tree.errors
         _ = try interpreter.interpret(0, .none, .{});
-        // _ = reportErrors(interpreter);
+        // TODO report handle.analysis_errors
 
         return .{
-            .config = config,
-            .document_store = document_store,
-            .ip = ip,
+            .context = context,
+            .handle = handle,
+            .ip = &context.server.ip,
             .interpreter = interpreter,
         };
     }
 
-    pub fn deinit(self: *Context) void {
-        self.interpreter.deinit();
-        self.document_store.deinit();
-        self.ip.deinit(allocator);
-
-        allocator.destroy(self.config);
-        allocator.destroy(self.document_store);
-        allocator.destroy(self.interpreter);
-        allocator.destroy(self.ip);
+    pub fn deinit(self: *Tester) void {
+        self.context.deinit();
+        self.* = undefined;
     }
 
-    pub fn call(self: *Context, func_node: Ast.Node.Index, arguments: []const KV) !KV {
+    pub fn call(self: *Tester, func_node: Ast.Node.Index, arguments: []const KV) !KV {
         var args = try allocator.alloc(ComptimeInterpreter.Value, arguments.len);
         defer allocator.free(args);
 
@@ -369,10 +333,10 @@ const Context = struct {
                 .interpreter = self.interpreter,
                 .node_idx = 0,
                 .index = if (argument.val) |val|
-                    try self.interpreter.ip.get(self.interpreter.allocator, val)
+                    try self.ip.get(allocator, val)
                 else
-                    try self.interpreter.ip.get(self.interpreter.allocator, .{
-                        .unknown_value = .{ .ty = try self.interpreter.ip.get(self.interpreter.allocator, argument.ty) },
+                    try self.ip.get(allocator, .{
+                        .unknown_value = .{ .ty = try self.ip.get(allocator, argument.ty) },
                     }),
             };
         }
@@ -381,29 +345,29 @@ const Context = struct {
         const result = (try self.interpreter.call(namespace, func_node, args, .{})).result;
 
         const val = result.value.index;
-        const ty = self.interpreter.ip.typeOf(val);
+        const ty = self.ip.typeOf(val);
 
         return KV{
-            .ty = self.interpreter.ip.indexToKey(ty),
-            .val = self.interpreter.ip.indexToKey(val),
+            .ty = self.ip.indexToKey(ty),
+            .val = self.ip.indexToKey(val),
         };
     }
 
-    pub fn interpret(self: *Context, node: Ast.Node.Index) !KV {
+    pub fn interpret(self: *Tester, node: Ast.Node.Index) !KV {
         const namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0); // root namespace
         const result = try (try self.interpreter.interpret(node, namespace, .{})).getValue();
 
         const val = result.index;
-        const ty = self.interpreter.ip.typeOf(val);
+        const ty = self.ip.typeOf(val);
 
         return KV{
-            .ty = self.interpreter.ip.indexToKey(ty),
-            .val = self.interpreter.ip.indexToKey(val),
+            .ty = self.ip.indexToKey(ty),
+            .val = self.ip.indexToKey(val),
         };
     }
 
-    pub fn findFn(self: Context, name: []const u8) Ast.Node.Index {
-        const handle = self.interpreter.getHandle();
+    pub fn findFn(self: Tester, name: []const u8) Ast.Node.Index {
+        const handle = self.handle;
         for (handle.tree.nodes.items(.tag), 0..) |tag, i| {
             if (tag != .fn_decl) continue;
             const node: Ast.Node.Index = @intCast(i);
@@ -415,8 +379,8 @@ const Context = struct {
         std.debug.panic("failed to find function with name '{s}'", .{name});
     }
 
-    pub fn findVar(self: Context, name: []const u8) Ast.Node.Index {
-        const handle = self.interpreter.getHandle();
+    pub fn findVar(self: Tester, name: []const u8) Ast.Node.Index {
+        const handle = self.handle;
         var node: Ast.Node.Index = 0;
         while (node < handle.tree.nodes.len) : (node += 1) {
             const var_decl = handle.tree.fullVarDecl(node) orelse continue;
@@ -433,17 +397,17 @@ fn testCall(
     arguments: []const KV,
     expected_ty: Key,
 ) !void {
-    var context = try Context.init(source);
-    defer context.deinit();
+    var tester = try Tester.init(source);
+    defer tester.deinit();
 
-    const result = try context.call(context.findFn("Foo"), arguments);
+    const result = try tester.call(tester.findFn("Foo"), arguments);
 
-    const ty = try context.ip.get(allocator, result.ty);
-    const val = if (result.val) |key| try context.ip.get(allocator, key) else .none;
-    const expected_ty_index = try context.ip.get(allocator, expected_ty);
+    const ty = try tester.ip.get(allocator, result.ty);
+    const val = if (result.val) |key| try tester.ip.get(allocator, key) else .none;
+    const expected_ty_index = try tester.ip.get(allocator, expected_ty);
 
-    try expectEqualIndex(context.interpreter.ip, .type_type, ty);
-    try expectEqualIndex(context.interpreter.ip, expected_ty_index, val);
+    try expectEqualIndex(tester.ip, .type_type, ty);
+    try expectEqualIndex(tester.ip, expected_ty_index, val);
 }
 
 fn testExpr(
@@ -455,33 +419,19 @@ fn testExpr(
     , .{expr});
     defer allocator.free(source);
 
-    var context = try Context.init(source);
-    defer context.deinit();
+    var tester = try Tester.init(source);
+    defer tester.deinit();
 
-    const result = try context.interpret(context.findVar("foobarbaz"));
+    const result = try tester.interpret(tester.findVar("foobarbaz"));
 
-    const expected_index = try context.ip.get(allocator, expected);
-    const val = if (result.val) |key| try context.ip.get(allocator, key) else .none;
+    const expected_index = try tester.ip.get(allocator, expected);
+    const val = if (result.val) |key| try tester.ip.get(allocator, key) else .none;
 
-    try expectEqualIndex(context.interpreter.ip, expected_index, val);
+    try expectEqualIndex(tester.ip, expected_index, val);
 }
 
 fn expectEqualIndex(ip: *InternPool, expected: Index, actual: Index) !void {
     if (expected == actual) return;
     std.debug.print("expected `{}`, found `{}`\n", .{ expected.fmtDebug(ip), actual.fmtDebug(ip) });
     return error.TestExpectedEqual;
-}
-
-fn reportErrors(interpreter: *ComptimeInterpreter) void {
-    // TODO use ErrorBuilder
-    var err_it = interpreter.errors.iterator();
-    if (interpreter.errors.count() != 0) {
-        const handle = interpreter.getHandle();
-        std.debug.print("\n{s}\n", .{handle.text});
-        while (err_it.next()) |entry| {
-            const token = handle.tree.firstToken(entry.key_ptr.*);
-            const position = offsets.tokenToPosition(handle.tree, token, .@"utf-8");
-            std.debug.print("{d}:{d}: {s}\n", .{ position.line, position.character, entry.value_ptr.message });
-        }
-    }
 }
