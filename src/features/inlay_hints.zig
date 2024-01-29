@@ -236,20 +236,10 @@ fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
 fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = builder.handle, .node = node }) orelse return null;
 
-    var type_references = Analyser.ReferencedType.Set.init(builder.arena);
-    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
-
-    var type_str: []const u8 = "";
-    try builder.analyser.referencedTypes(
-        resolved_type,
-        &type_str,
-        &reference_collector,
-    );
+    const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{resolved_type.fmt(builder.analyser)});
     if (type_str.len == 0) return null;
 
-    type_str = try reduceTypeWhitespace(type_str, builder.arena);
-
-    return type_str;
+    return try reduceTypeWhitespace(type_str, builder.arena);
 }
 
 fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
@@ -260,15 +250,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
     ) orelse return null;
     const resolved_type = try things.resolveType(builder.analyser) orelse return null;
 
-    var type_references = Analyser.ReferencedType.Set.init(builder.arena);
-    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
-
-    var type_str: []const u8 = "";
-    try builder.analyser.referencedTypes(
-        resolved_type,
-        &type_str,
-        &reference_collector,
-    );
+    const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{resolved_type.fmt(builder.analyser)});
     if (type_str.len == 0) return null;
 
     return try reduceTypeWhitespace(type_str, builder.arena);
