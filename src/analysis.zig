@@ -269,24 +269,21 @@ pub fn firstParamIs(
     const param = ast.nextFnParam(&it).?;
     if (param.type_expr == 0) return false;
 
-    if (try analyser.resolveTypeOfNodeInternal(.{
+    const resolved_type = try analyser.resolveTypeOfNodeInternal(.{
         .node = param.type_expr,
         .handle = handle,
-    })) |resolved_type| {
-        if (resolved_type.eql(expected))
-            return true;
-    }
+    }) orelse return false;
+    if (!resolved_type.is_type_val) return false;
 
-    if (ast.fullPtrType(tree, param.type_expr)) |ptr_type| {
-        if (try analyser.resolveTypeOfNodeInternal(.{
-            .node = ptr_type.ast.child_type,
-            .handle = handle,
-        })) |resolved_prefix_op| {
-            if (resolved_prefix_op.eql(expected))
-                return true;
-        }
-    }
-    return false;
+    const deref_type = switch (resolved_type.data) {
+        .pointer => |info| switch (info.size) {
+            .One => info.elem_ty.*,
+            .Many, .Slice, .C => return false,
+        },
+        else => resolved_type,
+    };
+
+    return deref_type.eql(expected);
 }
 
 pub fn getVariableSignature(allocator: std.mem.Allocator, tree: Ast, var_decl: Ast.full.VarDecl) error{OutOfMemory}![]const u8 {

@@ -45,6 +45,11 @@ test "inlayhints - function self parameter" {
         \\const _ = foo.bar(<alpha>5);
     , .Parameter);
     try testInlayHints(
+        \\const Foo = struct { pub fn bar(self: *Foo, alpha: u32) void {} };
+        \\const foo: *Foo = undefined;
+        \\const _ = foo.bar(<alpha>5);
+    , .Parameter);
+    try testInlayHints(
         \\const Foo = struct { pub fn bar(_: Foo, alpha: u32, beta: []const u8) void {} };
         \\const foo: Foo = .{};
         \\const _ = foo.bar(<alpha>5,<beta>"");
@@ -52,6 +57,11 @@ test "inlayhints - function self parameter" {
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
         \\const foo: Foo = .{};
+        \\const _ = foo.bar(<alpha>5,<beta>4);
+    , .Parameter);
+    try testInlayHints(
+        \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
+        \\const foo: *Foo = undefined;
         \\const _ = foo.bar(<alpha>5,<beta>4);
     , .Parameter);
     try testInlayHints(
@@ -65,6 +75,14 @@ test "inlayhints - function self parameter" {
         \\      bar(<self>undefined,<alpha>5,<beta>"");
         \\  }
         \\};
+    , .Parameter);
+}
+
+test "inlayhints - function self parameter with pointer type in type declaration" {
+    try testInlayHints(
+        \\const Foo = *opaque { pub fn bar(self: Foo, alpha: u32) void {} };
+        \\const foo: Foo = undefined;
+        \\const _ = foo.bar(<alpha>5);
     , .Parameter);
 }
 
