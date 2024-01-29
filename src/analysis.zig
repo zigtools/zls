@@ -2405,6 +2405,113 @@ pub const Type = struct {
             return decl;
         return analyser.lookupSymbolContainer(node_handle, symbol, .other);
     }
+
+    pub fn fmt(ty: Type, analyser: *Analyser) std.fmt.Formatter(format) {
+        const typeof = ty.typeOf(analyser);
+        return .{ .data = .{ .ty = typeof, .analyser = analyser } };
+    }
+
+    pub fn fmtTypeVal(ty: Type, analyser: *Analyser) std.fmt.Formatter(format) {
+        std.debug.assert(ty.is_type_val);
+        return .{ .data = .{ .ty = ty, .analyser = analyser } };
+    }
+
+    const FormatContext = struct {
+        ty: Type,
+        analyser: *Analyser,
+    };
+
+    fn format(
+        ctx: FormatContext,
+        comptime fmt_str: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.ty);
+
+        const ty = ctx.ty;
+        const analyser = ctx.analyser;
+
+        switch (ty.data) {
+            .pointer => |info| {
+                const size_prefix = switch (info.size) {
+                    .One => "*",
+                    .Many => "[*]",
+                    .Slice => "[]",
+                    .C => "[*c]",
+                };
+                const const_prefix = if (info.is_const) "const " else "";
+
+                return try writer.print("{s}{s}{}", .{ size_prefix, const_prefix, info.elem_ty.fmtTypeVal(analyser) });
+            },
+            .array => |info| {
+                try writer.writeByte('[');
+                if (info.elem_count) |count| {
+                    try writer.print("{d}", .{count});
+                } else {
+                    try writer.writeAll("?");
+                }
+                if (info.sentinel != .none) {
+                    try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                }
+                try writer.writeByte(']');
+                try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser)});
+            },
+            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser)}),
+            .error_union => |t| try writer.print("!{}", .{t.fmtTypeVal(analyser)}),
+            .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser)}),
+            .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
+                .root => {
+                    const path = URI.parse(analyser.arena.allocator(), node_handle.handle.uri) catch node_handle.handle.uri;
+                    try writer.writeAll(std.fs.path.stem(path));
+                },
+
+                .container_decl,
+                .container_decl_arg,
+                .container_decl_arg_trailing,
+                .container_decl_trailing,
+                .container_decl_two,
+                .container_decl_two_trailing,
+                .error_set_decl,
+                .merge_error_sets,
+                .tagged_union,
+                .tagged_union_trailing,
+                .tagged_union_two,
+                .tagged_union_two_trailing,
+                .tagged_union_enum_tag,
+                .tagged_union_enum_tag_trailing,
+                => {
+                    const node = node_handle.node;
+                    const handle = node_handle.handle;
+                    const tree = handle.tree;
+
+                    const token_tags = tree.tokens.items(.tag);
+                    const token_starts = tree.tokens.items(.start);
+
+                    // NOTE: This is a hacky nightmare but it works :P
+                    const token = tree.firstToken(node);
+                    if (token >= 2 and token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
+                        try writer.writeAll(tree.tokenSlice(token - 2));
+                        return;
+                    }
+                    if (token >= 1 and token_tags[token - 1] == .keyword_return) blk: {
+                        const document_scope = handle.getDocumentScope() catch break :blk; // there is no good way to handle this error
+                        const func_node = innermostBlockScopeInternal(document_scope, token_starts[token - 1], true);
+                        var buf: [1]Ast.Node.Index = undefined;
+                        const func = tree.fullFnProto(&buf, func_node) orelse break :blk;
+                        const func_name_token = func.name_token orelse break :blk;
+                        const func_name = offsets.tokenToSlice(tree, func_name_token);
+                        try writer.print("{s}(...)", .{func_name});
+                        return;
+                    }
+                    try writer.writeAll(offsets.nodeToSlice(tree, node));
+                },
+                else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+            },
+            .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),
+            .either => try writer.writeAll("(either type)"), // TODO
+        }
+    }
 };
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
