@@ -451,15 +451,15 @@ test "completion - pointer" {
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
 
-    // try testCompletion(
-    //     \\const S = struct {
-    //     \\    alpha: u32,
-    //     \\};
-    //     \\const foo: []S = undefined;
-    //     \\const bar = foo.ptr[0].<cursor>
-    // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-    // });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: []S = undefined;
+        \\const bar = foo.ptr[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 
     try testCompletion(
         \\const S = struct {
@@ -537,8 +537,32 @@ test "completion - array" {
         \\const foo: [3]u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should show "const len: usize = 3"
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+    });
+    try testCompletion(
+        \\const length = 3;
+        \\const foo: [length]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+    });
+}
+
+test "completion - single pointer to array" {
+    try testCompletion(
+        \\const foo: *[3]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        // TODO detail should be '[3]u32'
+        .{ .label = "*", .kind = .Operator },
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: *[2]S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
 }
 

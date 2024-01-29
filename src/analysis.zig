@@ -789,27 +789,27 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, 
 
     switch (lhs.data) {
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
-            .array_type, .array_type_sentinel => {
-                const child_type = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = node_handle.handle.tree.nodes.items(.data)[node_handle.node].rhs,
-                    .handle = node_handle.handle,
-                })) orelse return null;
-                if (!child_type.is_type_val) return null;
-
-                switch (rhs) {
-                    .Single => return try child_type.instanceTypeVal(analyser),
-                    .Range => {
-                        const child_type_ptr = try analyser.arena.allocator().create(Type);
-                        child_type_ptr.* = child_type;
-                        return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = child_type_ptr } }, .is_type_val = false };
-                    },
-                }
-            },
             .for_range => return try Type.typeValFromIP(analyser, .usize_type),
             else => return null,
         },
+        .array => |info| switch (rhs) {
+            .Single => return try info.elem_ty.instanceTypeVal(analyser),
+            .Range => {
+                return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = info.elem_ty } }, .is_type_val = false };
+            },
+        },
         .pointer => |info| return switch (info.size) {
-            .One => null, // TODO resolve single item pointer to array
+            .One => switch (info.elem_ty.data) {
+                .array => |array_info| {
+                    switch (rhs) {
+                        .Single => return try array_info.elem_ty.instanceTypeVal(analyser),
+                        .Range => {
+                            return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = array_info.elem_ty } }, .is_type_val = false };
+                        },
+                    }
+                },
+                else => return null,
+            },
             .Many => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
@@ -862,7 +862,15 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .One, .Many, .C => {},
+            .One => switch (info.elem_ty.data) {
+                .array => {
+                    std.debug.assert(!info.elem_ty.is_type_val);
+                    if (std.mem.eql(u8, "len", name)) {
+                        return try Type.typeValFromIP(analyser, .usize_type);
+                    }
+                },
+                else => {},
+            },
             .Slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return try Type.typeValFromIP(analyser, .usize_type);
@@ -872,7 +880,15 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
                     return Type{ .data = .{ .pointer = .{ .size = .Many, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false };
                 }
             },
+            .Many, .C => {},
         },
+
+        .array => {
+            if (std.mem.eql(u8, "len", name)) {
+                return try Type.typeValFromIP(analyser, .usize_type);
+            }
+        },
+
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
                 return child_ty.*;
@@ -880,8 +896,6 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
         },
 
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
-            .array_type,
-            .array_type_sentinel,
             .multiline_string_literal,
             .string_literal,
             => if (std.mem.eql(u8, "len", name)) {
@@ -1276,10 +1290,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .@"comptime",
         .@"nosuspend",
         .grouped_expression,
-        .array_init,
-        .array_init_comma,
-        .array_init_one,
-        .array_init_one_comma,
         .struct_init,
         .struct_init_comma,
         .struct_init_one,
@@ -1303,10 +1313,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .@"nosuspend",
                 .grouped_expression,
                 => base_type,
-                .array_init,
-                .array_init_comma,
-                .array_init_one,
-                .array_init_one_comma,
                 .struct_init,
                 .struct_init_comma,
                 .struct_init_one,
@@ -1361,9 +1367,86 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             elem_ty_ptr.* = elem_ty;
             return Type{ .data = .{ .pointer = .{ .size = ptr_info.size, .is_const = ptr_info.const_token != null, .elem_ty = elem_ty_ptr } }, .is_type_val = true };
         },
-        .anyframe_type,
         .array_type,
         .array_type_sentinel,
+        => {
+            const array_info = tree.fullArrayType(node).?;
+
+            const elem_count: ?u64 = blk: {
+                // When resolve_number_literal_values is set then resolveTypeOfNode will also resolve the value of number literals.
+                // So we can use it to resolve the element count.
+
+                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+                analyser.resolve_number_literal_values = true;
+                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+
+                const resolved_elem_count = try analyser.resolveTypeOfNode(.{ .node = array_info.ast.elem_count, .handle = handle }) orelse break :blk null;
+                switch (resolved_elem_count.data) {
+                    .ip_index => |payload| break :blk analyser.ip.toInt(payload.index, u64),
+                    else => break :blk null,
+                }
+            };
+
+            const sentinel: InternPool.Index = if (array_info.ast.sentinel != 0) blk: {
+                // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
+                const sentinel = try analyser.resolveTypeOfNode(.{ .node = array_info.ast.sentinel, .handle = handle }) orelse break :blk .none;
+                break :blk switch (sentinel.data) {
+                    .ip_index => |payload| payload.index,
+                    else => .none,
+                };
+            } else .none;
+
+            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_info.ast.elem_type, .handle = handle }) orelse return null;
+            if (!elem_ty.is_type_val) return null;
+
+            const elem_ty_ptr = try analyser.arena.allocator().create(Type);
+            elem_ty_ptr.* = elem_ty;
+
+            return Type{
+                .data = .{ .array = .{
+                    .elem_count = elem_count,
+                    .sentinel = sentinel,
+                    .elem_ty = elem_ty_ptr,
+                } },
+                .is_type_val = true,
+            };
+        },
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init,
+        .array_init_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const array_init_info = tree.fullArrayInit(&buffer, node).?;
+
+            std.debug.assert(array_init_info.ast.elements.len != 0);
+
+            if (array_init_info.ast.type_expr != 0) blk: {
+                const array_ty = try analyser.resolveTypeOfNode(.{ .node = array_init_info.ast.type_expr, .handle = handle }) orelse break :blk;
+                return try array_ty.instanceTypeVal(analyser);
+            }
+
+            // try to infer the array type
+
+            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_init_info.ast.elements[0], .handle = handle }) orelse
+                try Type.typeValFromIP(analyser, .unknown_type);
+            const elem_ty_ptr = try analyser.arena.allocator().create(Type);
+            elem_ty_ptr.* = elem_ty;
+
+            return Type{
+                .data = .{ .array = .{
+                    .elem_count = @intCast(array_init_info.ast.elements.len),
+                    .sentinel = .none,
+                    .elem_ty = elem_ty_ptr,
+                } },
+                .is_type_val = false,
+            };
+        },
+        .anyframe_type,
         .error_union,
         .error_set_decl,
         .merge_error_sets,
@@ -1766,10 +1849,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .assign_destructure,
         => {},
 
-        .array_init_dot_two,
-        .array_init_dot_two_comma,
-        .array_init_dot,
-        .array_init_dot_comma,
         .struct_init_dot_two,
         .struct_init_dot_two_comma,
         .struct_init_dot,
@@ -1818,6 +1897,14 @@ pub const Type = struct {
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
             is_const: bool,
+            elem_ty: *Type,
+        },
+
+        /// [elem_count :sentinel]elem_ty
+        array: struct {
+            elem_count: ?u64,
+            /// `.none` means no sentinel
+            sentinel: InternPool.Index,
             elem_ty: *Type,
         },
 
@@ -1874,6 +1961,11 @@ pub const Type = struct {
                 std.hash.autoHash(hasher, info.is_const);
                 info.elem_ty.hashWithHasher(hasher);
             },
+            .array => |info| {
+                std.hash.autoHash(hasher, info.elem_count);
+                std.hash.autoHash(hasher, info.sentinel);
+                info.elem_ty.hashWithHasher(hasher);
+            },
             .optional,
             .error_union,
             .union_tag,
@@ -1903,6 +1995,12 @@ pub const Type = struct {
             .pointer => |a_type| {
                 const b_type = b.data.pointer;
                 if (a_type.size != b_type.size) return false;
+                if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
+            },
+            .array => |a_type| {
+                const b_type = b.data.array;
+                if (std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
+                if (a_type.sentinel != b_type.sentinel) return false;
                 if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
             },
             inline .optional,
@@ -4129,6 +4227,26 @@ fn addReferencedTypes(
             const child_type_str = try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types));
             return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ size_prefix, const_prefix, child_type_str orelse return null });
         },
+        .array => |info| {
+            const child_type_str = try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)) orelse return null;
+            var buffer = std.ArrayListUnmanaged(u8){};
+            errdefer buffer.deinit(allocator);
+            const writer = buffer.writer(allocator);
+
+            try writer.writeByte('[');
+            if (info.elem_count) |count| {
+                try writer.print("{d}", .{count});
+            } else {
+                try writer.writeAll("?");
+            }
+            if (info.sentinel != .none) {
+                try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+            }
+            try writer.writeByte(']');
+            try writer.writeAll(child_type_str);
+
+            return try buffer.toOwnedSlice(allocator);
+        },
 
         .optional => |child_ty| {
             const elem_type_str = try analyser.addReferencedTypes(child_ty.*, ReferencedType.Collector.init(referenced_types));
@@ -4264,25 +4382,7 @@ fn addReferencedTypes(
 
             .array_type,
             .array_type_sentinel,
-            => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
-
-                const array_type = tree.fullArrayType(node).?;
-
-                const elem_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = array_type.ast.elem_type, .handle = handle },
-                    referenced_types,
-                );
-
-                const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(node));
-                const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(array_type.ast.elem_type));
-                return try std.fmt.allocPrint(allocator, "{s}{s}", .{
-                    tree.source[prefix_start..prefix_end],
-                    elem_type_str orelse return null,
-                });
-            },
+            => unreachable,
 
             .ptr_type,
             .ptr_type_aligned,
