@@ -4296,7 +4296,6 @@ pub const ReferencedType = struct {
 
     pub const Collector = struct {
         type_str: ?[]const u8 = null,
-        needs_type_reference: bool = true,
         referenced_types: *Set,
         pub fn init(referenced_types: *Set) Collector {
             return .{ .referenced_types = referenced_types };
@@ -4351,7 +4350,6 @@ fn referencedTypesFromNodeInternal(
         node = call.ast.fn_expr;
 
     if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |decl_handle| {
-        collector.needs_type_reference = false;
         try collector.referenced_types.put(.{
             .str = offsets.nodeToSlice(tree, node),
             .handle = decl_handle.handle,
@@ -4372,100 +4370,41 @@ fn referencedTypesFromNodeInternal(
 pub fn referencedTypes(
     analyser: *Analyser,
     resolved_type: Type,
-    resolved_type_str: *[]const u8,
     collector: *ReferencedType.Collector,
 ) error{OutOfMemory}!void {
+    if (resolved_type.is_type_val) return;
     analyser.resolved_nodes.clearRetainingCapacity();
-    if (resolved_type.is_type_val) {
-        collector.needs_type_reference = false;
-        _ = try analyser.addReferencedTypes(resolved_type, collector.*);
-        resolved_type_str.* = "type";
-    } else {
-        if (try analyser.addReferencedTypes(resolved_type, collector.*)) |str|
-            resolved_type_str.* = str;
-    }
-
-    switch (resolved_type.data) {
-        .ip_index => |payload| {
-            const allocator = collector.referenced_types.allocator;
-            const ip = analyser.ip;
-            const ty = ip.typeOf(payload.index);
-            resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{ty.fmt(ip)});
-        },
-        else => {},
-    }
+    try analyser.addReferencedTypes(resolved_type, collector.*);
 }
 
 fn addReferencedTypesFromNode(
     analyser: *Analyser,
     node_handle: NodeWithHandle,
     referenced_types: *ReferencedType.Set,
-) error{OutOfMemory}!?[]const u8 {
-    if (analyser.resolved_nodes.contains(.{ .node = node_handle.node, .uri = node_handle.handle.uri })) return null;
-    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
-    if (!ty.is_type_val) return null;
+) error{OutOfMemory}!void {
+    if (analyser.resolved_nodes.contains(.{ .node = node_handle.node, .uri = node_handle.handle.uri })) return;
+    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return;
+    if (!ty.is_type_val) return;
     var collector = ReferencedType.Collector.init(referenced_types);
     try analyser.referencedTypesFromNodeInternal(node_handle, &collector);
-    return analyser.addReferencedTypes(ty, collector);
+    try analyser.addReferencedTypes(ty, collector);
 }
 
 fn addReferencedTypes(
     analyser: *Analyser,
     ty: Type,
     collector: ReferencedType.Collector,
-) error{OutOfMemory}!?[]const u8 {
+) error{OutOfMemory}!void {
     const type_str = collector.type_str;
-    const needs_type_reference = collector.needs_type_reference;
     const referenced_types = collector.referenced_types;
     const allocator = referenced_types.allocator;
 
     switch (ty.data) {
-        .pointer => |info| {
-            const size_prefix = switch (info.size) {
-                .One => "*",
-                .Many => "[*]",
-                .Slice => "[]",
-                .C => "[*c]",
-            };
-            const const_prefix = if (info.is_const) "const " else "";
-            const child_type_str = try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ size_prefix, const_prefix, child_type_str orelse return null });
-        },
-        .array => |info| {
-            const child_type_str = try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)) orelse return null;
-            var buffer = std.ArrayListUnmanaged(u8){};
-            errdefer buffer.deinit(allocator);
-            const writer = buffer.writer(allocator);
-
-            try writer.writeByte('[');
-            if (info.elem_count) |count| {
-                try writer.print("{d}", .{count});
-            } else {
-                try writer.writeAll("?");
-            }
-            if (info.sentinel != .none) {
-                try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
-            }
-            try writer.writeByte(']');
-            try writer.writeAll(child_type_str);
-
-            return try buffer.toOwnedSlice(allocator);
-        },
-
-        .optional => |child_ty| {
-            const elem_type_str = try analyser.addReferencedTypes(child_ty.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "?{s}", .{elem_type_str orelse return null});
-        },
-
-        .error_union => |t| {
-            const rhs_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "!{s}", .{rhs_str orelse return null});
-        },
-
-        .union_tag => |t| {
-            const union_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
-            return try std.fmt.allocPrint(allocator, "@typeInfo({s}).Union.tag_type.?", .{union_type_str orelse return null});
-        },
+        .pointer => |info| try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)),
+        .array => |info| try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)),
+        .optional => |child_ty| try analyser.addReferencedTypes(child_ty.*, ReferencedType.Collector.init(referenced_types)),
+        .error_union => |t| try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types)),
+        .union_tag => |t| try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types)),
 
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .root => {
@@ -4475,17 +4414,14 @@ fn addReferencedTypes(
 
                 const path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
                     error.OutOfMemory => |e| return e,
-                    else => return null,
+                    else => return,
                 };
                 const str = std.fs.path.stem(path);
-                if (needs_type_reference) {
-                    try referenced_types.put(.{
-                        .str = type_str orelse str,
-                        .handle = handle,
-                        .token = tree.firstToken(node),
-                    }, {});
-                }
-                return str;
+                try referenced_types.put(.{
+                    .str = type_str orelse str,
+                    .handle = handle,
+                    .token = tree.firstToken(node),
+                }, {});
             },
 
             .container_decl,
@@ -4514,32 +4450,25 @@ fn addReferencedTypes(
                 const token = tree.firstToken(node);
                 if (token >= 2 and token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
                     const str = tree.tokenSlice(token - 2);
-                    if (needs_type_reference) {
-                        try referenced_types.put(.{
-                            .str = type_str orelse str,
-                            .handle = handle,
-                            .token = token - 2,
-                        }, {});
-                    }
-                    return str;
+                    try referenced_types.put(.{
+                        .str = type_str orelse str,
+                        .handle = handle,
+                        .token = token - 2,
+                    }, {});
                 }
-                if (token >= 1 and token_tags[token - 1] == .keyword_return) {
+                if (token >= 1 and token_tags[token - 1] == .keyword_return) blk: {
                     const document_scope = try handle.getDocumentScope();
                     const func_node = innermostBlockScopeInternal(document_scope, token_starts[token - 1], true);
                     var buf: [1]Ast.Node.Index = undefined;
-                    const func = tree.fullFnProto(&buf, func_node) orelse return null;
-                    const func_name_token = func.name_token orelse return null;
+                    const func = tree.fullFnProto(&buf, func_node) orelse break :blk;
+                    const func_name_token = func.name_token orelse break :blk;
                     const func_name = offsets.tokenToSlice(tree, func_name_token);
-                    if (needs_type_reference) {
-                        try referenced_types.put(.{
-                            .str = type_str orelse func_name,
-                            .handle = handle,
-                            .token = func_name_token,
-                        }, {});
-                    }
-                    return try std.fmt.allocPrint(allocator, "{s}(...)", .{func_name});
+                    try referenced_types.put(.{
+                        .str = type_str orelse func_name,
+                        .handle = handle,
+                        .token = func_name_token,
+                    }, {});
                 }
-                return offsets.nodeToSlice(tree, node);
             },
 
             .fn_proto,
@@ -4555,33 +4484,19 @@ fn addReferencedTypes(
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_proto = tree.fullFnProto(&buffer, node).?;
 
-                var param_type_strings = std.ArrayList(?[]const u8).init(allocator);
                 var it = fn_proto.iterate(&tree);
                 while (ast.nextFnParam(&it)) |param| {
-                    try param_type_strings.append(try analyser.addReferencedTypesFromNode(
+                    if (param.type_expr == 0) continue;
+                    try analyser.addReferencedTypesFromNode(
                         .{ .node = param.type_expr, .handle = handle },
                         referenced_types,
-                    ));
+                    );
                 }
 
-                const return_type_str = try analyser.addReferencedTypesFromNode(
+                try analyser.addReferencedTypesFromNode(
                     .{ .node = fn_proto.ast.return_type, .handle = handle },
                     referenced_types,
                 );
-
-                var str = std.ArrayList(u8).init(allocator);
-                const writer = str.writer();
-                try writer.print("fn (", .{});
-                for (param_type_strings.items, 0..) |param_type_str, param_index| {
-                    if (param_index > 0)
-                        try writer.print(", ", .{});
-                    try writer.print("{s}", .{param_type_str orelse return null});
-                }
-                try writer.print(") ", .{});
-                if (ast.hasInferredError(tree, fn_proto))
-                    try writer.print("!", .{});
-                try writer.print("{s}", .{return_type_str orelse return null});
-                return str.items;
             },
 
             .array_type,
@@ -4601,20 +4516,15 @@ fn addReferencedTypes(
                 const handle = node_handle.handle;
                 const tree = handle.tree;
 
-                const lhs_str = try analyser.addReferencedTypesFromNode(
+                try analyser.addReferencedTypesFromNode(
                     .{ .node = tree.nodes.items(.data)[node].lhs, .handle = handle },
                     referenced_types,
                 );
 
-                const rhs_str = try analyser.addReferencedTypesFromNode(
+                try analyser.addReferencedTypesFromNode(
                     .{ .node = tree.nodes.items(.data)[node].rhs, .handle = handle },
                     referenced_types,
                 );
-
-                return try std.fmt.allocPrint(allocator, "{s}!{s}", .{
-                    lhs_str orelse return null,
-                    rhs_str orelse return null,
-                });
             },
 
             .multiline_string_literal => unreachable,
@@ -4627,29 +4537,12 @@ fn addReferencedTypes(
 
             .error_value => unreachable,
 
-            .identifier => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
-
-                const name_token = tree.nodes.items(.main_token)[node];
-                if (tree.tokens.items(.tag)[name_token] != .identifier) return null;
-                const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';
-                if (is_escaped_identifier) return null;
-                const primitive = try analyser.resolvePrimitive(name) orelse return null;
-                return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip)});
-            },
+            .identifier => {},
 
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 
-        .ip_index => |payload| {
-            return try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip)});
-        },
-
+        .ip_index => {},
         .either => {}, // TODO
     }
-
-    return null;
 }
