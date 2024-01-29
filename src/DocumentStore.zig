@@ -359,6 +359,10 @@ pub const Handle = struct {
         return @bitCast(self.impl.status.load(.Acquire));
     }
 
+    pub fn isOpen(self: Handle) bool {
+        return self.getStatus().open;
+    }
+
     /// returns the previous value
     fn setOpen(self: *Handle, open: bool) bool {
         if (open) {
