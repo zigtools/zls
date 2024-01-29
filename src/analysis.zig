@@ -26,6 +26,8 @@ resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Type, NodeWithUri.Context, st
 /// used to detect recursion
 use_trail: NodeSet = .{},
 collect_callsite_references: bool,
+/// avoid unnecessarily parsing number literals
+resolve_number_literal_values: bool,
 /// handle of the doc where the request originated
 root_handle: ?*DocumentStore.Handle,
 
@@ -38,6 +40,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool, root
         .store = store,
         .ip = ip,
         .collect_callsite_references = true,
+        .resolve_number_literal_values = false,
         .root_handle = root_handle,
     };
 }
@@ -1671,7 +1674,46 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .float => .comptime_float_type,
                 .failure => return null,
             };
-            return try Type.typeValFromIP(analyser, ty);
+            if (!analyser.resolve_number_literal_values) {
+                return try Type.typeValFromIP(analyser, ty);
+            }
+            const value: ?InternPool.Index = switch (result) {
+                .float => blk: {
+                    break :blk try analyser.ip.get(
+                        analyser.gpa,
+                        .{ .float_comptime_value = std.fmt.parseFloat(f128, bytes) catch break :blk null },
+                    );
+                },
+                .int => blk: {
+                    break :blk if (bytes[0] == '-')
+                        try analyser.ip.get(
+                            analyser.gpa,
+                            .{ .int_i64_value = .{ .ty = ty, .int = std.fmt.parseInt(i64, bytes, 0) catch break :blk null } },
+                        )
+                    else
+                        try analyser.ip.get(
+                            analyser.gpa,
+                            .{ .int_u64_value = .{ .ty = ty, .int = std.fmt.parseInt(u64, bytes, 0) catch break :blk null } },
+                        );
+                },
+                .big_int => |base| blk: {
+                    var big_int = try std.math.big.int.Managed.init(analyser.gpa);
+                    defer big_int.deinit();
+                    const prefix_length: usize = if (base != .decimal) 2 else 0;
+                    big_int.setString(@intFromEnum(base), bytes[prefix_length..]) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        else => break :blk null,
+                    };
+                    std.debug.assert(ty == .comptime_int_type);
+                    break :blk try analyser.ip.getBigInt(analyser.gpa, ty, big_int.toConst());
+                },
+                .failure => unreachable, // checked above
+            };
+
+            return Type{
+                .data = .{ .ip_index = .{ .index = value orelse try analyser.ip.getUnknown(analyser.gpa, ty) } },
+                .is_type_val = false,
+            };
         },
 
         .enum_literal => return try Type.typeValFromIP(analyser, .enum_literal_type),
