@@ -37,6 +37,7 @@ fn typeToCompletion(
                 try list.append(arena, .{
                     .label = "*",
                     .kind = .Operator,
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{info.elem_ty.fmtTypeVal(analyser)}),
                     .insertText = "*",
                     .insertTextFormat = .PlainText,
                 });
@@ -55,9 +56,14 @@ fn typeToCompletion(
                     .insertText = "len",
                     .insertTextFormat = .PlainText,
                 });
+
+                var many_ptr_ty = ty;
+                many_ptr_ty.is_type_val = true;
+                many_ptr_ty.data.pointer.size = .Many;
                 try list.append(arena, .{
                     .label = "ptr",
                     .kind = .Field,
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{many_ptr_ty.fmtTypeVal(analyser)}),
                     .insertText = "ptr",
                     .insertTextFormat = .PlainText,
                 });
@@ -77,11 +83,12 @@ fn typeToCompletion(
                 .insertTextFormat = .PlainText,
             });
         },
-        .optional => |_| {
+        .optional => |child_ty| {
             if (ty.is_type_val) return;
             try list.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
+                .detail = try std.fmt.allocPrint(arena, "{}", .{child_ty.fmtTypeVal(analyser)}),
                 .insertText = "?",
                 .insertTextFormat = .PlainText,
             });

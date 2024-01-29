@@ -273,8 +273,7 @@ test "completion - std.ArrayHashMap" {
         \\const foo = key.?.<cursor>
     , &.{
         .{ .label = "len", .kind = .Field, .detail = "usize" },
-        // TODO detail should be 'const ptr: [*]const u8'
-        .{ .label = "ptr", .kind = .Field },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]const u8" },
     });
     try testCompletion(
         \\const std = @import("std");
@@ -292,8 +291,7 @@ test "completion - std.ArrayHashMap" {
         \\const gop = try map.getOrPut(0);
         \\const foo = gop.value_ptr.<cursor>
     , &.{
-        // TODO detail should be 'u32'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
@@ -307,8 +305,7 @@ test "completion - std.HashMap" {
         \\const foo = key.?.<cursor>
     , &.{
         .{ .label = "len", .kind = .Field, .detail = "usize" },
-        // TODO detail should be 'const ptr: [*]const u8'
-        .{ .label = "ptr", .kind = .Field },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]const u8" },
     });
     try testCompletion(
         \\const std = @import("std");
@@ -326,8 +323,7 @@ test "completion - std.HashMap" {
         \\const gop = try map.getOrPut(0);
         \\const foo = gop.value_ptr.<cursor>
     , &.{
-        // TODO detail should be 'u32'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
@@ -387,8 +383,7 @@ test "completion - optional" {
         \\const foo: ?u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should be 'u32'
-        .{ .label = "?", .kind = .Operator },
+        .{ .label = "?", .kind = .Operator, .detail = "u32" },
     });
 
     try testCompletion(
@@ -412,8 +407,7 @@ test "completion - pointer" {
         \\const foo: *u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should be 'u32'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "u32" },
     });
 
     try testCompletion(
@@ -429,8 +423,7 @@ test "completion - pointer" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "len", .kind = .Field, .detail = "usize" },
-        // TODO detail should be '[*]const u8'
-        .{ .label = "ptr", .kind = .Field },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]const u8" },
     });
 
     try testCompletion(
@@ -446,8 +439,7 @@ test "completion - pointer" {
         \\const foo: *S = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should be 'S'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
@@ -553,8 +545,7 @@ test "completion - single pointer to array" {
         \\const foo: *[3]u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should be '[3]u32'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "[3]u32" },
         .{ .label = "len", .kind = .Field, .detail = "usize = 3" },
     });
     try testCompletion(
