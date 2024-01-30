@@ -67,6 +67,7 @@ const ClientCapabilities = struct {
     supports_publish_diagnostics: bool = false,
     supports_code_action_fixall: bool = false,
     hover_supports_md: bool = false,
+    signature_help_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
     supports_configuration: bool = false,
@@ -468,6 +469,21 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         }
         if (textDocument.definition) |definition| {
             server.client_capabilities.supports_textDocument_definition_linkSupport = definition.linkSupport orelse false;
+        }
+        if (textDocument.signatureHelp) |signature_help_capabilities| {
+            if (signature_help_capabilities.signatureInformation) |signature_information| {
+                if (signature_information.documentationFormat) |content_format| {
+                    for (content_format) |format| {
+                        if (format == .plaintext) {
+                            break;
+                        }
+                        if (format == .markdown) {
+                            server.client_capabilities.signature_help_supports_md = true;
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1303,6 +1319,8 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
+
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
     defer analyser.deinit();
 
@@ -1311,6 +1329,7 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
         arena,
         handle,
         source_index,
+        markup_kind,
     )) orelse return null;
 
     var signatures = try arena.alloc(types.SignatureInformation, 1);
@@ -1435,6 +1454,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    // The Language Server Specification does not provide a client capabilities that allows the client to specify the MarkupKind of inlay hints.
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 

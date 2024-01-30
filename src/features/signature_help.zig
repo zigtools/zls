@@ -16,6 +16,7 @@ fn fnProtoToSignatureInfo(
     commas: u32,
     skip_self_param: bool,
     func_type: Analyser.Type,
+    markup_kind: types.MarkupKind,
 ) !types.SignatureInformation {
     const fn_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
     const fn_node = fn_node_handle.node;
@@ -25,7 +26,7 @@ fn fnProtoToSignatureInfo(
     const proto = tree.fullFnProto(&buffer, fn_node).?;
 
     const label = Analyser.getFunctionSignature(tree, proto);
-    const proto_comments = (try Analyser.getDocComments(arena, tree, fn_node)) orelse "";
+    const proto_comments = try Analyser.getDocComments(arena, tree, fn_node);
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(fn_handle, proto);
@@ -38,28 +39,34 @@ fn fnProtoToSignatureInfo(
         const param_comments = if (param.first_doc_comment) |dc|
             try Analyser.collectDocComments(arena, tree, dc, false)
         else
-            "";
+            null;
 
         try params.append(arena, .{
             .label = .{ .string = ast.paramSlice(tree, param) },
-            .documentation = .{ .MarkupContent = .{
-                .kind = .markdown,
-                .value = param_comments,
-            } },
+            .documentation = if (param_comments) |comment| .{ .MarkupContent = .{
+                .kind = markup_kind,
+                .value = comment,
+            } } else null,
         });
     }
     return types.SignatureInformation{
         .label = label,
-        .documentation = .{ .MarkupContent = .{
-            .kind = .markdown,
-            .value = proto_comments,
-        } },
+        .documentation = if (proto_comments) |comment| .{ .MarkupContent = .{
+            .kind = markup_kind,
+            .value = comment,
+        } } else null,
         .parameters = params.items,
         .activeParameter = if (arg_idx < params.items.len) arg_idx else null,
     };
 }
 
-pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
+pub fn getSignatureInfo(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    absolute_index: usize,
+    markup_kind: types.MarkupKind,
+) !?types.SignatureInformation {
     const document_scope = try handle.getDocumentScope();
     const innermost_block = Analyser.innermostBlockScope(document_scope, absolute_index);
     const tree = handle.tree;
@@ -244,6 +251,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         paren_commas,
                         false,
                         func_type,
+                        markup_kind,
                     );
                 }
 
@@ -266,6 +274,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         paren_commas,
                         skip_self_param,
                         func_type,
+                        markup_kind,
                     );
                 }
             },
