@@ -64,6 +64,19 @@ fn typeToCompletion(
             },
             .Many, .C => {},
         },
+        .array => |info| {
+            if (ty.is_type_val) return;
+            try list.append(arena, .{
+                .label = "len",
+                .detail = if (info.elem_count) |count|
+                    try std.fmt.allocPrint(arena, "const len: usize = {}", .{count})
+                else
+                    "const len: usize",
+                .kind = .Field,
+                .insertText = "len",
+                .insertTextFormat = .PlainText,
+            });
+        },
         .optional => |_| {
             if (ty.is_type_val) return;
             try list.append(arena, .{
@@ -305,15 +318,7 @@ fn nodeToCompletion(
         },
         .array_type,
         .array_type_sentinel,
-        => {
-            try list.append(arena, .{
-                .label = "len",
-                .detail = "const len: usize",
-                .kind = .Field,
-                .insertText = "len",
-                .insertTextFormat = .PlainText,
-            });
-        },
+        => unreachable,
         .ptr_type,
         .ptr_type_aligned,
         .ptr_type_bit_range,
