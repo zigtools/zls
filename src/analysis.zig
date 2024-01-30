@@ -1621,6 +1621,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .block_two,
         .block_two_semicolon,
         => {
+            const has_zero_statements = switch (node_tags[node]) {
+                .block_two, .block_two_semicolon => datas[node].lhs == 0,
+                .block, .block_semicolon => false,
+                else => unreachable,
+            };
+            if (has_zero_statements) {
+                return Type{ .data = .{ .ip_index = .{ .index = .void_value } }, .is_type_val = false };
+            }
+
             const first_token = tree.firstToken(node);
             if (token_tags[first_token] != .identifier) return null;
 

@@ -106,6 +106,16 @@ test "hover - literal" {
         \\(*const [26:0]u8)
         \\```
     );
+    try testHover(
+        \\const f<cursor>oo = {};
+    ,
+        \\```zig
+        \\const foo = {}
+        \\```
+        \\```zig
+        \\(void)
+        \\```
+    );
 }
 
 test "hover - builtin" {
