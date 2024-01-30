@@ -911,6 +911,13 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     if (server.status == .initialized) {
+        if (new_zig_exe_path and server.client_capabilities.supports_publish_diagnostics) {
+            for (server.document_store.handles.values()) |handle| {
+                if (!handle.isOpen()) continue;
+                try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
+            }
+        }
+
         const json_message = try server.sendToClientRequest(
             .{ .string = "semantic_tokens_refresh" },
             "workspace/semanticTokens/refresh",
