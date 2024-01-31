@@ -38,7 +38,7 @@ pub fn dotCompletions(
                         try completions.ensureUnusedCapacity(arena, names.len);
                         for (names) |name| {
                             completions.appendAssumeCapacity(.{
-                                .label = try std.fmt.allocPrint(arena, "{}", .{name.fmt(&ip.string_pool)}),
+                                .label = try std.fmt.allocPrint(arena, "{}", .{ip.fmtId(name)}),
                                 .kind = .Constant,
                                 .detail = try std.fmt.allocPrint(arena, "error.{}", .{ip.fmtId(name)}),
                             });
