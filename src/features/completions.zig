@@ -827,7 +827,7 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
 fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
     store: *DocumentStore,
-    handle: DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
     var completions: CompletionSet = .{};
@@ -900,7 +900,7 @@ fn completeFileSystemStringLiteral(
     }
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
-        if (handle.associated_build_file) |uri| blk: {
+        if (try handle.getAssociatedBuildFileUri(store)) |uri| blk: {
             const build_file = store.getBuildFile(uri).?;
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
@@ -977,7 +977,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .string_literal,
         => blk: {
             if (pos_context == .string_literal and !DocumentStore.isBuildFile(handle.uri)) break :blk null;
-            break :blk completeFileSystemStringLiteral(arena, &server.document_store, handle.*, pos_context) catch |err| {
+            break :blk completeFileSystemStringLiteral(arena, &server.document_store, handle, pos_context) catch |err| {
                 log.err("failed to get file system completions: {}", .{err});
                 return null;
             };
@@ -1089,7 +1089,7 @@ fn globalSetCompletions(
 
     var dependencies = std.ArrayListUnmanaged(DocumentStore.Uri){};
     try dependencies.append(arena, handle.uri);
-    try store.collectDependencies(arena, handle.*, &dependencies);
+    try store.collectDependencies(arena, handle, &dependencies);
 
     // TODO Better solution for deciding what tags to include
     var result_set = CompletionSet{};
