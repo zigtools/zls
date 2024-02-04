@@ -58,37 +58,40 @@ pub fn main() !void {
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var cache = Build.Cache{
-        .gpa = allocator,
-        .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+    var graph: std.Build.Graph = .{
+        .arena = allocator,
+        .cache = .{
+            .gpa = allocator,
+            .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+        },
+        .zig_exe = zig_exe,
+        .env_map = try process.getEnvMap(allocator),
+        .global_cache_root = global_cache_directory,
     };
 
-    cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
-    cache.addPrefix(build_root_directory);
-    cache.addPrefix(local_cache_directory);
-    cache.addPrefix(global_cache_directory);
-    cache.hash.addBytes(builtin.zig_version_string);
-
-    const host: std.Build.ResolvedTarget = .{
-        .query = .{},
-        .result = try std.zig.system.resolveTargetQuery(.{}),
-    };
+    graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+    graph.cache.addPrefix(build_root_directory);
+    graph.cache.addPrefix(local_cache_directory);
+    graph.cache.addPrefix(global_cache_directory);
+    graph.cache.hash.addBytes(builtin.zig_version_string);
 
     const builder = try Build.create(
-        allocator,
-        zig_exe,
+        &graph,
         build_root_directory,
         local_cache_directory,
-        global_cache_directory,
-        host,
-        &cache,
         dependencies.root_deps,
     );
 
-    defer builder.destroy();
+    var output_tmp_nonce: ?[16]u8 = null;
 
     while (nextArg(args, &arg_idx)) |arg| {
-        if (std.mem.startsWith(u8, arg, "-D")) {
+        if (std.mem.startsWith(u8, arg, "-Z")) {
+            if (arg.len != 18) {
+                log.err("bad argument: '{s}'", .{arg});
+                return error.InvalidArgs;
+            }
+            output_tmp_nonce = arg[2..18].*;
+        } else if (std.mem.startsWith(u8, arg, "-D")) {
             const option_contents = arg[2..];
             if (option_contents.len == 0) {
                 log.err("Expected option name after '-D'\n\n", .{});
@@ -108,11 +111,45 @@ pub fn main() !void {
                     return error.InvalidArgs;
                 }
             }
+        } else if (std.mem.eql(u8, arg, "--zig-lib-dir")) {
+            const zig_lib_dir = nextArg(args, &arg_idx) orelse {
+                log.err("Expected argument after '{s}'", .{arg});
+                return error.InvalidArgs;
+            };
+            builder.zig_lib_dir = .{ .cwd_relative = zig_lib_dir };
         }
     }
 
+    const host_query = std.Build.parseTargetQuery(graph.host_query_options) catch |err| switch (err) {
+        error.ParseFailed => process.exit(1),
+    };
+    builder.host = .{
+        .query = .{},
+        .result = try std.zig.system.resolveTargetQuery(host_query),
+    };
+
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
+
+    if (graph.needed_lazy_dependencies.entries.len != 0) {
+        var buffer: std.ArrayListUnmanaged(u8) = .{};
+        for (graph.needed_lazy_dependencies.keys()) |k| {
+            try buffer.appendSlice(allocator, k);
+            try buffer.append(allocator, '\n');
+        }
+        const s = std.fs.path.sep_str;
+        const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse std.debug.panic("missing -Z arg", .{}));
+        local_cache_directory.handle.writeFile2(.{
+            .sub_path = tmp_sub_path,
+            .data = buffer.items,
+            .flags = .{ .exclusive = true },
+        }) catch |err| {
+            std.debug.panic("unable to write configuration results to '{}{s}': {s}", .{
+                local_cache_directory, tmp_sub_path, @errorName(err),
+            });
+        };
+        process.exit(3); // Indicate configure phase failed with meaningful stdout.
+    }
 
     var packages = Packages{ .allocator = allocator };
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
