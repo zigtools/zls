@@ -159,7 +159,7 @@ fn gatherReferences(
 
         var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
         defer handle_dependencies.deinit(allocator);
-        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
+        try analyser.store.collectDependencies(allocator, handle, &handle_dependencies);
 
         try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
         for (handle_dependencies.items) |uri| {
