@@ -177,15 +177,11 @@ pub const Handle = struct {
             /// Uris that come first have higher priority.
             unresolved: struct {
                 potential_build_files: []const Uri,
-                /// to avoid checking build files multiple times, a bitset stores whether or
-                /// not the build file should be skipped because it has previously been
-                /// found to be "unassociated" with the handle.
-                has_been_checked: std.DynamicBitSetUnmanaged,
+                last_checked: usize,
 
                 fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                     for (self.potential_build_files) |uri| allocator.free(uri);
                     allocator.free(self.potential_build_files);
-                    self.has_been_checked.deinit(allocator);
                     self.* = undefined;
                 }
             },
@@ -302,23 +298,18 @@ pub const Handle = struct {
             return .{ .resolved = build_file.uri };
         }
 
-        var has_missing_build_config = false;
-
-        var it = unresolved.has_been_checked.iterator(.{
-            .kind = .unset,
-            .direction = .reverse,
-        });
-        while (it.next()) |i| {
-            const build_file_uri = unresolved.potential_build_files[i];
+        for (unresolved.potential_build_files[unresolved.last_checked..], unresolved.last_checked..) |build_file_uri, i| {
             const build_file = document_store.getOrLoadBuildFile(build_file_uri) orelse continue;
             const is_associated = try document_store.uriAssociatedWithBuild(build_file, self.uri) orelse {
-                has_missing_build_config = true;
-                continue;
+                // when build configs are missing we keep the state at .unresolved so that
+                // future calls will retry until all build config are resolved.
+                // Then will have a conclusive result on whether or not there is a associated build file.
+                return .unresolved;
             };
 
             if (!is_associated) {
                 // the build file should be skipped in future calls.
-                unresolved.has_been_checked.set(i);
+                unresolved.last_checked = i + 1;
                 continue;
             }
 
@@ -326,13 +317,6 @@ pub const Handle = struct {
             unresolved.deinit(document_store.allocator);
             self.impl.associated_build_file = .{ .resolved = build_file.uri };
             return .{ .resolved = build_file.uri };
-        }
-
-        if (has_missing_build_config) {
-            // when build configs are missing we keep the state at .unresolved so that
-            // future calls will retry until all build config are resolved.
-            // Then will have a conclusive result on whether or not there is a associated build file.
-            return .unresolved;
         }
 
         unresolved.deinit(document_store.allocator);
@@ -1257,12 +1241,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             self.allocator.free(potential_build_files);
         }
 
-        var has_been_checked = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, potential_build_files.len);
-        errdefer has_been_checked.deinit(self.allocator);
-
         handle.impl.associated_build_file = .{ .unresolved = .{
-            .has_been_checked = has_been_checked,
             .potential_build_files = potential_build_files,
+            .last_checked = 0,
         } };
     }
 
