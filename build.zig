@@ -10,8 +10,23 @@ const min_zig_string = "0.12.0-dev.2138+828d23956";
 const Build = blk: {
     const current_zig = builtin.zig_version;
     const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
+    const is_current_zig_tagged_release = current_zig.pre == null;
     if (current_zig.order(min_zig) == .lt) {
-        @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
+        const message = std.fmt.comptimePrint(
+            \\Your Zig version does not meet the minimum build requirement:
+            \\  required Zig version: {[minimum_version]} (or greater)
+            \\  actual   Zig version: {[current_version]}
+            \\
+            \\
+        ++ if (is_current_zig_tagged_release)
+            \\Please download or compile a tagged release of ZLS.
+            \\  -> https://github.com/zigtools/zls/releases/tag/{[current_version]}
+        else
+            \\You can take one of the following actions to resolve this issue:
+            \\  - Download the latest nightly of Zig (https://ziglang.org/download/)
+            \\  - Compile an older version of ZLS that is compatible with your Zig version
+        , .{ .current_version = current_zig, .minimum_version = min_zig });
+        @compileError(message);
     }
     break :blk std.Build;
 };
