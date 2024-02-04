@@ -327,15 +327,7 @@ fn nodeToCompletion(
         .optional_type => unreachable,
         .multiline_string_literal,
         .string_literal,
-        => {
-            try list.append(arena, .{
-                .label = "len",
-                .detail = "const len: usize",
-                .kind = .Field,
-                .insertText = "len",
-                .insertTextFormat = .PlainText,
-            });
-        },
+        => unreachable,
         else => if (Analyser.nodeToString(tree, node)) |string| {
             try list.append(arena, .{
                 .label = string,

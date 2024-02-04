@@ -776,6 +776,16 @@ pub fn resolveDerefType(analyser: *Analyser, pointer: Type) error{OutOfMemory}!?
             .One, .C => return try info.elem_ty.instanceTypeVal(analyser),
             .Many, .Slice => return null,
         },
+        .ip_index => |payload| {
+            const ty = analyser.ip.typeOf(payload.index);
+            switch (analyser.ip.indexToKey(ty)) {
+                .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
+                    .One, .C => return try Type.typeValFromIP(analyser, pointer_info.elem_type),
+                    .Many, .Slice => return null,
+                },
+                else => return null,
+            }
+        },
         else => return null,
     }
 }
@@ -1749,10 +1759,68 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .negation,
         => return try Type.typeValFromIP(analyser, .bool_type),
 
-        .multiline_string_literal,
-        .string_literal,
-        .error_value, // TODO
-        => return Type{ .data = .{ .other = .{ .node = node, .handle = handle } }, .is_type_val = false },
+        .multiline_string_literal => {
+            const start = datas[node].lhs;
+            const end = datas[node].rhs;
+
+            var length: u64 = 0;
+
+            for (start..end + 1, 0..) |token_index, i| {
+                const slice = tree.tokenSlice(@intCast(token_index));
+                const carriage_return_ending: usize = if (slice[slice.len - 2] == '\r') 2 else 1;
+                length += slice.len - carriage_return_ending - 2 + @intFromBool(i != 0);
+            }
+
+            const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{
+                .elem_type = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
+                    .child = .u8_type,
+                    .len = length,
+                    .sentinel = .zero_u8,
+                } }),
+                .flags = .{
+                    .size = .One,
+                    .is_const = true,
+                },
+            } });
+            return try Type.typeValFromIP(analyser, string_literal_type);
+        },
+        .string_literal => {
+            const token_bytes = tree.tokenSlice(main_tokens[node]);
+
+            var counting_writer = std.io.countingWriter(std.io.null_writer);
+            const result = try std.zig.string_literal.parseWrite(counting_writer.writer(), token_bytes);
+            switch (result) {
+                .success => {},
+                .failure => return null,
+            }
+
+            const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{
+                .elem_type = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
+                    .child = .u8_type,
+                    .len = counting_writer.bytes_written,
+                    .sentinel = .zero_u8,
+                } }),
+                .flags = .{
+                    .size = .One,
+                    .is_const = true,
+                },
+            } });
+            return try Type.typeValFromIP(analyser, string_literal_type);
+        },
+        .error_value => {
+            const name = offsets.identifierTokenToNameSlice(tree, datas[node].rhs);
+            const name_index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
+
+            const error_set_type = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{
+                .owner_decl = .none,
+                .names = try analyser.ip.getStringSlice(analyser.gpa, &.{name_index}),
+            } });
+            const error_value = try analyser.ip.get(analyser.gpa, .{ .error_value = .{
+                .ty = error_set_type,
+                .error_tag_name = name_index,
+            } });
+            return Type{ .data = .{ .ip_index = .{ .index = error_value } }, .is_type_val = false };
+        },
 
         .char_literal => return try Type.typeValFromIP(analyser, .comptime_int_type),
 
@@ -4422,48 +4490,15 @@ fn addReferencedTypes(
                 });
             },
 
-            .multiline_string_literal => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
+            .multiline_string_literal => unreachable,
 
-                const start = tree.nodes.items(.data)[node].lhs;
-                const end = tree.nodes.items(.data)[node].rhs;
-                var len: usize = end - start;
-                var tok_i = start;
-                while (tok_i <= end) : (tok_i += 1) {
-                    const slice = tree.tokenSlice(tok_i);
-                    len += slice.len - 3;
-                    if (slice[slice.len - 2] == '\r') len -= 1;
-                }
-                return try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{len});
-            },
+            .string_literal => unreachable,
 
-            .string_literal => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
+            .number_literal, .char_literal => unreachable,
 
-                const token = tree.tokenSlice(tree.nodes.items(.main_token)[node]);
-                var counter = std.io.countingWriter(std.io.null_writer);
-                return switch (try std.zig.string_literal.parseWrite(counter.writer(), token)) {
-                    .success => try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{counter.bytes_written}),
-                    .failure => null,
-                };
-            },
+            .enum_literal => unreachable,
 
-            .number_literal, .char_literal => return "comptime_int",
-
-            .enum_literal => return "@TypeOf(.enum_literal)",
-
-            .error_value => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
-
-                const identifier = offsets.identifierTokenToNameSlice(tree, tree.nodes.items(.data)[node].rhs);
-                return try std.fmt.allocPrint(allocator, "error{{{}}}", .{std.zig.fmtId(identifier)});
-            },
+            .error_value => unreachable,
 
             .identifier => {
                 const node = node_handle.node;

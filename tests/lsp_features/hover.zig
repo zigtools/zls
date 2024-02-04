@@ -81,10 +81,37 @@ test "hover - literal" {
         \\```
     );
     try testHover(
+        \\const f<cursor>oo = {};
+    ,
+        \\```zig
+        \\const foo = {}
+        \\```
+        \\```zig
+        \\(void)
+        \\```
+    );
+}
+
+test "hover - string literal" {
+    try testHover(
         \\const f<cursor>oo = "ipsum lorem";
     ,
         \\```zig
         \\const foo = "ipsum lorem"
+        \\```
+        \\```zig
+        \\(*const [11:0]u8)
+        \\```
+    );
+    try testHover(
+        \\const f<cursor>oo =
+        \\    \\ipsum lorem
+        \\;
+    ,
+        \\```zig
+        \\const foo =
+        \\    \\ipsum lorem
+        \\
         \\```
         \\```zig
         \\(*const [11:0]u8)
@@ -107,13 +134,13 @@ test "hover - literal" {
         \\```
     );
     try testHover(
-        \\const f<cursor>oo = {};
+        \\const f<cursor>oo = "hello".*;
     ,
         \\```zig
-        \\const foo = {}
+        \\const foo = "hello".*
         \\```
         \\```zig
-        \\(void)
+        \\([5:0]u8)
         \\```
     );
 }
