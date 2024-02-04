@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.heap: add runtime safety for calling `stackFallback(N).get` multiple times
-const min_zig_string = "0.12.0-dev.2138+828d23956";
+/// Implement system package mode and lazy dependencies
+const min_zig_string = "0.12.0-dev.2583+d3fc2648c";
 
 const Build = blk: {
     const current_zig = builtin.zig_version;
@@ -107,7 +107,7 @@ pub fn build(b: *Build) !void {
 
     const test_options = b.addOptions();
     const test_options_module = test_options.createModule();
-    test_options.addOption([]const u8, "zig_exe_path", b.zig_exe);
+    test_options.addOption([]const u8, "zig_exe_path", b.graph.zig_exe);
     test_options.addOption([]const u8, "global_cache_path", global_cache_path);
 
     const exe_options_module = exe_options.createModule();
