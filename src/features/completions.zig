@@ -50,7 +50,7 @@ fn typeToCompletion(
 
                 try list.append(arena, .{
                     .label = "len",
-                    .detail = "const len: usize",
+                    .detail = "usize",
                     .kind = .Field,
                     .insertText = "len",
                     .insertTextFormat = .PlainText,
@@ -69,9 +69,9 @@ fn typeToCompletion(
             try list.append(arena, .{
                 .label = "len",
                 .detail = if (info.elem_count) |count|
-                    try std.fmt.allocPrint(arena, "const len: usize = {}", .{count})
+                    try std.fmt.allocPrint(arena, "usize = {}", .{count})
                 else
-                    "const len: usize",
+                    "usize",
                 .kind = .Field,
                 .insertText = "len",
                 .insertTextFormat = .PlainText,
@@ -296,7 +296,7 @@ fn nodeToCompletion(
                 .label = name,
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = try Analyser.getVariableSignature(arena, tree, var_decl),
+                .detail = try Analyser.getVariableSignature(arena, tree, var_decl, false),
                 .insertText = name,
                 .insertTextFormat = .PlainText,
             });
@@ -404,7 +404,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 .label = name,
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = ast.paramSlice(tree, param),
+                .detail = offsets.nodeToSlice(tree, param.type_expr),
                 .insertText = name,
                 .insertTextFormat = .PlainText,
             });
@@ -517,8 +517,6 @@ fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}
         };
     }
 
-    try formatCompletionDetails(server, arena, completions);
-
     return completions;
 }
 
@@ -537,7 +535,6 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
     };
     try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server, arena, &completions, &snipped_data.generic);
-    try formatCompletionDetails(server, arena, completions.items);
 
     return completions.toOwnedSlice(arena);
 }
@@ -550,187 +547,8 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
 
     const ty = (try analyser.getFieldAccessType(handle, source_index, loc)) orelse return null;
     try typeToCompletion(server, analyser, arena, &completions, ty, handle, null);
-    try formatCompletionDetails(server, arena, completions.items);
 
     return try completions.toOwnedSlice(arena);
-}
-
-fn formatCompletionDetails(server: *const Server, arena: std.mem.Allocator, completions: []types.CompletionItem) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (!server.client_capabilities.label_details_support) return;
-
-    for (completions) |*item| {
-        try formatDetailedLabel(item, arena);
-    }
-}
-
-fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
-    // NOTE: this is not ideal, we should build a detailed label like we do for label/detail
-    // because this implementation is very loose, nothing is formatted properly so we need to clean
-    // things a little bit, which is quite messy
-    // but it works, it provide decent results
-
-    std.debug.assert(item.kind != null);
-    if (item.detail == null)
-        return;
-
-    const detail = item.detail.?[0..@min(1024, item.detail.?.len)];
-    var detailLen: usize = detail.len;
-    var it: []u8 = try arena.alloc(u8, detailLen);
-
-    detailLen -= std.mem.replace(u8, detail, "    ", " ", it) * 3;
-    it = it[0..detailLen];
-
-    // HACK: for enums 'MyEnum.', item.detail shows everything, we don't want that
-    const isValue = std.mem.startsWith(u8, item.label, it);
-
-    const isVar = std.mem.startsWith(u8, it, "var ");
-    const isConst = std.mem.startsWith(u8, it, "const ");
-
-    // we don't want the entire content of things, see the NOTE above
-    if (std.mem.indexOf(u8, it, "{")) |end| {
-        it = it[0..end];
-    }
-    if (std.mem.indexOf(u8, it, "}")) |end| {
-        it = it[0..end];
-    }
-    if (std.mem.indexOf(u8, it, ";")) |end| {
-        it = it[0..end];
-    }
-
-    // log.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
-
-    if (std.mem.startsWith(u8, it, "fn ") or std.mem.startsWith(u8, it, "@")) {
-        const s: usize = std.mem.indexOf(u8, it, "(") orelse return;
-        const e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
-        if (e < s) {
-            log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind.? });
-            return;
-        }
-
-        item.detail = item.label;
-        item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
-
-        if (item.kind.? == .Constant) {
-            if (std.mem.indexOf(u8, it, "= struct")) |_| {
-                item.labelDetails.?.description = "struct";
-            } else if (std.mem.indexOf(u8, it, "= union")) |_| {
-                const us: usize = std.mem.indexOf(u8, it, "(") orelse return;
-                const ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
-                if (ue < us) {
-                    log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
-                    return;
-                }
-
-                item.labelDetails.?.description = it[us - 5 .. ue + 1];
-            }
-        }
-    } else if ((item.kind.? == .Variable or item.kind.? == .Constant) and (isVar or isConst)) {
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
-        item.detail = item.label;
-
-        const eqlPos = std.mem.indexOf(u8, it, "=");
-
-        if (std.mem.indexOf(u8, it, ":")) |start| {
-            if (eqlPos != null) {
-                if (start > eqlPos.?) return;
-            }
-            const e: usize = eqlPos orelse it.len;
-            item.labelDetails = .{
-                .detail = "", // left
-                .description = it[start + 1 .. e], // right
-            };
-        } else if (std.mem.indexOf(u8, it, "= .")) |start| {
-            item.labelDetails = .{
-                .detail = "", // left
-                .description = it[start + 2 .. it.len], // right
-            };
-        } else if (eqlPos) |start| {
-            item.labelDetails = .{
-                .detail = "", // left
-                .description = it[start + 2 .. it.len], // right
-            };
-        }
-    } else if (item.kind.? == .Variable) {
-        const s: usize = std.mem.indexOf(u8, it, ":") orelse return;
-        const e: usize = std.mem.indexOf(u8, it, "=") orelse return;
-
-        if (e < s) {
-            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
-            return;
-        }
-        // log.info("s: {} -> {}", .{s, e});
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
-        item.detail = item.label;
-        item.labelDetails = .{
-            .detail = "", // left
-            .description = it[s + 1 .. e], // right
-        };
-    } else if (std.mem.indexOf(u8, it, "@import") != null) {
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
-        item.detail = item.label;
-        item.labelDetails = .{
-            .detail = "", // left
-            .description = it, // right
-        };
-    } else if (item.kind.? == .Constant or item.kind.? == .Field) {
-        const s: usize = std.mem.indexOf(u8, it, " ") orelse return;
-        const e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
-        if (e < s) {
-            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
-            return;
-        }
-        // log.info("s: {} -> {}", .{s, e});
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
-        item.detail = item.label;
-        item.labelDetails = .{
-            .detail = "", // left
-            .description = it[s + 1 .. e], // right
-        };
-
-        if (std.mem.indexOf(u8, it, "= union(")) |_| {
-            const us: usize = std.mem.indexOf(u8, it, "(") orelse return;
-            const ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
-            if (ue < us) {
-                log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
-                return;
-            }
-            item.labelDetails.?.description = it[us - 5 .. ue + 1];
-        } else if (std.mem.indexOf(u8, it, "= enum(")) |_| {
-            const es: usize = std.mem.indexOf(u8, it, "(") orelse return;
-            const ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
-            if (ee < es) {
-                log.warn("something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
-                return;
-            }
-            item.labelDetails.?.description = it[es - 4 .. ee + 1];
-        } else if (std.mem.indexOf(u8, it, "= struct")) |_| {
-            item.labelDetails.?.description = "struct";
-        } else if (std.mem.indexOf(u8, it, "= union")) |_| {
-            item.labelDetails.?.description = "union";
-        } else if (std.mem.indexOf(u8, it, "= enum")) |_| {
-            item.labelDetails.?.description = "enum";
-        }
-    } else if (item.kind.? == .Field and isValue) {
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
-        item.detail = item.label;
-        item.labelDetails = .{
-            .detail = "", // left
-            .description = item.label, // right
-        };
-    } else {
-        // TODO: if something is missing, it needs to be implemented here
-    }
-
-    // if (item.labelDetails != null)
-    //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
 fn completeError(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
@@ -1106,7 +924,6 @@ fn globalSetCompletions(
             if (!gop.found_existing) {
                 gop.key_ptr.* = types.CompletionItem{
                     .label = name,
-                    // TODO check if client supports label_details_support
                     .detail = switch (kind) {
                         .error_set => try std.fmt.allocPrint(arena, "error.{}", .{std.zig.fmtId(name)}),
                         .enum_set => null,

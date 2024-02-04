@@ -68,7 +68,7 @@ fn hoverSymbolRecursive(
                         &reference_collector,
                     );
 
-                break :def try Analyser.getVariableSignature(arena, tree, var_decl);
+                break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 is_fn = true;
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
@@ -81,7 +81,7 @@ fn hoverSymbolRecursive(
                         &reference_collector,
                     );
 
-                break :def Analyser.getContainerFieldSignature(tree, field);
+                break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
             } else {
                 break :def Analyser.nodeToString(tree, node) orelse return null;
             }

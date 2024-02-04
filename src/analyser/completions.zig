@@ -84,7 +84,7 @@ pub fn dotCompletions(
             try completions.append(arena, .{
                 .label = "len",
                 .kind = .Field,
-                .detail = try std.fmt.allocPrint(arena, "const len: usize = {d}", .{array_info.len}),
+                .detail = try std.fmt.allocPrint(arena, "usize = {d}", .{array_info.len}),
             });
         },
         .struct_type => |struct_index| {
@@ -250,14 +250,14 @@ test "dotCompletions - array types" {
         .{
             .label = "len",
             .kind = .Field,
-            .detail = "const len: usize = 3",
+            .detail = "usize = 3",
         },
     });
     try testCompletion(&ip, try ip.getUnknown(gpa, @"[1]u8"), &.{
         .{
             .label = "len",
             .kind = .Field,
-            .detail = "const len: usize = 1",
+            .detail = "usize = 1",
         },
     });
 }
@@ -343,7 +343,7 @@ test "dotCompletions - single pointer indirection" {
         .{
             .label = "len",
             .kind = .Field,
-            .detail = "const len: usize = 1",
+            .detail = "usize = 1",
         },
     });
     try testCompletion(&ip, try ip.getUnknown(gpa, @"**[1]u32"), &.{});
