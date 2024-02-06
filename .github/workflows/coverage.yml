@@ -25,7 +25,7 @@ jobs:
           zig build test -Dgenerate_coverage --summary all
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: zig-out/coverage/kcov-merged
