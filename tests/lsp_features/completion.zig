@@ -77,7 +77,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Outer = struct { const Inner = Bar; };
         \\const foo = Outer.Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
@@ -85,7 +85,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Inner = Outer.Inner;
         \\const foo = Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     // decl name:   escaped
     // symbol name: unescaped
@@ -94,7 +94,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Outer = struct { const @"Inner" = Bar; };
         \\const foo = Outer.Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
@@ -102,7 +102,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Inner = Outer.Inner;
         \\const foo = Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     // decl name:   unescaped
     // symbol name: escaped
@@ -111,7 +111,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Outer = struct { const Inner = Bar; };
         \\const foo = Outer.@"Inner".<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
@@ -119,7 +119,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Inner = Outer.@"Inner";
         \\const foo = Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     // decl name:   escaped
     // symbol name: escaped
@@ -128,7 +128,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Outer = struct { const @"Inner" = Bar; };
         \\const foo = Outer.@"Inner".<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const Bar = struct { const Some = u32; };
@@ -136,7 +136,7 @@ test "completion - symbol lookup on escaped identifiers" {
         \\const Inner = Outer.@"Inner";
         \\const foo = Inner.<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
 }
 
@@ -157,20 +157,20 @@ test "completion - symbol lookup on identifier named after primitive" {
         \\const Bar = struct { const Some = u32; };
         \\const foo = Outer.@"u32".<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const Outer = struct { const @"undefined" = Bar; };
         \\const Bar = struct { const Some = u32; };
         \\const foo = Outer.@"undefined".<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const @"unreachable" = struct { const Some = u32; };
         \\const foo = @"unreachable".<cursor>
     , &.{
-        .{ .label = "Some", .kind = .Constant, .detail = "const Some = u32" },
+        .{ .label = "Some", .kind = .Constant, .detail = "u32" },
     });
 }
 
@@ -182,8 +182,8 @@ test "completion - function" {
     , &.{
         // TODO detail should be 'fn(alpha: u32, beta: []const u8) void' or 'foo: fn(alpha: u32, beta: []const u8) void'
         .{ .label = "foo", .kind = .Function, .detail = "fn foo(alpha: u32, beta: []const u8) void" },
-        .{ .label = "alpha", .kind = .Constant, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Constant, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Constant, .detail = "u32" },
+        .{ .label = "beta", .kind = .Constant, .detail = "[]const u8" },
     });
 
     try testCompletion(
@@ -191,7 +191,7 @@ test "completion - function" {
         \\fn foo() S { return undefined; }
         \\const bar = foo().<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -206,7 +206,7 @@ test "completion - generic function" {
         \\const array_list: ArrayList(S) = undefined;
         \\const foo = array_list.items[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -215,7 +215,7 @@ test "completion - generic function" {
         \\const s = foo(S);
         \\const foo = s.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -223,7 +223,7 @@ test "completion - generic function" {
         \\const s = foo(null, S);
         \\const foo = s.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -235,7 +235,7 @@ test "completion - generic function" {
         \\const s2 = s1.foo(S);
         \\const foo = s2.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S, comptime T: type) T" },
     });
     try testCompletion(
@@ -247,7 +247,7 @@ test "completion - generic function" {
         \\const s2 = s1.foo(null, S);
         \\const foo = s2.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S, any: anytype, comptime T: type) T" },
     });
 }
@@ -260,7 +260,7 @@ test "completion - std.ArrayList" {
         \\const array_list: std.ArrayList(S) = undefined;
         \\const foo = array_list.items[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -272,7 +272,7 @@ test "completion - std.ArrayHashMap" {
         \\const key = map.getKey("");
         \\const foo = key.?.<cursor>
     , &.{
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
         // TODO detail should be 'const ptr: [*]const u8'
         .{ .label = "ptr", .kind = .Field },
     });
@@ -283,7 +283,7 @@ test "completion - std.ArrayHashMap" {
         \\const s = map.get(0);
         \\const foo = s.?.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const std = @import("std");
@@ -294,7 +294,7 @@ test "completion - std.ArrayHashMap" {
     , &.{
         // TODO detail should be 'u32'
         .{ .label = "*", .kind = .Operator },
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -306,7 +306,7 @@ test "completion - std.HashMap" {
         \\const key = map.getKey("");
         \\const foo = key.?.<cursor>
     , &.{
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
         // TODO detail should be 'const ptr: [*]const u8'
         .{ .label = "ptr", .kind = .Field },
     });
@@ -317,7 +317,7 @@ test "completion - std.HashMap" {
         \\const s = map.get(0);
         \\const foo = s.?.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const std = @import("std");
@@ -328,7 +328,7 @@ test "completion - std.HashMap" {
     , &.{
         // TODO detail should be 'u32'
         .{ .label = "*", .kind = .Operator },
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -338,7 +338,7 @@ test "completion - function call" {
         \\fn func() S {}
         \\const foo = func().<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -346,7 +346,7 @@ test "completion - function call" {
         \\const foo = func();
         \\const bar = foo.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -354,7 +354,7 @@ test "completion - function call" {
         \\const func: fn() S = undefined;
         \\const foo = func().<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -362,7 +362,7 @@ test "completion - function call" {
         \\const foo = func();
         \\const bar = foo.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -370,7 +370,7 @@ test "completion - function call" {
         \\const func: *const fn() S = undefined;
         \\const foo = func().<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -378,7 +378,7 @@ test "completion - function call" {
         \\const foo = func();
         \\const bar = foo.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -396,7 +396,7 @@ test "completion - optional" {
         \\const foo: ?S = undefined;
         \\const bar = foo.?.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -421,15 +421,15 @@ test "completion - pointer" {
         \\const foo: *S = undefined;
         \\const bar = foo.*.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
         \\const foo: []const u8 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
-        // TODO detail should be 'const ptr: [*]const u8'
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        // TODO detail should be '[*]const u8'
         .{ .label = "ptr", .kind = .Field },
     });
 
@@ -438,7 +438,7 @@ test "completion - pointer" {
         \\const foo: []S = undefined;
         \\const bar = foo[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -448,7 +448,7 @@ test "completion - pointer" {
     , &.{
         // TODO detail should be 'S'
         .{ .label = "*", .kind = .Operator },
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -458,7 +458,7 @@ test "completion - pointer" {
         \\const foo: []S = undefined;
         \\const bar = foo.ptr[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -468,7 +468,7 @@ test "completion - pointer" {
         \\const foo: [*]S = undefined;
         \\const bar = foo[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -478,7 +478,7 @@ test "completion - pointer" {
         \\const foo: [*c]S = undefined;
         \\const bar = foo[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -488,7 +488,7 @@ test "completion - pointer" {
         \\const foo: [1]S = undefined;
         \\const bar = foo[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -509,7 +509,7 @@ test "completion - address of" {
     , &.{
         // TODO detail should be 'S'
         .{ .label = "*", .kind = .Operator },
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -537,14 +537,14 @@ test "completion - array" {
         \\const foo: [3]u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+        .{ .label = "len", .kind = .Field, .detail = "usize = 3" },
     });
     try testCompletion(
         \\const length = 3;
         \\const foo: [length]u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+        .{ .label = "len", .kind = .Field, .detail = "usize = 3" },
     });
 }
 
@@ -555,14 +555,14 @@ test "completion - single pointer to array" {
     , &.{
         // TODO detail should be '[3]u32'
         .{ .label = "*", .kind = .Operator },
-        .{ .label = "len", .kind = .Field, .detail = "const len: usize = 3" },
+        .{ .label = "len", .kind = .Field, .detail = "usize = 3" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\const foo: *[2]S = undefined;
         \\const bar = foo[0].<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -582,7 +582,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -592,7 +592,7 @@ test "completion - captures" {
         \\    };
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -605,7 +605,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -616,7 +616,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -627,7 +627,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -638,7 +638,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -650,7 +650,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -662,7 +662,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -673,7 +673,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     // TODO fix value capture without block scope
@@ -682,7 +682,7 @@ test "completion - captures" {
     //     \\const foo: ?S = undefined;
     //     \\const bar = if(foo) |baz| baz.<cursor>
     // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     // });
 
     try testCompletion(
@@ -697,7 +697,7 @@ test "completion - captures" {
         \\    baz.<cursor>
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -712,7 +712,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     try testCompletion(
@@ -727,7 +727,7 @@ test "completion - captures" {
         \\    }
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -740,8 +740,8 @@ test "completion - struct" {
         \\const foo: S = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
 
     try testCompletion(
@@ -752,8 +752,8 @@ test "completion - struct" {
         \\const foo = S{ .alpha = 0, .beta = "" };
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
 
     try testCompletion(
@@ -781,8 +781,8 @@ test "completion - struct" {
         \\    }
         \\};
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
         .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S) void" },
     });
 
@@ -792,8 +792,8 @@ test "completion - struct" {
         \\    fn foo(mode: <cursor>
         \\};
     , &.{
-        .{ .label = "S", .kind = .Constant, .detail = "const S = struct" },
-        .{ .label = "Mode", .kind = .Constant, .detail = "const Mode = enum" },
+        .{ .label = "S", .kind = .Constant, .detail = "struct" },
+        .{ .label = "Mode", .kind = .Constant, .detail = "enum" },
     });
 
     try testCompletion(
@@ -822,8 +822,8 @@ test "completion - union" {
         \\const foo: U = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
 
     try testCompletion(
@@ -1334,7 +1334,7 @@ test "completion - error union" {
         \\    baz.<cursor>
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
     // try testCompletion(
@@ -1344,7 +1344,7 @@ test "completion - error union" {
     //     \\    (try foo()).<cursor>
     //     \\}
     // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     // });
 
     try testCompletion(
@@ -1355,7 +1355,7 @@ test "completion - error union" {
         \\    baz.<cursor>
         \\}
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -1367,8 +1367,8 @@ test "completion - struct init" {
         \\};
         \\const foo = S{ .<cursor> };
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1379,10 +1379,10 @@ test "completion - struct init" {
         \\const foo = S{ .alpha = 3, .<cursor>, .gamma = null };
     , &.{
         // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
         // TODO `gamma` should be excluded
-        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?*S" },
+        .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1392,8 +1392,8 @@ test "completion - struct init" {
         \\const foo = S{ .alpha = S{ .beta = "{}" }, .<cursor> };
     , &.{
         // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1402,8 +1402,8 @@ test "completion - struct init" {
         \\};
         \\const foo = S{ .alpha = S{ .<cursor> } };
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1414,10 +1414,10 @@ test "completion - struct init" {
         \\const foo = S{ .gamma = undefined, .<cursor> , .alpha = undefined };
     , &.{
         // TODO `gamma` should be excluded
-        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?*S" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
+        .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
         // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1427,35 +1427,35 @@ test "completion - struct init" {
         \\};
         \\const foo = S{ .gamma = .{.<cursor>};
     , &.{
-        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?S" },
-        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(s: *S) void { s = .{.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(s: *S) void { s.* = .{.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo() S {}
         \\test { foo(){.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo() anyerror!S {}
         \\test { try foo(){.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -1464,7 +1464,7 @@ test "completion - struct init" {
         \\};
         \\test { try nmspc.foo(){.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const nmspc = struct {
@@ -1476,7 +1476,7 @@ test "completion - struct init" {
         \\};
         \\test { nmspc.foo(){.<cursor>} }
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     // Aliases
     try testCompletion(
@@ -1493,8 +1493,8 @@ test "completion - struct init" {
         \\    var s = Alias{.<cursor>};
         \\}
     , &.{
-        .{ .label = "isf1", .kind = .Field, .detail = "isf1: bool = true" },
-        .{ .label = "isf2", .kind = .Field, .detail = "isf2: bool = false" },
+        .{ .label = "isf1", .kind = .Field, .detail = "bool = true" },
+        .{ .label = "isf2", .kind = .Field, .detail = "bool = false" },
     });
     // Parser workaround for when used before defined
     try testCompletion(
@@ -1510,8 +1510,8 @@ test "completion - struct init" {
         \\const Alias0 = Outer.Inner;
         \\const Alias = Alias0;
     , &.{
-        .{ .label = "isf1", .kind = .Field, .detail = "isf1: bool = true" },
-        .{ .label = "isf2", .kind = .Field, .detail = "isf2: bool = false" },
+        .{ .label = "isf1", .kind = .Field, .detail = "bool = true" },
+        .{ .label = "isf2", .kind = .Field, .detail = "bool = false" },
     });
     // Parser workaround for completing within Self
     try testCompletion(
@@ -1523,8 +1523,8 @@ test "completion - struct init" {
         \\    }
         \\};
     , &.{
-        .{ .label = "a", .kind = .Field, .detail = "a: bool" },
-        .{ .label = "b", .kind = .Field, .detail = "b: bool" },
+        .{ .label = "a", .kind = .Field, .detail = "bool" },
+        .{ .label = "b", .kind = .Field, .detail = "bool" },
     });
     try testCompletion(
         \\fn ref(p0: A, p1: B) void {}
@@ -1538,8 +1538,8 @@ test "completion - struct init" {
         \\};
         \\ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
     , &.{
-        .{ .label = "arefb", .kind = .Field, .detail = "arefb: B = 8" },
-        .{ .label = "this_is_a", .kind = .Field, .detail = "this_is_a: u32 = 9" },
+        .{ .label = "arefb", .kind = .Field, .detail = "B = 8" },
+        .{ .label = "this_is_a", .kind = .Field, .detail = "u32 = 9" },
     });
     try testCompletion(
         \\const MyEnum = enum {
@@ -1556,9 +1556,9 @@ test "completion - struct init" {
         \\};
         \\const refs = S3{ .ref2 = .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } } };
     , &.{
-        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
-        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
-        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+        .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "S3 = undefined" },
     });
     // Method of T requiring explicit self param
     try testCompletion(
@@ -1577,9 +1577,9 @@ test "completion - struct init" {
         \\};
         \\S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
     , &.{
-        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
-        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
-        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+        .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "S3 = undefined" },
     });
     // Instance of T w/ self param + multitype (`switch`)
     try testCompletion(
@@ -1604,16 +1604,16 @@ test "completion - struct init" {
         \\const iofs3 = S3{};
         \\iofs3.s3(.{.<cursor>});
     , &.{
-        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
-        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
-        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
-        .{ .label = "s2f1", .kind = .Field, .detail = "s2f1: u8" },
-        .{ .label = "s2f2", .kind = .Field, .detail = "s2f2: u32 = 1" },
-        .{ .label = "ref1", .kind = .Field, .detail = "ref1: S1" },
-        .{ .label = "s3f1", .kind = .Field, .detail = "s3f1: u8" },
-        .{ .label = "s3f2", .kind = .Field, .detail = "s3f2: u32 = 1" },
-        .{ .label = "ref2", .kind = .Field, .detail = "ref2: S2" },
-        .{ .label = "mye", .kind = .Field, .detail = "mye: MyEnum = .ef1" },
+        .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "S3 = undefined" },
+        .{ .label = "s2f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s2f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref1", .kind = .Field, .detail = "S1" },
+        .{ .label = "s3f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s3f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref2", .kind = .Field, .detail = "S2" },
+        .{ .label = "mye", .kind = .Field, .detail = "MyEnum = .ef1" },
     });
     try testCompletion(
         \\const MyEnum = enum {
@@ -1627,13 +1627,13 @@ test "completion - struct init" {
         \\const S2 = struct { s2f1: u8, s2f2: u32 = 1, ref1: S1, mye: MyEnum = .ef1};
         \\const oesi: oes.es = .{ .<cursor>};
     , &.{
-        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
-        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
-        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
-        .{ .label = "s2f1", .kind = .Field, .detail = "s2f1: u8" },
-        .{ .label = "s2f2", .kind = .Field, .detail = "s2f2: u32 = 1" },
-        .{ .label = "ref1", .kind = .Field, .detail = "ref1: S1" },
-        .{ .label = "mye", .kind = .Field, .detail = "mye: MyEnum = .ef1" },
+        .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "S3 = undefined" },
+        .{ .label = "s2f1", .kind = .Field, .detail = "u8" },
+        .{ .label = "s2f2", .kind = .Field, .detail = "u32 = 1" },
+        .{ .label = "ref1", .kind = .Field, .detail = "S1" },
+        .{ .label = "mye", .kind = .Field, .detail = "MyEnum = .ef1" },
     });
 }
 
@@ -1645,8 +1645,8 @@ test "completion - declarations" {
         \\};
         \\const foo = S.<cursor>
     , &.{
-        .{ .label = "Public", .kind = .Constant, .detail = "const Public = u32" },
-        .{ .label = "Private", .kind = .Constant, .detail = "const Private = u32" },
+        .{ .label = "Public", .kind = .Constant, .detail = "u32" },
+        .{ .label = "Private", .kind = .Constant, .detail = "u32" },
     });
     try testCompletion(
         \\const S: type = struct {
@@ -1655,8 +1655,8 @@ test "completion - declarations" {
         \\};
         \\const foo = S.<cursor>
     , &.{
-        .{ .label = "Public", .kind = .Constant, .detail = "const Public = u32" },
-        .{ .label = "Private", .kind = .Constant, .detail = "const Private: type = u32" },
+        .{ .label = "Public", .kind = .Constant, .detail = "u32" },
+        .{ .label = "Private", .kind = .Constant, .detail = "type = u32" },
     });
 
     try testCompletion(
@@ -1762,8 +1762,8 @@ test "completion - usingnamespace" {
         \\    _ = chip.<cursor>;
         \\}
     , &.{
-        .{ .label = "inner", .kind = .Constant, .detail = "const chip_mod = struct" },
-        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "inner", .kind = .Constant, .detail = "struct" },
+        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
         .{ .label = "chip1fn1", .kind = .Function, .detail = "fn chip1fn1() void" },
         .{ .label = "chip1fn2", .kind = .Function, .detail = "fn chip1fn2(_: u32) void" },
     });
@@ -1828,7 +1828,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
     });
     try testCompletion(
         \\pub const chip_mod = struct {
@@ -1844,7 +1844,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
     });
     try testCompletion(
         \\pub const chip_mod = struct {
@@ -1862,7 +1862,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
     });
 }
 
@@ -1883,7 +1883,7 @@ test "completion - block" {
         \\};
         \\const baz = bar.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
 
@@ -1961,7 +1961,7 @@ test "completion - combine doc comments of declaration and definition" {
         .{
             .label = "bar",
             .kind = .Constant,
-            .detail = "const buzz = struct",
+            .detail = "struct",
             .documentation =
             \\ A
             \\
@@ -1983,7 +1983,7 @@ test "hover - top-level doc comment" {
         .{
             .label = "Foo",
             .kind = .Constant,
-            .detail = "const Foo = @This()",
+            .detail = "@This()",
             .documentation =
             \\ A
             \\

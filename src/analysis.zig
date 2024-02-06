@@ -125,13 +125,9 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
 
 /// Gets a function's keyword, name, arguments and return value.
 pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
-    const start = offsets.tokenToLoc(tree, func.ast.fn_token);
-
-    const end = if (func.ast.return_type != 0)
-        offsets.tokenToLoc(tree, ast.lastToken(tree, func.ast.return_type))
-    else
-        start;
-    return tree.source[start.start..end.end];
+    const first_token = func.ast.fn_token;
+    const last_token = if (func.ast.return_type != 0) ast.lastToken(tree, func.ast.return_type) else first_token;
+    return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
 fn formatSnippetPlaceholder(
@@ -289,56 +285,81 @@ pub fn firstParamIs(
     return deref_type.eql(expected);
 }
 
-pub fn getVariableSignature(allocator: std.mem.Allocator, tree: Ast, var_decl: Ast.full.VarDecl) error{OutOfMemory}![]const u8 {
+pub fn getVariableSignature(
+    allocator: std.mem.Allocator,
+    tree: Ast,
+    var_decl: Ast.full.VarDecl,
+    include_name: bool,
+) error{OutOfMemory}![]const u8 {
     const node_tags = tree.nodes.items(.tag);
 
-    const start_token = var_decl.ast.mut_token;
-    const end_token = blk: {
-        const init_node = var_decl.ast.init_node;
-        if (init_node == 0)
-            break :blk start_token + 1;
+    const start_token = if (include_name)
+        var_decl.ast.mut_token
+    else if (var_decl.ast.type_node != 0)
+        tree.firstToken(var_decl.ast.type_node)
+    else
+        tree.firstToken(var_decl.ast.init_node);
 
-        if (node_tags[init_node] == .merge_error_sets)
+    const init_node = var_decl.ast.init_node;
+    if (var_decl.ast.init_node == 0) {
+        if (var_decl.ast.type_node == 0) return "";
+        return offsets.tokensToSlice(tree, start_token, ast.lastToken(tree, var_decl.ast.type_node));
+    }
+
+    const end_token = switch (node_tags[init_node]) {
+        .merge_error_sets => {
             return try std.fmt.allocPrint(allocator, "{s} error", .{
                 offsets.tokensToSlice(tree, start_token, tree.firstToken(init_node) - 1),
             });
+        },
+        .error_set_decl => tree.firstToken(init_node),
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        => blk: {
+            var buf: [2]Ast.Node.Index = undefined;
+            const container_decl = tree.fullContainerDecl(&buf, init_node).?;
 
-        if (node_tags[init_node] == .error_set_decl)
-            break :blk tree.firstToken(init_node);
+            var token = container_decl.ast.main_token;
+            var offset: Ast.TokenIndex = 0;
 
-        var buf: [2]Ast.Node.Index = undefined;
-        const container_decl = tree.fullContainerDecl(&buf, init_node) orelse
-            break :blk ast.lastToken(tree, init_node);
+            // Tagged union: union(enum)
+            if (container_decl.ast.enum_token) |enum_token| {
+                token = enum_token;
+                offset += 1;
+            }
 
-        var token = container_decl.ast.main_token;
-        var offset: Ast.TokenIndex = 0;
+            // Backing integer: struct(u32), union(enum(u32))
+            // Tagged union: union(ComplexTypeTag)
+            if (container_decl.ast.arg != 0) {
+                token = ast.lastToken(tree, container_decl.ast.arg);
+                offset += 1;
+            }
 
-        // Tagged union: union(enum)
-        if (container_decl.ast.enum_token) |enum_token| {
-            token = enum_token;
-            offset += 1;
-        }
-
-        // Backing integer: struct(u32), union(enum(u32))
-        // Tagged union: union(ComplexTypeTag)
-        if (container_decl.ast.arg != 0) {
-            token = ast.lastToken(tree, container_decl.ast.arg);
-            offset += 1;
-        }
-
-        break :blk token + offset;
+            break :blk token + offset;
+        },
+        else => ast.lastToken(tree, init_node),
     };
+
     return offsets.tokensToSlice(tree, start_token, end_token);
 }
 
-pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []const u8 {
-    if (field.ast.value_expr == 0 and field.ast.type_expr == 0 and field.ast.align_expr == 0) {
-        return ""; // TODO display the container's type
-    }
-    const start = offsets.tokenToIndex(tree, field.ast.main_token);
-    const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
-    const end = offsets.tokenToLoc(tree, ast.lastToken(tree, end_node)).end;
-    return tree.source[start..end];
+pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]const u8 {
+    if (field.ast.type_expr == 0) return null;
+    const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else if (field.ast.align_expr != 0) field.ast.align_expr else field.ast.type_expr;
+
+    const first_token = tree.firstToken(field.ast.type_expr);
+    const last_token = ast.lastToken(tree, end_node);
+    return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
 /// The node is the meta-type `type`
