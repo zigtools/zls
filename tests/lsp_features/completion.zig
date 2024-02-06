@@ -2140,7 +2140,7 @@ test "anytype resolution based on callsite-references" {
     });
 }
 
-test "builtin fn `field`" {
+test "completion - builtin fns return type" {
     try testCompletion(
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
@@ -2189,6 +2189,198 @@ test "builtin fn `field`" {
         \\}
     , &.{
         .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
+    });
+    try testCompletion(
+        \\test {
+        \\    const src = @src();
+        \\    src.<cursor>
+        \\}
+    , &.{
+        .{ .label = "line", .kind = .Field, .detail = "u32" },
+        .{ .label = "file", .kind = .Field, .detail = "[:0]const u8" },
+        .{ .label = "fn_name", .kind = .Field, .detail = "[:0]const u8" },
+        .{ .label = "column", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\test {
+        \\    const ti = @typeInfo().<cursor>;
+        \\}
+    , &.{
+        .{ .label = "Type", .kind = .Field, .detail = "void" },
+        .{ .label = "Void", .kind = .Field, .detail = "void" },
+        .{ .label = "Bool", .kind = .Field, .detail = "void" },
+        .{ .label = "NoReturn", .kind = .Field, .detail = "void" },
+        .{ .label = "Int", .kind = .Field, .detail = "Int" },
+        .{ .label = "Float", .kind = .Field, .detail = "Float" },
+        .{ .label = "Pointer", .kind = .Field, .detail = "Pointer" },
+        .{ .label = "Array", .kind = .Field, .detail = "Array" },
+        .{ .label = "Struct", .kind = .Field, .detail = "Struct" },
+        .{ .label = "ComptimeFloat", .kind = .Field, .detail = "void" },
+        .{ .label = "ComptimeInt", .kind = .Field, .detail = "void" },
+        .{ .label = "Undefined", .kind = .Field, .detail = "void" },
+        .{ .label = "Null", .kind = .Field, .detail = "void" },
+        .{ .label = "Optional", .kind = .Field, .detail = "Optional" },
+        .{ .label = "ErrorUnion", .kind = .Field, .detail = "ErrorUnion" },
+        .{ .label = "ErrorSet", .kind = .Field, .detail = "ErrorSet" },
+        .{ .label = "Enum", .kind = .Field, .detail = "Enum" },
+        .{ .label = "Union", .kind = .Field, .detail = "Union" },
+        .{ .label = "Fn", .kind = .Field, .detail = "Fn" },
+        .{ .label = "Opaque", .kind = .Field, .detail = "Opaque" },
+        .{ .label = "Frame", .kind = .Field, .detail = "Frame" },
+        .{ .label = "AnyFrame", .kind = .Field, .detail = "AnyFrame" },
+        .{ .label = "Vector", .kind = .Field, .detail = "Vector" },
+        .{ .label = "EnumLiteral", .kind = .Field, .detail = "void" },
+    });
+}
+
+test "completion - builtin fns taking an enum arg" {
+    try testCompletion(
+        \\test {
+        \\    @Type(.{.<cursor>
+        \\}
+    , &.{
+        .{ .label = "Type", .kind = .Field, .detail = "void" },
+        .{ .label = "Void", .kind = .Field, .detail = "void" },
+        .{ .label = "Bool", .kind = .Field, .detail = "void" },
+        .{ .label = "NoReturn", .kind = .Field, .detail = "void" },
+        .{ .label = "Int", .kind = .Field, .detail = "Int" },
+        .{ .label = "Float", .kind = .Field, .detail = "Float" },
+        .{ .label = "Pointer", .kind = .Field, .detail = "Pointer" },
+        .{ .label = "Array", .kind = .Field, .detail = "Array" },
+        .{ .label = "Struct", .kind = .Field, .detail = "Struct" },
+        .{ .label = "ComptimeFloat", .kind = .Field, .detail = "void" },
+        .{ .label = "ComptimeInt", .kind = .Field, .detail = "void" },
+        .{ .label = "Undefined", .kind = .Field, .detail = "void" },
+        .{ .label = "Null", .kind = .Field, .detail = "void" },
+        .{ .label = "Optional", .kind = .Field, .detail = "Optional" },
+        .{ .label = "ErrorUnion", .kind = .Field, .detail = "ErrorUnion" },
+        .{ .label = "ErrorSet", .kind = .Field, .detail = "ErrorSet" },
+        .{ .label = "Enum", .kind = .Field, .detail = "Enum" },
+        .{ .label = "Union", .kind = .Field, .detail = "Union" },
+        .{ .label = "Fn", .kind = .Field, .detail = "Fn" },
+        .{ .label = "Opaque", .kind = .Field, .detail = "Opaque" },
+        .{ .label = "Frame", .kind = .Field, .detail = "Frame" },
+        .{ .label = "AnyFrame", .kind = .Field, .detail = "AnyFrame" },
+        .{ .label = "Vector", .kind = .Field, .detail = "Vector" },
+        .{ .label = "EnumLiteral", .kind = .Field, .detail = "void" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @Type(.{.Struct = .{.<cursor>
+        \\}
+    , &.{
+        .{ .label = "layout", .kind = .Field, .detail = "ContainerLayout" },
+        .{ .label = "backing_integer", .kind = .Field, .detail = "?type = null" },
+        .{ .label = "fields", .kind = .Field, .detail = "[]const StructField" },
+        .{ .label = "decls", .kind = .Field, .detail = "[]const Declaration" },
+        .{ .label = "is_tuple", .kind = .Field, .detail = "bool" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @setFloatMode(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "Strict", .kind = .EnumMember, .detail = "Strict" },
+        .{ .label = "Optimized", .kind = .EnumMember, .detail = "Optimized" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @prefetch(, .{.<cursor>})
+        \\}
+    , &.{
+        .{ .label = "rw", .kind = .Field, .detail = "Rw = .read" },
+        .{ .label = "locality", .kind = .Field, .detail = "u2 = 3" },
+        .{ .label = "cache", .kind = .Field, .detail = "Cache = .data" },
+    });
+    try testCompletion(
+        \\test {
+        \\    @reduce(.<cursor>
+        \\}
+    , &.{
+        .{ .label = "And", .kind = .EnumMember, .detail = "And" },
+        .{ .label = "Or", .kind = .EnumMember, .detail = "Or" },
+        .{ .label = "Xor", .kind = .EnumMember, .detail = "Xor" },
+        .{ .label = "Min", .kind = .EnumMember, .detail = "Min" },
+        .{ .label = "Max", .kind = .EnumMember, .detail = "Max" },
+        .{ .label = "Add", .kind = .EnumMember, .detail = "Add" },
+        .{ .label = "Mul", .kind = .EnumMember, .detail = "Mul" },
+    });
+    try testCompletionTextEdit(.{
+        .source = "comptime { @export(foo ,.<cursor>",
+        .label = "name",
+        .expected_insert_line = "comptime { @export(foo ,.{ .name = ",
+        .expected_replace_line = "comptime { @export(foo ,.{ .name = ",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @extern(T , .<cursor>",
+        .label = "is_thread_local",
+        .expected_insert_line = "test { @extern(T , .{ .is_thread_local = ",
+        .expected_replace_line = "test { @extern(T , .{ .is_thread_local = ",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @fence(.<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @fence(.AcqRel",
+        .expected_replace_line = "test { @fence(.AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @cmpxchgWeak(1,2,3,4, .<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @cmpxchgWeak(1,2,3,4, .AcqRel",
+        .expected_replace_line = "test { @cmpxchgWeak(1,2,3,4, .AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @cmpxchgStrong(1,2,3,4,5,.<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @cmpxchgStrong(1,2,3,4,5,.AcqRel",
+        .expected_replace_line = "test { @cmpxchgStrong(1,2,3,4,5,.AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicLoad(1,2,.<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @atomicLoad(1,2,.AcqRel",
+        .expected_replace_line = "test { @atomicLoad(1,2,.AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicStore(1,2,3,.<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @atomicStore(1,2,3,.AcqRel",
+        .expected_replace_line = "test { @atomicStore(1,2,3,.AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicRmw(1,2,.<cursor>",
+        .label = "Add",
+        .expected_insert_line = "test { @atomicRmw(1,2,.Add",
+        .expected_replace_line = "test { @atomicRmw(1,2,.Add",
+        .enable_snippets = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "test { @atomicRmw(1,2,3,4,.<cursor>",
+        .label = "AcqRel",
+        .expected_insert_line = "test { @atomicRmw(1,2,3,4,.AcqRel",
+        .expected_replace_line = "test { @atomicRmw(1,2,3,4,.AcqRel",
+        .enable_snippets = false,
+    });
+    try testCompletion(
+        \\test {
+        \\    @call(.<cursor>
+        \\}
+    , &.{
+        .{ .label = "auto", .kind = .EnumMember, .detail = "auto" },
+        .{ .label = "async_kw", .kind = .EnumMember, .detail = "async_kw" },
+        .{ .label = "never_tail", .kind = .EnumMember, .detail = "never_tail" },
+        .{ .label = "never_inline", .kind = .EnumMember, .detail = "never_inline" },
+        .{ .label = "no_async", .kind = .EnumMember, .detail = "no_async" },
+        .{ .label = "always_tail", .kind = .EnumMember, .detail = "always_tail" },
+        .{ .label = "always_inline", .kind = .EnumMember, .detail = "always_inline" },
+        .{ .label = "compile_time", .kind = .EnumMember, .detail = "compile_time" },
     });
 }
 

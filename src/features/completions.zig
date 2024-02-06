@@ -1311,113 +1311,92 @@ fn collectContainerNodes(
 
 fn resolveBuiltinFnArg(
     analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    /// `null` means return type
-    arg_index: ?usize,
+    arg_index: usize,
     /// Includes leading `@`
     name: []const u8,
 ) std.mem.Allocator.Error!?Analyser.Type {
-    const type_type = try Analyser.Type.typeValFromIP(analyser, .type_type);
     const builtin_name: []const u8 = name: {
         if (std.mem.eql(u8, name, "@Type")) {
-            switch (arg_index orelse return type_type) {
+            switch (arg_index) {
                 0 => break :name "Type",
                 else => return null,
             }
         }
 
-        if (std.mem.eql(u8, name, "@typeInfo")) {
-            switch (arg_index orelse break :name "Type") {
-                0 => return type_type,
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@src")) {
-            if (arg_index != null) return null;
-            break :name "SourceLocation";
-        }
-
         if (std.mem.eql(u8, name, "@setFloatMode")) {
-            switch (arg_index orelse return null) {
+            switch (arg_index) {
                 0 => break :name "FloatMode",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@prefetch")) {
-            switch (arg_index orelse return null) {
-                0 => return null,
+            switch (arg_index) {
                 1 => break :name "PrefetchOptions",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@reduce")) {
-            switch (arg_index orelse return null) {
+            switch (arg_index) {
                 0 => break :name "ReduceOp",
-                1 => return null,
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@export")) {
-            switch (arg_index orelse return null) {
-                0 => return null,
+            switch (arg_index) {
                 1 => break :name "ExportOptions",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@extern")) {
-            switch (arg_index orelse return null) {
-                0 => return type_type,
+            switch (arg_index) {
                 1 => break :name "ExternOptions",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@fence")) {
-            switch (arg_index orelse return null) {
+            switch (arg_index) {
                 0 => break :name "AtomicOrder",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@cmpxchgWeak") or std.mem.eql(u8, name, "@cmpxchgStrong")) {
-            switch (arg_index orelse return null) {
-                0 => return type_type,
-                1, 2, 3 => return null,
+            switch (arg_index) {
                 4, 5 => break :name "AtomicOrder",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@atomicLoad")) {
-            switch (arg_index orelse return null) {
-                0 => return type_type,
-                1 => return null,
+            switch (arg_index) {
                 2 => break :name "AtomicOrder",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@atomicStore")) {
-            switch (arg_index orelse return null) {
-                0 => return type_type,
-                1, 2 => return null,
+            switch (arg_index) {
                 3 => break :name "AtomicOrder",
                 else => return null,
             }
         }
 
         if (std.mem.eql(u8, name, "@atomicRmw")) {
-            switch (arg_index orelse return null) {
-                0 => return type_type,
-                1 => return null,
+            switch (arg_index) {
                 2 => break :name "AtomicRmwOp",
-                3 => return null,
                 4 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@call")) {
+            switch (arg_index) {
+                0 => break :name "CallModifier",
                 else => return null,
             }
         }
@@ -1425,15 +1404,7 @@ fn resolveBuiltinFnArg(
         return null;
     };
 
-    const std_uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), handle.*, "std") orelse return null;
-    const std_handle = analyser.store.getOrLoadHandle(std_uri) orelse return null;
-    const std_ty = Analyser.Type.typeVal(.{ .handle = std_handle, .node = 0 });
-
-    const builtin_decl = try std_ty.lookupSymbol(analyser, "builtin") orelse return null;
-    const builtin_ty = try builtin_decl.resolveType(analyser) orelse return null;
-
-    const want_ty_decl = try builtin_ty.lookupSymbol(analyser, builtin_name) orelse return null;
-    return want_ty_decl.resolveType(analyser);
+    return analyser.instanceStdBuiltinType(builtin_name);
 }
 
 fn collectBuiltinContainerNodes(
@@ -1443,10 +1414,10 @@ fn collectBuiltinContainerNodes(
     dot_context: EnumLiteralContext,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
+    if (dot_context.need_ret_type) return;
     if (try resolveBuiltinFnArg(
         builder.analyser,
-        handle,
-        if (dot_context.need_ret_type) null else dot_context.fn_arg_index,
+        dot_context.fn_arg_index,
         handle.tree.source[loc.start..loc.end],
     )) |ty| {
         try types_with_handles.append(builder.arena, ty);
