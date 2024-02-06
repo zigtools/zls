@@ -154,6 +154,12 @@ test "hover - builtin" {
         \\```
         \\Converts `true` to `@as(u1, 1)` and `false` to `@as(u1, 0)`.
     );
+    try testHoverWithOptions(
+        \\@intFr<cursor>omBool(5);
+    ,
+        \\@intFromBool(value: bool) u1
+        \\Converts `true` to `@as(u1, 1)` and `false` to `@as(u1, 0)`.
+    , .{ .markup_kind = .plaintext });
 }
 
 test "hover - struct" {
@@ -514,6 +520,61 @@ test "hover - error union" {
         \\
         \\Go to [E](file:///test.zig#L2) | [S](file:///test.zig#L1)
     );
+}
+
+test "hover - either types" {
+    try testHover(
+        \\const A = struct {
+        \\    ///small type
+        \\    pub const T = u32;
+        \\};
+        \\const B = struct {
+        \\    ///large type
+        \\    pub const T = u64;
+        \\};
+        \\const either = if (undefined) A else B;
+        \\const bar = either.<cursor>T;
+    ,
+        \\```zig
+        \\const T = u32
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\small type
+        \\
+        \\```zig
+        \\const T = u64
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\large type
+    );
+    try testHoverWithOptions(
+        \\const A = struct {
+        \\    ///small type
+        \\    pub const T = u32;
+        \\};
+        \\const B = struct {
+        \\    ///large type
+        \\    pub const T = u64;
+        \\};
+        \\const either = if (undefined) A else B;
+        \\const bar = either.<cursor>T;
+    ,
+        \\const T = u32
+        \\(type)
+        \\
+        \\small type
+        \\
+        \\const T = u64
+        \\(type)
+        \\
+        \\large type
+    , .{ .markup_kind = .plaintext });
 }
 
 test "hover - var decl comments" {
