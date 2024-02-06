@@ -55,25 +55,22 @@ jobs:
       - run: zig env
 
       - name: Checkout zig
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: zig
           repository: "ziglang/zig"
-          fetch-depth: 0
 
       - name: Checkout zls (non-PR)
         if: github.event_name != 'pull_request_target'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: zls
-          fetch-depth: 0
 
       - name: Checkout zls (PR)
         if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: zls
-          fetch-depth: 0
           ref: "refs/pull/${{ github.event.number }}/merge"
 
       - name: Build zls
@@ -83,11 +80,10 @@ jobs:
           zig build
 
       - name: Checkout sus
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: sus
           repository: "zigtools/sus"
-          fetch-depth: 0
 
       - name: Build sus
         run: |
@@ -117,6 +113,3 @@ jobs:
           space_region: nyc3
           source: sus/saved_logs/
           out_dir: ${{ github.event.pull_request.head.repo.full_name || github.repository }}/${{ github.head_ref || github.ref_name }}/${{ github.event.pull_request.head.sha || github.sha }}
-
-
-  
