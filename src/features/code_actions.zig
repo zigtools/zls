@@ -6,7 +6,7 @@ const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 pub const Builder = struct {
     arena: std.mem.Allocator,

@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
-const tracy = @import("tracy.zig");
+const tracy = @import("tracy");
 const DiffMatchPatch = @import("diffz");
 
 const dmp = DiffMatchPatch{

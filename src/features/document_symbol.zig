@@ -6,7 +6,7 @@ const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const analysis = @import("../analysis.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 const Symbol = struct {
     name: []const u8,

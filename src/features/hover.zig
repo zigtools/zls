@@ -6,7 +6,7 @@ const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");

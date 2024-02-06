@@ -22,7 +22,7 @@ const isPrimitive = std.zig.primitives.isPrimitive;
 const Zir = @import("Zir.zig");
 const refToIndex = Zir.refToIndex;
 const indexToRef = Zir.indexToRef;
-const trace = @import("../tracy.zig").trace;
+const trace = @import("tracy").trace;
 const BuiltinFn = @import("BuiltinFn.zig");
 const AstRlAnnotate = @import("AstRlAnnotate.zig");
 
