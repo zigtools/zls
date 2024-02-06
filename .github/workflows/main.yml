@@ -39,9 +39,6 @@ jobs:
       - name: Run zig fmt
         run: zig fmt --check .
 
-      - name: Build
-        run: zig build
-
       - name: Get ZLS version and mimimum build version
         id: zls_version
         run: |
