@@ -6,10 +6,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          submodules: true
+      - uses: actions/checkout@v4
 
       - uses: goto-bus-stop/setup-zig@v2
         with:
@@ -30,7 +27,7 @@ jobs:
         run: |
           kcov --version
           zig build test -Dgenerate_coverage
-          
+
       - name: Upload to Codecov
         uses: codecov/codecov-action@v3
         with:
@@ -38,4 +35,3 @@ jobs:
           directory: zig-out/kcov/kcov-merged
           fail_ci_if_error: true
           verbose: true
-
