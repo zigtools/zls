@@ -811,11 +811,20 @@ pub fn resolveDerefType(analyser: *Analyser, pointer: Type) error{OutOfMemory}!?
     }
 }
 
+const BracketAccessKind = enum {
+    /// `lhs[index]`
+    Single,
+    /// `lhs[start..]`
+    Open,
+    /// `lhs[start..end]`
+    Range,
+};
+
 /// Resolves slicing and array access
-/// - `lhs[index]`
-/// - `lhs[start..]`
-/// - `lhs[start..end]`
-fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, Range }) error{OutOfMemory}!?Type {
+/// - `lhs[index]` (Single)
+/// - `lhs[start..]` (Open)
+/// - `lhs[start..end]` (Range)
+fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKind) error{OutOfMemory}!?Type {
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
@@ -825,7 +834,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, 
         },
         .array => |info| switch (rhs) {
             .Single => return try info.elem_ty.instanceTypeVal(analyser),
-            .Range => {
+            .Open, .Range => {
                 return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = info.elem_ty } }, .is_type_val = false };
             },
         },
@@ -834,7 +843,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, 
                 .array => |array_info| {
                     switch (rhs) {
                         .Single => return try array_info.elem_ty.instanceTypeVal(analyser),
-                        .Range => {
+                        .Open, .Range => {
                             return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = array_info.elem_ty } }, .is_type_val = false };
                         },
                     }
@@ -843,11 +852,17 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: enum { Single, 
             },
             .Many => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
+                .Open => lhs,
                 .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
             },
-            .Slice, .C => switch (rhs) {
+            .Slice => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
-                .Range => lhs,
+                .Open, .Range => lhs,
+            },
+            .C => switch (rhs) {
+                .Single => try info.elem_ty.instanceTypeVal(analyser),
+                .Open => lhs,
+                .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
             },
         },
         else => return null,
@@ -1352,7 +1367,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .slice,
                 .slice_sentinel,
                 .slice_open,
-                => try analyser.resolveBracketAccessType(base_type, .Range),
+                => {
+                    const slice_info = tree.fullSlice(node).?;
+                    const kind: BracketAccessKind = if (slice_info.ast.end == 0) .Open else .Range;
+                    return try analyser.resolveBracketAccessType(base_type, kind);
+                },
                 .deref => try analyser.resolveDerefType(base_type),
                 .unwrap_optional => try analyser.resolveOptionalUnwrap(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
@@ -2644,15 +2663,9 @@ pub fn getFieldAccessType(
                             return current_type;
                         }
 
-                        const deref_type = if (current_type) |ty|
-                            if (try analyser.resolveDerefType(ty)) |deref_ty| deref_ty else ty
-                        else
-                            return null;
-
                         const symbol = offsets.identifierIndexToNameSlice(tokenizer.buffer, after_period.loc.start);
 
-                        const child = try deref_type.lookupSymbol(analyser, symbol) orelse continue;
-                        current_type = try child.resolveType(analyser) orelse continue;
+                        current_type = try analyser.resolveFieldAccess(current_type orelse return null, symbol) orelse return null;
                     },
                     .question_mark => {
                         current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;
@@ -2703,21 +2716,34 @@ pub fn getFieldAccessType(
                 } else return null;
             },
             .l_bracket => {
-                var brack_count: usize = 1;
-                var next = tokenizer.next();
-                var is_range = false;
-                while (next.tag != .eof) : (next = tokenizer.next()) {
-                    if (next.tag == .r_bracket) {
-                        brack_count -= 1;
-                        if (brack_count == 0) break;
-                    } else if (next.tag == .l_bracket) {
-                        brack_count += 1;
-                    } else if (next.tag == .ellipsis2 and brack_count == 1) {
-                        is_range = true;
-                    }
-                } else return null;
+                var bracket_count: usize = 1;
+                var kind: BracketAccessKind = .Single;
 
-                current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, if (is_range) .Range else .Single)) orelse return null;
+                while (true) {
+                    const token = tokenizer.next();
+                    switch (token.tag) {
+                        .eof => return null,
+                        .r_bracket => {
+                            bracket_count -= 1;
+                            if (bracket_count == 0) break;
+                        },
+                        .l_bracket => {
+                            bracket_count += 1;
+                        },
+                        .ellipsis2 => {
+                            if (bracket_count == 1) {
+                                kind = .Open;
+                            }
+                        },
+                        else => {
+                            if (bracket_count == 1 and kind == .Open) {
+                                kind = .Range;
+                            }
+                        },
+                    }
+                } else unreachable;
+
+                current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, kind)) orelse return null;
             },
             .builtin => {
                 if (std.mem.eql(u8, tokenizer.buffer[tok.loc.start..tok.loc.end], "@import")) {
