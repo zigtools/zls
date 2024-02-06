@@ -307,6 +307,7 @@ pub fn getVariableSignature(
 
     const end_token = switch (node_tags[init_node]) {
         .merge_error_sets => {
+            if (!include_name) return "error";
             return try std.fmt.allocPrint(allocator, "{s} error", .{
                 offsets.tokensToSlice(tree, start_token, tree.firstToken(init_node) - 1),
             });

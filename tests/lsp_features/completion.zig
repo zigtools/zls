@@ -1314,6 +1314,13 @@ test "completion - merged error sets" {
         .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
         .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
     });
+
+    try testCompletion(
+        \\const Error = error{Foo} || error{Bar};
+        \\const E = <cursor>
+    , &.{
+        .{ .label = "Error", .kind = .Constant, .detail = "error" },
+    });
 }
 
 test "completion - error union" {
