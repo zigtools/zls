@@ -31,7 +31,7 @@ fn typeToCompletion(
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .One => {
+            .One, .C => {
                 if (ty.is_type_val) return;
 
                 try list.append(arena, .{
@@ -41,6 +41,8 @@ fn typeToCompletion(
                     .insertText = "*",
                     .insertTextFormat = .PlainText,
                 });
+
+                if (info.size == .C) return;
 
                 if (try analyser.resolveDerefType(ty)) |child_ty| {
                     try typeToCompletion(server, analyser, arena, list, child_ty, orig_handle, null);
@@ -68,7 +70,7 @@ fn typeToCompletion(
                     .insertTextFormat = .PlainText,
                 });
             },
-            .Many, .C => {},
+            .Many => {},
         },
         .array => |info| {
             if (ty.is_type_val) return;

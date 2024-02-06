@@ -402,14 +402,19 @@ test "completion - optional type" {
     , &.{});
 }
 
-test "completion - pointer" {
+test "completion - pointer deref" {
     try testCompletion(
         \\const foo: *u32 = undefined;
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "u32" },
     });
-
+    try testCompletion(
+        \\const foo: [*c]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "u32" },
+    });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\const foo: *S = undefined;
@@ -417,23 +422,6 @@ test "completion - pointer" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
-
-    try testCompletion(
-        \\const foo: []const u8 = undefined;
-        \\const bar = foo.<cursor>
-    , &.{
-        .{ .label = "len", .kind = .Field, .detail = "usize" },
-        .{ .label = "ptr", .kind = .Field, .detail = "[*]const u8" },
-    });
-
-    try testCompletion(
-        \\const S = struct { alpha: u32 };
-        \\const foo: []S = undefined;
-        \\const bar = foo[0].<cursor>
-    , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-    });
-
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\const foo: *S = undefined;
@@ -442,17 +430,16 @@ test "completion - pointer" {
         .{ .label = "*", .kind = .Operator, .detail = "S" },
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
-
     try testCompletion(
-        \\const S = struct {
-        \\    alpha: u32,
-        \\};
-        \\const foo: []S = undefined;
-        \\const bar = foo.ptr[0].<cursor>
+        \\const S = struct { alpha: u32 };
+        \\const foo: [*c]S = undefined;
+        \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
     });
+}
 
+test "completion - pointer array access" {
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -462,7 +449,13 @@ test "completion - pointer" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
-
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: []S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -472,16 +465,93 @@ test "completion - pointer" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
-
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
         \\};
-        \\const foo: [1]S = undefined;
-        \\const bar = foo[0].<cursor>
+        \\const foo: []S = undefined;
+        \\const bar = foo.ptr[0].<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
+}
+
+test "completion - pointer subslicing" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: []S = undefined;
+        \\const bar = foo[0..].<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]S" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: []S = undefined;
+        \\const bar = foo.ptr[0..].<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: [*c]S = undefined;
+        \\const bar = foo.ptr[0..].<cursor>
+    , &.{});
+}
+
+test "completion - pointer subslicing parser correctness" {
+    try testCompletion(
+        \\const foo: [*]u32 = undefined;
+        \\const bar = foo[foo[0]..].<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: []S = undefined;
+        \\const bar = foo.ptr[foo[0]..][0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const foo: [*]u32 = undefined;
+        \\const bar = foo[foo[0..2]..].<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: [*c]S = undefined;
+        \\const bar = foo[foo[0..2]..foo[0..]].<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]S" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: [*c]S = undefined;
+        \\const bar = foo[foo[0..2]..foo[0..]][0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
+test "completion - slice pointer" {
+    try testCompletion(
+        \\const foo: []const u8 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]const u8" },
+    });
+}
+
+test "completion - many item pointer" {
+    try testCompletion(
+        \\const foo: [*]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: []S = undefined;
+        \\const bar = foo.ptr.<cursor>
+    , &.{});
 }
 
 test "completion - address of" {
@@ -490,8 +560,7 @@ test "completion - address of" {
         \\const value_ptr = &value;
         \\const foo = value_ptr.<cursor>;
     , &.{
-        // TODO detail should be 'u32'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -499,8 +568,7 @@ test "completion - address of" {
         \\const value_ptr = &value;
         \\const foo = value_ptr.<cursor>;
     , &.{
-        // TODO detail should be 'S'
-        .{ .label = "*", .kind = .Operator },
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 }
@@ -538,6 +606,23 @@ test "completion - array" {
     , &.{
         .{ .label = "len", .kind = .Field, .detail = "usize = 3" },
     });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: [1]S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const foo: [3]u32 = undefined;
+        \\var index: usize = undefined;
+        \\const bar = foo[0..index].<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]u32" },
+    });
 }
 
 test "completion - single pointer to array" {
@@ -554,6 +639,13 @@ test "completion - single pointer to array" {
         \\const bar = foo[0].<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const foo: *[3]u32 = undefined;
+        \\const bar = foo[0..3].<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]u32" },
     });
 }
 
@@ -2059,6 +2151,7 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params);
 
     const completion_list: types.CompletionList = (response orelse {
+        if (expected_completions.len == 0) return;
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     }).CompletionList;
