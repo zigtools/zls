@@ -28,4 +28,4 @@ jobs:
         run: zig fmt --check .
 
       - name: Run Tests
-        run: zig build test
+        run: zig build test --summary all
