@@ -41,7 +41,6 @@ pub fn build(b: *Build) !void {
     const enable_tracy_allocation = b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
-    const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
     const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
     const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
@@ -222,6 +221,7 @@ pub fn build(b: *Build) !void {
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
+        const coverage_output_dir = b.makeTempPath();
         const include_pattern = b.fmt("--include-pattern=/src", .{});
         const exclude_pattern = b.fmt("--exclude-pattern=/src/stage2", .{});
         const args = &[_]std.Build.Step.Run.Arg{
@@ -245,13 +245,19 @@ pub fn build(b: *Build) !void {
         merge_step.addArgs(&.{
             "kcov",
             "--merge",
-            coverage_output_dir,
+            b.pathJoin(&.{ coverage_output_dir, "output" }),
             b.pathJoin(&.{ coverage_output_dir, "test" }),
         });
-        merge_step.step.dependOn(&b.addRemoveDirTree(coverage_output_dir).step);
         merge_step.step.dependOn(&tests_run.step);
         merge_step.step.dependOn(&src_tests_run.step);
-        test_step.dependOn(&merge_step.step);
+
+        const install_coverage = b.addInstallDirectory(.{
+            .source_dir = .{ .path = b.pathJoin(&.{ coverage_output_dir, "output" }) },
+            .install_dir = .{ .custom = "coverage" },
+            .install_subdir = "",
+        });
+        install_coverage.step.dependOn(&merge_step.step);
+        test_step.dependOn(&install_coverage.step);
     }
 }
 
