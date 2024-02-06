@@ -187,7 +187,6 @@ fn hoverDefinitionBuiltin(
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     _ = analyser;
-    _ = markup_kind;
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -212,25 +211,45 @@ fn hoverDefinitionBuiltin(
 
         const source = handle.cimports.items(.source)[index];
 
-        try writer.print(
-            \\```c
-            \\{s}
-            \\```
-            \\
-        , .{source});
+        switch (markup_kind) {
+            .plaintext => {
+                try writer.print(
+                    \\{s}
+                    \\
+                , .{source});
+            },
+            .markdown => {
+                try writer.print(
+                    \\```c
+                    \\{s}
+                    \\```
+                    \\
+                , .{source});
+            },
+        }
     }
 
-    try writer.print(
-        \\```zig
-        \\{s}
-        \\```
-        \\{s}
-    , .{ builtin.signature, builtin.documentation });
+    switch (markup_kind) {
+        .plaintext => {
+            try writer.print(
+                \\{s}
+                \\{s}
+            , .{ builtin.signature, builtin.documentation });
+        },
+        .markdown => {
+            try writer.print(
+                \\```zig
+                \\{s}
+                \\```
+                \\{s}
+            , .{ builtin.signature, builtin.documentation });
+        },
+    }
 
     return types.Hover{
         .contents = .{
             .MarkupContent = .{
-                .kind = .markdown,
+                .kind = markup_kind,
                 .value = contents.items,
             },
         },
@@ -307,25 +326,21 @@ fn hoverDefinitionFieldAccess(
     const held_loc = offsets.locMerge(loc, name_loc);
     const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
 
-    var content = std.ArrayListUnmanaged(types.MarkedString){};
+    var content = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, decls.len);
 
     for (decls) |decl| {
-        try content.append(arena, .{
-            .string = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse continue,
-        });
+        content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);
     }
 
-    // Yes, this is deprecated; the issue is that there's no better
-    // solution for multiple hover entries :(
     return .{
-        .contents = switch (content.items.len) {
-            0 => return null,
-            1 => .{ .MarkupContent = .{
-                .kind = .markdown,
-                .value = content.items[0].string,
-            } },
-            else => .{ .array_of_MarkedString = try content.toOwnedSlice(arena) },
-        },
+        .contents = .{ .MarkupContent = .{
+            .kind = markup_kind,
+            .value = switch (content.items.len) {
+                0 => return null,
+                1 => content.items[0],
+                else => try std.mem.join(arena, "\n\n", content.items),
+            },
+        } },
         .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
