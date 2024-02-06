@@ -2780,21 +2780,12 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
         else => return null,
     };
 
-    const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
-    const new_handle_document_scope = try new_handle.getDocumentScope();
+    const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
+    const builtin_root_struct_type = Type.typeVal(.{ .node = 0, .handle = builtin_handle });
 
-    const decl_index = new_handle_document_scope.getScopeDeclaration(.{
-        .scope = @enumFromInt(0),
-        .name = type_name,
-        .kind = .other,
-    }).unwrap() orelse return null;
-
-    const decl = new_handle_document_scope.declarations.get(@intFromEnum(decl_index));
-    if (decl != .ast_node) return null;
-
-    const var_decl = new_handle.tree.fullVarDecl(decl.ast_node) orelse return null;
-
-    return Type{ .data = .{ .other = .{ .node = var_decl.ast.init_node, .handle = new_handle } }, .is_type_val = false };
+    const builtin_type_decl = try builtin_root_struct_type.lookupSymbol(analyser, type_name) orelse return null;
+    const builtin_type = try builtin_type_decl.resolveType(analyser) orelse return null;
+    return try builtin_type.instanceTypeVal(analyser);
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
