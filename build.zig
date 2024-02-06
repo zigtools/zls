@@ -38,6 +38,8 @@ pub fn build(b: *Build) !void {
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
+    const enable_tracy_allocation = b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
+    const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
     const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
@@ -46,59 +48,20 @@ pub fn build(b: *Build) !void {
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
     const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
 
-    const version_string = v: {
-        const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
-        const build_root_path = b.build_root.path orelse ".";
-
-        var code: u8 = undefined;
-        const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
-            "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
-        }, &code, .Ignore) catch break :v version_string;
-
-        const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
-
-        switch (std.mem.count(u8, git_describe, "-")) {
-            0 => {
-                // Tagged release version (e.g. 0.10.0).
-                std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
-                break :v version_string;
-            },
-            2 => {
-                // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
-                var it = std.mem.splitScalar(u8, git_describe, '-');
-                const tagged_ancestor = it.first();
-                const commit_height = it.next().?;
-                const commit_id = it.next().?;
-
-                const ancestor_ver = try std.SemanticVersion.parse(tagged_ancestor);
-                std.debug.assert(zls_version.order(ancestor_ver) == .gt); // zls version must be greater than its previous version
-                std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
-
-                break :v b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
-            },
-            else => {
-                std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
-                std.process.exit(1);
-            },
-        }
-    };
-
-    const exe_options = b.addOptions();
-    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
-    exe_options.addOption(bool, "enable_tracy", enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
-    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
-    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
-    exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
-    exe_options.addOption([]const u8, "version_string", version_string);
-    exe_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
-    exe_options.addOption([]const u8, "min_zig_string", min_zig_string);
+    const version_string = getVersion(b);
 
     const build_options = b.addOptions();
     const build_options_module = build_options.createModule();
     build_options.addOption([]const u8, "version_string", version_string);
     build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
+    build_options.addOption([]const u8, "min_zig_string", min_zig_string);
+
+    const exe_options = b.addOptions();
+    const exe_options_module = exe_options.createModule();
+    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
+    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
+    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
+    exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
 
     const global_cache_path = try b.cache_root.join(b.allocator, &.{"zls"});
     b.cache_root.handle.makePath(global_cache_path) catch |err| {
@@ -110,48 +73,15 @@ pub fn build(b: *Build) !void {
     test_options.addOption([]const u8, "zig_exe_path", b.graph.zig_exe);
     test_options.addOption([]const u8, "global_cache_path", global_cache_path);
 
-    const exe_options_module = exe_options.createModule();
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
-
-    const exe = b.addExecutable(.{
-        .name = "zls",
-        .root_source_file = .{ .path = "src/main.zig" },
+    const tracy_module = getTracyModule(b, .{
         .target = target,
         .optimize = optimize,
-        .single_threaded = single_threaded,
+        .enable = enable_tracy,
+        .enable_allocation = enable_tracy_allocation,
+        .enable_callstack = enable_tracy_callstack,
     });
-    exe.use_llvm = use_llvm;
-    exe.use_lld = use_llvm;
-    exe.pie = pie;
-    b.installArtifact(exe);
-
-    exe.root_module.addImport("build_options", exe_options_module);
-    exe.root_module.addImport("known-folders", known_folders_module);
-    exe.root_module.addImport("diffz", diffz_module);
-
-    if (enable_tracy) {
-        const client_cpp = "src/tracy/public/TracyClient.cpp";
-
-        // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-        const tracy_c_flags: []const []const u8 = if (target.result.isMinGW())
-            &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
-        else
-            &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
-
-        exe.addIncludePath(.{ .path = "src/tracy" });
-        exe.addCSourceFile(.{
-            .file = .{ .path = client_cpp },
-            .flags = tracy_c_flags,
-        });
-        exe.linkLibCpp();
-        exe.linkLibC();
-
-        if (target.result.os.tag == .windows) {
-            exe.linkSystemLibrary("dbghelp");
-            exe.linkSystemLibrary("ws2_32");
-        }
-    }
 
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
@@ -194,45 +124,60 @@ pub fn build(b: *Build) !void {
     else
         gen_version_data_cmd.addOutputFileArg(version_data_file_name);
     const version_data_module = b.addModule("version_data", .{ .root_source_file = version_data_path });
-    exe.root_module.addImport("version_data", version_data_module);
 
     const zls_module = b.addModule("zls", .{
         .root_source_file = .{ .path = "src/zls.zig" },
         .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "tracy", .module = tracy_module },
             .{ .name = "build_options", .module = build_options_module },
             .{ .name = "version_data", .module = version_data_module },
         },
     });
 
+    const exe = b.addExecutable(.{
+        .name = "zls",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = single_threaded,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
+    });
+    exe.pie = pie;
+    exe.root_module.addImport("exe_options", exe_options_module);
+    exe.root_module.addImport("tracy", tracy_module);
+    exe.root_module.addImport("known-folders", known_folders_module);
+    exe.root_module.addImport("zls", zls_module);
+    b.installArtifact(exe);
+
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
-    var tests = b.addTest(.{
+    const tests = b.addTest(.{
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
         .optimize = optimize,
         .filter = test_filter,
         .single_threaded = single_threaded,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
     });
-    tests.use_llvm = use_llvm;
-    tests.use_lld = use_llvm;
 
     tests.root_module.addImport("zls", zls_module);
-    tests.root_module.addImport("build_options", build_options_module);
     tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
-    var src_tests = b.addTest(.{
+    const src_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
         .optimize = optimize,
         .filter = test_filter,
         .single_threaded = single_threaded,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
     });
-    src_tests.use_llvm = use_llvm;
-    src_tests.use_lld = use_llvm;
     src_tests.root_module.addImport("build_options", build_options_module);
     src_tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
@@ -248,15 +193,15 @@ pub fn build(b: *Build) !void {
             .{ .bytes = b.dupe(coverage_output_dir) },
         };
 
-        var tests_run = b.addRunArtifact(tests);
-        var src_tests_run = b.addRunArtifact(src_tests);
+        const tests_run = b.addRunArtifact(tests);
+        const src_tests_run = b.addRunArtifact(src_tests);
         tests_run.has_side_effects = true;
         src_tests_run.has_side_effects = true;
 
         tests_run.argv.insertSlice(0, args) catch @panic("OOM");
         src_tests_run.argv.insertSlice(0, args) catch @panic("OOM");
 
-        var merge_step = std.Build.Step.Run.create(b, "merge kcov");
+        const merge_step = std.Build.Step.Run.create(b, "merge kcov");
         merge_step.has_side_effects = true;
         merge_step.addArgs(&.{
             "kcov",
@@ -269,4 +214,88 @@ pub fn build(b: *Build) !void {
         merge_step.step.dependOn(&src_tests_run.step);
         test_step.dependOn(&merge_step.step);
     }
+}
+
+fn getVersion(b: *Build) []const u8 {
+    const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
+    const build_root_path = b.build_root.path orelse ".";
+
+    var code: u8 = undefined;
+    const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
+        "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
+    }, &code, .Ignore) catch return version_string;
+
+    const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
+
+    switch (std.mem.count(u8, git_describe, "-")) {
+        0 => {
+            // Tagged release version (e.g. 0.10.0).
+            std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
+            return version_string;
+        },
+        2 => {
+            // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
+            var it = std.mem.splitScalar(u8, git_describe, '-');
+            const tagged_ancestor = it.first();
+            const commit_height = it.next().?;
+            const commit_id = it.next().?;
+
+            const ancestor_ver = std.SemanticVersion.parse(tagged_ancestor) catch unreachable;
+            std.debug.assert(zls_version.order(ancestor_ver) == .gt); // zls version must be greater than its previous version
+            std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
+
+            return b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
+        },
+        else => {
+            std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
+            std.process.exit(1);
+        },
+    }
+}
+
+fn getTracyModule(
+    b: *Build,
+    options: struct {
+        target: Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        enable: bool,
+        enable_allocation: bool,
+        enable_callstack: bool,
+    },
+) *Build.Module {
+    const tracy_options = b.addOptions();
+    tracy_options.addOption(bool, "enable", options.enable);
+    tracy_options.addOption(bool, "enable_allocation", options.enable and options.enable_allocation);
+    tracy_options.addOption(bool, "enable_callstack", options.enable and options.enable_callstack);
+
+    const tracy_module = b.addModule("tracy", .{
+        .root_source_file = .{ .path = "src/tracy.zig" },
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    tracy_module.addImport("options", tracy_options.createModule());
+    if (!options.enable) return tracy_module;
+    tracy_module.link_libc = true;
+    tracy_module.link_libcpp = true;
+
+    const client_cpp = "src/tracy/public/TracyClient.cpp";
+
+    // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+    const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
+        &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
+    else
+        &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
+
+    tracy_module.addIncludePath(.{ .path = "src/tracy" });
+    tracy_module.addCSourceFile(.{
+        .file = .{ .path = client_cpp },
+        .flags = tracy_c_flags,
+    });
+
+    if (options.target.result.os.tag == .windows) {
+        tracy_module.linkSystemLibrary("dbghelp", .{});
+        tracy_module.linkSystemLibrary("ws2_32", .{});
+    }
+
+    return tracy_module;
 }

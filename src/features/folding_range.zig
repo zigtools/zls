@@ -4,7 +4,7 @@ const Ast = std.zig.Ast;
 const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 const FoldingRange = struct {
     loc: offsets.Loc,

@@ -12,7 +12,7 @@ const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
 const code_actions = @import("code_actions.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 const Module = @import("../stage2/Module.zig");
 const Zir = @import("../stage2/Zir.zig");

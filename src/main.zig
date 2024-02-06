@@ -1,21 +1,17 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
-const build_options = @import("build_options");
-const tracy = @import("tracy.zig");
+const zls = @import("zls");
+const exe_options = @import("exe_options");
+
+const tracy = @import("tracy");
 const known_folders = @import("known-folders");
-const Config = @import("Config.zig");
-const configuration = @import("configuration.zig");
-const Server = @import("Server.zig");
-const Header = @import("Header.zig");
-const Transport = @import("Transport.zig");
-const debug = @import("debug.zig");
 const binned_allocator = @import("binned_allocator.zig");
 
 const logger = std.log.scoped(.zls_main);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => @enumFromInt(@intFromEnum(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
+    else => @enumFromInt(@intFromEnum(exe_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
 fn logFn(
@@ -45,7 +41,7 @@ pub const std_options = std.Options{
     .logFn = logFn,
 };
 
-fn getRecordFile(config: Config) ?std.fs.File {
+fn getRecordFile(config: zls.Config) ?std.fs.File {
     if (!config.record_session) return null;
 
     if (config.record_session_path) |record_path| {
@@ -62,7 +58,7 @@ fn getRecordFile(config: Config) ?std.fs.File {
     }
 }
 
-fn getReplayFile(config: Config) ?std.fs.File {
+fn getReplayFile(config: zls.Config) ?std.fs.File {
     const replay_path = config.replay_session_path orelse config.record_session_path orelse return null;
 
     if (std.fs.openFileAbsolute(replay_path, .{})) |file| {
@@ -78,8 +74,8 @@ fn getReplayFile(config: Config) ?std.fs.File {
 /// when replaying we read this message and replace the current config
 fn updateConfig(
     allocator: std.mem.Allocator,
-    transport: *Transport,
-    config: *configuration.ConfigWithPath,
+    transport: *zls.Transport,
+    config: *zls.configuration.ConfigWithPath,
     record_file: ?std.fs.File,
     replay_file: ?std.fs.File,
 ) !void {
@@ -94,7 +90,7 @@ fn updateConfig(
         defer buffer.deinit(allocator);
         try std.json.stringify(cfg, .{}, buffer.writer(allocator));
 
-        var header = Header{ .content_length = buffer.items.len };
+        var header = zls.Header{ .content_length = buffer.items.len };
         try header.write(file.writer());
         try file.writeAll(buffer.items);
     }
@@ -104,7 +100,7 @@ fn updateConfig(
         defer allocator.free(json_message);
 
         const new_config = try std.json.parseFromSlice(
-            Config,
+            zls.Config,
             allocator,
             json_message,
             .{ .allocate = .alloc_always },
@@ -232,11 +228,11 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         return result;
     }
     if (specified.get(.version)) {
-        try stdout.writeAll(build_options.version_string ++ "\n");
+        try stdout.writeAll(zls.build_options.version_string ++ "\n");
         return result;
     }
     if (specified.get(.@"minimum-build-version")) {
-        try stdout.writeAll(build_options.min_zig_string ++ "\n");
+        try stdout.writeAll(zls.build_options.min_zig_string ++ "\n");
         return result;
     }
     if (specified.get(.@"compiler-version")) {
@@ -255,7 +251,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         std.debug.assert(result.config_path != null);
     }
     if (specified.get(.@"show-config-path")) {
-        var new_config = try configuration.getConfig(allocator, result.config_path);
+        var new_config = try zls.configuration.getConfig(allocator, result.config_path);
         defer new_config.deinit(allocator);
 
         if (new_config.config_path) |path| {
@@ -286,13 +282,13 @@ const stack_frames = switch (zig_builtin.mode) {
 };
 
 pub fn main() !void {
-    var allocator_state = if (build_options.use_gpa)
+    var allocator_state = if (exe_options.use_gpa)
         std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
     else
         binned_allocator.BinnedAllocator(.{}){};
 
     defer {
-        if (build_options.use_gpa)
+        if (exe_options.use_gpa)
             std.debug.assert(allocator_state.deinit() == .ok)
         else
             allocator_state.deinit();
@@ -301,8 +297,8 @@ pub fn main() !void {
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
 
-    var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
-    const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
+    var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else void{};
+    const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
     defer allocator.free(result.zls_exe_path);
@@ -312,9 +308,9 @@ pub fn main() !void {
         .exit => return,
     }
 
-    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version_string, result.zls_exe_path });
+    logger.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
 
-    var config = try configuration.getConfig(allocator, result.config_path);
+    var config = try zls.configuration.getConfig(allocator, result.config_path);
     defer config.deinit(allocator);
 
     if (result.replay_enabled and config.config.record_session_path == null) {
@@ -332,7 +328,7 @@ pub fn main() !void {
     const replay_file = if (result.replay_enabled) getReplayFile(config.config) else null;
     defer if (replay_file) |file| file.close();
 
-    var transport = Transport.init(
+    var transport = zls.Transport.init(
         if (replay_file) |file| file.reader() else std.io.getStdIn().reader(),
         std.io.getStdOut().writer(),
     );
@@ -341,7 +337,7 @@ pub fn main() !void {
 
     try updateConfig(allocator, &transport, &config, record_file, replay_file);
 
-    const server = try Server.create(allocator);
+    const server = try zls.Server.create(allocator);
     defer server.destroy();
     try server.updateConfiguration2(config.config);
     server.recording_enabled = record_file != null;

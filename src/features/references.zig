@@ -8,7 +8,7 @@ const Analyser = @import("../analysis.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
-const tracy = @import("../tracy.zig");
+const tracy = @import("tracy");
 
 fn labelReferences(
     allocator: std.mem.Allocator,
