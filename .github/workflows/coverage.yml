@@ -12,11 +12,7 @@ jobs:
         with:
           version: master
 
-      - run: zig version
       - run: zig env
-
-      - name: Build
-        run: zig build
 
       - name: Install kcov
         run: |
