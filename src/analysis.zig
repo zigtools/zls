@@ -2947,10 +2947,10 @@ pub fn getPositionContext(
     var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
     defer stack.deinit(allocator);
 
-    {
-        var held_line = try allocator.dupeZ(u8, text[0..line_loc.end]);
-        defer allocator.free(held_line);
+    var held_line = try allocator.dupeZ(u8, text[0..line_loc.end]);
+    defer allocator.free(held_line);
 
+    {
         var tokenizer: std.zig.Tokenizer = .{
             .buffer = held_line,
             .index = line_loc.start,
@@ -3097,19 +3097,26 @@ pub fn getPositionContext(
         }
     }
 
-    if (line.len == 0) return .empty;
+    const ltrimmed_line = std.mem.trimLeft(u8, line, " \t");
+    if (ltrimmed_line.len == 0) return .empty;
 
-    const held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
-    defer allocator.free(held_line);
-
-    switch (line[0]) {
+    switch (ltrimmed_line[0]) {
         'a'...'z', 'A'...'Z', '_', '@' => {},
         else => return .empty,
     }
-    var tokenizer = std.zig.Tokenizer.init(held_line);
+
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = held_line,
+        .index = line_loc.start,
+        .pending_invalid_token = null,
+    };
     const tok = tokenizer.next();
 
-    return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
+    return switch (tok.tag) {
+        .identifier => PositionContext{ .var_access = tok.loc },
+        .builtin => PositionContext{ .builtin = tok.loc },
+        else => .empty,
+    };
 }
 
 pub const TokenWithHandle = struct {
