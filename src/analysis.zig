@@ -1796,8 +1796,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .bool_and,
         .bool_or,
         .bool_not,
-        .negation,
         => return try Type.typeValFromIP(analyser, .bool_type),
+
+        .negation,
+        .negation_wrap,
+        => return try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].lhs, .handle = handle }),
 
         .multiline_string_literal => {
             const start = datas[node].lhs;
@@ -1938,7 +1941,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .bit_xor,
         .bit_or,
         .bit_not,
-        .negation_wrap,
         => {},
 
         .array_mult,

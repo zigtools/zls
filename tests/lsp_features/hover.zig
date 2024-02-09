@@ -162,6 +162,44 @@ test "hover - builtin" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "hover - negation" {
+    try testHover(
+        \\const f<cursor>oo = 1;
+        \\const f = -a;
+        \\const b = -%a;
+        \\const _ = <cursor>
+    ,
+        \\```zig
+        \\const foo = 1
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+    try testHover(
+        \\const foo = 1;
+        \\const b<cursor>ar = -foo;
+    ,
+        \\```zig
+        \\const bar = -foo
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+    try testHover(
+        \\const foo = 1;
+        \\const b<cursor>ar = -%foo;
+    ,
+        \\```zig
+        \\const bar = -%foo
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+}
+
 test "hover - struct" {
     try testHover(
         \\const Str<cursor>uct = packed struct(u32) {};
