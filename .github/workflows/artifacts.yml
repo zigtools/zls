@@ -22,25 +22,27 @@ jobs:
 
       - name: Build artifacts
         run: |
-          zig build release -Dcpu=baseline -Doptimize=ReleaseSafe --summary all
+          mkdir -p artifacts/master
 
-          zls_version=$(zig-out/x86_64-linux/zls --version)
+          zig build release -Dcpu=baseline -Doptimize=ReleaseSafe --prefix artifacts/master --summary all
+
+          zls_version=$(artifacts/master/x86_64-linux/zls --version)
           mkdir -p "artifacts/$zls_version/"
-          cp -r zig-out/* "artifacts/$zls_version/"
+          cp -r artifacts/master/* "artifacts/$zls_version/"
 
           wget https://zigtools-releases.nyc3.digitaloceanspaces.com/zls/index.json
 
           cp index.json artifacts/old-index.json
 
-          for file in zig-out/*; do
-            targets+=("${file#zig-out/}")
+          for file in artifacts/master/*; do
+            targets+=("${file#artifacts/master/}")
           done
 
           jq \
           --arg targets                   "${targets[*]}"                                       \
           --arg zig_version               "$(zig version)"                                      \
-          --arg zls_version               "$(zig-out/x86_64-linux/zls --version)"               \
-          --arg zls_minimum_build_version "$(zig-out/x86_64-linux/zls --minimum-build-version)" \
+          --arg zls_version               "$(artifacts/master/x86_64-linux/zls --version)"               \
+          --arg zls_minimum_build_version "$(artifacts/master/x86_64-linux/zls --minimum-build-version)" \
           '.latest = $zls_version | .versions[$zls_version] = {
           "date": now | todateiso8601,
           "builtWithZigVersion": $zig_version,
