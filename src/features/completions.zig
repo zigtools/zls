@@ -1271,7 +1271,7 @@ fn collectFieldAccessContainerNodes(
         var node_type = try decl.resolveType(analyser) orelse continue;
         // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (try analyser.resolveOptionalChildType(node_type)) |unwrapped| node_type = unwrapped;
+            if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
             const fn_proto_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes

@@ -1135,6 +1135,25 @@ test "completion - enum" {
         .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    se: ?SomeEnum = null,
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    s.se = .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
 }
 
 test "completion - global enum set" {
@@ -1518,6 +1537,21 @@ test "completion - struct init" {
         \\const foo = S{ .gamma = .{.<cursor>};
     , &.{
         .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S = null,
+        \\};
+        \\test {
+        \\    const foo: S = undefined;
+        \\    foo.gamma = .{.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S = null" },
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
     });
