@@ -18,30 +18,31 @@ var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     else => @enumFromInt(@intFromEnum(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
-pub const std_options = struct {
+fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(level) > @intFromEnum(actual_log_level)) return;
+
+    const level_txt = comptime level.asText();
+    const scope_txt = comptime @tagName(scope);
+
+    const stderr = std.io.getStdErr().writer();
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
+
+    stderr.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch return;
+    stderr.print(format, args) catch return;
+    stderr.writeByte('\n') catch return;
+}
+
+pub const std_options = std.Options{
     // Always set this to debug to make std.log call into our handler, then control the runtime
-    // value in the definition below.
-    pub const log_level = .debug;
-
-    pub fn logFn(
-        comptime level: std.log.Level,
-        comptime scope: @TypeOf(.EnumLiteral),
-        comptime format: []const u8,
-        args: anytype,
-    ) void {
-        if (@intFromEnum(level) > @intFromEnum(actual_log_level)) return;
-
-        const level_txt = comptime level.asText();
-        const scope_txt = comptime @tagName(scope);
-
-        const stderr = std.io.getStdErr().writer();
-        std.debug.getStderrMutex().lock();
-        defer std.debug.getStderrMutex().unlock();
-
-        stderr.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch return;
-        stderr.print(format, args) catch return;
-        stderr.writeByte('\n') catch return;
-    }
+    // value in logFn itself
+    .log_level = .debug,
+    .logFn = logFn,
 };
 
 fn getRecordFile(config: Config) ?std.fs.File {
