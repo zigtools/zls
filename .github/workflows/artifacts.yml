@@ -1,0 +1,60 @@
+name: Deploy release artifacts
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.repository_owner == 'zigtools'
+    runs-on: ubuntu-latest
+    needs: [build, check_build_runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+
+      - run: zig env
+
+      - name: Build artifacts
+        run: |
+          zig build release -Dcpu=baseline -Doptimize=ReleaseSafe --summary all
+
+          zls_version=$(zig-out/x86_64-linux/zls --version)
+          mkdir -p "artifacts/$zls_version/"
+          cp -r zig-out/* "artifacts/$zls_version/"
+
+          wget https://zigtools-releases.nyc3.digitaloceanspaces.com/zls/index.json
+
+          cp index.json artifacts/old-index.json
+
+          for file in zig-out/*; do
+            targets+=("${file#zig-out/}")
+          done
+
+          jq \
+          --arg targets                   "${targets[*]}"                                       \
+          --arg zig_version               "$(zig version)"                                      \
+          --arg zls_version               "$(zig-out/x86_64-linux/zls --version)"               \
+          --arg zls_minimum_build_version "$(zig-out/x86_64-linux/zls --minimum-build-version)" \
+          '.latest = $zls_version | .versions[$zls_version] = {
+          "date": now | todateiso8601,
+          "builtWithZigVersion": $zig_version,
+          "zlsVersion": $zls_version,
+          "zlsMinimumBuildVersion": $zls_minimum_build_version,
+          "commit": "${{ github.sha }}",
+          "targets": ($targets / " "),
+          }' index.json > artifacts/index.json
+
+      - uses: BetaHuhn/do-spaces-action@v2
+        with:
+          access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
+          secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
+          space_name: zigtools-releases
+          space_region: nyc3
+          source: artifacts/
+          out_dir: zls/
