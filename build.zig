@@ -136,6 +136,45 @@ pub fn build(b: *Build) !void {
         },
     });
 
+    const targets: []const std.Target.Query = &.{
+        .{ .cpu_arch = .x86_64, .os_tag = .windows },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux },
+        .{ .cpu_arch = .x86_64, .os_tag = .macos },
+        .{ .cpu_arch = .x86, .os_tag = .windows },
+        .{ .cpu_arch = .x86, .os_tag = .linux },
+        .{ .cpu_arch = .aarch64, .os_tag = .linux },
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+        .{ .cpu_arch = .wasm32, .os_tag = .wasi },
+    };
+
+    const release_step = b.step("release", "Build all release binaries");
+
+    for (targets) |target_query| {
+        const exe = b.addExecutable(.{
+            .name = "zls",
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = b.resolveTargetQuery(target_query),
+            .optimize = optimize,
+            .single_threaded = single_threaded,
+            .use_llvm = use_llvm,
+            .use_lld = use_llvm,
+        });
+        exe.pie = pie;
+        exe.root_module.addImport("exe_options", exe_options_module);
+        exe.root_module.addImport("tracy", tracy_module);
+        exe.root_module.addImport("known-folders", known_folders_module);
+        exe.root_module.addImport("zls", zls_module);
+
+        const target_output = b.addInstallArtifact(exe, .{
+            .dest_dir = .{
+                .override = .{
+                    .custom = try target_query.zigTriple(b.allocator),
+                },
+            },
+        });
+        release_step.dependOn(&target_output.step);
+    }
+
     const exe = b.addExecutable(.{
         .name = "zls",
         .root_source_file = .{ .path = "src/main.zig" },

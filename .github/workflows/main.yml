@@ -1,16 +1,8 @@
 name: CI
 
 on:
-  push:
-    paths:
-      - ".github/workflows/main.yml"
-      - "**.zig"
-      - "build.zig.zon"
   pull_request:
-    paths:
-      - ".github/workflows/main.yml"
-      - "**.zig"
-      - "build.zig.zon"
+  push:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
@@ -30,65 +22,10 @@ jobs:
         with:
           version: master
 
-      - name: Get Zig version
-        id: zig_version
-        run: echo "zig_version=$(zig version)" >> $GITHUB_OUTPUT
-
       - run: zig env
 
       - name: Run zig fmt
         run: zig fmt --check .
 
-      - name: Get ZLS version and mimimum build version
-        id: zls_version
-        run: |
-          echo "zls_version=$(./zig-out/bin/zls --version)" >> $GITHUB_OUTPUT
-          echo "zls_minimum_build_version=$(./zig-out/bin/zls --minimum-build-version)" >> $GITHUB_OUTPUT
-
       - name: Run Tests
         run: zig build test
-
-      - name: Build artifacts
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi")
-          mkdir -p "artifacts/${{ steps.zls_version.outputs.zls_version }}/"
-
-          for target in "${targets[@]}"; do
-            mkdir -p artifacts/${{ steps.zls_version.outputs.zls_version }}/$target
-
-            echo "Building target ${target}..."
-            if [ "${GITHUB_REF##*/}" == "master" ]; then
-              echo "Building safe"
-              zig build -Dtarget=${target} -Dcpu=baseline -Doptimize=ReleaseSafe --prefix artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/
-            else
-              echo "Building debug as action is not running on master"
-              zig build -Dtarget=${target} -Dcpu=baseline --prefix artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/
-            fi
-
-            mv artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/bin/* artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}
-            rmdir artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/bin
-          done
-
-          wget https://zigtools-releases.nyc3.digitaloceanspaces.com/zls/index.json
-
-          cp index.json artifacts/old-index.json
-
-          jq --arg targets "${targets[*]}" '.latest = "${{ steps.zls_version.outputs.zls_version }}" | .versions["${{ steps.zls_version.outputs.zls_version }}"] = {
-            "date": now | todateiso8601,
-            "builtWithZigVersion": "${{ steps.zig_version.outputs.zig_version }}",
-            "zlsVersion": "${{ steps.zls_version.outputs.zls_version }}",
-            "zlsMinimumBuildVersion": "${{ steps.zls_version.outputs.zls_minimum_build_version }}",
-            "commit": "${{ github.sha }}",
-            "targets": ($targets / " "),
-          }' index.json > artifacts/index.json
-
-      - uses: BetaHuhn/do-spaces-action@v2
-        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' }}
-        with:
-          access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
-          secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
-          space_name: zigtools-releases
-          space_region: nyc3
-          source: artifacts/
-          out_dir: zls/
