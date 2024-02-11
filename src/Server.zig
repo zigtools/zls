@@ -69,6 +69,7 @@ const ClientCapabilities = struct {
     hover_supports_md: bool = false,
     signature_help_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
+    label_details_support: bool = false,
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
@@ -431,6 +432,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         }
         if (textDocument.completion) |completion| {
             if (completion.completionItem) |completionItem| {
+                server.client_capabilities.label_details_support = completionItem.labelDetailsSupport orelse false;
                 server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
                 if (completionItem.documentationFormat) |documentation_format| {
                     for (documentation_format) |format| {
