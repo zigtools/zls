@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// Implement system package mode and lazy dependencies
-const min_zig_string = "0.12.0-dev.2583+d3fc2648c";
+/// std: make options a struct instance instead of a namespace
+const min_zig_string = "0.12.0-dev.2701+d18f52197";
 
 const Build = blk: {
     const current_zig = builtin.zig_version;
