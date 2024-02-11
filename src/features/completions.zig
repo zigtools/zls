@@ -247,50 +247,101 @@ fn nodeToCompletion(
         => {
             var buf: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buf, node).?;
-            if (func.name_token) |name_token| {
-                const func_name = orig_name orelse tree.tokenSlice(name_token);
-                const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
+            const name_token = func.name_token orelse return;
 
-                const insert_text = blk: {
-                    if (!use_snippets) break :blk func_name;
+            const func_name = orig_name orelse tree.tokenSlice(name_token);
+            const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
+            const use_placeholders = server.config.enable_argument_placeholders;
+            const use_label_details = server.client_capabilities.label_details_support;
 
-                    const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(handle, func);
+            const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(handle, func);
 
-                    const use_placeholders = server.config.enable_argument_placeholders;
-                    if (use_placeholders) {
-                        var it = func.iterate(&tree);
-                        if (skip_self_param) _ = ast.nextFnParam(&it);
-                        break :blk try Analyser.getFunctionSnippet(arena, func_name, &it);
-                    }
+            const insert_text = blk: {
+                if (use_snippets and use_placeholders) {
+                    break :blk try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
+                        .fn_proto = func,
+                        .tree = &tree,
 
-                    switch (func.ast.params.len) {
-                        // No arguments, leave cursor at the end
-                        0 => break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name}),
-                        1 => {
-                            if (skip_self_param) {
-                                // The one argument is a self parameter, leave cursor at the end
-                                break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name});
-                            }
+                        .include_fn_keyword = false,
+                        .include_name = true,
+                        .skip_first_param = skip_self_param,
+                        .include_parameter_modifiers = false,
+                        .include_parameter_names = true,
+                        .include_parameter_types = true,
+                        .include_return_type = false,
+                        .snippet_placeholders = true,
+                    })});
+                }
 
-                            // Non-self parameter, leave the cursor in the parentheses
-                            break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name});
-                        },
+                switch (func.ast.params.len) {
+                    // No arguments, leave cursor at the end
+                    0 => break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name}),
+                    1 => {
+                        if (skip_self_param) {
+                            // The one argument is a self parameter, leave cursor at the end
+                            break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name});
+                        }
+
+                        // Non-self parameter, leave the cursor in the parentheses
+                        if (!use_snippets) break :blk func_name;
+                        break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name});
+                    },
+                    else => {
                         // Atleast one non-self parameter, leave the cursor in the parentheses
-                        else => break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name}),
-                    }
-                };
+                        if (!use_snippets) break :blk func_name;
+                        break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name});
+                    },
+                }
+            };
 
-                const is_type_function = Analyser.isTypeFunction(tree, func);
+            const kind: types.CompletionItemKind = if (Analyser.isTypeFunction(tree, func))
+                .Struct
+            else if (skip_self_param)
+                .Method
+            else
+                .Function;
 
-                try list.append(arena, .{
-                    .label = func_name,
-                    .kind = if (is_type_function) .Struct else .Function,
-                    .documentation = doc,
-                    .detail = Analyser.getFunctionSignature(tree, func),
-                    .insertText = insert_text,
-                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
-                });
-            }
+            const label_details: ?[]const u8 = if (use_label_details)
+                try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
+                    .fn_proto = func,
+                    .tree = &tree,
+
+                    .include_fn_keyword = false,
+                    .include_name = false,
+                    .include_parameter_modifiers = true,
+                    .include_parameter_names = true,
+                    .include_parameter_types = true,
+                    .include_return_type = false,
+                    .snippet_placeholders = false,
+                })})
+            else
+                null;
+
+            const details = try std.fmt.allocPrint(arena, "{}", .{Analyser.fmtFunction(.{
+                .fn_proto = func,
+                .tree = &tree,
+
+                .include_fn_keyword = true,
+                .include_name = false,
+                .include_parameter_modifiers = true,
+                .include_parameter_names = true,
+                .include_parameter_types = true,
+                .include_return_type = true,
+                .snippet_placeholders = false,
+            })});
+
+            try list.append(arena, .{
+                .label = func_name,
+                .labelDetails = if (use_label_details) .{
+                    .detail = label_details,
+                    .description = null,
+                } else null,
+                .kind = kind,
+                .documentation = doc,
+                .detail = details,
+                .insertText = insert_text,
+                .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+            });
         },
         .global_var_decl,
         .local_var_decl,

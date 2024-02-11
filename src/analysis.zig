@@ -135,7 +135,7 @@ fn formatSnippetPlaceholder(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    _ = fmt;
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, data);
     _ = options;
 
     var split_it = std.mem.splitScalar(u8, data, '}');
@@ -148,74 +148,139 @@ fn formatSnippetPlaceholder(
     }
 }
 
-const SnippetPlaceholderFormatter = std.fmt.Formatter(formatSnippetPlaceholder);
-
-fn fmtSnippetPlaceholder(bytes: []const u8) SnippetPlaceholderFormatter {
+fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlaceholder) {
     return .{ .data = bytes };
 }
 
-/// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(
-    allocator: std.mem.Allocator,
-    name: []const u8,
-    iterator: *Ast.full.FnProto.Iterator,
-) ![]const u8 {
-    const tree = iterator.tree.*;
+pub const FormatFunctionOptions = struct {
+    fn_proto: Ast.full.FnProto,
+    tree: *const Ast,
 
-    var buffer = std.ArrayListUnmanaged(u8){};
-    try buffer.ensureTotalCapacity(allocator, 128);
+    include_fn_keyword: bool,
+    /// only included if available
+    include_name: bool,
+    skip_first_param: bool = false,
+    include_parameter_modifiers: bool,
+    include_parameter_names: bool,
+    include_parameter_types: bool,
+    include_return_type: bool,
+    snippet_placeholders: bool,
+};
 
-    var buf_stream = buffer.writer(allocator);
+pub fn formatFunction(
+    data: FormatFunctionOptions,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, data);
+    _ = options;
 
-    try buf_stream.writeAll(name);
-    try buf_stream.writeByte('(');
+    const tree = data.tree;
+    var it = data.fn_proto.iterate(data.tree);
+
+    if (data.include_fn_keyword) {
+        try writer.writeAll("fn ");
+    }
+
+    if (data.include_name) {
+        if (data.fn_proto.name_token) |name_token| {
+            try writer.writeAll(tree.tokenSlice(name_token));
+        }
+    }
+
+    try writer.writeByte('(');
 
     const token_tags = tree.tokens.items(.tag);
 
-    var i: usize = 0;
-    while (ast.nextFnParam(iterator)) |param| : (i += 1) {
-        if (i != 0)
-            try buf_stream.writeAll(", ${")
-        else
-            try buf_stream.writeAll("${");
-
-        try buf_stream.print("{d}:", .{i + 1});
-
-        if (param.comptime_noalias) |token_index| {
-            if (token_tags[token_index] == .keyword_comptime)
-                try buf_stream.writeAll("comptime ")
-            else
-                try buf_stream.writeAll("noalias ");
-        }
-
-        if (param.name_token) |name_token| {
-            try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(name_token))});
-            try buf_stream.writeAll(": ");
-        }
-
-        if (param.anytype_ellipsis3) |token_index| {
-            if (token_tags[token_index] == .keyword_anytype)
-                try buf_stream.writeAll("anytype")
-            else
-                try buf_stream.writeAll("...");
-        } else if (param.type_expr != 0) {
-            var curr_token = tree.firstToken(param.type_expr);
-            const end_token = ast.lastToken(tree, param.type_expr);
-            while (curr_token <= end_token) : (curr_token += 1) {
-                const tag = token_tags[curr_token];
-                const is_comma = tag == .comma;
-
-                if (curr_token == end_token and is_comma) continue;
-                try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
-                if (is_comma or tag == .keyword_const) try buf_stream.writeByte(' ');
-            }
-        } // else Incomplete and that's ok :)
-
-        try buf_stream.writeByte('}');
+    if (data.skip_first_param) {
+        _ = ast.nextFnParam(&it);
     }
-    try buf_stream.writeByte(')');
 
-    return buffer.toOwnedSlice(allocator);
+    var i: usize = 0;
+    while (ast.nextFnParam(&it)) |param| : (i += 1) {
+        if (i != 0) {
+            try writer.writeAll(", ");
+        }
+
+        if (data.snippet_placeholders) {
+            try writer.print("${{{d}:", .{i + 1});
+        }
+
+        // Note that parameter doc comments are being skipped
+
+        if (data.include_parameter_modifiers) {
+            if (param.comptime_noalias) |token_index| {
+                switch (token_tags[token_index]) {
+                    .keyword_comptime => try writer.writeAll("comptime "),
+                    .keyword_noalias => try writer.writeAll("noalias "),
+                    else => unreachable,
+                }
+            }
+        }
+
+        if (data.include_parameter_names) {
+            if (param.name_token) |name_token| {
+                const name = tree.tokenSlice(name_token);
+                if (data.snippet_placeholders) {
+                    try writer.print("{}", .{fmtSnippetPlaceholder(name)});
+                } else {
+                    try writer.writeAll(name);
+                }
+            }
+        }
+
+        if (data.include_parameter_types) {
+            try writer.writeAll(": ");
+
+            if (param.type_expr != 0) {
+                if (data.snippet_placeholders) {
+                    var curr_token = tree.firstToken(param.type_expr);
+                    const end_token = ast.lastToken(tree.*, param.type_expr);
+                    while (curr_token <= end_token) : (curr_token += 1) {
+                        const tag = token_tags[curr_token];
+                        const is_comma = tag == .comma;
+
+                        if (curr_token == end_token and is_comma) continue;
+                        try writer.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
+                        if (is_comma or tag == .keyword_const) try writer.writeByte(' ');
+                    }
+                } else {
+                    try writer.writeAll(offsets.nodeToSlice(tree.*, param.type_expr));
+                }
+            } else if (param.anytype_ellipsis3) |token_index| {
+                switch (token_tags[token_index]) {
+                    .keyword_anytype => try writer.writeAll("anytype"),
+                    .ellipsis3 => try writer.writeAll("..."),
+                    else => unreachable,
+                }
+            }
+        }
+
+        if (data.snippet_placeholders) {
+            try writer.writeByte('}');
+        }
+    }
+    try writer.writeByte(')');
+
+    // ignoring align_expr
+    // ignoring addrspace_expr
+    // ignoring section_expr
+    // ignoring callconv_expr
+
+    if (data.include_return_type) {
+        if (data.fn_proto.ast.return_type != 0) {
+            try writer.writeByte(' ');
+            if (ast.hasInferredError(tree.*, data.fn_proto)) {
+                try writer.writeByte('!');
+            }
+            try writer.writeAll(offsets.nodeToSlice(tree.*, data.fn_proto.ast.return_type));
+        }
+    }
+}
+
+pub fn fmtFunction(options: FormatFunctionOptions) std.fmt.Formatter(formatFunction) {
+    return .{ .data = options };
 }
 
 pub fn isInstanceCall(
