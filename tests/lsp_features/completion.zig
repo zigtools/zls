@@ -2367,7 +2367,7 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
             return error.InvalidCompletionDetail;
         }
 
-        if (expected_completion.labelDetails) |expected_label_details| blk: {
+        if (expected_completion.labelDetails) |expected_label_details| {
             const actual_label_details = actual_completion.labelDetails orelse {
                 try error_builder.msgAtIndex("expected label details on completion item '{s}'!", test_uri, cursor_idx, .err, .{label});
                 return error.InvalidCompletionLabelDetails;
@@ -2375,17 +2375,26 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
             const detail_ok = (expected_label_details.detail == null and actual_label_details.detail == null) or
                 (expected_label_details.detail != null and actual_label_details.detail != null and std.mem.eql(u8, expected_label_details.detail.?, actual_label_details.detail.?));
 
+            if (!detail_ok) {
+                try error_builder.msgAtIndex("completion item '{s}' should have label detail '{?s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                    label,
+                    expected_label_details.detail,
+                    actual_label_details.detail,
+                });
+                return error.InvalidCompletionLabelDetails;
+            }
+
             const description_ok = (expected_label_details.description == null and actual_label_details.description == null) or
                 (expected_label_details.description != null and actual_label_details.description != null and std.mem.eql(u8, expected_label_details.description.?, actual_label_details.description.?));
 
-            if (detail_ok and description_ok) break :blk;
-
-            try error_builder.msgAtIndex("completion item '{s}' should have label detail '{}' but was '{}'!", test_uri, cursor_idx, .err, .{
-                label,
-                expected_label_details,
-                actual_label_details,
-            });
-            return error.InvalidCompletionLabelDetails;
+            if (!description_ok) {
+                try error_builder.msgAtIndex("completion item '{s}' should have label detail description '{?s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                    label,
+                    expected_label_details.description,
+                    actual_label_details.description,
+                });
+                return error.InvalidCompletionLabelDetails;
+            }
         }
 
         blk: {
