@@ -742,6 +742,19 @@ test "hover - top-level doc comment" {
     );
 }
 
+test "hover - deprecated" {
+    try testHover(
+        \\const f<cursor>oo = @compileError("some message");
+    ,
+        \\```zig
+        \\const foo = @compileError("some message")
+        \\```
+        \\```zig
+        \\(@compileError("some message"))
+        \\```
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }

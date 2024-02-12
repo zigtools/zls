@@ -18,6 +18,7 @@ const Completion = struct {
     detail: ?[]const u8 = null,
     documentation: ?[]const u8 = null,
     insert_text: ?[]const u8 = null,
+    deprecated: bool = false,
 };
 
 const CompletionSet = std.StringArrayHashMapUnmanaged(Completion);
@@ -1791,6 +1792,21 @@ test "completion - struct init" {
     });
 }
 
+test "completion - deprecated " {
+    // removed symbols from the standard library are ofted marked with a compile error
+    try testCompletion(
+        \\const foo = @compileError("Deprecated; some message");
+        \\const bar = <cursor>
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Constant,
+            .documentation = "Deprecated; some message",
+            .deprecated = true,
+        },
+    });
+}
+
 test "completion - declarations" {
     try testCompletion(
         \\const S = struct {
@@ -2241,6 +2257,8 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
     ctx.server.client_capabilities.completion_doc_supports_md = true;
     ctx.server.client_capabilities.supports_snippets = options.enable_snippets;
     ctx.server.client_capabilities.label_details_support = true;
+    ctx.server.client_capabilities.supports_completion_deprecated_old = true;
+    ctx.server.client_capabilities.supports_completion_deprecated_tag = true;
 
     ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
     ctx.server.config.enable_snippets = options.enable_snippets;
@@ -2368,6 +2386,23 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
                 actual_label_details,
             });
             return error.InvalidCompletionLabelDetails;
+        }
+
+        blk: {
+            const actual_deprecated =
+                if (actual_completion.tags) |tags|
+                std.mem.indexOfScalar(types.CompletionItemTag, tags, .Deprecated) != null
+            else
+                false;
+            std.debug.assert(actual_deprecated == (actual_completion.deprecated orelse false));
+            if (expected_completion.deprecated == actual_deprecated) break :blk;
+
+            try error_builder.msgAtIndex("completion item '{s}' should {s} be marked as deprecated but {s}!", test_uri, cursor_idx, .err, .{
+                label,
+                if (expected_completion.deprecated) "" else "not",
+                if (actual_deprecated) "was" else "wasn't",
+            });
+            return error.InvalidCompletionDeprecation;
         }
     }
 
