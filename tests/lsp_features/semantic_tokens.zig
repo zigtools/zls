@@ -1626,6 +1626,61 @@ test "semantic tokens - assembly" {
     });
 }
 
+const S = struct {
+    const foo = @compileError("some message");
+};
+const bar = S.foo;
+
+test "semantic tokens - deprecated" {
+    try testSemanticTokens(
+        \\const foo = @compileError("some message");
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "@compileError", .builtin, .{} },
+        .{ "\"some message\"", .string, .{} },
+    });
+    try testSemanticTokens(
+        \\const foo = @compileError("some message");
+        \\const bar = foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "@compileError", .builtin, .{} },
+        .{ "\"some message\"", .string, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "foo", .variable, .{ .deprecated = true } },
+    });
+    try testSemanticTokens(
+        \\const S = struct {
+        \\  const foo = @compileError("some message");
+        \\};
+        \\const bar = S.foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "@compileError", .builtin, .{} },
+        .{ "\"some message\"", .string, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "foo", .variable, .{ .deprecated = true } },
+    });
+}
+
 test "semantic tokens - recursive usingnamespace" {
     // this test is supposed to check against infinite recursion when resolving usingnamespace
     try testSemanticTokens(

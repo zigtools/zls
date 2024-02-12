@@ -262,7 +262,11 @@ fn colorIdentifierBasedOnType(
         };
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
-        try writeTokenMod(builder, target_tok, if (is_parameter) .parameter else .variable, tok_mod);
+        var new_tok_mod = tok_mod;
+        if (type_node.data == .compile_error) {
+            new_tok_mod.deprecated = true;
+        }
+        try writeTokenMod(builder, target_tok, if (is_parameter) .parameter else .variable, new_tok_mod);
     }
 }
 

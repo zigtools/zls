@@ -1711,6 +1711,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 return try resolveFieldAccess(analyser, lhs, field_name[1 .. field_name.len - 1]);
             }
+            if (std.mem.eql(u8, call_name, "@compileError")) {
+                return Type{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
+            }
         },
         .fn_proto,
         .fn_proto_multi,
@@ -2107,6 +2110,9 @@ pub const Type = struct {
         /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
         other: NodeWithHandle,
 
+        /// - `@compileError("")`
+        compile_error: NodeWithHandle,
+
         /// Branching types
         either: []const EitherEntry,
 
@@ -2154,7 +2160,7 @@ pub const Type = struct {
             .error_union,
             .union_tag,
             => |t| t.hashWithHasher(hasher),
-            .other => |node_handle| {
+            .other, .compile_error => |node_handle| {
                 std.hash.autoHash(hasher, node_handle.node);
                 hasher.update(node_handle.handle.uri);
             },
@@ -2194,11 +2200,8 @@ pub const Type = struct {
                 const b_type = @field(b.data, @tagName(name));
                 if (!a_type.eql(b_type.*)) return false;
             },
-            .other => |a_node_handle| {
-                const b_node_handle = b.data.other;
-                if (a_node_handle.node != b_node_handle.node) return false;
-                if (!std.mem.eql(u8, a_node_handle.handle.uri, b_node_handle.handle.uri)) return false;
-            },
+            .other => |a_node_handle| return a_node_handle.eql(b.data.other),
+            .compile_error => |a_node_handle| return a_node_handle.eql(b.data.compile_error),
             .either => |a_entries| {
                 const b_entries = b.data.either;
 
@@ -2595,7 +2598,8 @@ pub const Type = struct {
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
             .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),
-            .either => try writer.writeAll("(either type)"), // TODO
+            .either => try writer.writeAll("either type"), // TODO
+            .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
         }
     }
 };
@@ -4636,7 +4640,7 @@ fn addReferencedTypes(
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 
-        .ip_index => {},
+        .ip_index, .compile_error => {},
         .either => {}, // TODO
     }
 }

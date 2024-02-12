@@ -69,6 +69,10 @@ const ClientCapabilities = struct {
     hover_supports_md: bool = false,
     signature_help_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
+    /// deprecated can be marked through the `CompletionItem.deprecated` field
+    supports_completion_deprecated_old: bool = false,
+    /// deprecated can be marked through the `CompletionItem.tags` field
+    supports_completion_deprecated_tag: bool = false,
     label_details_support: bool = false,
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
@@ -434,6 +438,18 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             if (completion.completionItem) |completionItem| {
                 server.client_capabilities.label_details_support = completionItem.labelDetailsSupport orelse false;
                 server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
+                server.client_capabilities.supports_completion_deprecated_old = completionItem.deprecatedSupport orelse false;
+                if (completionItem.tagSupport) |tagSupport| {
+                    for (tagSupport.valueSet) |tag| {
+                        switch (tag) {
+                            .Deprecated => {
+                                server.client_capabilities.supports_completion_deprecated_tag = true;
+                                break;
+                            },
+                            .placeholder__ => {},
+                        }
+                    }
+                }
                 if (completionItem.documentationFormat) |documentation_format| {
                     for (documentation_format) |format| {
                         if (format == .plaintext) {

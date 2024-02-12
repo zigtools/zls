@@ -120,6 +120,7 @@ fn typeToCompletion(
         },
         .error_union,
         .union_tag,
+        .compile_error,
         => {},
     }
 }
@@ -352,14 +353,45 @@ fn nodeToCompletion(
             const name = orig_name orelse tree.tokenSlice(var_decl.ast.mut_token + 1);
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            try list.append(arena, .{
-                .label = name,
-                .kind = if (is_const) .Constant else .Variable,
-                .documentation = doc,
-                .detail = try Analyser.getVariableSignature(arena, tree, var_decl, false),
-                .insertText = name,
-                .insertTextFormat = .PlainText,
-            });
+            const compile_error_message = blk: {
+                if (!server.client_capabilities.supports_completion_deprecated_old and
+                    !server.client_capabilities.supports_completion_deprecated_tag) break :blk null;
+
+                if (var_decl.ast.init_node == 0) break :blk null;
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = ast.builtinCallParams(tree, var_decl.ast.init_node, &buffer) orelse break :blk null;
+                if (params.len != 1) break :blk null;
+
+                const builtin_name = tree.tokenSlice(tree.nodes.items(.main_token)[var_decl.ast.init_node]);
+                if (!std.mem.eql(u8, builtin_name, "@compileError")) break :blk null;
+
+                if (tree.nodes.items(.tag)[params[0]] == .string_literal) {
+                    const literal = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
+                    break :blk literal[1 .. literal.len - 1];
+                }
+                break :blk "";
+            };
+
+            if (compile_error_message) |message| {
+                try list.append(arena, .{
+                    .label = name,
+                    .kind = if (is_const) .Constant else .Variable,
+                    .documentation = .{ .MarkupContent = .{ .kind = .markdown, .value = message } },
+                    .deprecated = if (server.client_capabilities.supports_completion_deprecated_old) true else null,
+                    .tags = if (server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
+                    .insertText = name,
+                    .insertTextFormat = .PlainText,
+                });
+            } else {
+                try list.append(arena, .{
+                    .label = name,
+                    .kind = if (is_const) .Constant else .Variable,
+                    .documentation = doc,
+                    .detail = try Analyser.getVariableSignature(arena, tree, var_decl, false),
+                    .insertText = name,
+                    .insertTextFormat = .PlainText,
+                });
+            }
         },
         .container_field,
         .container_field_align,
