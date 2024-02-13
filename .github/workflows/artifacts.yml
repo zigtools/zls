@@ -14,7 +14,6 @@ jobs:
   deploy:
     if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-latest
-    needs: [build, check_build_runner]
     steps:
       - uses: actions/checkout@v4
 
