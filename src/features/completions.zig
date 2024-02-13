@@ -660,7 +660,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
 
         .Variable => "2_",
         .Field => "3_",
-        .Function => "4_",
+        .Function, .Method => "4_",
 
         .Keyword, .Snippet, .EnumMember => "5_",
 
@@ -673,7 +673,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
         => "6_",
 
         else => {
-            log.debug(@typeName(types.CompletionItemKind) ++ "{s} has no sort score specified!", .{@tagName(kind)});
+            log.debug(@typeName(types.CompletionItemKind) ++ ".{s} has no sort score specified!", .{@tagName(kind)});
             return null;
         },
     };
