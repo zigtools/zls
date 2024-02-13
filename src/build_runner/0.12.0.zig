@@ -911,14 +911,23 @@ fn extractBuildInformation(
         }
     }
 
+    var available_options: std.json.ArrayHashMap(BuildConfig.AvailableOption) = .{};
+    try available_options.map.ensureTotalCapacity(arena, b.available_options_map.count());
+
+    var it = b.available_options_map.iterator();
+    while (it.next()) |available_option| {
+        available_options.map.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
+    }
+
     try std.json.stringify(
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,
             .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
+            .available_options = available_options,
         },
         .{
-            .whitespace = .indent_1,
+            .whitespace = .indent_2,
         },
         std.io.getStdOut().writer(),
     );
