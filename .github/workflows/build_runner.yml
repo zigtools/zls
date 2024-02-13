@@ -24,8 +24,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-tags: "true"
 
       - name: Grab zig
         uses: goto-bus-stop/setup-zig@v2

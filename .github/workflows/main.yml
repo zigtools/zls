@@ -16,8 +16,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: "true"
 
       - uses: goto-bus-stop/setup-zig@v2
         with:

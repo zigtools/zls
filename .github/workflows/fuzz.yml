@@ -64,14 +64,14 @@ jobs:
         if: github.event_name != 'pull_request_target'
         uses: actions/checkout@v4
         with:
-          fetch-tags: "true"
+          fetch-depth: 0
           path: zls
 
       - name: Checkout zls (PR)
         if: github.event_name == 'pull_request_target'
         uses: actions/checkout@v4
         with:
-          fetch-tags: "true"
+          fetch-depth: 0
           path: zls
           ref: "refs/pull/${{ github.event.number }}/merge"
 
