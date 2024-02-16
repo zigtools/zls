@@ -65,7 +65,7 @@ pub const Context = struct {
         const params = types.DidOpenTextDocumentParams{
             .textDocument = .{
                 .uri = uri,
-                .languageId = "zig",
+                .languageId = .{ .custom_value = "zig" }, // no zig :(
                 .version = 420,
                 .text = source,
             },

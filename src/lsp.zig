@@ -109,6 +109,8 @@ pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bo
             }
             break :build_kvs kvs_array[0..];
         };
+        /// NOTE: this maps 'empty' to .empty when T contains an empty enum
+        /// this shouldn't happen but this doesn't do any harm
         const map = std.ComptimeStringMap(T, kvs);
 
         pub fn eql(a: T, b: T) bool {
@@ -124,7 +126,7 @@ pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bo
         }
 
         pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!T {
-            const slice = try std.json.parseFromTokenSourceLeaky([]const u8, allocator, source, options);
+            const slice = try std.json.Value.jsonParse(allocator, source, options);
             if (contains_empty_enum and slice.len == 0) return .empty;
             return map.get(slice) orelse return .{ .custom_value = slice };
         }
@@ -226,13 +228,8 @@ pub const DocumentDiagnosticReport = union(enum) {
 
 pub const PrepareRenameResult = union(enum) {
     Range: Range,
-    literal_1: struct {
-        range: Range,
-        placeholder: []const u8,
-    },
-    literal_2: struct {
-        defaultBehavior: bool,
-    },
+    PrepareRenamePlaceholder: PrepareRenamePlaceholder,
+    PrepareRenameDefaultBehavior: PrepareRenameDefaultBehavior,
     pub usingnamespace UnionParser(@This());
 };
 
@@ -264,20 +261,8 @@ pub const WorkspaceDocumentDiagnosticReport = union(enum) {
 /// An event describing a change to a text document. If only a text is provided
 /// it is considered to be the full content of the document.
 pub const TextDocumentContentChangeEvent = union(enum) {
-    literal_0: struct {
-        /// The range of the document that changed.
-        range: Range,
-        /// The optional length of the range that got replaced.
-        ///
-        /// @deprecated use range instead.
-        rangeLength: ?u32 = null,
-        /// The new text for the provided range.
-        text: []const u8,
-    },
-    literal_1: struct {
-        /// The new text of the whole document.
-        text: []const u8,
-    },
+    TextDocumentContentChangePartial: TextDocumentContentChangePartial,
+    TextDocumentContentChangeWholeDocument: TextDocumentContentChangeWholeDocument,
     pub usingnamespace UnionParser(@This());
 };
 
@@ -295,10 +280,7 @@ pub const TextDocumentContentChangeEvent = union(enum) {
 /// @deprecated use MarkupContent instead.
 pub const MarkedString = union(enum) {
     string: []const u8,
-    literal_1: struct {
-        language: []const u8,
-        value: []const u8,
-    },
+    MarkedStringWithLanguage: MarkedStringWithLanguage,
     pub usingnamespace UnionParser(@This());
 };
 
@@ -338,30 +320,9 @@ pub const GlobPattern = union(enum) {
 ///
 /// @since 3.17.0
 pub const TextDocumentFilter = union(enum) {
-    literal_0: struct {
-        /// A language id, like `typescript`.
-        language: []const u8,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: ?[]const u8 = null,
-        /// A glob pattern, like `*.{ts,js}`.
-        pattern: ?[]const u8 = null,
-    },
-    literal_1: struct {
-        /// A language id, like `typescript`.
-        language: ?[]const u8 = null,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: []const u8,
-        /// A glob pattern, like `*.{ts,js}`.
-        pattern: ?[]const u8 = null,
-    },
-    literal_2: struct {
-        /// A language id, like `typescript`.
-        language: ?[]const u8 = null,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: ?[]const u8 = null,
-        /// A glob pattern, like `*.{ts,js}`.
-        pattern: []const u8,
-    },
+    TextDocumentFilterLanguage: TextDocumentFilterLanguage,
+    TextDocumentFilterScheme: TextDocumentFilterScheme,
+    TextDocumentFilterPattern: TextDocumentFilterPattern,
     pub usingnamespace UnionParser(@This());
 };
 
@@ -371,30 +332,9 @@ pub const TextDocumentFilter = union(enum) {
 ///
 /// @since 3.17.0
 pub const NotebookDocumentFilter = union(enum) {
-    literal_0: struct {
-        /// The type of the enclosing notebook.
-        notebookType: []const u8,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: ?[]const u8 = null,
-        /// A glob pattern.
-        pattern: ?[]const u8 = null,
-    },
-    literal_1: struct {
-        /// The type of the enclosing notebook.
-        notebookType: ?[]const u8 = null,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: []const u8,
-        /// A glob pattern.
-        pattern: ?[]const u8 = null,
-    },
-    literal_2: struct {
-        /// The type of the enclosing notebook.
-        notebookType: ?[]const u8 = null,
-        /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
-        scheme: ?[]const u8 = null,
-        /// A glob pattern.
-        pattern: []const u8,
-    },
+    NotebookDocumentFilterNotebookType: NotebookDocumentFilterNotebookType,
+    NotebookDocumentFilterScheme: NotebookDocumentFilterScheme,
+    NotebookDocumentFilterPattern: NotebookDocumentFilterPattern,
     pub usingnamespace UnionParser(@This());
 };
 
@@ -408,6 +348,8 @@ pub const NotebookDocumentFilter = union(enum) {
 ///
 /// @since 3.17.0
 pub const Pattern = []const u8;
+
+pub const RegularExpressionEngineKind = []const u8;
 
 // Enumerations
 
@@ -627,6 +569,11 @@ pub const MessageType = enum(u32) {
     Info = 3,
     /// A log message.
     Log = 4,
+    /// A debug message.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    Debug = 5,
     pub usingnamespace EnumStringifyAsInt(@This());
 };
 
@@ -775,6 +722,18 @@ pub const CodeActionKind = union(enum) {
     /// - Inline constant
     /// - ...
     @"refactor.inline",
+    /// Base kind for refactoring move actions: `refactor.move`
+    ///
+    /// Example move actions:
+    ///
+    /// - Move a function to a new file
+    /// - Move a property between classes
+    /// - Move method to base class
+    /// - ...
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    @"refactor.move",
     /// Base kind for refactoring rewrite actions: 'refactor.rewrite'
     ///
     /// Example rewrite actions:
@@ -799,6 +758,11 @@ pub const CodeActionKind = union(enum) {
     ///
     /// @since 3.15.0
     @"source.fixAll",
+    /// Base kind for all code actions applying to the entire notebook's scope. CodeActionKinds using
+    /// this should always begin with `notebook.`
+    ///
+    /// @since 3.18.0
+    notebook,
     custom_value: []const u8,
 
     const helpers = EnumCustomStringValues(@This(), true);
@@ -838,7 +802,7 @@ pub const CodeActionKind = union(enum) {
     pub const jsonStringify = helpers.jsonStringify;
 };
 
-pub const TraceValues = enum {
+pub const TraceValue = enum {
     /// Turn tracing off.
     off,
     /// Trace messages only.
@@ -859,15 +823,88 @@ pub const MarkupKind = enum {
     markdown,
 };
 
+/// Predefined Language kinds
+/// @since 3.18.0
+/// @proposed
+pub const LanguageKind = union(enum) {
+    abap,
+    bat,
+    bibtex,
+    clojure,
+    coffeescript,
+    c,
+    cpp,
+    csharp,
+    css,
+    /// @since 3.18.0
+    /// @proposed
+    d,
+    /// @since 3.18.0
+    /// @proposed
+    pascal,
+    diff,
+    dart,
+    dockerfile,
+    elixir,
+    erlang,
+    fsharp,
+    @"git-commit",
+    rebase,
+    go,
+    groovy,
+    handlebars,
+    html,
+    ini,
+    java,
+    javascript,
+    javascriptreact,
+    json,
+    latex,
+    less,
+    lua,
+    makefile,
+    markdown,
+    @"objective-c",
+    @"objective-cpp",
+    /// @since 3.18.0
+    /// @proposed
+    perl,
+    perl6,
+    php,
+    powershell,
+    jade,
+    python,
+    r,
+    razor,
+    ruby,
+    rust,
+    scss,
+    sass,
+    scala,
+    shaderlab,
+    shellscript,
+    sql,
+    swift,
+    typescript,
+    typescriptreact,
+    tex,
+    vb,
+    xml,
+    xsl,
+    yaml,
+    custom_value: []const u8,
+    pub usingnamespace EnumCustomStringValues(@This(), false);
+};
+
 /// Describes how an {@link InlineCompletionItemProvider inline completion provider} was triggered.
 ///
 /// @since 3.18.0
 /// @proposed
 pub const InlineCompletionTriggerKind = enum(u32) {
     /// Completion was triggered explicitly by a user gesture.
-    Invoked = 0,
+    Invoked = 1,
     /// Completion was triggered automatically while editing.
-    Automatic = 1,
+    Automatic = 2,
     pub usingnamespace EnumStringifyAsInt(@This());
 };
 
@@ -1257,7 +1294,7 @@ pub const FoldingRange = struct {
     endLine: u32,
     /// The zero-based character offset before the folded range ends. If not defined, defaults to the length of the end line.
     endCharacter: ?u32 = null,
-    /// Describes the kind of the folding range such as `comment' or 'region'. The kind
+    /// Describes the kind of the folding range such as 'comment' or 'region'. The kind
     /// is used to categorize folding ranges and used by commands like 'Fold all comments'.
     /// See {@link FoldingRangeKind} for an enumeration of standardized kinds.
     kind: ?FoldingRangeKind = null,
@@ -1546,10 +1583,7 @@ pub const SemanticTokensRegistrationOptions = struct {
     /// Server supports providing semantic tokens for a full document.
     full: ?union(enum) {
         bool: bool,
-        literal_1: struct {
-            /// The server supports deltas for full documents.
-            delta: ?bool = null,
-        },
+        SemanticTokensFullDelta: SemanticTokensFullDelta,
         pub usingnamespace UnionParser(@This());
     } = null,
 
@@ -1958,6 +1992,9 @@ pub const InlayHintParams = struct {
 /// @since 3.17.0
 pub const InlayHint = struct {
     /// The position of this hint.
+    ///
+    /// If multiple hints have the same position, they will be shown in the order
+    /// they appear in the response.
     position: Position,
     /// The label of this hint. A human readable string or an array of
     /// InlayHintLabelPart label parts.
@@ -2139,6 +2176,28 @@ pub const DidOpenNotebookDocumentParams = struct {
     cellTextDocuments: []const TextDocumentItem,
 };
 
+/// Registration options specific to a notebook.
+///
+/// @since 3.17.0
+pub const NotebookDocumentSyncRegistrationOptions = struct {
+
+    // Extends NotebookDocumentSyncOptions
+    /// The notebooks to be synced
+    notebookSelector: []const union(enum) {
+        NotebookDocumentFilterWithNotebook: NotebookDocumentFilterWithNotebook,
+        NotebookDocumentFilterWithCells: NotebookDocumentFilterWithCells,
+        pub usingnamespace UnionParser(@This());
+    },
+    /// Whether save notification should be forwarded to
+    /// the server. Will only be honored if mode === `notebook`.
+    save: ?bool = null,
+
+    // Uses mixin StaticRegistrationOptions
+    /// The id used to register the request. The id can be used to deregister
+    /// the request again. See also Registration#id.
+    id: ?[]const u8 = null,
+};
+
 /// The params sent in a change notebook document notification.
 ///
 /// @since 3.17.0
@@ -2273,12 +2332,7 @@ pub const InitializeParams = struct {
     /// Information about the client
     ///
     /// @since 3.15.0
-    clientInfo: ?struct {
-        /// The name of the client as defined by the client.
-        name: []const u8,
-        /// The client's version as defined by the client.
-        version: ?[]const u8 = null,
-    } = null,
+    clientInfo: ?ClientInfo = null,
     /// The locale the client is currently showing the user interface
     /// in. This must not necessarily be the locale of the operating
     /// system.
@@ -2304,7 +2358,7 @@ pub const InitializeParams = struct {
     /// User provided initialization options.
     initializationOptions: ?LSPAny = null,
     /// The initial trace setting. If omitted trace is disabled ('off').
-    trace: ?TraceValues = null,
+    trace: ?TraceValue = null,
 
     // Uses mixin WorkDoneProgressParams
     /// An optional token that a server can use to report work done progress.
@@ -2328,12 +2382,7 @@ pub const InitializeResult = struct {
     /// Information about the server.
     ///
     /// @since 3.15.0
-    serverInfo: ?struct {
-        /// The name of the server as defined by the server.
-        name: []const u8,
-        /// The server's version as defined by the server.
-        version: ?[]const u8 = null,
-    } = null,
+    serverInfo: ?ServerInfo = null,
 };
 
 /// The data type of the ResponseError if the
@@ -2672,35 +2721,7 @@ pub const CompletionList = struct {
     /// capability.
     ///
     /// @since 3.17.0
-    itemDefaults: ?struct {
-        /// A default commit character set.
-        ///
-        /// @since 3.17.0
-        commitCharacters: ?[]const []const u8 = null,
-        /// A default edit range.
-        ///
-        /// @since 3.17.0
-        editRange: ?union(enum) {
-            Range: Range,
-            literal_1: struct {
-                insert: Range,
-                replace: Range,
-            },
-            pub usingnamespace UnionParser(@This());
-        } = null,
-        /// A default insert text format.
-        ///
-        /// @since 3.17.0
-        insertTextFormat: ?InsertTextFormat = null,
-        /// A default insert text mode.
-        ///
-        /// @since 3.17.0
-        insertTextMode: ?InsertTextMode = null,
-        /// A default data value.
-        ///
-        /// @since 3.17.0
-        data: ?LSPAny = null,
-    } = null,
+    itemDefaults: ?CompletionItemDefaults = null,
     /// The completion items.
     items: []const CompletionItem,
 };
@@ -2739,14 +2760,7 @@ pub const CompletionRegistrationOptions = struct {
     /// capabilities.
     ///
     /// @since 3.17.0
-    completionItem: ?struct {
-        /// The server has support for completion item label
-        /// details (see also `CompletionItemLabelDetails`) when
-        /// receiving a completion item in a resolve call.
-        ///
-        /// @since 3.17.0
-        labelDetailsSupport: ?bool = null,
-    } = null,
+    completionItem: ?ServerCompletionItemOptions = null,
 
     // Uses mixin WorkDoneProgressOptions
     workDoneProgress: ?bool = null,
@@ -2829,13 +2843,22 @@ pub const SignatureHelp = struct {
     /// In future version of the protocol this property might become
     /// mandatory to better express this.
     activeSignature: ?u32 = null,
-    /// The active parameter of the active signature. If omitted or the value
-    /// lies outside the range of `signatures[activeSignature].parameters`
-    /// defaults to 0 if the active signature has parameters. If
-    /// the active signature has no parameters it is ignored.
+    /// The active parameter of the active signature.
+    ///
+    /// If `null`, no parameter of the signature is active (for example a named
+    /// argument that does not match any declared parameters). This is only valid
+    /// if the client specifies the client capability
+    /// `textDocument.signatureHelp.noActiveParameterSupport === true`
+    ///
+    /// If omitted or the value lies outside the range of
+    /// `signatures[activeSignature].parameters` defaults to 0 if the active
+    /// signature has parameters.
+    ///
+    /// If the active signature has no parameters it is ignored.
+    ///
     /// In future version of the protocol this property might become
-    /// mandatory to better express the active parameter if the
-    /// active signature does have any.
+    /// mandatory (but still nullable) to better express the active parameter if
+    /// the active signature does have any.
     activeParameter: ?u32 = null,
 };
 
@@ -3097,6 +3120,11 @@ pub const CodeActionParams = struct {
 pub const Command = struct {
     /// Title of the command, like `save`.
     title: []const u8,
+    /// An optional tooltip.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    tooltip: ?[]const u8 = null,
     /// The identifier of the actual command handler.
     command: []const u8,
     /// Arguments that the command handler should be
@@ -3140,12 +3168,7 @@ pub const CodeAction = struct {
     ///     error message with `reason` in the editor.
     ///
     /// @since 3.16.0
-    disabled: ?struct {
-        /// Human readable description of why the code action is currently disabled.
-        ///
-        /// This is displayed in the code actions UI.
-        reason: []const u8,
-    } = null,
+    disabled: ?CodeActionDisabled = null,
     /// The workspace edit this code action performs.
     edit: ?WorkspaceEdit = null,
     /// A command this code action executes. If a code action
@@ -3173,6 +3196,22 @@ pub const CodeActionRegistrationOptions = struct {
     /// The list of kinds may be generic, such as `CodeActionKind.Refactor`, or the server
     /// may list out every specific kind they provide.
     codeActionKinds: ?[]const CodeActionKind = null,
+    /// Static documentation for a class of code actions.
+    ///
+    /// Documentation from the provider should be shown in the code actions menu if either:
+    ///
+    /// - Code actions of `kind` are requested by the editor. In this case, the editor will show the documentation that
+    ///   most closely matches the requested code action kind. For example, if a provider has documentation for
+    ///   both `Refactor` and `RefactorExtract`, when the user requests code actions for `RefactorExtract`,
+    ///   the editor will use the documentation for `RefactorExtract` instead of the documentation for `Refactor`.
+    ///
+    /// - Any code actions of `kind` are returned by the provider.
+    ///
+    /// At most one documentation entry should be shown per provider.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    documentation: ?[]const CodeActionKindDocumentation = null,
     /// The server provides support to resolve additional
     /// information for a code action.
     ///
@@ -3212,9 +3251,7 @@ pub const WorkspaceSymbol = struct {
     /// See SymbolInformation#location for more details.
     location: union(enum) {
         Location: Location,
-        literal_1: struct {
-            uri: DocumentUri,
-        },
+        LocationUriOnly: LocationUriOnly,
         pub usingnamespace UnionParser(@This());
     },
     /// A data entry field that is preserved on a workspace symbol between a
@@ -3277,8 +3314,7 @@ pub const CodeLens = struct {
     /// The command this code lens represents.
     command: ?Command = null,
     /// A data entry field that is preserved on a code lens item between
-    /// a {@link CodeLensRequest} and a [CodeLensResolveRequest]
-    /// (#CodeLensResolveRequest)
+    /// a {@link CodeLensRequest} and a {@link CodeLensResolveRequest}
     data: ?LSPAny = null,
 };
 
@@ -3609,7 +3645,7 @@ pub const WorkDoneProgressEnd = struct {
 };
 
 pub const SetTraceParams = struct {
-    value: TraceValues,
+    value: TraceValue,
 };
 
 pub const LogTraceParams = struct {
@@ -3720,7 +3756,7 @@ pub const WorkspaceFoldersChangeEvent = struct {
 
 pub const ConfigurationItem = struct {
     /// The scope to get the configuration section for.
-    scopeUri: ?[]const u8 = null,
+    scopeUri: ?URI = null,
     /// The configuration section asked for.
     section: ?[]const u8 = null,
 };
@@ -3768,14 +3804,14 @@ pub const DeclarationOptions = struct {
 /// offset of b is 3 since `𐐀` is represented using two code units in UTF-16.
 /// Since 3.17 clients and servers can agree on a different string encoding
 /// representation (e.g. UTF-8). The client announces it's supported encoding
-/// via the client capability [`general.positionEncodings`](#clientCapabilities).
+/// via the client capability [`general.positionEncodings`](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#clientCapabilities).
 /// The value is an array of position encodings the client supports, with
 /// decreasing preference (e.g. the encoding at index `0` is the most preferred
 /// one). To stay backwards compatible the only mandatory encoding is UTF-16
 /// represented via the string `utf-16`. The server can pick one of the
 /// encodings offered by the client and signals that encoding back to the
 /// client via the initialize result's property
-/// [`capabilities.positionEncoding`](#serverCapabilities). If the string value
+/// [`capabilities.positionEncoding`](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#serverCapabilities). If the string value
 /// `utf-16` is missing from the client's capability `general.positionEncodings`
 /// servers can safely assume that the client supports UTF-16. If the server
 /// omits the position encoding in its initialize result the encoding defaults
@@ -3833,10 +3869,7 @@ pub const SemanticTokensOptions = struct {
     /// Server supports providing semantic tokens for a full document.
     full: ?union(enum) {
         bool: bool,
-        literal_1: struct {
-            /// The server supports deltas for full documents.
-            delta: ?bool = null,
-        },
+        SemanticTokensFullDelta: SemanticTokensFullDelta,
         pub usingnamespace UnionParser(@This());
     } = null,
 
@@ -4267,12 +4300,37 @@ pub const TextDocumentItem = struct {
     /// The text document's uri.
     uri: DocumentUri,
     /// The text document's language identifier.
-    languageId: []const u8,
+    languageId: LanguageKind,
     /// The version number of this document (it will increase after each
     /// change, including undo/redo).
     version: i32,
     /// The content of the opened text document.
     text: []const u8,
+};
+
+/// Options specific to a notebook plus its cells
+/// to be synced to the server.
+///
+/// If a selector provides a notebook document
+/// filter but no cell selector all cells of a
+/// matching notebook document will be synced.
+///
+/// If a selector provides no notebook document
+/// filter but only a cell selector all notebook
+/// document that contain at least one matching
+/// cell will be synced.
+///
+/// @since 3.17.0
+pub const NotebookDocumentSyncOptions = struct {
+    /// The notebooks to be synced
+    notebookSelector: []const union(enum) {
+        NotebookDocumentFilterWithNotebook: NotebookDocumentFilterWithNotebook,
+        NotebookDocumentFilterWithCells: NotebookDocumentFilterWithCells,
+        pub usingnamespace UnionParser(@This());
+    },
+    /// Whether save notification should be forwarded to
+    /// the server. Will only be honored if mode === `notebook`.
+    save: ?bool = null,
 };
 
 /// A versioned notebook document identifier.
@@ -4294,26 +4352,7 @@ pub const NotebookDocumentChangeEvent = struct {
     /// Note: should always be an object literal (e.g. LSPObject)
     metadata: ?LSPObject = null,
     /// Changes to cells
-    cells: ?struct {
-        /// Changes to the cell structure to add or
-        /// remove cells.
-        structure: ?struct {
-            /// The change to the cell array.
-            array: NotebookCellArrayChange,
-            /// Additional opened cell text documents.
-            didOpen: ?[]const TextDocumentItem = null,
-            /// Additional closed cell text documents.
-            didClose: ?[]const TextDocumentIdentifier = null,
-        } = null,
-        /// Changes to notebook cells properties like its
-        /// kind, execution summary or metadata.
-        data: ?[]const NotebookCell = null,
-        /// Changes to the text content of notebook cells.
-        textContent: ?[]const struct {
-            document: VersionedTextDocumentIdentifier,
-            changes: []const TextDocumentContentChangeEvent,
-        } = null,
-    } = null,
+    cells: ?NotebookDocumentCellChanges = null,
 };
 
 /// A literal to identify a notebook document in the client.
@@ -4393,12 +4432,7 @@ pub const _InitializeParams = struct {
     /// Information about the client
     ///
     /// @since 3.15.0
-    clientInfo: ?struct {
-        /// The name of the client as defined by the client.
-        name: []const u8,
-        /// The client's version as defined by the client.
-        version: ?[]const u8 = null,
-    } = null,
+    clientInfo: ?ClientInfo = null,
     /// The locale the client is currently showing the user interface
     /// in. This must not necessarily be the locale of the operating
     /// system.
@@ -4424,7 +4458,7 @@ pub const _InitializeParams = struct {
     /// User provided initialization options.
     initializationOptions: ?LSPAny = null,
     /// The initial trace setting. If omitted trace is disabled ('off').
-    trace: ?TraceValues = null,
+    trace: ?TraceValue = null,
 
     // Uses mixin WorkDoneProgressParams
     /// An optional token that a server can use to report work done progress.
@@ -4669,18 +4703,21 @@ pub const ServerCapabilities = struct {
         pub usingnamespace UnionParser(@This());
     } = null,
     /// Workspace specific server capabilities.
-    workspace: ?struct {
-        /// The server supports workspace folder.
-        ///
-        /// @since 3.6.0
-        workspaceFolders: ?WorkspaceFoldersServerCapabilities = null,
-        /// The server is interested in notifications/requests for operations on files.
-        ///
-        /// @since 3.16.0
-        fileOperations: ?FileOperationOptions = null,
-    } = null,
+    workspace: ?WorkspaceOptions = null,
     /// Experimental server capabilities.
     experimental: ?LSPAny = null,
+};
+
+/// Information about the server
+///
+/// @since 3.15.0
+/// @since 3.18.0 ServerInfo type name added.
+/// @proposed
+pub const ServerInfo = struct {
+    /// The name of the server as defined by the server.
+    name: []const u8,
+    /// The server's version as defined by the server.
+    version: ?[]const u8 = null,
 };
 
 /// A text document identifier to denote a specific version of a text document.
@@ -4790,6 +4827,46 @@ pub const InsertReplaceEdit = struct {
     replace: Range,
 };
 
+/// In many cases the items of an actual completion result share the same
+/// value for properties like `commitCharacters` or the range of a text
+/// edit. A completion list can therefore define item defaults which will
+/// be used if a completion item itself doesn't specify the value.
+///
+/// If a completion list specifies a default value and a completion item
+/// also specifies a corresponding value the one from the item is used.
+///
+/// Servers are only allowed to return default values if the client
+/// signals support for this via the `completionList.itemDefaults`
+/// capability.
+///
+/// @since 3.17.0
+pub const CompletionItemDefaults = struct {
+    /// A default commit character set.
+    ///
+    /// @since 3.17.0
+    commitCharacters: ?[]const []const u8 = null,
+    /// A default edit range.
+    ///
+    /// @since 3.17.0
+    editRange: ?union(enum) {
+        Range: Range,
+        EditRangeWithInsertReplace: EditRangeWithInsertReplace,
+        pub usingnamespace UnionParser(@This());
+    } = null,
+    /// A default insert text format.
+    ///
+    /// @since 3.17.0
+    insertTextFormat: ?InsertTextFormat = null,
+    /// A default insert text mode.
+    ///
+    /// @since 3.17.0
+    insertTextMode: ?InsertTextMode = null,
+    /// A default data value.
+    ///
+    /// @since 3.17.0
+    data: ?LSPAny = null,
+};
+
 /// Completion options.
 pub const CompletionOptions = struct {
     /// Most tools trigger completion request automatically without explicitly requesting
@@ -4817,14 +4894,7 @@ pub const CompletionOptions = struct {
     /// capabilities.
     ///
     /// @since 3.17.0
-    completionItem: ?struct {
-        /// The server has support for completion item label
-        /// details (see also `CompletionItemLabelDetails`) when
-        /// receiving a completion item in a resolve call.
-        ///
-        /// @since 3.17.0
-        labelDetailsSupport: ?bool = null,
-    } = null,
+    completionItem: ?ServerCompletionItemOptions = null,
 
     // Uses mixin WorkDoneProgressOptions
     workDoneProgress: ?bool = null,
@@ -4877,7 +4947,13 @@ pub const SignatureInformation = struct {
     parameters: ?[]const ParameterInformation = null,
     /// The index of the active parameter.
     ///
-    /// If provided, this is used in place of `SignatureHelp.activeParameter`.
+    /// If `null`, no parameter of the signature is active (for example a named
+    /// argument that does not match any declared parameters). This is only valid
+    /// if the client specifies the client capability
+    /// `textDocument.signatureHelp.noActiveParameterSupport === true`
+    ///
+    /// If provided (or `null`), this is used in place of
+    /// `SignatureHelp.activeParameter`.
     ///
     /// @since 3.16.0
     activeParameter: ?u32 = null,
@@ -4976,6 +5052,17 @@ pub const CodeActionContext = struct {
     triggerKind: ?CodeActionTriggerKind = null,
 };
 
+/// Captures why the code action is currently disabled.
+///
+/// @since 3.18.0
+/// @proposed
+pub const CodeActionDisabled = struct {
+    /// Human readable description of why the code action is currently disabled.
+    ///
+    /// This is displayed in the code actions UI.
+    reason: []const u8,
+};
+
 /// Provider options for a {@link CodeActionRequest}.
 pub const CodeActionOptions = struct {
     /// CodeActionKinds that this server may return.
@@ -4983,6 +5070,22 @@ pub const CodeActionOptions = struct {
     /// The list of kinds may be generic, such as `CodeActionKind.Refactor`, or the server
     /// may list out every specific kind they provide.
     codeActionKinds: ?[]const CodeActionKind = null,
+    /// Static documentation for a class of code actions.
+    ///
+    /// Documentation from the provider should be shown in the code actions menu if either:
+    ///
+    /// - Code actions of `kind` are requested by the editor. In this case, the editor will show the documentation that
+    ///   most closely matches the requested code action kind. For example, if a provider has documentation for
+    ///   both `Refactor` and `RefactorExtract`, when the user requests code actions for `RefactorExtract`,
+    ///   the editor will use the documentation for `RefactorExtract` instead of the documentation for `Refactor`.
+    ///
+    /// - Any code actions of `kind` are returned by the provider.
+    ///
+    /// At most one documentation entry should be shown per provider.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    documentation: ?[]const CodeActionKindDocumentation = null,
     /// The server provides support to resolve additional
     /// information for a code action.
     ///
@@ -4991,6 +5094,14 @@ pub const CodeActionOptions = struct {
 
     // Uses mixin WorkDoneProgressOptions
     workDoneProgress: ?bool = null,
+};
+
+/// Location with only uri and does not include range.
+///
+/// @since 3.18.0
+/// @proposed
+pub const LocationUriOnly = struct {
+    uri: DocumentUri,
 };
 
 /// Server capabilities for a {@link WorkspaceSymbolRequest}.
@@ -5081,6 +5192,19 @@ pub const RenameOptions = struct {
     workDoneProgress: ?bool = null,
 };
 
+/// @since 3.18.0
+/// @proposed
+pub const PrepareRenamePlaceholder = struct {
+    range: Range,
+    placeholder: []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const PrepareRenameDefaultBehavior = struct {
+    defaultBehavior: bool,
+};
+
 /// The server capabilities of a {@link ExecuteCommandRequest}.
 pub const ExecuteCommandOptions = struct {
     /// The commands to be executed on the server
@@ -5096,6 +5220,15 @@ pub const SemanticTokensLegend = struct {
     tokenTypes: []const []const u8,
     /// The token modifiers a server uses.
     tokenModifiers: []const []const u8,
+};
+
+/// Semantic tokens options to support deltas for full documents
+///
+/// @since 3.18.0
+/// @proposed
+pub const SemanticTokensFullDelta = struct {
+    /// The server supports deltas for full documents.
+    delta: ?bool = null,
 };
 
 /// A text document identifier to optionally denote a specific version of a text document.
@@ -5247,17 +5380,49 @@ pub const NotebookCell = struct {
     executionSummary: ?ExecutionSummary = null,
 };
 
-/// A change describing how to move a `NotebookCell`
-/// array from state S to S'.
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentFilterWithNotebook = struct {
+    /// The notebook to be synced If a string
+    /// value is provided it matches against the
+    /// notebook type. '*' matches every notebook.
+    notebook: union(enum) {
+        string: []const u8,
+        NotebookDocumentFilter: NotebookDocumentFilter,
+        pub usingnamespace UnionParser(@This());
+    },
+    /// The cells of the matching notebook to be synced.
+    cells: ?[]const NotebookCellLanguage = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentFilterWithCells = struct {
+    /// The notebook to be synced If a string
+    /// value is provided it matches against the
+    /// notebook type. '*' matches every notebook.
+    notebook: ?union(enum) {
+        string: []const u8,
+        NotebookDocumentFilter: NotebookDocumentFilter,
+        pub usingnamespace UnionParser(@This());
+    } = null,
+    /// The cells of the matching notebook to be synced.
+    cells: []const NotebookCellLanguage,
+};
+
+/// Cell changes to a notebook document.
 ///
-/// @since 3.17.0
-pub const NotebookCellArrayChange = struct {
-    /// The start oftest of the cell that changed.
-    start: u32,
-    /// The deleted cells
-    deleteCount: u32,
-    /// The new cells, if any
-    cells: ?[]const NotebookCell = null,
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentCellChanges = struct {
+    /// Changes to the cell structure to add or
+    /// remove cells.
+    structure: ?NotebookDocumentCellChangeStructure = null,
+    /// Changes to notebook cells properties like its
+    /// kind, execution summary or metadata.
+    data: ?[]const NotebookCell = null,
+    /// Changes to the text content of notebook cells.
+    textContent: ?[]const NotebookDocumentCellContentChanges = null,
 };
 
 /// Describes the currently selected completion item.
@@ -5269,6 +5434,18 @@ pub const SelectedCompletionInfo = struct {
     range: Range,
     /// The text the range will be replaced with if this completion is accepted.
     text: []const u8,
+};
+
+/// Information about the client
+///
+/// @since 3.15.0
+/// @since 3.18.0 ClientInfo type name added.
+/// @proposed
+pub const ClientInfo = struct {
+    /// The name of the client as defined by the client.
+    name: []const u8,
+    /// The client's version as defined by the client.
+    version: ?[]const u8 = null,
 };
 
 /// Defines the capabilities provided by the client.
@@ -5313,138 +5490,39 @@ pub const TextDocumentSyncOptions = struct {
     } = null,
 };
 
-/// Options specific to a notebook plus its cells
-/// to be synced to the server.
+/// Defines workspace specific capabilities of the server.
 ///
-/// If a selector provides a notebook document
-/// filter but no cell selector all cells of a
-/// matching notebook document will be synced.
-///
-/// If a selector provides no notebook document
-/// filter but only a cell selector all notebook
-/// document that contain at least one matching
-/// cell will be synced.
-///
-/// @since 3.17.0
-pub const NotebookDocumentSyncOptions = struct {
-    /// The notebooks to be synced
-    notebookSelector: []const union(enum) {
-        literal_0: struct {
-            /// The notebook to be synced If a string
-            /// value is provided it matches against the
-            /// notebook type. '*' matches every notebook.
-            notebook: union(enum) {
-                string: []const u8,
-                NotebookDocumentFilter: NotebookDocumentFilter,
-                pub usingnamespace UnionParser(@This());
-            },
-            /// The cells of the matching notebook to be synced.
-            cells: ?[]const struct {
-                language: []const u8,
-            } = null,
-        },
-        literal_1: struct {
-            /// The notebook to be synced If a string
-            /// value is provided it matches against the
-            /// notebook type. '*' matches every notebook.
-            notebook: ?union(enum) {
-                string: []const u8,
-                NotebookDocumentFilter: NotebookDocumentFilter,
-                pub usingnamespace UnionParser(@This());
-            } = null,
-            /// The cells of the matching notebook to be synced.
-            cells: []const struct {
-                language: []const u8,
-            },
-        },
-        pub usingnamespace UnionParser(@This());
-    },
-    /// Whether save notification should be forwarded to
-    /// the server. Will only be honored if mode === `notebook`.
-    save: ?bool = null,
-};
-
-/// Registration options specific to a notebook.
-///
-/// @since 3.17.0
-pub const NotebookDocumentSyncRegistrationOptions = struct {
-
-    // Extends NotebookDocumentSyncOptions
-    /// The notebooks to be synced
-    notebookSelector: []const union(enum) {
-        literal_0: struct {
-            /// The notebook to be synced If a string
-            /// value is provided it matches against the
-            /// notebook type. '*' matches every notebook.
-            notebook: union(enum) {
-                string: []const u8,
-                NotebookDocumentFilter: NotebookDocumentFilter,
-                pub usingnamespace UnionParser(@This());
-            },
-            /// The cells of the matching notebook to be synced.
-            cells: ?[]const struct {
-                language: []const u8,
-            } = null,
-        },
-        literal_1: struct {
-            /// The notebook to be synced If a string
-            /// value is provided it matches against the
-            /// notebook type. '*' matches every notebook.
-            notebook: ?union(enum) {
-                string: []const u8,
-                NotebookDocumentFilter: NotebookDocumentFilter,
-                pub usingnamespace UnionParser(@This());
-            } = null,
-            /// The cells of the matching notebook to be synced.
-            cells: []const struct {
-                language: []const u8,
-            },
-        },
-        pub usingnamespace UnionParser(@This());
-    },
-    /// Whether save notification should be forwarded to
-    /// the server. Will only be honored if mode === `notebook`.
-    save: ?bool = null,
-
-    // Uses mixin StaticRegistrationOptions
-    /// The id used to register the request. The id can be used to deregister
-    /// the request again. See also Registration#id.
-    id: ?[]const u8 = null,
-};
-
-pub const WorkspaceFoldersServerCapabilities = struct {
-    /// The server has support for workspace folders
-    supported: ?bool = null,
-    /// Whether the server wants to receive workspace folder
-    /// change notifications.
+/// @since 3.18.0
+/// @proposed
+pub const WorkspaceOptions = struct {
+    /// The server supports workspace folder.
     ///
-    /// If a string is provided the string is treated as an ID
-    /// under which the notification is registered on the client
-    /// side. The ID can be used to unregister for these events
-    /// using the `client/unregisterCapability` request.
-    changeNotifications: ?union(enum) {
-        string: []const u8,
-        bool: bool,
-        pub usingnamespace UnionParser(@This());
-    } = null,
+    /// @since 3.6.0
+    workspaceFolders: ?WorkspaceFoldersServerCapabilities = null,
+    /// The server is interested in notifications/requests for operations on files.
+    ///
+    /// @since 3.16.0
+    fileOperations: ?FileOperationOptions = null,
 };
 
-/// Options for notifications/requests for user operations on files.
-///
-/// @since 3.16.0
-pub const FileOperationOptions = struct {
-    /// The server is interested in receiving didCreateFiles notifications.
-    didCreate: ?FileOperationRegistrationOptions = null,
-    /// The server is interested in receiving willCreateFiles requests.
-    willCreate: ?FileOperationRegistrationOptions = null,
-    /// The server is interested in receiving didRenameFiles notifications.
-    didRename: ?FileOperationRegistrationOptions = null,
-    /// The server is interested in receiving willRenameFiles requests.
-    willRename: ?FileOperationRegistrationOptions = null,
-    /// The server is interested in receiving didDeleteFiles file notifications.
-    didDelete: ?FileOperationRegistrationOptions = null,
-    /// The server is interested in receiving willDeleteFiles file requests.
-    willDelete: ?FileOperationRegistrationOptions = null,
+/// @since 3.18.0
+/// @proposed
+pub const TextDocumentContentChangePartial = struct {
+    /// The range of the document that changed.
+    range: Range,
+    /// The optional length of the range that got replaced.
+    ///
+    /// @deprecated use range instead.
+    rangeLength: ?u32 = null,
+    /// The new text for the provided range.
+    text: []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const TextDocumentContentChangeWholeDocument = struct {
+    /// The new text of the whole document.
+    text: []const u8,
 };
 
 /// Structure to capture a description for an error code.
@@ -5465,6 +5543,34 @@ pub const DiagnosticRelatedInformation = struct {
     message: []const u8,
 };
 
+/// Edit range variant that includes ranges for insert and replace operations.
+///
+/// @since 3.18.0
+/// @proposed
+pub const EditRangeWithInsertReplace = struct {
+    insert: Range,
+    replace: Range,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ServerCompletionItemOptions = struct {
+    /// The server has support for completion item label
+    /// details (see also `CompletionItemLabelDetails`) when
+    /// receiving a completion item in a resolve call.
+    ///
+    /// @since 3.17.0
+    labelDetailsSupport: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+/// @deprecated use MarkupContent instead.
+pub const MarkedStringWithLanguage = struct {
+    language: []const u8,
+    value: []const u8,
+};
+
 /// Represents a parameter of a callable-signature. A parameter can
 /// have a label and a doc-comment.
 pub const ParameterInformation = struct {
@@ -5473,6 +5579,10 @@ pub const ParameterInformation = struct {
     /// Either a string or an inclusive start and exclusive end offsets within its containing
     /// signature label. (see SignatureInformation.label). The offsets are based on a UTF-16
     /// string representation as `Position` and `Range` does.
+    ///
+    /// To avoid ambiguities a server should use the [start, end] offset value instead of using
+    /// a substring. Whether a client support this is controlled via `labelOffsetSupport` client
+    /// capability.
     ///
     /// *Note*: a label of type string should be a substring of its containing signature label.
     /// Its intended use case is to highlight the parameter label part in the `SignatureInformation.label`.
@@ -5488,6 +5598,23 @@ pub const ParameterInformation = struct {
         MarkupContent: MarkupContent,
         pub usingnamespace UnionParser(@This());
     } = null,
+};
+
+/// Documentation for a class of code actions.
+///
+/// @since 3.18.0
+/// @proposed
+pub const CodeActionKindDocumentation = struct {
+    /// The kind of the code action being documented.
+    ///
+    /// If the kind is generic, such as `CodeActionKind.Refactor`, the documentation will be shown whenever any
+    /// refactorings are returned. If the kind if more specific, such as `CodeActionKind.RefactorExtract`, the
+    /// documentation will only be shown when extract refactoring code actions are returned.
+    kind: CodeActionKind,
+    /// Command that is ued to display the documentation to the user.
+    ///
+    /// The title of this documentation code action is taken from {@linkcode Command.title}
+    command: Command,
 };
 
 /// A notebook cell text document filter denotes a cell text
@@ -5527,6 +5654,34 @@ pub const ExecutionSummary = struct {
     /// Whether the execution was successful or
     /// not if known by the client.
     success: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const NotebookCellLanguage = struct {
+    language: []const u8,
+};
+
+/// Structural changes to cells in a notebook document.
+///
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentCellChangeStructure = struct {
+    /// The change to the cell array.
+    array: NotebookCellArrayChange,
+    /// Additional opened cell text documents.
+    didOpen: ?[]const TextDocumentItem = null,
+    /// Additional closed cell text documents.
+    didClose: ?[]const TextDocumentIdentifier = null,
+};
+
+/// Content changes to a cell in a notebook document.
+///
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentCellContentChanges = struct {
+    document: VersionedTextDocumentIdentifier,
+    changes: []const TextDocumentContentChangeEvent,
 };
 
 /// Workspace specific client capabilities.
@@ -5582,6 +5737,11 @@ pub const WorkspaceClientCapabilities = struct {
     ///
     /// @since 3.17.0.
     diagnostics: ?DiagnosticWorkspaceClientCapabilities = null,
+    /// Capabilities specific to the folding range requests scoped to the workspace.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    foldingRange: ?FoldingRangeWorkspaceClientCapabilities = null,
 };
 
 /// Text document specific client capabilities.
@@ -5723,14 +5883,7 @@ pub const GeneralClientCapabilities = struct {
     /// anymore since the information is outdated).
     ///
     /// @since 3.17.0
-    staleRequestSupport: ?struct {
-        /// The client will actively cancel the request.
-        cancel: bool,
-        /// The list of requests for which the client
-        /// will retry the request if it receives a
-        /// response with error code `ContentModified`
-        retryOnContentModified: []const []const u8,
-    } = null,
+    staleRequestSupport: ?StaleRequestSupportOptions = null,
     /// Client capabilities specific to regular expressions.
     ///
     /// @since 3.16.0
@@ -5760,6 +5913,41 @@ pub const GeneralClientCapabilities = struct {
     positionEncodings: ?[]const PositionEncodingKind = null,
 };
 
+pub const WorkspaceFoldersServerCapabilities = struct {
+    /// The server has support for workspace folders
+    supported: ?bool = null,
+    /// Whether the server wants to receive workspace folder
+    /// change notifications.
+    ///
+    /// If a string is provided the string is treated as an ID
+    /// under which the notification is registered on the client
+    /// side. The ID can be used to unregister for these events
+    /// using the `client/unregisterCapability` request.
+    changeNotifications: ?union(enum) {
+        string: []const u8,
+        bool: bool,
+        pub usingnamespace UnionParser(@This());
+    } = null,
+};
+
+/// Options for notifications/requests for user operations on files.
+///
+/// @since 3.16.0
+pub const FileOperationOptions = struct {
+    /// The server is interested in receiving didCreateFiles notifications.
+    didCreate: ?FileOperationRegistrationOptions = null,
+    /// The server is interested in receiving willCreateFiles requests.
+    willCreate: ?FileOperationRegistrationOptions = null,
+    /// The server is interested in receiving didRenameFiles notifications.
+    didRename: ?FileOperationRegistrationOptions = null,
+    /// The server is interested in receiving willRenameFiles requests.
+    willRename: ?FileOperationRegistrationOptions = null,
+    /// The server is interested in receiving didDeleteFiles file notifications.
+    didDelete: ?FileOperationRegistrationOptions = null,
+    /// The server is interested in receiving willDeleteFiles file requests.
+    willDelete: ?FileOperationRegistrationOptions = null,
+};
+
 /// A relative pattern is a helper to construct glob patterns that are matched
 /// relatively to a base URI. The common value for a `baseUri` is a workspace
 /// folder root, but it can be another absolute URI as well.
@@ -5775,6 +5963,97 @@ pub const RelativePattern = struct {
     },
     /// The actual glob pattern;
     pattern: Pattern,
+};
+
+/// A document filter where `language` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const TextDocumentFilterLanguage = struct {
+    /// A language id, like `typescript`.
+    language: []const u8,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: ?[]const u8 = null,
+    /// A glob pattern, like **​/*.{ts,js}. See TextDocumentFilter for examples.
+    pattern: ?[]const u8 = null,
+};
+
+/// A document filter where `scheme` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const TextDocumentFilterScheme = struct {
+    /// A language id, like `typescript`.
+    language: ?[]const u8 = null,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: []const u8,
+    /// A glob pattern, like **​/*.{ts,js}. See TextDocumentFilter for examples.
+    pattern: ?[]const u8 = null,
+};
+
+/// A document filter where `pattern` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const TextDocumentFilterPattern = struct {
+    /// A language id, like `typescript`.
+    language: ?[]const u8 = null,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: ?[]const u8 = null,
+    /// A glob pattern, like **​/*.{ts,js}. See TextDocumentFilter for examples.
+    pattern: []const u8,
+};
+
+/// A notebook document filter where `notebookType` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentFilterNotebookType = struct {
+    /// The type of the enclosing notebook.
+    notebookType: []const u8,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: ?[]const u8 = null,
+    /// A glob pattern.
+    pattern: ?[]const u8 = null,
+};
+
+/// A notebook document filter where `scheme` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentFilterScheme = struct {
+    /// The type of the enclosing notebook.
+    notebookType: ?[]const u8 = null,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: []const u8,
+    /// A glob pattern.
+    pattern: ?[]const u8 = null,
+};
+
+/// A notebook document filter where `pattern` is required field.
+///
+/// @since 3.18.0
+/// @proposed
+pub const NotebookDocumentFilterPattern = struct {
+    /// The type of the enclosing notebook.
+    notebookType: ?[]const u8 = null,
+    /// A Uri {@link Uri.scheme scheme}, like `file` or `untitled`.
+    scheme: ?[]const u8 = null,
+    /// A glob pattern.
+    pattern: []const u8,
+};
+
+/// A change describing how to move a `NotebookCell`
+/// array from state S to S'.
+///
+/// @since 3.17.0
+pub const NotebookCellArrayChange = struct {
+    /// The start oftest of the cell that changed.
+    start: u32,
+    /// The deleted cells
+    deleteCount: u32,
+    /// The new cells, if any
+    cells: ?[]const NotebookCell = null,
 };
 
 pub const WorkspaceEditClientCapabilities = struct {
@@ -5802,12 +6081,7 @@ pub const WorkspaceEditClientCapabilities = struct {
     /// create file, rename file and delete file changes.
     ///
     /// @since 3.16.0
-    changeAnnotationSupport: ?struct {
-        /// Whether the client groups edits with equal labels into tree nodes,
-        /// for instance all edits labelled with "Changes in Strings" would
-        /// be a tree node.
-        groupsOnLabel: ?bool = null,
-    } = null,
+    changeAnnotationSupport: ?ChangeAnnotationsSupportOptions = null,
 };
 
 pub const DidChangeConfigurationClientCapabilities = struct {
@@ -5832,35 +6106,18 @@ pub const WorkspaceSymbolClientCapabilities = struct {
     /// Symbol request supports dynamic registration.
     dynamicRegistration: ?bool = null,
     /// Specific capabilities for the `SymbolKind` in the `workspace/symbol` request.
-    symbolKind: ?struct {
-        /// The symbol kind values the client supports. When this
-        /// property exists the client also guarantees that it will
-        /// handle values outside its set gracefully and falls back
-        /// to a default value when unknown.
-        ///
-        /// If this property is not present the client only supports
-        /// the symbol kinds from `File` to `Array` as defined in
-        /// the initial version of the protocol.
-        valueSet: ?[]const SymbolKind = null,
-    } = null,
+    symbolKind: ?ClientSymbolKindOptions = null,
     /// The client supports tags on `SymbolInformation`.
     /// Clients supporting tags have to handle unknown tags gracefully.
     ///
     /// @since 3.16.0
-    tagSupport: ?struct {
-        /// The tags supported by the client.
-        valueSet: []const SymbolTag,
-    } = null,
+    tagSupport: ?ClientSymbolTagOptions = null,
     /// The client support partial workspace symbols. The client will send the
     /// request `workspaceSymbol/resolve` to the server to resolve additional
     /// properties.
     ///
     /// @since 3.17.0
-    resolveSupport: ?struct {
-        /// The properties that a client can resolve lazily. Usually
-        /// `location.range`
-        properties: []const []const u8,
-    } = null,
+    resolveSupport: ?ClientSymbolResolveOptions = null,
 };
 
 /// The client capabilities of a {@link ExecuteCommandRequest}.
@@ -5958,6 +6215,24 @@ pub const DiagnosticWorkspaceClientCapabilities = struct {
     refreshSupport: ?bool = null,
 };
 
+/// Client workspace capabilities specific to folding ranges
+///
+/// @since 3.18.0
+/// @proposed
+pub const FoldingRangeWorkspaceClientCapabilities = struct {
+    /// Whether the client implementation supports a refresh request sent from the
+    /// server to the client.
+    ///
+    /// Note that this event is global and will force the client to refresh all
+    /// folding ranges currently shown. It should be used with absolute care and is
+    /// useful for situation where a server for example detects a project wide
+    /// change that requires such a calculation.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    refreshSupport: ?bool = null,
+};
+
 pub const TextDocumentSyncClientCapabilities = struct {
     /// Whether text document synchronization supports dynamic registration.
     dynamicRegistration: ?bool = null,
@@ -5977,72 +6252,8 @@ pub const CompletionClientCapabilities = struct {
     dynamicRegistration: ?bool = null,
     /// The client supports the following `CompletionItem` specific
     /// capabilities.
-    completionItem: ?struct {
-        /// Client supports snippets as insert text.
-        ///
-        /// A snippet can define tab stops and placeholders with `$1`, `$2`
-        /// and `${3:foo}`. `$0` defines the final tab stop, it defaults to
-        /// the end of the snippet. Placeholders with equal identifiers are linked,
-        /// that is typing in one will update others too.
-        snippetSupport: ?bool = null,
-        /// Client supports commit characters on a completion item.
-        commitCharactersSupport: ?bool = null,
-        /// Client supports the following content formats for the documentation
-        /// property. The order describes the preferred format of the client.
-        documentationFormat: ?[]const MarkupKind = null,
-        /// Client supports the deprecated property on a completion item.
-        deprecatedSupport: ?bool = null,
-        /// Client supports the preselect property on a completion item.
-        preselectSupport: ?bool = null,
-        /// Client supports the tag property on a completion item. Clients supporting
-        /// tags have to handle unknown tags gracefully. Clients especially need to
-        /// preserve unknown tags when sending a completion item back to the server in
-        /// a resolve call.
-        ///
-        /// @since 3.15.0
-        tagSupport: ?struct {
-            /// The tags supported by the client.
-            valueSet: []const CompletionItemTag,
-        } = null,
-        /// Client support insert replace edit to control different behavior if a
-        /// completion item is inserted in the text or should replace text.
-        ///
-        /// @since 3.16.0
-        insertReplaceSupport: ?bool = null,
-        /// Indicates which properties a client can resolve lazily on a completion
-        /// item. Before version 3.16.0 only the predefined properties `documentation`
-        /// and `details` could be resolved lazily.
-        ///
-        /// @since 3.16.0
-        resolveSupport: ?struct {
-            /// The properties that a client can resolve lazily.
-            properties: []const []const u8,
-        } = null,
-        /// The client supports the `insertTextMode` property on
-        /// a completion item to override the whitespace handling mode
-        /// as defined by the client (see `insertTextMode`).
-        ///
-        /// @since 3.16.0
-        insertTextModeSupport: ?struct {
-            valueSet: []const InsertTextMode,
-        } = null,
-        /// The client has support for completion item label
-        /// details (see also `CompletionItemLabelDetails`).
-        ///
-        /// @since 3.17.0
-        labelDetailsSupport: ?bool = null,
-    } = null,
-    completionItemKind: ?struct {
-        /// The completion item kind values the client supports. When this
-        /// property exists the client also guarantees that it will
-        /// handle values outside its set gracefully and falls back
-        /// to a default value when unknown.
-        ///
-        /// If this property is not present the client only supports
-        /// the completion items kinds from `Text` to `Reference` as defined in
-        /// the initial version of the protocol.
-        valueSet: ?[]const CompletionItemKind = null,
-    } = null,
+    completionItem: ?ClientCompletionItemOptions = null,
+    completionItemKind: ?ClientCompletionItemOptionsKind = null,
     /// Defines how the client handles whitespace and indentation
     /// when accepting a completion item that uses multi line
     /// text in either `insertText` or `textEdit`.
@@ -6056,17 +6267,7 @@ pub const CompletionClientCapabilities = struct {
     /// capabilities.
     ///
     /// @since 3.17.0
-    completionList: ?struct {
-        /// The client supports the following itemDefaults on
-        /// a completion list.
-        ///
-        /// The value lists the supported property names of the
-        /// `CompletionList.itemDefaults` object. If omitted
-        /// no properties are supported.
-        ///
-        /// @since 3.17.0
-        itemDefaults: ?[]const []const u8 = null,
-    } = null,
+    completionList: ?CompletionListCapabilities = null,
 };
 
 pub const HoverClientCapabilities = struct {
@@ -6083,24 +6284,7 @@ pub const SignatureHelpClientCapabilities = struct {
     dynamicRegistration: ?bool = null,
     /// The client supports the following `SignatureInformation`
     /// specific properties.
-    signatureInformation: ?struct {
-        /// Client supports the following content formats for the documentation
-        /// property. The order describes the preferred format of the client.
-        documentationFormat: ?[]const MarkupKind = null,
-        /// Client capabilities specific to parameter information.
-        parameterInformation: ?struct {
-            /// The client supports processing label offsets instead of a
-            /// simple label string.
-            ///
-            /// @since 3.14.0
-            labelOffsetSupport: ?bool = null,
-        } = null,
-        /// The client supports the `activeParameter` property on `SignatureInformation`
-        /// literal.
-        ///
-        /// @since 3.16.0
-        activeParameterSupport: ?bool = null,
-    } = null,
+    signatureInformation: ?ClientSignatureInformationOptions = null,
     /// The client supports to send additional context information for a
     /// `textDocument/signatureHelp` request. A client that opts into
     /// contextSupport will also support the `retriggerCharacters` on
@@ -6172,17 +6356,7 @@ pub const DocumentSymbolClientCapabilities = struct {
     dynamicRegistration: ?bool = null,
     /// Specific capabilities for the `SymbolKind` in the
     /// `textDocument/documentSymbol` request.
-    symbolKind: ?struct {
-        /// The symbol kind values the client supports. When this
-        /// property exists the client also guarantees that it will
-        /// handle values outside its set gracefully and falls back
-        /// to a default value when unknown.
-        ///
-        /// If this property is not present the client only supports
-        /// the symbol kinds from `File` to `Array` as defined in
-        /// the initial version of the protocol.
-        valueSet: ?[]const SymbolKind = null,
-    } = null,
+    symbolKind: ?ClientSymbolKindOptions = null,
     /// The client supports hierarchical document symbols.
     hierarchicalDocumentSymbolSupport: ?bool = null,
     /// The client supports tags on `SymbolInformation`. Tags are supported on
@@ -6190,10 +6364,7 @@ pub const DocumentSymbolClientCapabilities = struct {
     /// Clients supporting tags have to handle unknown tags gracefully.
     ///
     /// @since 3.16.0
-    tagSupport: ?struct {
-        /// The tags supported by the client.
-        valueSet: []const SymbolTag,
-    } = null,
+    tagSupport: ?ClientSymbolTagOptions = null,
     /// The client supports an additional label presented in the UI when
     /// registering a document symbol provider.
     ///
@@ -6210,17 +6381,7 @@ pub const CodeActionClientCapabilities = struct {
     /// set the request can only return `Command` literals.
     ///
     /// @since 3.8.0
-    codeActionLiteralSupport: ?struct {
-        /// The code action kind is support with the following value
-        /// set.
-        codeActionKind: struct {
-            /// The code action kind values the client supports. When this
-            /// property exists the client also guarantees that it will
-            /// handle values outside its set gracefully and falls back
-            /// to a default value when unknown.
-            valueSet: []const CodeActionKind,
-        },
-    } = null,
+    codeActionLiteralSupport: ?ClientCodeActionLiteralOptions = null,
     /// Whether code action supports the `isPreferred` property.
     ///
     /// @since 3.15.0
@@ -6239,10 +6400,7 @@ pub const CodeActionClientCapabilities = struct {
     /// properties via a separate `codeAction/resolve` request.
     ///
     /// @since 3.16.0
-    resolveSupport: ?struct {
-        /// The properties that a client can resolve lazily.
-        properties: []const []const u8,
-    } = null,
+    resolveSupport: ?ClientCodeActionResolveOptions = null,
     /// Whether the client honors the change annotations in
     /// text edits and resource operations returned via the
     /// `CodeAction#edit` property by for example presenting
@@ -6251,6 +6409,12 @@ pub const CodeActionClientCapabilities = struct {
     ///
     /// @since 3.16.0
     honorsChangeAnnotations: ?bool = null,
+    /// Whether the client supports documentation for a class of
+    /// code actions.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    documentationSupport: ?bool = null,
 };
 
 /// The client capabilities  of a {@link CodeLensRequest}.
@@ -6341,23 +6505,11 @@ pub const FoldingRangeClientCapabilities = struct {
     /// Specific options for the folding range kind.
     ///
     /// @since 3.17.0
-    foldingRangeKind: ?struct {
-        /// The folding range kind values the client supports. When this
-        /// property exists the client also guarantees that it will
-        /// handle values outside its set gracefully and falls back
-        /// to a default value when unknown.
-        valueSet: ?[]const FoldingRangeKind = null,
-    } = null,
+    foldingRangeKind: ?ClientFoldingRangeKindOptions = null,
     /// Specific options for the folding range.
     ///
     /// @since 3.17.0
-    foldingRange: ?struct {
-        /// If set, the client signals that it supports setting collapsedText on
-        /// folding ranges to display custom labels instead of the default text.
-        ///
-        /// @since 3.17.0
-        collapsedText: ?bool = null,
-    } = null,
+    foldingRange: ?ClientFoldingRangeOptions = null,
 };
 
 pub const SelectionRangeClientCapabilities = struct {
@@ -6375,10 +6527,7 @@ pub const PublishDiagnosticsClientCapabilities = struct {
     /// Clients supporting tags have to handle unknown tags gracefully.
     ///
     /// @since 3.15.0
-    tagSupport: ?struct {
-        /// The tags supported by the client.
-        valueSet: []const DiagnosticTag,
-    } = null,
+    tagSupport: ?ClientDiagnosticsTagOptions = null,
     /// Whether the client interprets the version property of the
     /// `textDocument/publishDiagnostics` notification's parameter.
     ///
@@ -6418,26 +6567,7 @@ pub const SemanticTokensClientCapabilities = struct {
     /// `request.range` are both set to true but the server only provides a
     /// range provider the client might not render a minimap correctly or might
     /// even decide to not show any semantic tokens at all.
-    requests: struct {
-        /// The client will send the `textDocument/semanticTokens/range` request if
-        /// the server provides a corresponding handler.
-        range: ?union(enum) {
-            bool: bool,
-            literal_1: struct {},
-            pub usingnamespace UnionParser(@This());
-        } = null,
-        /// The client will send the `textDocument/semanticTokens/full` request if
-        /// the server provides a corresponding handler.
-        full: ?union(enum) {
-            bool: bool,
-            literal_1: struct {
-                /// The client will send the `textDocument/semanticTokens/full/delta` request if
-                /// the server provides a corresponding handler.
-                delta: ?bool = null,
-            },
-            pub usingnamespace UnionParser(@This());
-        } = null,
-    },
+    requests: ClientSemanticTokensRequestOptions,
     /// The token types that the client supports.
     tokenTypes: []const []const u8,
     /// The token modifiers that the client supports.
@@ -6512,10 +6642,7 @@ pub const InlayHintClientCapabilities = struct {
     dynamicRegistration: ?bool = null,
     /// Indicates which properties a client can resolve lazily on an inlay
     /// hint.
-    resolveSupport: ?struct {
-        /// The properties that a client can resolve lazily.
-        properties: []const []const u8,
-    } = null,
+    resolveSupport: ?ClientInlayHintResolveOptions = null,
 };
 
 /// Client capabilities specific to diagnostic pull requests.
@@ -6555,12 +6682,7 @@ pub const NotebookDocumentSyncClientCapabilities = struct {
 /// Show message request client capabilities
 pub const ShowMessageRequestClientCapabilities = struct {
     /// Capabilities specific to the `MessageActionItem` type.
-    messageActionItem: ?struct {
-        /// Whether the client supports additional attributes which
-        /// are preserved and send back to the server in the
-        /// request's response.
-        additionalPropertiesSupport: ?bool = null,
-    } = null,
+    messageActionItem: ?ClientShowMessageActionItemOptions = null,
 };
 
 /// Client capabilities for the showDocument request.
@@ -6572,12 +6694,23 @@ pub const ShowDocumentClientCapabilities = struct {
     support: bool,
 };
 
+/// @since 3.18.0
+/// @proposed
+pub const StaleRequestSupportOptions = struct {
+    /// The client will actively cancel the request.
+    cancel: bool,
+    /// The list of requests for which the client
+    /// will retry the request if it receives a
+    /// response with error code `ContentModified`
+    retryOnContentModified: []const []const u8,
+};
+
 /// Client capabilities specific to regular expressions.
 ///
 /// @since 3.16.0
 pub const RegularExpressionsClientCapabilities = struct {
     /// The engine's name.
-    engine: []const u8,
+    engine: RegularExpressionEngineKind,
     /// The engine's version.
     version: ?[]const u8 = null,
 };
@@ -6595,6 +6728,271 @@ pub const MarkdownClientCapabilities = struct {
     ///
     /// @since 3.17.0
     allowedTags: ?[]const []const u8 = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ChangeAnnotationsSupportOptions = struct {
+    /// Whether the client groups edits with equal labels into tree nodes,
+    /// for instance all edits labelled with "Changes in Strings" would
+    /// be a tree node.
+    groupsOnLabel: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSymbolKindOptions = struct {
+    /// The symbol kind values the client supports. When this
+    /// property exists the client also guarantees that it will
+    /// handle values outside its set gracefully and falls back
+    /// to a default value when unknown.
+    ///
+    /// If this property is not present the client only supports
+    /// the symbol kinds from `File` to `Array` as defined in
+    /// the initial version of the protocol.
+    valueSet: ?[]const SymbolKind = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSymbolTagOptions = struct {
+    /// The tags supported by the client.
+    valueSet: []const SymbolTag,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSymbolResolveOptions = struct {
+    /// The properties that a client can resolve lazily. Usually
+    /// `location.range`
+    properties: []const []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCompletionItemOptions = struct {
+    /// Client supports snippets as insert text.
+    ///
+    /// A snippet can define tab stops and placeholders with `$1`, `$2`
+    /// and `${3:foo}`. `$0` defines the final tab stop, it defaults to
+    /// the end of the snippet. Placeholders with equal identifiers are linked,
+    /// that is typing in one will update others too.
+    snippetSupport: ?bool = null,
+    /// Client supports commit characters on a completion item.
+    commitCharactersSupport: ?bool = null,
+    /// Client supports the following content formats for the documentation
+    /// property. The order describes the preferred format of the client.
+    documentationFormat: ?[]const MarkupKind = null,
+    /// Client supports the deprecated property on a completion item.
+    deprecatedSupport: ?bool = null,
+    /// Client supports the preselect property on a completion item.
+    preselectSupport: ?bool = null,
+    /// Client supports the tag property on a completion item. Clients supporting
+    /// tags have to handle unknown tags gracefully. Clients especially need to
+    /// preserve unknown tags when sending a completion item back to the server in
+    /// a resolve call.
+    ///
+    /// @since 3.15.0
+    tagSupport: ?CompletionItemTagOptions = null,
+    /// Client support insert replace edit to control different behavior if a
+    /// completion item is inserted in the text or should replace text.
+    ///
+    /// @since 3.16.0
+    insertReplaceSupport: ?bool = null,
+    /// Indicates which properties a client can resolve lazily on a completion
+    /// item. Before version 3.16.0 only the predefined properties `documentation`
+    /// and `details` could be resolved lazily.
+    ///
+    /// @since 3.16.0
+    resolveSupport: ?ClientCompletionItemResolveOptions = null,
+    /// The client supports the `insertTextMode` property on
+    /// a completion item to override the whitespace handling mode
+    /// as defined by the client (see `insertTextMode`).
+    ///
+    /// @since 3.16.0
+    insertTextModeSupport: ?ClientCompletionItemInsertTextModeOptions = null,
+    /// The client has support for completion item label
+    /// details (see also `CompletionItemLabelDetails`).
+    ///
+    /// @since 3.17.0
+    labelDetailsSupport: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCompletionItemOptionsKind = struct {
+    /// The completion item kind values the client supports. When this
+    /// property exists the client also guarantees that it will
+    /// handle values outside its set gracefully and falls back
+    /// to a default value when unknown.
+    ///
+    /// If this property is not present the client only supports
+    /// the completion items kinds from `Text` to `Reference` as defined in
+    /// the initial version of the protocol.
+    valueSet: ?[]const CompletionItemKind = null,
+};
+
+/// The client supports the following `CompletionList` specific
+/// capabilities.
+///
+/// @since 3.17.0
+pub const CompletionListCapabilities = struct {
+    /// The client supports the following itemDefaults on
+    /// a completion list.
+    ///
+    /// The value lists the supported property names of the
+    /// `CompletionList.itemDefaults` object. If omitted
+    /// no properties are supported.
+    ///
+    /// @since 3.17.0
+    itemDefaults: ?[]const []const u8 = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSignatureInformationOptions = struct {
+    /// Client supports the following content formats for the documentation
+    /// property. The order describes the preferred format of the client.
+    documentationFormat: ?[]const MarkupKind = null,
+    /// Client capabilities specific to parameter information.
+    parameterInformation: ?ClientSignatureParameterInformationOptions = null,
+    /// The client supports the `activeParameter` property on `SignatureInformation`
+    /// literal.
+    ///
+    /// @since 3.16.0
+    activeParameterSupport: ?bool = null,
+    /// The client supports the `activeParameter` property on
+    /// `SignatureHelp`/`SignatureInformation` being set to `null` to
+    /// indicate that no parameter should be active.
+    ///
+    /// @since 3.18.0
+    /// @proposed
+    noActiveParameterSupport: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCodeActionLiteralOptions = struct {
+    /// The code action kind is support with the following value
+    /// set.
+    codeActionKind: ClientCodeActionKindOptions,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCodeActionResolveOptions = struct {
+    /// The properties that a client can resolve lazily.
+    properties: []const []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientFoldingRangeKindOptions = struct {
+    /// The folding range kind values the client supports. When this
+    /// property exists the client also guarantees that it will
+    /// handle values outside its set gracefully and falls back
+    /// to a default value when unknown.
+    valueSet: ?[]const FoldingRangeKind = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientFoldingRangeOptions = struct {
+    /// If set, the client signals that it supports setting collapsedText on
+    /// folding ranges to display custom labels instead of the default text.
+    ///
+    /// @since 3.17.0
+    collapsedText: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientDiagnosticsTagOptions = struct {
+    /// The tags supported by the client.
+    valueSet: []const DiagnosticTag,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSemanticTokensRequestOptions = struct {
+    /// The client will send the `textDocument/semanticTokens/range` request if
+    /// the server provides a corresponding handler.
+    range: ?union(enum) {
+        bool: bool,
+        literal_1: struct {},
+        pub usingnamespace UnionParser(@This());
+    } = null,
+    /// The client will send the `textDocument/semanticTokens/full` request if
+    /// the server provides a corresponding handler.
+    full: ?union(enum) {
+        bool: bool,
+        ClientSemanticTokensRequestFullDelta: ClientSemanticTokensRequestFullDelta,
+        pub usingnamespace UnionParser(@This());
+    } = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientInlayHintResolveOptions = struct {
+    /// The properties that a client can resolve lazily.
+    properties: []const []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientShowMessageActionItemOptions = struct {
+    /// Whether the client supports additional attributes which
+    /// are preserved and send back to the server in the
+    /// request's response.
+    additionalPropertiesSupport: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const CompletionItemTagOptions = struct {
+    /// The tags supported by the client.
+    valueSet: []const CompletionItemTag,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCompletionItemResolveOptions = struct {
+    /// The properties that a client can resolve lazily.
+    properties: []const []const u8,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCompletionItemInsertTextModeOptions = struct {
+    valueSet: []const InsertTextMode,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSignatureParameterInformationOptions = struct {
+    /// The client supports processing label offsets instead of a
+    /// simple label string.
+    ///
+    /// @since 3.14.0
+    labelOffsetSupport: ?bool = null,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientCodeActionKindOptions = struct {
+    /// The code action kind values the client supports. When this
+    /// property exists the client also guarantees that it will
+    /// handle values outside its set gracefully and falls back
+    /// to a default value when unknown.
+    valueSet: []const CodeActionKind,
+};
+
+/// @since 3.18.0
+/// @proposed
+pub const ClientSemanticTokensRequestFullDelta = struct {
+    /// The client will send the `textDocument/semanticTokens/full/delta` request if
+    /// the server provides a corresponding handler.
+    delta: ?bool = null,
 };
 
 pub const notification_metadata = [_]NotificationMetadata{
@@ -6657,14 +7055,14 @@ pub const notification_metadata = [_]NotificationMetadata{
         .documentation = "A notification sent when a notebook opens.\n\n@since 3.17.0",
         .direction = .clientToServer,
         .Params = DidOpenNotebookDocumentParams,
-        .registration = .{ .method = "notebookDocument/sync", .Options = null },
+        .registration = .{ .method = "notebookDocument/sync", .Options = NotebookDocumentSyncRegistrationOptions },
     },
     .{
         .method = "notebookDocument/didChange",
         .documentation = null,
         .direction = .clientToServer,
         .Params = DidChangeNotebookDocumentParams,
-        .registration = .{ .method = "notebookDocument/sync", .Options = null },
+        .registration = .{ .method = "notebookDocument/sync", .Options = NotebookDocumentSyncRegistrationOptions },
     },
     // A notification sent when a notebook document is saved.
     //
@@ -6674,7 +7072,7 @@ pub const notification_metadata = [_]NotificationMetadata{
         .documentation = "A notification sent when a notebook document is saved.\n\n@since 3.17.0",
         .direction = .clientToServer,
         .Params = DidSaveNotebookDocumentParams,
-        .registration = .{ .method = "notebookDocument/sync", .Options = null },
+        .registration = .{ .method = "notebookDocument/sync", .Options = NotebookDocumentSyncRegistrationOptions },
     },
     // A notification sent when a notebook closes.
     //
@@ -6684,7 +7082,7 @@ pub const notification_metadata = [_]NotificationMetadata{
         .documentation = "A notification sent when a notebook closes.\n\n@since 3.17.0",
         .direction = .clientToServer,
         .Params = DidCloseNotebookDocumentParams,
-        .registration = .{ .method = "notebookDocument/sync", .Options = null },
+        .registration = .{ .method = "notebookDocument/sync", .Options = NotebookDocumentSyncRegistrationOptions },
     },
     // The initialized notification is sent from the client to the
     // server after the client is fully initialized and the server
@@ -6847,12 +7245,11 @@ pub const notification_metadata = [_]NotificationMetadata{
 };
 pub const request_metadata = [_]RequestMetadata{
     // A request to resolve the implementation locations of a symbol at a given text
-    // document position. The request's parameter is of type [TextDocumentPositionParams]
-    // (#TextDocumentPositionParams) the response is of type {@link Definition} or a
-    // Thenable that resolves to such.
+    // document position. The request's parameter is of type {@link TextDocumentPositionParams}
+    // the response is of type {@link Definition} or a Thenable that resolves to such.
     .{
         .method = "textDocument/implementation",
-        .documentation = "A request to resolve the implementation locations of a symbol at a given text\ndocument position. The request's parameter is of type [TextDocumentPositionParams]\n(#TextDocumentPositionParams) the response is of type {@link Definition} or a\nThenable that resolves to such.",
+        .documentation = "A request to resolve the implementation locations of a symbol at a given text\ndocument position. The request's parameter is of type {@link TextDocumentPositionParams}\nthe response is of type {@link Definition} or a Thenable that resolves to such.",
         .direction = .clientToServer,
         .Params = ImplementationParams,
         .Result = ?union(enum) {
@@ -6869,12 +7266,11 @@ pub const request_metadata = [_]RequestMetadata{
         .registration = .{ .method = null, .Options = ImplementationRegistrationOptions },
     },
     // A request to resolve the type definition locations of a symbol at a given text
-    // document position. The request's parameter is of type [TextDocumentPositionParams]
-    // (#TextDocumentPositionParams) the response is of type {@link Definition} or a
-    // Thenable that resolves to such.
+    // document position. The request's parameter is of type {@link TextDocumentPositionParams}
+    // the response is of type {@link Definition} or a Thenable that resolves to such.
     .{
         .method = "textDocument/typeDefinition",
-        .documentation = "A request to resolve the type definition locations of a symbol at a given text\ndocument position. The request's parameter is of type [TextDocumentPositionParams]\n(#TextDocumentPositionParams) the response is of type {@link Definition} or a\nThenable that resolves to such.",
+        .documentation = "A request to resolve the type definition locations of a symbol at a given text\ndocument position. The request's parameter is of type {@link TextDocumentPositionParams}\nthe response is of type {@link Definition} or a Thenable that resolves to such.",
         .direction = .clientToServer,
         .Params = TypeDefinitionParams,
         .Result = ?union(enum) {
@@ -6970,14 +7366,25 @@ pub const request_metadata = [_]RequestMetadata{
         .ErrorData = null,
         .registration = .{ .method = null, .Options = FoldingRangeRegistrationOptions },
     },
+    // @since 3.18.0
+    // @proposed
+    .{
+        .method = "workspace/foldingRange/refresh",
+        .documentation = "@since 3.18.0\n@proposed",
+        .direction = .serverToClient,
+        .Params = null,
+        .Result = ?void,
+        .PartialResult = null,
+        .ErrorData = null,
+        .registration = .{ .method = null, .Options = null },
+    },
     // A request to resolve the type definition locations of a symbol at a given text
-    // document position. The request's parameter is of type [TextDocumentPositionParams]
-    // (#TextDocumentPositionParams) the response is of type {@link Declaration}
-    // or a typed array of {@link DeclarationLink} or a Thenable that resolves
-    // to such.
+    // document position. The request's parameter is of type {@link TextDocumentPositionParams}
+    // the response is of type {@link Declaration} or a typed array of {@link DeclarationLink}
+    // or a Thenable that resolves to such.
     .{
         .method = "textDocument/declaration",
-        .documentation = "A request to resolve the type definition locations of a symbol at a given text\ndocument position. The request's parameter is of type [TextDocumentPositionParams]\n(#TextDocumentPositionParams) the response is of type {@link Declaration}\nor a typed array of {@link DeclarationLink} or a Thenable that resolves\nto such.",
+        .documentation = "A request to resolve the type definition locations of a symbol at a given text\ndocument position. The request's parameter is of type {@link TextDocumentPositionParams}\nthe response is of type {@link Declaration} or a typed array of {@link DeclarationLink}\nor a Thenable that resolves to such.",
         .direction = .clientToServer,
         .Params = DeclarationParams,
         .Result = ?union(enum) {
@@ -7506,13 +7913,12 @@ pub const request_metadata = [_]RequestMetadata{
         .registration = .{ .method = null, .Options = SignatureHelpRegistrationOptions },
     },
     // A request to resolve the definition location of a symbol at a given text
-    // document position. The request's parameter is of type [TextDocumentPosition]
-    // (#TextDocumentPosition) the response is of either type {@link Definition}
-    // or a typed array of {@link DefinitionLink} or a Thenable that resolves
-    // to such.
+    // document position. The request's parameter is of type {@link TextDocumentPosition}
+    // the response is of either type {@link Definition} or a typed array of
+    // {@link DefinitionLink} or a Thenable that resolves to such.
     .{
         .method = "textDocument/definition",
-        .documentation = "A request to resolve the definition location of a symbol at a given text\ndocument position. The request's parameter is of type [TextDocumentPosition]\n(#TextDocumentPosition) the response is of either type {@link Definition}\nor a typed array of {@link DefinitionLink} or a Thenable that resolves\nto such.",
+        .documentation = "A request to resolve the definition location of a symbol at a given text\ndocument position. The request's parameter is of type {@link TextDocumentPosition}\nthe response is of either type {@link Definition} or a typed array of\n{@link DefinitionLink} or a Thenable that resolves to such.",
         .direction = .clientToServer,
         .Params = DefinitionParams,
         .Result = ?union(enum) {
@@ -7543,12 +7949,12 @@ pub const request_metadata = [_]RequestMetadata{
         .registration = .{ .method = null, .Options = ReferenceRegistrationOptions },
     },
     // Request to resolve a {@link DocumentHighlight} for a given
-    // text document position. The request's parameter is of type [TextDocumentPosition]
-    // (#TextDocumentPosition) the request response is of type [DocumentHighlight[]]
-    // (#DocumentHighlight) or a Thenable that resolves to such.
+    // text document position. The request's parameter is of type {@link TextDocumentPosition}
+    // the request response is an array of type {@link DocumentHighlight}
+    // or a Thenable that resolves to such.
     .{
         .method = "textDocument/documentHighlight",
-        .documentation = "Request to resolve a {@link DocumentHighlight} for a given\ntext document position. The request's parameter is of type [TextDocumentPosition]\n(#TextDocumentPosition) the request response is of type [DocumentHighlight[]]\n(#DocumentHighlight) or a Thenable that resolves to such.",
+        .documentation = "Request to resolve a {@link DocumentHighlight} for a given\ntext document position. The request's parameter is of type {@link TextDocumentPosition}\nthe request response is an array of type {@link DocumentHighlight}\nor a Thenable that resolves to such.",
         .direction = .clientToServer,
         .Params = DocumentHighlightParams,
         .Result = ?[]const DocumentHighlight,
