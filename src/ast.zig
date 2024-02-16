@@ -204,20 +204,29 @@ fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
         .ast = info,
         .payload_token = null,
         .error_token = null,
-        .else_token = undefined,
+        .else_token = 0,
     };
     // if (cond_expr) |x|
-    //              ^ ^
-    const payload_pipe = lastToken(tree, info.cond_expr) + 2;
-    if (token_tags[payload_pipe] == .pipe) {
-        result.payload_token = payload_pipe + 1;
+    //              ^  ^
+    const possible_payload_token = lastToken(tree, info.cond_expr) + 3;
+    const possible_payload_identifier_token = possible_payload_token + @intFromBool(token_tags[possible_payload_token] == .asterisk);
+    if (possible_payload_token < tree.tokens.len and token_tags[possible_payload_identifier_token] == .identifier) {
+        result.payload_token = possible_payload_token;
     }
     if (info.else_expr != 0) {
         // then_expr else |x|
-        //           ^    ^
-        result.else_token = lastToken(tree, info.then_expr) + 1;
-        if (token_tags[result.else_token + 1] == .pipe) {
-            result.error_token = result.else_token + 2;
+        //           ^     ^
+        const possible_else_token = lastToken(tree, info.then_expr) + 1;
+        if (token_tags[possible_else_token] == .keyword_else) {
+            result.else_token = possible_else_token;
+
+            const possible_error_token = result.else_token + 2;
+            if (possible_error_token < tree.tokens.len and switch (token_tags[possible_error_token]) {
+                .identifier, .asterisk => true,
+                else => false,
+            }) {
+                result.error_token = possible_error_token;
+            }
         }
     }
     return result;
@@ -253,7 +262,7 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
         .inline_token = null,
         .label_token = null,
         .payload_token = null,
-        .else_token = undefined,
+        .else_token = 0,
         .error_token = null,
     };
     var tok_i = info.while_token -| 1;
@@ -266,16 +275,24 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
     {
         result.label_token = tok_i -| 1;
     }
-    const last_cond_token = lastToken(tree, info.cond_expr);
-    if (token_tags[last_cond_token + 2] == .pipe) {
-        result.payload_token = last_cond_token + 3;
+    // while (cond_expr) |x|
+    //                 ^  ^
+    const possible_payload_token = lastToken(tree, info.cond_expr) + 3;
+    const possible_payload_identifier_token = possible_payload_token + @intFromBool(token_tags[possible_payload_token] == .asterisk);
+    if (possible_payload_token < tree.tokens.len and token_tags[possible_payload_identifier_token] == .identifier) {
+        result.payload_token = possible_payload_token;
     }
     if (info.else_expr != 0) {
         // then_expr else |x|
-        //           ^    ^
-        result.else_token = lastToken(tree, info.then_expr) + 1;
-        if (token_tags[result.else_token + 1] == .pipe) {
-            result.error_token = result.else_token + 2;
+        //           ^     ^
+        const possible_else_token = lastToken(tree, info.then_expr) + 1;
+        if (token_tags[possible_else_token] == .keyword_else) {
+            result.else_token = possible_else_token;
+
+            const possible_error_token = result.else_token + 2;
+            if (possible_error_token < tree.tokens.len and token_tags[possible_error_token] == .identifier) {
+                result.error_token = possible_error_token;
+            }
         }
     }
     return result;
@@ -288,7 +305,7 @@ fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
         .inline_token = null,
         .label_token = null,
         .payload_token = undefined,
-        .else_token = undefined,
+        .else_token = 0,
     };
     var tok_i = info.for_token -| 1;
     if (token_tags[tok_i] == .keyword_inline) {
@@ -303,7 +320,10 @@ fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
     const last_cond_token = lastToken(tree, info.inputs[info.inputs.len - 1]);
     result.payload_token = last_cond_token + 3 + @intFromBool(token_tags[last_cond_token + 1] == .comma);
     if (info.else_expr != 0) {
-        result.else_token = lastToken(tree, info.then_expr) + 1;
+        const possible_else_token = lastToken(tree, info.then_expr) + 1;
+        if (token_tags[possible_else_token] == .keyword_else) {
+            result.else_token = possible_else_token;
+        }
     }
     return result;
 }
