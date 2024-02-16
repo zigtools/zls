@@ -1339,6 +1339,31 @@ test "semantic tokens - if" {
     });
 }
 
+test "semantic tokens - if error union with invalid then expression" {
+    try testSemanticTokens(
+        \\const foo = 
+        \\  if (undefined) |value| {
+        \\      switch (value) {} catch |err| {};
+        \\  } else |err| {};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+
+        .{ "if", .keyword, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "value", .variable, .{ .declaration = true } },
+
+        .{ "switch", .keyword, .{} },
+        .{ "value", .variable, .{} },
+        // .{ "catch", .keyword, .{} },
+        // .{ "err", .variable, .{ .declaration = true } },
+
+        // .{ "else", .keyword, .{} },
+        // .{ "err", .variable, .{ .declaration = true } },
+    });
+}
+
 test "semantic tokens - while" {
     try testSemanticTokens(
         \\const foo = while (false) {};
