@@ -210,7 +210,10 @@ fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
     //              ^  ^
     const possible_payload_token = lastToken(tree, info.cond_expr) + 3;
     const possible_payload_identifier_token = possible_payload_token + @intFromBool(token_tags[possible_payload_token] == .asterisk);
-    if (possible_payload_token < tree.tokens.len and token_tags[possible_payload_identifier_token] == .identifier) {
+    if (possible_payload_token < tree.tokens.len and
+        token_tags[possible_payload_token - 1] == .pipe and
+        token_tags[possible_payload_identifier_token] == .identifier)
+    {
         result.payload_token = possible_payload_token;
     }
     if (info.else_expr != 0) {
@@ -219,13 +222,11 @@ fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
         const possible_else_token = lastToken(tree, info.then_expr) + 1;
         if (token_tags[possible_else_token] == .keyword_else) {
             result.else_token = possible_else_token;
-
-            const possible_error_token = result.else_token + 2;
-            if (possible_error_token < tree.tokens.len and switch (token_tags[possible_error_token]) {
-                .identifier, .asterisk => true,
-                else => false,
-            }) {
-                result.error_token = possible_error_token;
+            if (result.else_token + 2 < tree.tokens.len and
+                token_tags[result.else_token + 1] == .pipe and
+                token_tags[result.else_token + 2] == .identifier)
+            {
+                result.error_token = result.else_token + 2;
             }
         }
     }
@@ -279,7 +280,10 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
     //                 ^  ^
     const possible_payload_token = lastToken(tree, info.cond_expr) + 3;
     const possible_payload_identifier_token = possible_payload_token + @intFromBool(token_tags[possible_payload_token] == .asterisk);
-    if (possible_payload_token < tree.tokens.len and token_tags[possible_payload_identifier_token] == .identifier) {
+    if (possible_payload_token < tree.tokens.len and
+        token_tags[possible_payload_token - 1] == .pipe and
+        token_tags[possible_payload_identifier_token] == .identifier)
+    {
         result.payload_token = possible_payload_token;
     }
     if (info.else_expr != 0) {
@@ -288,10 +292,11 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
         const possible_else_token = lastToken(tree, info.then_expr) + 1;
         if (token_tags[possible_else_token] == .keyword_else) {
             result.else_token = possible_else_token;
-
-            const possible_error_token = result.else_token + 2;
-            if (possible_error_token < tree.tokens.len and token_tags[possible_error_token] == .identifier) {
-                result.error_token = possible_error_token;
+            if (result.else_token + 2 < tree.tokens.len and
+                token_tags[result.else_token + 1] == .pipe and
+                token_tags[result.else_token + 2] == .identifier)
+            {
+                result.error_token = result.else_token + 2;
             }
         }
     }

@@ -685,7 +685,85 @@ test "completion - array type" {
     , &.{});
 }
 
-test "completion - captures" {
+test "completion - if/for/while/catch scopes" {
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    if (true) {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    if (true) {
+        \\    } else {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    for (undefined) |_| {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    for (undefined) |_| {
+        \\        
+        \\    } else {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    while (true) {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    for (undefined) {
+        \\        
+        \\    } else {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
+        \\    error.Foo catch {
+        \\        S.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+}
+
+test "completion - if captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(bar: ?S) void {
@@ -720,6 +798,32 @@ test "completion - captures" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
+    // TODO fix value capture without block scope
+    // try testCompletion(
+    //     \\const S = struct { alpha: u32 };
+    //     \\const foo: ?S = undefined;
+    //     \\const bar = if(foo) |baz| baz.<cursor>
+    // , &.{
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    // });
+
+    try testCompletion(
+        \\const E = error{ X, Y };
+        \\const S = struct { alpha: u32 };
+        \\fn foo() E!S { return undefined; }
+        \\fn bar() void {
+        \\    if (foo()) |baz| {
+        \\        baz.<cursor>
+        \\    } else |err| {
+        \\        _ = err;
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
+test "completion - for captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(items: []S) void {
@@ -776,7 +880,9 @@ test "completion - captures" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
+}
 
+test "completion - while captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(bar: ?S) void {
@@ -787,46 +893,6 @@ test "completion - captures" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
-
-    // TODO fix value capture without block scope
-    // try testCompletion(
-    //     \\const S = struct { alpha: u32 };
-    //     \\const foo: ?S = undefined;
-    //     \\const bar = if(foo) |baz| baz.<cursor>
-    // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-    // });
-
-    try testCompletion(
-        \\const E = error{ X, Y };
-        \\const S = struct { alpha: u32 };
-        \\fn foo() E!S { return undefined; }
-        \\fn bar() void {
-        \\    const baz = foo() catch |err| {
-        \\        _ = err;
-        \\        return;
-        \\    };
-        \\    baz.<cursor>
-        \\}
-    , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-    });
-
-    try testCompletion(
-        \\const E = error{ X, Y };
-        \\const S = struct { alpha: u32 };
-        \\fn foo() E!S { return undefined; }
-        \\fn bar() void {
-        \\    if (foo()) |baz| {
-        \\        baz.<cursor>
-        \\    } else |err| {
-        \\        _ = err;
-        \\    }
-        \\}
-    , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-    });
-
     try testCompletion(
         \\const E = error{ X, Y };
         \\const S = struct { alpha: u32 };
@@ -837,6 +903,23 @@ test "completion - captures" {
         \\    } else |err| {
         \\        _ = err;
         \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
+test "completion - catch captures" {
+    try testCompletion(
+        \\const E = error{ X, Y };
+        \\const S = struct { alpha: u32 };
+        \\fn foo() E!S { return undefined; }
+        \\fn bar() void {
+        \\    const baz = foo() catch |err| {
+        \\        _ = err;
+        \\        return;
+        \\    };
+        \\    baz.<cursor>
         \\}
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
