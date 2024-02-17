@@ -49,6 +49,11 @@
             "type": "boolean",
             "default": true
         },
+        "inlay_hints_show_anon_literal_field_type": {
+            "description": "Enable inlay hints for fields in union and struct inits",
+            "type": "boolean",
+            "default": true
+        },
         "inlay_hints_show_parameter_name": {
             "description": "Enable inlay hints for parameter names",
             "type": "boolean",

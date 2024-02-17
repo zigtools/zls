@@ -57,6 +57,7 @@ The following options are currently available.
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_variable_type_hints` | `bool` | `true` | Enable inlay hints for variable types |
+| `inlay_hints_show_anon_literal_field_type` | `bool` | `true` | Enable inlay hints for fields in union and struct inits |
 | `inlay_hints_show_parameter_name` | `bool` | `true` | Enable inlay hints for parameter names |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
