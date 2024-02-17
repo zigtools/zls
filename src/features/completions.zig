@@ -702,15 +702,14 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, loc: offsets.Loc) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
 
-    // as invoked source_index points to the char/token after the `.`, do `- 1`
-    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, source_index - 1);
+    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start);
     if (dot_token_index < 2) return &.{};
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -894,7 +893,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .var_access, .empty => try completeGlobal(server, analyser, arena, handle, source_index),
         .field_access => |loc| try completeFieldAccess(server, analyser, arena, handle, source_index, loc),
         .global_error_set => try completeError(server, arena, handle),
-        .enum_literal => try completeDot(&server.document_store, analyser, arena, handle, source_index),
+        .enum_literal => |loc| try completeDot(&server.document_store, analyser, arena, handle, loc),
         .label => try completeLabel(server, analyser, arena, handle, source_index),
         .import_string_literal,
         .cinclude_string_literal,
@@ -1299,8 +1298,8 @@ fn collectContainerNodes(
     defer tracy_zone.end();
 
     var types_with_handles = std.ArrayListUnmanaged(Analyser.Type){};
-
-    switch (try Analyser.getPositionContext(arena, handle.tree.source, source_index, false)) {
+    const position_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, false);
+    switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(analyser, arena, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(analyser, arena, handle, loc, dot_context, &types_with_handles),
         .enum_literal => |loc| try collectEnumLiteralContainerNodes(analyser, arena, handle, loc, &types_with_handles),
@@ -1441,7 +1440,7 @@ fn collectEnumLiteralContainerNodes(
         analyser,
         arena,
         handle,
-        handle.tree.tokens.items(.start)[el_dot_context.identifier_token_index],
+        offsets.tokenToLoc(handle.tree, el_dot_context.identifier_token_index).end,
         &el_dot_context,
     );
     for (containers) |container| {

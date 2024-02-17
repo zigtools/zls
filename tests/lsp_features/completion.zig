@@ -1628,6 +1628,18 @@ test "completion - struct init" {
         .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
     });
+    // Incomplete struct field
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\};
+        \\const foo = S{ .alpha = S{ .alp<cursor> } };
+    , &.{
+        // clients do the filtering
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+    });
     try testCompletion(
         \\const S = struct {
         \\    alpha: *const S,
