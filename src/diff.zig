@@ -77,30 +77,32 @@ pub fn applyContentChanges(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var last_full_text_change: ?usize = null;
-    var i: usize = content_changes.len;
-    while (i > 0) {
-        i -= 1;
-        if (content_changes[i] == .literal_1) {
-            last_full_text_change = i;
-            continue;
+    const last_full_text_index, const last_full_text = blk: {
+        var i: usize = content_changes.len;
+        while (i != 0) {
+            i -= 1;
+            switch (content_changes[i]) {
+                .TextDocumentContentChangeWholeDocument => |content_change| break :blk .{ i, content_change.text },
+                .TextDocumentContentChangePartial => continue,
+            }
         }
-    }
+        break :blk .{ null, text };
+    };
 
     var text_array = std.ArrayListUnmanaged(u8){};
     errdefer text_array.deinit(allocator);
 
-    try text_array.appendSlice(allocator, if (last_full_text_change) |index| content_changes[index].literal_1.text else text);
+    try text_array.appendSlice(allocator, last_full_text);
 
     // don't even bother applying changes before a full text change
-    const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
+    const changes = content_changes[if (last_full_text_index) |index| index + 1 else 0..];
 
     for (changes) |item| {
-        const range = item.literal_0.range;
+        const content_change = item.TextDocumentContentChangePartial;
 
-        const start = offsets.maybePositionToIndex(text_array.items, range.start, encoding) orelse return error.InvalidParams;
-        const end = offsets.maybePositionToIndex(text_array.items, range.end, encoding) orelse return error.InvalidParams;
-        try text_array.replaceRange(allocator, start, end - start, item.literal_0.text);
+        const start = offsets.maybePositionToIndex(text_array.items, content_change.range.start, encoding) orelse return error.InvalidParams;
+        const end = offsets.maybePositionToIndex(text_array.items, content_change.range.end, encoding) orelse return error.InvalidParams;
+        try text_array.replaceRange(allocator, start, end - start, content_change.text);
     }
 
     return try text_array.toOwnedSliceSentinel(allocator, 0);

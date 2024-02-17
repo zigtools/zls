@@ -288,7 +288,7 @@ fn showMessage(
         .Error => log.err("{s}", .{message}),
         .Warning => log.warn("{s}", .{message}),
         .Info => log.info("{s}", .{message}),
-        .Log => log.debug("{s}", .{message}),
+        .Log, .Debug => log.debug("{s}", .{message}),
     }
     switch (server.status) {
         .initializing,
