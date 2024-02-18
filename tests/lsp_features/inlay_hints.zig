@@ -160,6 +160,49 @@ test "inlayhints - var decl" {
     , .Type);
 }
 
+test "inlayhints - function with error union" {
+    try testInlayHints(
+        \\fn foo() !u32 {}
+        \\test {
+        \\    const val<!u32> = foo();
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\const Error<type> = error{OutOfMemory};
+        \\fn foo() Error!u32 {}
+        \\test {
+        \\    const val<Error!u32> = foo();
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\fn foo() error{OutOfMemory}!u32 {}
+        \\test {
+        \\    const val<error{OutOfMemory}!u32> = foo();
+        \\}
+    , .Type);
+
+    // same but with `try`
+    try testInlayHints(
+        \\fn foo() !u32 {}
+        \\test {
+        \\    const val<u32> = try foo();
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\const Error<type> = error{OutOfMemory};
+        \\fn foo() Error!u32 {}
+        \\test {
+        \\    const val<u32> = try foo();
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\fn foo() error{OutOfMemory}!u32 {}
+        \\test {
+        \\    const val<u32> = try foo();
+        \\}
+    , .Type);
+}
+
 test "inlayhints - generic function parameter" {
     // TODO there should be an inlay hint that shows `T`
     try testInlayHints(

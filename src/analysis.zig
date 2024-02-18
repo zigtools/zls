@@ -749,12 +749,21 @@ pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle:
     const ret = .{ .node = return_type, .handle = handle };
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
+    if (!child_type.is_type_val) return null;
 
     if (ast.hasInferredError(tree, fn_decl)) {
         const child_type_ptr = try analyser.arena.allocator().create(Type);
-        child_type_ptr.* = try child_type.instanceTypeVal(analyser) orelse return null;
-        return Type{ .data = .{ .error_union = child_type_ptr }, .is_type_val = false };
-    } else return try child_type.instanceTypeVal(analyser);
+        child_type_ptr.* = child_type;
+        return Type{
+            .data = .{ .error_union = .{
+                .error_set = null,
+                .payload = child_type_ptr,
+            } },
+            .is_type_val = false,
+        };
+    }
+
+    return try child_type.instanceTypeVal(analyser);
 }
 
 /// `optional.?`
@@ -789,32 +798,16 @@ pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type 
     return Type{ .data = .{ .pointer = .{ .size = .One, .is_const = false, .elem_ty = base_type_ptr } }, .is_type_val = false };
 }
 
-pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: Type, side: ErrorUnionSide) error{OutOfMemory}!?Type {
-    const rhs_node_handle = switch (rhs.data) {
-        .other => |n| n,
-        .error_union => |t| return switch (side) {
-            .left => null,
-            .right => t.*,
+pub const ErrorUnionSide = enum { error_set, payload };
+
+pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUnionSide) error{OutOfMemory}!?Type {
+    return switch (ty.data) {
+        .error_union => |info| switch (side) {
+            .error_set => try (info.error_set orelse return null).instanceTypeVal(analyser),
+            .payload => try info.payload.instanceTypeVal(analyser),
         },
         else => return null,
     };
-    const rhs_node = rhs_node_handle.node;
-    const rhs_handle = rhs_node_handle.handle;
-    const tree = rhs_handle.tree;
-    if (tree.nodes.items(.tag)[rhs_node] == .error_union) {
-        const data = tree.nodes.items(.data)[rhs_node];
-        const node_with_handle = NodeWithHandle{
-            .node = switch (side) {
-                .left => data.lhs,
-                .right => data.rhs,
-            },
-            .handle = rhs_handle,
-        };
-        const ty = try analyser.resolveTypeOfNodeInternal(node_with_handle) orelse return null;
-        return try ty.instanceTypeVal(analyser);
-    }
-
-    return null;
 }
 
 fn resolveTaggedUnionFieldType(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
@@ -1460,8 +1453,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .unwrap_optional => try analyser.resolveOptionalUnwrap(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
                 .@"orelse" => try analyser.resolveOptionalUnwrap(base_type),
-                .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
-                .@"try" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
+                .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
+                .@"try" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
                 .address_of => try analyser.resolveAddressOf(base_type),
                 else => unreachable,
             };
@@ -1580,8 +1573,29 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .is_type_val = false,
             };
         },
+        .error_union => {
+            const error_set = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].lhs, .handle = handle }) orelse return null;
+            if (!error_set.is_type_val) return null;
+
+            const payload = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return null;
+            if (!payload.is_type_val) return null;
+
+            const error_set_ptr = try analyser.arena.allocator().create(Type);
+            error_set_ptr.* = error_set;
+
+            const payload_ptr = try analyser.arena.allocator().create(Type);
+            payload_ptr.* = payload;
+
+            return Type{
+                .data = .{ .error_union = .{
+                    .error_set = error_set_ptr,
+                    .payload = payload_ptr,
+                } },
+                .is_type_val = true,
+            };
+        },
+
         .anyframe_type,
-        .error_union,
         .error_set_decl,
         .merge_error_sets,
         .container_decl,
@@ -2117,8 +2131,12 @@ pub const Type = struct {
         /// ?T
         optional: *Type,
 
-        /// Return type of `fn foo() !Foo`
-        error_union: *Type,
+        /// `error_set!payload`
+        error_union: struct {
+            /// `null` if inferred error
+            error_set: ?*Type,
+            payload: *Type,
+        },
 
         /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
         union_tag: *Type,
@@ -2175,10 +2193,13 @@ pub const Type = struct {
                 std.hash.autoHash(hasher, info.sentinel);
                 info.elem_ty.hashWithHasher(hasher);
             },
-            .optional,
-            .error_union,
-            .union_tag,
-            => |t| t.hashWithHasher(hasher),
+            .optional, .union_tag => |t| t.hashWithHasher(hasher),
+            .error_union => |info| {
+                if (info.error_set) |error_set| {
+                    error_set.hashWithHasher(hasher);
+                }
+                info.payload.hashWithHasher(hasher);
+            },
             .other, .compile_error => |node_handle| {
                 std.hash.autoHash(hasher, node_handle.node);
                 hasher.update(node_handle.handle.uri);
@@ -2213,11 +2234,18 @@ pub const Type = struct {
                 if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
             },
             inline .optional,
-            .error_union,
             .union_tag,
             => |a_type, name| {
                 const b_type = @field(b.data, @tagName(name));
                 if (!a_type.eql(b_type.*)) return false;
+            },
+            .error_union => |info| {
+                const b_info = b.data.error_union;
+                if (!info.payload.eql(b_info.payload.*)) return false;
+                if ((info.error_set == null) != (b_info.error_set == null)) return false;
+                if (info.error_set) |a_error_set| {
+                    if (!a_error_set.eql(b_info.error_set.?.*)) return false;
+                }
             },
             .other => |a_node_handle| return a_node_handle.eql(b.data.other),
             .compile_error => |a_node_handle| return a_node_handle.eql(b.data.compile_error),
@@ -2566,7 +2594,12 @@ pub const Type = struct {
                 try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser)});
             },
             .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser)}),
-            .error_union => |t| try writer.print("!{}", .{t.fmtTypeVal(analyser)}),
+            .error_union => |info| {
+                if (info.error_set) |error_set| {
+                    try writer.print("{}", .{error_set.fmtTypeVal(analyser)});
+                }
+                try writer.print("!{}", .{info.payload.fmtTypeVal(analyser)});
+            },
             .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser)}),
             .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
                 .root => {
@@ -3205,8 +3238,6 @@ pub const TokenWithHandle = struct {
     handle: *DocumentStore.Handle,
 };
 
-pub const ErrorUnionSide = enum { left, right };
-
 pub const Declaration = union(enum) {
     /// Index of the ast node
     ast_node: Ast.Node.Index,
@@ -3547,14 +3578,14 @@ pub const DeclWithHandle = struct {
                     .node = pay.condition,
                     .handle = self.handle,
                 })) orelse return null,
-                .right,
+                .payload,
             ),
             .error_union_error => |pay| try analyser.resolveUnwrapErrorUnionType(
                 (try analyser.resolveTypeOfNodeInternal(.{
                     .node = if (pay.condition == 0) return null else pay.condition,
                     .handle = self.handle,
                 })) orelse return null,
-                .left,
+                .error_set,
             ),
             .array_payload => |pay| try analyser.resolveBracketAccessType(
                 (try analyser.resolveTypeOfNodeInternal(.{
@@ -4000,7 +4031,7 @@ pub fn lookupSymbolFieldInit(
         nodes[1..],
     )) orelse return null;
 
-    if (try analyser.resolveUnwrapErrorUnionType(container_type, .right)) |unwrapped|
+    if (try analyser.resolveUnwrapErrorUnionType(container_type, .payload)) |unwrapped|
         container_type = unwrapped;
 
     if (try analyser.resolveOptionalUnwrap(container_type)) |unwrapped|
@@ -4520,7 +4551,12 @@ fn addReferencedTypes(
         .pointer => |info| try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)),
         .array => |info| try analyser.addReferencedTypes(info.elem_ty.*, ReferencedType.Collector.init(referenced_types)),
         .optional => |child_ty| try analyser.addReferencedTypes(child_ty.*, ReferencedType.Collector.init(referenced_types)),
-        .error_union => |t| try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types)),
+        .error_union => |info| {
+            if (info.error_set) |error_set| {
+                try analyser.addReferencedTypes(error_set.*, ReferencedType.Collector.init(referenced_types));
+            }
+            try analyser.addReferencedTypes(info.payload.*, ReferencedType.Collector.init(referenced_types));
+        },
         .union_tag => |t| try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types)),
 
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
@@ -4615,47 +4651,6 @@ fn addReferencedTypes(
                     referenced_types,
                 );
             },
-
-            .array_type,
-            .array_type_sentinel,
-            => unreachable,
-
-            .ptr_type,
-            .ptr_type_aligned,
-            .ptr_type_bit_range,
-            .ptr_type_sentinel,
-            => unreachable,
-
-            .optional_type => unreachable,
-
-            .error_union => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
-
-                try analyser.addReferencedTypesFromNode(
-                    .{ .node = tree.nodes.items(.data)[node].lhs, .handle = handle },
-                    referenced_types,
-                );
-
-                try analyser.addReferencedTypesFromNode(
-                    .{ .node = tree.nodes.items(.data)[node].rhs, .handle = handle },
-                    referenced_types,
-                );
-            },
-
-            .multiline_string_literal => unreachable,
-
-            .string_literal => unreachable,
-
-            .number_literal, .char_literal => unreachable,
-
-            .enum_literal => unreachable,
-
-            .error_value => unreachable,
-
-            .identifier => {},
-
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 

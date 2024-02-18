@@ -1560,6 +1560,17 @@ test "completion - error union" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() !S {}
+        \\fn bar() !void {
+        \\    const baz = try foo();
+        \\    baz.<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+
     // try testCompletion(
     //     \\const S = struct { alpha: u32 };
     //     \\fn foo() error{Foo}!S {}
