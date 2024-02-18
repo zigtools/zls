@@ -275,6 +275,28 @@ test "inlayhints - capture values" {
     , .Type);
 }
 
+test "inlayhints - capture value with catch" {
+    try testInlayHints(
+        \\fn foo() !u32 {}
+        \\test {
+        \\    foo() catch |err| {}
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\const Error<type> = error{OutOfMemory};
+        \\fn foo() Error!u32 {}
+        \\test {
+        \\    foo() catch |err<Error>| {}
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\fn foo() error{OutOfMemory}!u32 {}
+        \\test {
+        \\    foo() catch |err<error{OutOfMemory}>| {}
+        \\}
+    , .Type);
+}
+
 fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);

@@ -928,7 +928,7 @@ noinline fn walkCatchNode(
     try walkNode(context, tree, data[node_idx].lhs);
 
     const catch_token = main_tokens[node_idx] + 2;
-    if (token_tags.len > catch_token and
+    if (catch_token < tree.tokens.len and
         token_tags[catch_token - 1] == .pipe and
         token_tags[catch_token] == .identifier)
     {
