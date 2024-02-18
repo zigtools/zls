@@ -1329,7 +1329,7 @@ fn collectVarAccessContainerNodes(
             const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
             const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
             var node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse return;
-            if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
+            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
         }
@@ -1360,7 +1360,7 @@ fn collectFieldAccessContainerNodes(
     const name_loc = Analyser.identifierLocFromPosition(loc.end, handle) orelse {
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
-        if (try analyser.resolveUnwrapErrorUnionType(container, .right)) |unwrapped| {
+        if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
             if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
                 try types_with_handles.append(arena, unwrapped);
                 return;
@@ -1388,7 +1388,7 @@ fn collectFieldAccessContainerNodes(
                 const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
                 const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
                 node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse continue;
-                if (try analyser.resolveUnwrapErrorUnionType(node_type, .right)) |unwrapped| node_type = unwrapped;
+                if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
                 try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
                 continue;
             }

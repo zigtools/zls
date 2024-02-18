@@ -360,6 +360,7 @@ fn writeNodeInlayHint(
 ) error{OutOfMemory}!void {
     const node_tags = tree.nodes.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
+    const token_tags = tree.tokens.items(.tag);
 
     const tag = node_tags[node];
 
@@ -425,6 +426,17 @@ fn writeNodeInlayHint(
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
             const full_case = builder.handle.tree.fullSwitchCase(node).?;
             if (full_case.payload_token) |token| try inferAppendTypeStr(builder, token);
+        },
+        .@"catch" => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+
+            const catch_token = main_tokens[node] + 2;
+            if (catch_token < tree.tokens.len and
+                token_tags[catch_token - 1] == .pipe and
+                token_tags[catch_token] == .identifier)
+            {
+                try inferAppendTypeStr(builder, catch_token);
+            }
         },
         .builtin_call_two,
         .builtin_call_two_comma,
