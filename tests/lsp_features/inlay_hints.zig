@@ -97,13 +97,19 @@ test "inlayhints - resolve alias" {
 test "inlayhints - builtin call" {
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
-    , .{ .kind = .Parameter });
-    try testInlayHints(
         \\const _ = @sizeOf(<T>u32);
-    , .{ .kind = .Parameter });
-    try testInlayHints(
         \\const _ = @TypeOf(5);
-    , .{ .kind = .Parameter });
+    , .{
+        .kind = .Parameter,
+    });
+    try testInlayHints(
+        \\const _ = @memcpy("","");
+        \\const _ = @sizeOf(u32);
+        \\const _ = @TypeOf(5);
+    , .{
+        .kind = .Parameter,
+        .show_builtin = false,
+    });
 }
 
 test "inlayhints - exclude single argument" {
@@ -396,6 +402,7 @@ test "inlayhints - capture value with catch" {
 
 const Options = struct {
     kind: types.InlayHintKind,
+    show_builtin: bool = true,
     exclude_single_argument: bool = false,
     hide_redundant_param_names: bool = false,
     hide_redundant_param_names_last_token: bool = false,
@@ -410,6 +417,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
 
     ctx.server.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
     ctx.server.config.inlay_hints_show_variable_type_hints = options.kind == .Type;
+    ctx.server.config.inlay_hints_show_builtin = options.show_builtin;
     ctx.server.config.inlay_hints_exclude_single_argument = options.exclude_single_argument;
     ctx.server.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
     ctx.server.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
