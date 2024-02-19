@@ -1257,25 +1257,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 }
             }
 
-            if (try analyser.lookupSymbolGlobal(
-                handle,
-                name,
-                starts[name_token],
-            )) |child| {
-                switch (child.decl) {
-                    .ast_node => |n| {
-                        if (n == node) return null;
-                        const child_decl_tree = child.handle.tree;
-                        if (child_decl_tree.fullVarDecl(n)) |var_decl| {
-                            if (var_decl.ast.init_node == node)
-                                return null;
-                        }
-                    },
-                    else => {},
-                }
-                return try child.resolveType(analyser);
-            }
-            return null;
+            const child = try analyser.lookupSymbolGlobal(handle, name, starts[name_token]) orelse return null;
+            return try child.resolveType(analyser);
         },
         .call,
         .call_comma,
