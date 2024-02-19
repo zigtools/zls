@@ -127,7 +127,7 @@ test "inlayhints - var decl" {
         \\const Foo<type> = struct { bar: u32 };
         \\const Error<type> = error{e};
         \\fn test_context() !void {
-        \\    const baz: ?Foo = Foo{ .bar = 42 };
+        \\    const baz: ?Foo = Foo{ .bar<u32> = 42 };
         \\    if (baz) |b<Foo>| {
         \\        const d: Error!?Foo = b;
         \\        const e<*Error!?Foo> = &d;
@@ -146,11 +146,11 @@ test "inlayhints - var decl" {
         \\     },
         \\ } {
         \\     return .{
-        \\         .a = a,
-        \\         .b = b,
-        \\         .c = .{
-        \\             .d = 0,
-        \\             .e = "Testing",
+        \\         .a<u32> = a,
+        \\         .b<i32> = b,
+        \\         .c<struct { d: usize, e: []const u8, }> = .{
+        \\             .d<usize> = 0,
+        \\             .e<[]const u8> = "Testing",
         \\         }
         \\     }; 
         \\ }
@@ -254,7 +254,7 @@ test "inlayhints - capture values" {
         \\};
         \\fn a() void {
         \\    var foo<Foo> = Foo {
-        \\        .counter = 10,
+        \\        .counter<usize> = 10,
         \\    };
         \\    while (foo.next()) |val<?usize>| {
         \\        if (val) |v<usize>| { _ = v; }

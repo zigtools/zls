@@ -462,6 +462,33 @@ fn writeNodeInlayHint(
                 try writeBuiltinHint(builder, params, builtin.arguments);
             }
         },
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init,
+        .struct_init_comma,
+        => {
+            if (!builder.config.inlay_hints_show_struct_literal_field_type) return;
+            var buffer: [2]Ast.Node.Index = undefined;
+            const struct_init = tree.fullStructInit(&buffer, node).?;
+            for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
+                const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
+                const name_loc = offsets.tokenToLoc(tree, name_token);
+                const name = offsets.locToSlice(tree.source, name_loc);
+                const decl = (try builder.analyser.getSymbolEnumLiteral(builder.arena, builder.handle, name_loc.start, name)) orelse continue;
+                const ty = try decl.resolveType(builder.analyser) orelse continue;
+                const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser)});
+                if (type_str.len == 0) continue;
+                try appendTypeHintString(
+                    builder,
+                    name_token,
+                    try reduceTypeWhitespace(type_str, builder.arena),
+                );
+            }
+        },
         else => {},
     }
 }
