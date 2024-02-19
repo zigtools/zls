@@ -97,13 +97,25 @@ test "resolve alias" {
 test "builtin call" {
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
-        \\const _ = @sizeOf(<T>u32);
-        \\const _ = @TypeOf(5);
-    , .{
-        .kind = .Parameter,
-    });
+        \\const _ = @Vector(<len>4,<Element>u32);
+        \\const _ = @compileError(<msg>"");
+    , .{ .kind = .Parameter });
+
+    // exclude variadics
+    try testInlayHints(
+        \\const _ = @compileLog(2, 3);
+        \\const _ = @TypeOf(null, 5);
+    , .{ .kind = .Parameter });
+
+    // exclude other builtins
+    try testInlayHints(
+        \\const _ = @sizeOf(u32);
+        \\const _ = @max(2, 4);
+    , .{ .kind = .Parameter });
+
     try testInlayHints(
         \\const _ = @memcpy("","");
+        \\const _ = @TypeOf(null, 5);
         \\const _ = @sizeOf(u32);
         \\const _ = @TypeOf(5);
     , .{
