@@ -1257,25 +1257,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 }
             }
 
-            if (try analyser.lookupSymbolGlobal(
-                handle,
-                name,
-                starts[name_token],
-            )) |child| {
-                switch (child.decl) {
-                    .ast_node => |n| {
-                        if (n == node) return null;
-                        const child_decl_tree = child.handle.tree;
-                        if (child_decl_tree.fullVarDecl(n)) |var_decl| {
-                            if (var_decl.ast.init_node == node)
-                                return null;
-                        }
-                    },
-                    else => {},
-                }
-                return try child.resolveType(analyser);
-            }
-            return null;
+            const child = try analyser.lookupSymbolGlobal(handle, name, starts[name_token]) orelse return null;
+            return try child.resolveType(analyser);
         },
         .call,
         .call_comma,
@@ -2646,6 +2629,30 @@ pub const Type = struct {
                         return;
                     }
                     try writer.writeAll(offsets.nodeToSlice(tree, node));
+                },
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => {
+                    var buf: [1]Ast.Node.Index = undefined;
+                    const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node).?;
+
+                    try writer.print("{}", .{fmtFunction(.{
+                        .fn_proto = fn_proto,
+                        .tree = &node_handle.handle.tree,
+                        .include_fn_keyword = true,
+                        .include_name = false,
+                        .skip_first_param = false,
+                        .parameters = .{ .show = .{
+                            .include_modifiers = true,
+                            .include_names = true,
+                            .include_types = true,
+                        } },
+                        .include_return_type = true,
+                        .snippet_placeholders = false,
+                    })});
                 },
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
