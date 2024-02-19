@@ -32,8 +32,8 @@ enable_inlay_hints: bool = true,
 /// Enable inlay hints for variable types
 inlay_hints_show_variable_type_hints: bool = true,
 
-/// Enable inlay hints for fields in union and struct inits
-inlay_hints_show_anon_literal_field_type: bool = true,
+/// Enable inlay hints for fields in struct and union literals
+inlay_hints_show_struct_literal_field_type: bool = true,
 
 /// Enable inlay hints for parameter names
 inlay_hints_show_parameter_name: bool = true,

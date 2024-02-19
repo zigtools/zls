@@ -49,8 +49,8 @@
             "type": "boolean",
             "default": true
         },
-        "inlay_hints_show_anon_literal_field_type": {
-            "description": "Enable inlay hints for fields in union and struct inits",
+        "inlay_hints_show_struct_literal_field_type": {
+            "description": "Enable inlay hints for fields in struct and union literals",
             "type": "boolean",
             "default": true
         },
