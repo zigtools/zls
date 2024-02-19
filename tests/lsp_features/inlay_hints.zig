@@ -106,6 +106,42 @@ test "inlayhints - builtin call" {
     , .{ .kind = .Parameter });
 }
 
+test "inlayhints - exclude single argument" {
+    try testInlayHints(
+        \\fn func1(alpha: u32) void {}
+        \\fn func2(alpha: u32, beta: u32) void {}
+        \\test {
+        \\    func1(1);
+        \\    func2(<alpha>1, <beta>2);
+        \\}
+    , .{
+        .kind = .Parameter,
+        .exclude_single_argument = true,
+    });
+    try testInlayHints(
+        \\const S = struct {
+        \\    fn method1(self: S) void {}
+        \\    fn method2(self: S, alpha: u32) void {}
+        \\    fn method3(self: S, alpha: u32, beta: u32) void {}
+        \\    fn method4(alpha: u32, beta: u32) void {}
+        \\};
+        \\test {
+        \\    S.method1(undefined);
+        \\    S.method2(<self>undefined, <alpha>1);
+        \\    S.method3(<self>undefined, <alpha>1, <beta>2);
+        \\    S.method4(<alpha>1, <beta>2);
+        \\
+        \\    const s: S = undefined;
+        \\    s.method1();
+        \\    s.method2(1);
+        \\    s.method3(<alpha>1, <beta>2);
+        \\}
+    , .{
+        .kind = .Parameter,
+        .exclude_single_argument = true,
+    });
+}
+
 test "inlayhints - hide redundant parameter names" {
     try testInlayHints(
         \\fn func(alpha: u32) void {}
@@ -360,6 +396,7 @@ test "inlayhints - capture value with catch" {
 
 const Options = struct {
     kind: types.InlayHintKind,
+    exclude_single_argument: bool = false,
     hide_redundant_param_names: bool = false,
     hide_redundant_param_names_last_token: bool = false,
 };
@@ -373,6 +410,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
 
     ctx.server.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
     ctx.server.config.inlay_hints_show_variable_type_hints = options.kind == .Type;
+    ctx.server.config.inlay_hints_exclude_single_argument = options.exclude_single_argument;
     ctx.server.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
     ctx.server.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
 
