@@ -160,6 +160,24 @@ test "inlayhints - var decl" {
     , .Type);
 }
 
+test "inlayhints - function alias" {
+    try testInlayHints(
+        \\fn foo(alpha: u32) void {
+        \\    return alpha;
+        \\}
+        \\const bar<fn (alpha: u32) void> = foo;
+    , .Type);
+    try testInlayHints(
+        \\pub fn foo(
+        \\  // some documentation
+        \\  comptime alpha: u32,
+        \\) u32 {
+        \\    return alpha; 
+        \\}
+        \\const bar<*fn (comptime alpha: u32) u32> = &foo;
+    , .Type);
+}
+
 test "inlayhints - function with error union" {
     try testInlayHints(
         \\fn foo() !u32 {}

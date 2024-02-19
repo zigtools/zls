@@ -2630,6 +2630,30 @@ pub const Type = struct {
                     }
                     try writer.writeAll(offsets.nodeToSlice(tree, node));
                 },
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => {
+                    var buf: [1]Ast.Node.Index = undefined;
+                    const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node).?;
+
+                    try writer.print("{}", .{fmtFunction(.{
+                        .fn_proto = fn_proto,
+                        .tree = &node_handle.handle.tree,
+                        .include_fn_keyword = true,
+                        .include_name = false,
+                        .skip_first_param = false,
+                        .parameters = .{ .show = .{
+                            .include_modifiers = true,
+                            .include_names = true,
+                            .include_types = true,
+                        } },
+                        .include_return_type = true,
+                        .snippet_placeholders = false,
+                    })});
+                },
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
             .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),
