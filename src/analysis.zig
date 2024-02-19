@@ -1541,9 +1541,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             // try to infer the array type
+            const maybe_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_init_info.ast.elements[0], .handle = handle });
+            const elem_ty = if (maybe_elem_ty) |elem_ty| elem_ty.typeOf(analyser) else try Type.typeValFromIP(analyser, .type_type);
 
-            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_init_info.ast.elements[0], .handle = handle }) orelse
-                try Type.typeValFromIP(analyser, .unknown_type);
             const elem_ty_ptr = try analyser.arena.allocator().create(Type);
             elem_ty_ptr.* = elem_ty;
 
