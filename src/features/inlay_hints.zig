@@ -122,22 +122,22 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, ty: Analyser.Type) !voi
     const arguments = call.ast.params;
     const min_len = @min(parameters.len, arguments.len);
     for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
-        const name_token = param.name_token orelse continue;
-        const name = fn_node.handle.tree.tokenSlice(name_token);
+        const parameter_name_token = param.name_token orelse continue;
+        const parameter_name = offsets.identifierTokenToNameSlice(fn_node.handle.tree, parameter_name_token);
 
-        if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
-            const last_arg_token = ast.lastToken(tree, arg);
-            const arg_name = tree.tokenSlice(last_arg_token);
+        if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) dont_skip: {
+            const arg_token = if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
+                ast.lastToken(tree, arg)
+            else if (builder.config.inlay_hints_hide_redundant_param_names)
+                tree.nodes.items(.main_token)[arg]
+            else
+                unreachable;
 
-            if (std.mem.eql(u8, arg_name, name)) {
-                if (tree.firstToken(arg) == last_arg_token) {
-                    if (builder.config.inlay_hints_hide_redundant_param_names)
-                        continue;
-                } else {
-                    if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
-                        continue;
-                }
-            }
+            if (tree.tokens.items(.tag)[arg_token] != .identifier) break :dont_skip;
+            const arg_token_name = offsets.identifierTokenToNameSlice(tree, arg_token);
+            if (!std.mem.eql(u8, parameter_name, arg_token_name)) break :dont_skip;
+
+            continue;
         }
 
         const token_tags = fn_node.handle.tree.tokens.items(.tag);
@@ -152,7 +152,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, ty: Analyser.Type) !voi
 
         try builder.appendParameterHint(
             tree.firstToken(arg),
-            name,
+            parameter_name,
             tooltip,
             no_alias,
             comp_time,

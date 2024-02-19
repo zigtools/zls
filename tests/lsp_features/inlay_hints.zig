@@ -12,30 +12,30 @@ const offsets = zls.offsets;
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "inlayhints - empty" {
-    try testInlayHints("", .Parameter);
-    try testInlayHints("", .Type);
+    try testInlayHints("", .{ .kind = .Parameter });
+    try testInlayHints("", .{ .kind = .Type });
 }
 
 test "inlayhints - function call" {
     try testInlayHints(
         \\fn foo(alpha: u32) void {}
         \\const _ = foo(<alpha>5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\fn foo(alpha: u32, beta: u64) void {}
         \\const _ = foo(<alpha>5,<beta>4);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\fn foo(alpha: u32, beta: u64) void {}
         \\const _ = foo(  <alpha>3 + 2 ,  <beta>(3 - 2));
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\fn foo(alpha: u32, beta: u64) void {}
         \\const _ = foo(
         \\    <alpha>3 + 2,
         \\    <beta>(3 - 2),
         \\);
-    , .Parameter);
+    , .{ .kind = .Parameter });
 }
 
 test "inlayhints - function self parameter" {
@@ -43,31 +43,31 @@ test "inlayhints - function self parameter" {
         \\const Foo = struct { pub fn bar(self: *Foo, alpha: u32) void {} };
         \\const foo: Foo = .{};
         \\const _ = foo.bar(<alpha>5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: *Foo, alpha: u32) void {} };
         \\const foo: *Foo = undefined;
         \\const _ = foo.bar(<alpha>5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct { pub fn bar(_: Foo, alpha: u32, beta: []const u8) void {} };
         \\const foo: Foo = .{};
         \\const _ = foo.bar(<alpha>5,<beta>"");
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
         \\const foo: Foo = .{};
         \\const _ = foo.bar(<alpha>5,<beta>4);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
         \\const foo: *Foo = undefined;
         \\const _ = foo.bar(<alpha>5,<beta>4);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: []const u8) void {} };
         \\const _ = Foo.bar(<self>undefined,<alpha>5,<beta>"");
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const Foo = struct {
         \\  pub fn bar(self: Foo, alpha: u32, beta: []const u8) void {}
@@ -75,7 +75,7 @@ test "inlayhints - function self parameter" {
         \\      bar(<self>undefined,<alpha>5,<beta>"");
         \\  }
         \\};
-    , .Parameter);
+    , .{ .kind = .Parameter });
 }
 
 test "inlayhints - function self parameter with pointer type in type declaration" {
@@ -83,7 +83,7 @@ test "inlayhints - function self parameter with pointer type in type declaration
         \\const Foo = *opaque { pub fn bar(self: Foo, alpha: u32) void {} };
         \\const foo: Foo = undefined;
         \\const _ = foo.bar(<alpha>5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
 }
 
 test "inlayhints - resolve alias" {
@@ -91,38 +91,81 @@ test "inlayhints - resolve alias" {
         \\fn foo(alpha: u32) void {}
         \\const bar = foo;
         \\const _ = bar(<alpha>5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
 }
 
 test "inlayhints - builtin call" {
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const _ = @sizeOf(<T>u32);
-    , .Parameter);
+    , .{ .kind = .Parameter });
     try testInlayHints(
         \\const _ = @TypeOf(5);
-    , .Parameter);
+    , .{ .kind = .Parameter });
+}
+
+test "inlayhints - hide redundant parameter names" {
+    try testInlayHints(
+        \\fn func(alpha: u32) void {}
+        \\test {
+        \\    const alpha: u32 = 5;
+        \\    const beta: u32 = 5;
+        \\    const s = .{ .alpha = 5, .beta = 5 };
+        \\
+        \\    func(alpha);
+        \\
+        \\    func(<alpha>&alpha);
+        \\    func(<alpha>s.alpha);
+        \\    func(<alpha>beta);
+        \\    func(<alpha>&beta);
+        \\    func(<alpha>s.beta);
+        \\}
+    , .{
+        .kind = .Parameter,
+        .hide_redundant_param_names = true,
+        .hide_redundant_param_names_last_token = false,
+    });
+    try testInlayHints(
+        \\fn func(alpha: u32) void {}
+        \\test {
+        \\    const alpha: u32 = 5;
+        \\    const beta: u32 = 5;
+        \\    const s = .{ .alpha = 5, .beta = 5 };
+        \\
+        \\    func(alpha);
+        \\    func(&alpha);
+        \\    func(s.alpha);
+        \\
+        \\    func(<alpha>beta);
+        \\    func(<alpha>&beta);
+        \\    func(<alpha>s.beta);
+        \\}
+    , .{
+        .kind = .Parameter,
+        .hide_redundant_param_names = true,
+        .hide_redundant_param_names_last_token = true,
+    });
 }
 
 test "inlayhints - var decl" {
     try testInlayHints(
         \\const foo<comptime_int> = 5;
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const foo<bool> = true;
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const foo<@TypeOf(undefined)> = undefined;
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const foo<**const [3:0]u8> = &"Bar";
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const foo: *[]const u8 = &"Bar";
         \\const baz<**[]const u8> = &foo;
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const Foo<type> = struct { bar: u32 };
         \\const Error<type> = error{e};
@@ -135,7 +178,7 @@ test "inlayhints - var decl" {
         \\        _ = f;
         \\    }
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\ fn thing(a: u32, b: i32) struct {
         \\     a: u32,
@@ -157,7 +200,7 @@ test "inlayhints - var decl" {
         \\
         \\ var a<struct { a: u32, b: i32, c: struct { d: usize, e: []const u8, }, }> = thing(10, -4);
         \\ _ = a;
-    , .Type);
+    , .{ .kind = .Type });
 }
 
 test "inlayhints - function alias" {
@@ -166,7 +209,7 @@ test "inlayhints - function alias" {
         \\    return alpha;
         \\}
         \\const bar<fn (alpha: u32) void> = foo;
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\pub fn foo(
         \\  // some documentation
@@ -175,7 +218,7 @@ test "inlayhints - function alias" {
         \\    return alpha; 
         \\}
         \\const bar<*fn (comptime alpha: u32) u32> = &foo;
-    , .Type);
+    , .{ .kind = .Type });
 }
 
 test "inlayhints - function with error union" {
@@ -184,20 +227,20 @@ test "inlayhints - function with error union" {
         \\test {
         \\    const val<!u32> = foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const Error<type> = error{OutOfMemory};
         \\fn foo() Error!u32 {}
         \\test {
         \\    const val<Error!u32> = foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\fn foo() error{OutOfMemory}!u32 {}
         \\test {
         \\    const val<error{OutOfMemory}!u32> = foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 
     // same but with `try`
     try testInlayHints(
@@ -205,20 +248,20 @@ test "inlayhints - function with error union" {
         \\test {
         \\    const val<u32> = try foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const Error<type> = error{OutOfMemory};
         \\fn foo() Error!u32 {}
         \\test {
         \\    const val<u32> = try foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\fn foo() error{OutOfMemory}!u32 {}
         \\test {
         \\    const val<u32> = try foo();
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 }
 
 test "inlayhints - generic function parameter" {
@@ -227,7 +270,7 @@ test "inlayhints - generic function parameter" {
         \\fn foo(comptime T: type, param: T) void {
         \\    const val = param;
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 }
 
 test "inlayhints - capture values" {
@@ -238,7 +281,7 @@ test "inlayhints - capture values" {
         \\      _ = bar;
         \\  }
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const FooError<type> = error{
         \\  Err1,
@@ -255,7 +298,7 @@ test "inlayhints - capture values" {
         \\        _ = e;
         \\    }
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const FooError<type> = error{
         \\  Err1,
@@ -278,7 +321,7 @@ test "inlayhints - capture values" {
         \\        if (val) |v<usize>| { _ = v; }
         \\    } else |e<FooError>| { _ = e; }
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 
     try testInlayHints(
         \\fn foo() void {
@@ -290,7 +333,7 @@ test "inlayhints - capture values" {
         \\      _ = ch;
         \\  }
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 }
 
 test "inlayhints - capture value with catch" {
@@ -299,28 +342,39 @@ test "inlayhints - capture value with catch" {
         \\test {
         \\    foo() catch |err| {}
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\const Error<type> = error{OutOfMemory};
         \\fn foo() Error!u32 {}
         \\test {
         \\    foo() catch |err<Error>| {}
         \\}
-    , .Type);
+    , .{ .kind = .Type });
     try testInlayHints(
         \\fn foo() error{OutOfMemory}!u32 {}
         \\test {
         \\    foo() catch |err<error{OutOfMemory}>| {}
         \\}
-    , .Type);
+    , .{ .kind = .Type });
 }
 
-fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
+const Options = struct {
+    kind: types.InlayHintKind,
+    hide_redundant_param_names: bool = false,
+    hide_redundant_param_names_last_token: bool = false,
+};
+
+fn testInlayHints(source: []const u8, options: Options) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
     var ctx = try Context.init();
     defer ctx.deinit();
+
+    ctx.server.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
+    ctx.server.config.inlay_hints_show_variable_type_hints = options.kind == .Type;
+    ctx.server.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
+    ctx.server.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
 
     const test_uri = try ctx.addDocument(phr.new_source);
 
@@ -357,7 +411,7 @@ fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
 
         for (hints, 0..) |hint, i| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
-            if (hint.kind.? != kind) continue;
+            try std.testing.expectEqual(options.kind, hint.kind.?);
 
             if (visited.isSet(i)) {
                 try error_builder.msgAtIndex("duplicate inlay hint here!", test_uri, new_loc.start, .err, .{});
@@ -366,7 +420,7 @@ fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
                 visited.set(i);
             }
 
-            const actual_label = switch (kind) {
+            const actual_label = switch (options.kind) {
                 .Parameter => blk: {
                     if (!std.mem.endsWith(u8, hint.label.string, ":")) {
                         try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label.string});
@@ -395,7 +449,7 @@ fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
     var it = visited.iterator(.{ .kind = .unset });
     while (it.next()) |index| {
         const hint = hints[index];
-        if (hint.kind.? != kind) continue;
+        try std.testing.expectEqual(options.kind, hint.kind.?);
         const source_index = offsets.positionToIndex(phr.new_source, hint.position, ctx.server.offset_encoding);
         try error_builder.msgAtIndex("unexpected inlay hint `{s}` here!", test_uri, source_index, .err, .{hint.label.string});
     }
