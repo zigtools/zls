@@ -378,6 +378,21 @@ test "inlayhints - capture values" {
     , .{ .kind = .Type });
 }
 
+test "inlayhints - capture value with switch" {
+    try testInlayHints(
+        \\const U<type> = union(enum) {
+        \\    foo: u32,
+        \\    bar: []const u8,
+        \\};
+        \\fn foo(u: U) void {
+        \\    switch (u) {
+        \\        .foo => |number<u32>| {},
+        \\        .bar => |slice<[]const u8>| {},
+        \\    }
+        \\}
+    , .{ .kind = .Type });
+}
+
 test "inlayhints - capture value with catch" {
     try testInlayHints(
         \\fn foo() !u32 {}
