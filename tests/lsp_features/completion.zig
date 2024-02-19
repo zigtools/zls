@@ -2091,7 +2091,7 @@ test "completion - anytype resolution based on callsite-references" {
     });
 }
 
-test "builtin fn `field`" {
+test "completion - builtin fn `field`" {
     try testCompletion(
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
@@ -2248,7 +2248,7 @@ test "completion - combine doc comments of declaration and definition" {
     });
 }
 
-test "hover - top-level doc comment" {
+test "completion - top-level doc comment" {
     try testCompletion(
         \\//! B
         \\
@@ -2267,6 +2267,36 @@ test "hover - top-level doc comment" {
             \\ B
             ,
         },
+    });
+}
+
+test "completion - function `self` parameter detection" {
+    try testCompletion(
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Method, .detail = "fn (self: S) void", .insert_text = "f()" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    fn f(self: @This()) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Method, .detail = "fn (self: @This()) void", .insert_text = "f()" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    fn f(self: anytype) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+    , &.{
+        .{ .label = "f", .kind = .Method, .detail = "fn (self: anytype) void", .insert_text = "f()" },
     });
 }
 

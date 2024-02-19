@@ -344,11 +344,12 @@ pub fn firstParamIs(
     func: Ast.full.FnProto,
     expected: Type,
 ) error{OutOfMemory}!bool {
-    if (func.ast.params.len == 0) return false;
-
     const tree = handle.tree;
     var it = func.iterate(&tree);
-    const param = ast.nextFnParam(&it).?;
+    const param = ast.nextFnParam(&it) orelse return false;
+    if (param.anytype_ellipsis3) |token| {
+        if (tree.tokens.items(.tag)[token] == .keyword_anytype) return true;
+    }
     if (param.type_expr == 0) return false;
 
     const resolved_type = try analyser.resolveTypeOfNodeInternal(.{
