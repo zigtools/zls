@@ -92,50 +92,38 @@ const Builder = struct {
 };
 
 /// `call` is the function call
-/// `decl_handle` should be a function protototype
+/// `ty` should be a function protototype
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.DeclWithHandle) !void {
+fn writeCallHint(builder: *Builder, call: Ast.full.Call, ty: Analyser.Type) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = builder.handle;
     const tree = handle.tree;
 
-    const node = switch (decl_handle.decl) {
-        .ast_node => |node| node,
-        else => return,
-    };
-
-    const maybe_resolved_alias = try builder.analyser.resolveVarDeclAlias(.{ .node = node, .handle = decl_handle.handle });
-    const resolved_decl_handle = if (maybe_resolved_alias) |resolved_decl| resolved_decl else decl_handle;
-
-    const fn_node = switch (resolved_decl_handle.decl) {
-        .ast_node => |fn_node| fn_node,
-        else => return,
-    };
-
-    const decl_tree = resolved_decl_handle.handle.tree;
+    const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
+    const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
 
     var buffer: [1]Ast.Node.Index = undefined;
-    const fn_proto = decl_tree.fullFnProto(&buffer, fn_node) orelse return;
+    const fn_proto = fn_node.handle.tree.fullFnProto(&buffer, fn_node.node).?;
 
     var params = try std.ArrayListUnmanaged(Ast.full.FnProto.Param).initCapacity(builder.arena, fn_proto.ast.params.len);
     defer params.deinit(builder.arena);
 
-    var it = fn_proto.iterate(&decl_tree);
+    var it = fn_proto.iterate(&fn_node.handle.tree);
     while (ast.nextFnParam(&it)) |param| {
         try params.append(builder.arena, param);
     }
 
     const has_self_param = call.ast.params.len + 1 == params.items.len and
-        try builder.analyser.isInstanceCall(handle, call, resolved_decl_handle.handle, fn_proto);
+        try builder.analyser.isInstanceCall(handle, call, fn_node.handle, fn_proto);
 
     const parameters = params.items[@intFromBool(has_self_param)..];
     const arguments = call.ast.params;
     const min_len = @min(parameters.len, arguments.len);
     for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
         const name_token = param.name_token orelse continue;
-        const name = decl_tree.tokenSlice(name_token);
+        const name = fn_node.handle.tree.tokenSlice(name_token);
 
         if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
             const last_arg_token = ast.lastToken(tree, arg);
@@ -152,7 +140,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
             }
         }
 
-        const token_tags = decl_tree.tokens.items(.tag);
+        const token_tags = fn_node.handle.tree.tokens.items(.tag);
 
         const no_alias = if (param.comptime_noalias) |t| token_tags[t] == .keyword_noalias or token_tags[t - 1] == .keyword_noalias else false;
         const comp_time = if (param.comptime_noalias) |t| token_tags[t] == .keyword_comptime or token_tags[t - 1] == .keyword_comptime else false;
@@ -160,7 +148,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
         const tooltip = if (param.anytype_ellipsis3) |token|
             if (token_tags[token] == .keyword_anytype) "anytype" else ""
         else
-            offsets.nodeToSlice(decl_tree, param.type_expr);
+            offsets.nodeToSlice(fn_node.handle.tree, param.type_expr);
 
         try builder.appendParameterHint(
             tree.firstToken(arg),
@@ -312,40 +300,15 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     const handle = builder.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const node_data = tree.nodes.items(.data);
-    const main_tokens = tree.nodes.items(.main_token);
-    const token_tags = tree.tokens.items(.tag);
 
     switch (node_tags[call.ast.fn_expr]) {
         .identifier => {
-            const name_token = main_tokens[call.ast.fn_expr];
-            const name = offsets.identifierTokenToNameSlice(tree, name_token);
-            const source_index = offsets.tokenToIndex(tree, name_token);
-
-            if (try builder.analyser.lookupSymbolGlobal(handle, name, source_index)) |decl_handle| {
-                try writeCallHint(builder, call, decl_handle);
-            }
+            const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
+            try writeCallHint(builder, call, ty);
         },
         .field_access => {
-            const lhsToken = tree.firstToken(call.ast.fn_expr);
-            const rhsToken = node_data[call.ast.fn_expr].rhs;
-            std.debug.assert(token_tags[rhsToken] == .identifier);
-
-            const start = offsets.tokenToIndex(tree, lhsToken);
-            const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
-
-            // note: we have the ast node, traversing it would probably yield better results
-            // than trying to re-tokenize and re-parse it
-            if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, .{
-                .start = start,
-                .end = rhs_loc.end,
-            })) |ty| {
-                const container_handle = try builder.analyser.resolveDerefType(ty) orelse ty;
-                const symbol = offsets.identifierTokenToNameSlice(tree, rhsToken);
-                if (try container_handle.lookupSymbol(builder.analyser, symbol)) |decl_handle| {
-                    try writeCallHint(builder, call, decl_handle);
-                }
-            }
+            const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
+            try writeCallHint(builder, call, ty);
         },
         else => {
             log.debug("cannot deduce fn expression with tag '{}'", .{node_tags[call.ast.fn_expr]});
