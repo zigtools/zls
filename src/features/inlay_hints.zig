@@ -13,10 +13,130 @@ const Config = @import("../Config.zig");
 
 const data = @import("version_data");
 
-/// don't show inlay hints for the given builtin functions
-/// this option is rare and is therefore build-only and
-/// non-configurable at runtime
-pub const inlay_hints_exclude_builtins: []const u8 = &.{};
+/// don't show inlay hints for builtin functions whose parameter names carry no
+/// meaningful information or are trivial deductible based on the builtin name.
+const excluded_builtins_set = blk: {
+    @setEvalBranchQuota(2000);
+    break :blk std.ComptimeStringMap(void, &.{
+        .{"addrSpaceCast"},
+        .{"addWithOverflow"},
+        .{"alignCast"},
+        .{"alignOf"},
+        .{"as"},
+        // .{"atomicLoad"},
+        // .{"atomicRmw"},
+        // .{"atomicStore"},
+        .{"bitCast"},
+        .{"bitOffsetOf"},
+        .{"bitSizeOf"},
+        .{"breakpoint"}, // no parameters
+        // .{"mulAdd"},
+        .{"byteSwap"},
+        .{"bitReverse"},
+        .{"offsetOf"},
+        // .{"call"},
+        .{"cDefine"},
+        .{"cImport"},
+        .{"cInclude"},
+        .{"clz"},
+        // .{"cmpxchgStrong"},
+        // .{"cmpxchgWeak"},
+        // .{"compileError"},
+        .{"compileLog"}, // variadic
+        .{"constCast"},
+        .{"ctz"},
+        .{"cUndef"},
+        // .{"cVaArg"},
+        // .{"cVaCopy"},
+        // .{"cVaEnd"},
+        // .{"cVaStart"},
+        .{"divExact"},
+        .{"divFloor"},
+        .{"divTrunc"},
+        .{"embedFile"},
+        .{"enumFromInt"},
+        .{"errorFromInt"},
+        .{"errorName"},
+        .{"errorReturnTrace"}, // no parameters
+        .{"errorCast"},
+        // .{"export"},
+        // .{"extern"},
+        // .{"fence"},
+        // .{"field"},
+        // .{"fieldParentPtr"},
+        .{"floatCast"},
+        .{"floatFromInt"},
+        .{"frameAddress"}, // no parameters
+        // .{"hasDecl"},
+        // .{"hasField"},
+        .{"import"},
+        .{"inComptime"}, // no parameters
+        .{"intCast"},
+        .{"intFromBool"},
+        .{"intFromEnum"},
+        .{"intFromError"},
+        .{"intFromFloat"},
+        .{"intFromPtr"},
+        .{"max"},
+        // .{"memcpy"},
+        // .{"memset"},
+        .{"min"},
+        // .{"wasmMemorySize"},
+        // .{"wasmMemoryGrow"},
+        .{"mod"},
+        .{"mulWithOverflow"},
+        // .{"panic"},
+        .{"popCount"},
+        // .{"prefetch"},
+        .{"ptrCast"},
+        .{"ptrFromInt"},
+        .{"rem"},
+        .{"returnAddress"}, // no parameters
+        // .{"select"},
+        // .{"setAlignStack"},
+        .{"setCold"},
+        .{"setEvalBranchQuota"},
+        .{"setFloatMode"},
+        .{"setRuntimeSafety"},
+        // .{"shlExact"},
+        // .{"shlWithOverflow"},
+        // .{"shrExact"},
+        // .{"shuffle"},
+        .{"sizeOf"},
+        // .{"splat"},
+        // .{"reduce"},
+        .{"src"}, // no parameters
+        .{"sqrt"},
+        .{"sin"},
+        .{"cos"},
+        .{"tan"},
+        .{"exp"},
+        .{"exp2"},
+        .{"log"},
+        .{"log2"},
+        .{"log10"},
+        .{"abs"},
+        .{"floor"},
+        .{"ceil"},
+        .{"trunc"},
+        .{"round"},
+        .{"subWithOverflow"},
+        .{"tagName"},
+        .{"This"}, // no parameters
+        .{"trap"}, // no parameters
+        .{"truncate"},
+        .{"Type"},
+        .{"typeInfo"},
+        .{"typeName"},
+        .{"TypeOf"}, // variadic
+        // .{"unionInit"},
+        // .{"Vector"},
+        .{"volatileCast"},
+        // .{"workGroupId"},
+        // .{"workGroupSize"},
+        // .{"workItemId"},
+    });
+};
 
 pub const InlayHint = struct {
     index: usize,
@@ -416,19 +536,16 @@ fn writeNodeInlayHint(
         => {
             if (!builder.config.inlay_hints_show_parameter_name or !builder.config.inlay_hints_show_builtin) return;
 
+            const name = tree.tokenSlice(main_tokens[node]);
+            if (name.len < 2 or excluded_builtins_set.has(name[1..])) return;
+
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node, &buffer).?;
 
             if (params.len == 0) return;
 
-            const name = tree.tokenSlice(main_tokens[node]);
-
-            outer: for (data.builtins) |builtin| {
+            for (data.builtins) |builtin| {
                 if (!std.mem.eql(u8, builtin.name, name)) continue;
-
-                for (inlay_hints_exclude_builtins) |builtin_name| {
-                    if (std.mem.eql(u8, builtin_name, name)) break :outer;
-                }
 
                 try writeBuiltinHint(builder, params, builtin.arguments);
             }
