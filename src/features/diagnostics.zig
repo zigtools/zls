@@ -394,6 +394,9 @@ fn getDiagnosticsFromAstCheck(
     const zig_exe_path = server.config.zig_exe_path.?;
 
     const stderr_bytes = blk: {
+        server.zig_exe_lock.lock();
+        defer server.zig_exe_lock.unlock();
+
         var process = std.process.Child.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
         process.stdin_behavior = .Pipe;
         process.stderr_behavior = .Pipe;
