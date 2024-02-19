@@ -419,7 +419,7 @@ test "semantic tokens - call" {
         \\const alpha = foo(0);
     , &.{
         .{ "fn", .keyword, .{} },
-        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+        .{ "foo", .method, .{ .declaration = true, .generic = true } },
         .{ "a", .parameter, .{ .declaration = true } },
         .{ "anytype", .type, .{} },
         .{ "void", .type, .{} },
@@ -430,7 +430,7 @@ test "semantic tokens - call" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "foo", .function, .{ .generic = true } },
+        .{ "foo", .method, .{ .generic = true } },
         .{ "0", .number, .{} },
     });
 }

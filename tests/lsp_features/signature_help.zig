@@ -201,6 +201,16 @@ test "signature help - self parameter" {
     , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
 }
 
+test "signature help - self parameter is anytype" {
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(self: anytype, a: u32, b: void) bool {}
+        \\};
+        \\const s: S = undefined;
+        \\const foo = s.foo(3,<cursor>);
+    , "fn foo(self: anytype, a: u32, b: void) bool", 2);
+}
+
 test "signature help - anytype" {
     try testSignatureHelp(
         \\fn foo(a: u32, b: anytype, c: u32) void {
