@@ -399,6 +399,7 @@ fn getDiagnosticsFromAstCheck(
 
         var process = std.process.Child.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
         process.stdin_behavior = .Pipe;
+        process.stdout_behavior = .Ignore;
         process.stderr_behavior = .Pipe;
 
         process.spawn() catch |err| {
@@ -410,15 +411,19 @@ fn getDiagnosticsFromAstCheck(
 
         process.stdin = null;
 
-        const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+        const stderr_bytes = try process.stderr.?.readToEndAlloc(server.allocator, std.math.maxInt(usize));
         errdefer server.allocator.free(stderr_bytes);
 
         const term = process.wait() catch |err| {
             log.warn("Failed to await zig ast-check process, error: {}", .{err});
+            server.allocator.free(stderr_bytes);
             return;
         };
 
-        if (term != .Exited) return;
+        if (term != .Exited) {
+            server.allocator.free(stderr_bytes);
+            return;
+        }
         break :blk stderr_bytes;
     };
     defer server.allocator.free(stderr_bytes);
