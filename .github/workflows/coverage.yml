@@ -2,9 +2,13 @@ name: Code Coverage
 
 on:
   push:
+    branches:
+      - master
+  pull_request:
 
 jobs:
   coverage:
+    if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
