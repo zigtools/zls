@@ -114,9 +114,11 @@ fn typeToCompletion(
             analyser.ip,
             payload.index,
         ),
-        .either => |bruh| {
-            for (bruh) |a|
-                try typeToCompletion(server, analyser, arena, list, a.type_with_handle, orig_handle, a.descriptor);
+        .either => |either_entries| {
+            for (either_entries) |entry| {
+                const entry_ty = Analyser.Type{ .data = entry.type_data, .is_type_val = ty.is_type_val };
+                try typeToCompletion(server, analyser, arena, list, entry_ty, orig_handle, entry.descriptor);
+            }
         },
         .error_union,
         .union_tag,

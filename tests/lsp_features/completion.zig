@@ -2170,20 +2170,20 @@ test "either" {
         \\    fn alpha() void {}
         \\};
         \\const Beta = struct {
-        \\    fn beta() void {}
+        \\    fn beta(_: @This()) void {}
         \\};
         \\const foo: if (undefined) Alpha else Beta = undefined;
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
     });
     try testCompletion(
         \\const Alpha = struct {
         \\    fn alpha() void {}
         \\};
         \\const Beta = struct {
-        \\    fn beta() void {}
+        \\    fn beta(_: @This()) void {}
         \\};
         \\const alpha: Alpha = undefined;
         \\const beta: Beta = undefined;
@@ -2191,7 +2191,21 @@ test "either" {
         \\const foo = gamma.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
+    });
+
+    try testCompletion(
+        \\const Alpha = struct {
+        \\    fn alpha() void {}
+        \\};
+        \\const Beta = struct {
+        \\    fn beta(_: @This()) void {}
+        \\};
+        \\const T = if (undefined) Alpha else Beta;
+        \\const bar = T.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: @This()) void" },
     });
 }
 

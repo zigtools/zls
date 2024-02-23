@@ -1759,13 +1759,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) orelse break :blk;
             }
 
-            var either = std.ArrayListUnmanaged(Type.EitherEntry){};
-            if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) |t|
-                try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
-            if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
-                try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
+            var either: std.BoundedArray(Type.TypeWithDescriptor, 2) = .{};
 
-            return Type.fromEither(analyser.arena.allocator(), either.items);
+            if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) |t|
+                either.appendAssumeCapacity(.{ .type = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
+            if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
+                either.appendAssumeCapacity(.{ .type = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
+
+            return Type.fromEither(analyser.arena.allocator(), either.constSlice());
         },
         .@"switch",
         .switch_comma,
@@ -1773,7 +1774,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
-            var either = std.ArrayListUnmanaged(Type.EitherEntry){};
+            var either = std.ArrayListUnmanaged(Type.TypeWithDescriptor){};
 
             for (cases) |case| {
                 const switch_case = tree.fullSwitchCase(case).?;
@@ -1786,7 +1787,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = switch_case.ast.target_expr })) |t|
                     try either.append(analyser.arena.allocator(), .{
-                        .type_with_handle = t,
+                        .type = t,
                         .descriptor = try descriptor.toOwnedSlice(analyser.arena.allocator()),
                     });
             }
@@ -2092,11 +2093,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
     pub const EitherEntry = struct {
-        type_with_handle: Type,
+        /// the `is_type_val` property is inherited from the containing `Type`
+        type_data: Data,
         descriptor: []const u8,
     };
 
-    data: union(enum) {
+    pub const Data = union(enum) {
         /// *T, [*]T, [T], [*c]T
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
@@ -2144,7 +2146,9 @@ pub const Type = struct {
             /// this stores both the type and the value
             index: InternPool.Index,
         },
-    },
+    };
+
+    data: Data,
     /// If true, the type `type`, the attached data is the value of the type value.
     /// ```zig
     /// const foo = u32; // is_type_val == true
@@ -2191,7 +2195,8 @@ pub const Type = struct {
             .either => |entries| {
                 for (entries) |entry| {
                     hasher.update(entry.descriptor);
-                    entry.type_with_handle.hashWithHasher(hasher);
+                    const entry_ty = Type{ .data = entry.type_data, .is_type_val = self.is_type_val };
+                    entry_ty.hashWithHasher(hasher);
                 }
             },
             .ip_index => |payload| {
@@ -2239,7 +2244,9 @@ pub const Type = struct {
                 if (a_entries.len != b_entries.len) return false;
                 for (a_entries, b_entries) |a_entry, b_entry| {
                     if (!std.mem.eql(u8, a_entry.descriptor, b_entry.descriptor)) return false;
-                    if (!a_entry.type_with_handle.eql(b_entry.type_with_handle)) return false;
+                    const a_entry_ty = Type{ .data = a_entry.type_data, .is_type_val = a.is_type_val };
+                    const b_entry_ty = Type{ .data = b_entry.type_data, .is_type_val = b.is_type_val };
+                    if (!a_entry_ty.eql(b_entry_ty)) return false;
                 }
             },
             .ip_index => |a_payload| {
@@ -2268,12 +2275,17 @@ pub const Type = struct {
         };
     }
 
-    pub fn fromEither(arena: std.mem.Allocator, entries: []const Type.EitherEntry) error{OutOfMemory}!?Type {
+    pub const TypeWithDescriptor = struct {
+        type: Type,
+        descriptor: []const u8,
+    };
+
+    pub fn fromEither(arena: std.mem.Allocator, entries: []const TypeWithDescriptor) error{OutOfMemory}!?Type {
         if (entries.len == 0)
             return null;
 
         if (entries.len == 1)
-            return entries[0].type_with_handle;
+            return entries[0].type;
 
         // Note that we don't hash/equate descriptors to remove
         // duplicates
@@ -2281,13 +2293,16 @@ pub const Type = struct {
         const DeduplicatorContext = struct {
             pub fn hash(self: @This(), item: Type.EitherEntry) u32 {
                 _ = self;
-                return item.type_with_handle.hash32();
+                const ty = Type{ .data = item.type_data, .is_type_val = true };
+                return ty.hash32();
             }
 
             pub fn eql(self: @This(), a: Type.EitherEntry, b: Type.EitherEntry, b_index: usize) bool {
                 _ = b_index;
                 _ = self;
-                return a.type_with_handle.eql(b.type_with_handle);
+                const a_ty = Type{ .data = a.type_data, .is_type_val = true };
+                const b_ty = Type{ .data = b.type_data, .is_type_val = true };
+                return a_ty.eql(b_ty);
             }
         };
         const Deduplicator = std.ArrayHashMapUnmanaged(Type.EitherEntry, void, DeduplicatorContext, true);
@@ -2298,14 +2313,18 @@ pub const Type = struct {
         var has_type_val: bool = false;
 
         for (entries) |entry| {
-            try deduplicator.put(arena, entry, {});
-            if (entry.type_with_handle.is_type_val) {
+            try deduplicator.put(
+                arena,
+                .{ .type_data = entry.type.data, .descriptor = entry.descriptor },
+                {},
+            );
+            if (entry.type.is_type_val) {
                 has_type_val = true;
             }
         }
 
         if (deduplicator.count() == 1)
-            return entries[0].type_with_handle;
+            return entries[0].type;
 
         return .{
             .data = .{ .either = try arena.dupe(Type.EitherEntry, deduplicator.keys()) },
@@ -2325,7 +2344,8 @@ pub const Type = struct {
         switch (ty.data) {
             .either => |entries| {
                 for (entries) |entry| {
-                    try entry.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types);
+                    const entry_ty = Type{ .data = entry.type_data, .is_type_val = ty.is_type_val };
+                    try entry_ty.getAllTypesWithHandlesArrayList(arena, all_types);
                 }
             },
             else => try all_types.append(arena, ty),
@@ -2504,7 +2524,8 @@ pub const Type = struct {
             .either => |entries| {
                 // TODO: Return all options instead of first valid one
                 for (entries) |entry| {
-                    if (try entry.type_with_handle.lookupSymbol(analyser, symbol)) |decl| {
+                    const entry_ty = Type{ .data = entry.type_data, .is_type_val = self.is_type_val };
+                    if (try entry_ty.lookupSymbol(analyser, symbol)) |decl| {
                         return decl;
                     }
                 }
@@ -3519,7 +3540,7 @@ pub const DeclWithHandle = struct {
                     // TODO: Set `workspace` to true; current problems
                     // - we gather dependencies, not dependents
 
-                    var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
+                    var possible = std.ArrayListUnmanaged(Type.TypeWithDescriptor){};
 
                     for (refs.items) |ref| {
                         const handle = analyser.store.getOrLoadHandle(ref.uri).?;
@@ -3552,7 +3573,7 @@ pub const DeclWithHandle = struct {
 
                         const loc = offsets.tokenToPosition(tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
                         try possible.append(analyser.arena.allocator(), .{
-                            .type_with_handle = ty,
+                            .type = ty,
                             .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
                         });
                     }
@@ -3766,7 +3787,7 @@ fn iterateUsingnamespaceContainerSymbols(
         },
         .either => |entries| {
             for (entries) |entry| {
-                switch (entry.type_with_handle.data) {
+                switch (entry.type_data) {
                     .other => |expr| {
                         try analyser.iterateSymbolsContainer(
                             expr,
