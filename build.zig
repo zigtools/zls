@@ -41,7 +41,7 @@ pub fn build(b: *Build) !void {
     const enable_tracy_allocation = b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
-    const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
     const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
@@ -197,7 +197,7 @@ pub fn build(b: *Build) !void {
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
         .optimize = optimize,
-        .filter = test_filter,
+        .filters = test_filters,
         .single_threaded = single_threaded,
         .use_llvm = use_llvm,
         .use_lld = use_llvm,
@@ -211,7 +211,7 @@ pub fn build(b: *Build) !void {
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
         .optimize = optimize,
-        .filter = test_filter,
+        .filters = test_filters,
         .single_threaded = single_threaded,
         .use_llvm = use_llvm,
         .use_lld = use_llvm,
