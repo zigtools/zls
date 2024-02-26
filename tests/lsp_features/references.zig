@@ -42,7 +42,7 @@ test "references" {
     );
 }
 
-test "references - global scope" {
+test "global scope" {
     try testReferences(
         \\const foo = <0>;
         \\const <0> = 0;
@@ -50,7 +50,7 @@ test "references - global scope" {
     );
 }
 
-test "references - local scope" {
+test "local scope" {
     try testReferences(
         \\fn foo(<0>: u32, bar: u32) void {
         \\    return <0> + bar;
@@ -69,7 +69,7 @@ test "references - local scope" {
     );
 }
 
-test "references - destructuring" {
+test "destructuring" {
     try testReferences(
         \\const blk = {
         \\    const <0>, const foo = .{ 1, 2 };
@@ -84,7 +84,7 @@ test "references - destructuring" {
     );
 }
 
-test "references - for/while capture" {
+test "for/while capture" {
     try testReferences(
         \\const blk = {
         \\    for ("") |<0>| {
@@ -97,7 +97,7 @@ test "references - for/while capture" {
     );
 }
 
-test "references - struct field access" {
+test "struct field access" {
     try testReferences(
         \\const S = struct {<0>: u32 = 3};
         \\pub fn foo() bool {
@@ -107,7 +107,7 @@ test "references - struct field access" {
     );
 }
 
-test "references - struct decl access" {
+test "struct decl access" {
     try testReferences(
         \\const S = struct {
         \\    fn <0>() void {}
@@ -122,7 +122,7 @@ test "references - struct decl access" {
     );
 }
 
-test "references - while continue expression" {
+test "while continue expression" {
     try testReferences(
         \\ pub fn foo() void {
         \\     var <0>: u32 = 0;
@@ -131,7 +131,7 @@ test "references - while continue expression" {
     );
 }
 
-test "references - test with identifier" {
+test "test with identifier" {
     try testReferences(
         \\pub fn <0>() bool {}
         \\test <0> {}
@@ -139,7 +139,7 @@ test "references - test with identifier" {
     );
 }
 
-test "references - label" {
+test "label" {
     try testReferences(
         \\const foo = <0>: {
         \\    break :<0> 0;
@@ -147,7 +147,7 @@ test "references - label" {
     );
 }
 
-test "references - asm" {
+test "asm" {
     try testReferences(
         \\fn foo(<0>: u32) void {
         \\    asm ("bogus"
@@ -165,7 +165,7 @@ test "references - asm" {
     );
 }
 
-test "references - function header" {
+test "function header" {
     try testReferences(
         \\fn foo(<0>: anytype) @TypeOf(<0>) {}
     );
@@ -174,7 +174,7 @@ test "references - function header" {
     );
 }
 
-test "references - cross-file reference" {
+test "cross-file reference" {
     if (true) return error.SkipZigTest; // TODO
     try testMFReferences(&.{
         \\pub const <0> = struct {};

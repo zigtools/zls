@@ -8,11 +8,11 @@ const types = zls.types;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "foldingRange - empty" {
+test "empty" {
     try testFoldingRange("", &.{});
 }
 
-test "foldingRange - container type without members" {
+test "container type without members" {
     try testFoldingRange(
         \\const S = struct {
         \\};
@@ -28,7 +28,7 @@ test "foldingRange - container type without members" {
     });
 }
 
-test "foldingRange - doc comment" {
+test "doc comment" {
     try testFoldingRange(
         \\/// hello
         \\/// world
@@ -38,7 +38,7 @@ test "foldingRange - doc comment" {
     });
 }
 
-test "foldingRange - region" {
+test "region" {
     try testFoldingRange(
         \\const foo = 0;
         \\//#region
@@ -62,7 +62,7 @@ test "foldingRange - region" {
     });
 }
 
-test "foldingRange - if" {
+test "if" {
     try testFoldingRange(
         \\const foo = if (false) {
         \\
@@ -82,7 +82,7 @@ test "foldingRange - if" {
     });
 }
 
-test "foldingRange - for/while" {
+test "for/while" {
     try testFoldingRange(
         \\const foo = for ("") |_| {
         \\
@@ -99,7 +99,7 @@ test "foldingRange - for/while" {
     });
 }
 
-test "foldingRange - switch" {
+test "switch" {
     try testFoldingRange(
         \\const foo = switch (5) {
         \\    0 => {},
@@ -132,7 +132,7 @@ test "foldingRange - switch" {
     });
 }
 
-test "foldingRange - function" {
+test "function" {
     try testFoldingRange(
         \\fn main() u32 {
         \\    return 1 + 1;
@@ -163,7 +163,7 @@ test "foldingRange - function" {
     });
 }
 
-test "foldingRange - function with doc comment" {
+test "function with doc comment" {
     try testFoldingRange(
         \\/// this is
         \\/// a function
@@ -181,7 +181,7 @@ test "foldingRange - function with doc comment" {
     });
 }
 
-test "foldingRange - container decl" {
+test "container decl" {
     try testFoldingRange(
         \\const Foo = struct {
         \\  alpha: u32,
@@ -241,7 +241,7 @@ test "foldingRange - container decl" {
     });
 }
 
-test "foldingRange - call" {
+test "call" {
     try testFoldingRange(
         \\extern fn foo(a: bool, b: ?usize) void;
         \\const result = foo(
@@ -253,7 +253,7 @@ test "foldingRange - call" {
     });
 }
 
-test "foldingRange - multi-line string literal" {
+test "multi-line string literal" {
     try testFoldingRange(
         \\const foo =
         \\    \\hello
@@ -264,7 +264,7 @@ test "foldingRange - multi-line string literal" {
     });
 }
 
-test "foldingRange - invalid condition within a `switch`" {
+test "invalid condition within a `switch`" {
     try testFoldingRange(
         \\switch (a.) {
         \\}
@@ -273,7 +273,7 @@ test "foldingRange - invalid condition within a `switch`" {
     });
 }
 
-test "foldingRange - weird code" {
+test "weird code" {
     // the expected output is irrelevant, just ensure no crash
     try testFoldingRange(
         \\if ( {fn foo()}

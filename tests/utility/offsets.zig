@@ -7,7 +7,7 @@ const Loc = offsets.Loc;
 
 const Ast = std.zig.Ast;
 
-test "offsets - index <-> Position" {
+test "index <-> Position" {
     try testIndexPosition("", 0, 0, .{ 0, 0, 0 });
 
     try testIndexPosition("hello from zig", 10, 0, .{ 10, 10, 10 });
@@ -32,7 +32,7 @@ test "offsets - index <-> Position" {
     try testIndexPosition("a¶↉🠁\n", 11, 1, .{ 0, 0, 0 });
 }
 
-test "offsets - positionToIndex where character value is greater than the line length" {
+test "positionToIndex where character value is greater than the line length" {
     try testPositionToIndex("", 0, 0, .{ 1, 1, 1 });
 
     try testPositionToIndex("\n", 0, 0, .{ 1, 1, 1 });
@@ -50,7 +50,7 @@ test "offsets - positionToIndex where character value is greater than the line l
     try testPositionToIndex("a¶↉🠁\na¶↉🠁\n", 21, 1, .{ 11, 6, 5 });
 }
 
-test "offsets - tokenToLoc" {
+test "tokenToLoc" {
     try testTokenToLoc("foo", 0, 0, 3);
     try testTokenToLoc("foo\n", 0, 0, 3);
     try testTokenToLoc("\nfoo", 0, 1, 4);
@@ -58,14 +58,14 @@ test "offsets - tokenToLoc" {
     try testTokenToLoc(";;", 1, 1, 2);
 }
 
-test "offsets - tokenIndexToLoc" {
+test "tokenIndexToLoc" {
     try testTokenIndexToLoc("", 0, 0, 0);
     try testTokenIndexToLoc("foo", 0, 0, 3);
     try testTokenIndexToLoc("0, 0", 3, 3, 4);
     try testTokenIndexToLoc(" bar ", 0, 1, 4);
 }
 
-test "offsets - identifierIndexToNameLoc" {
+test "identifierIndexToNameLoc" {
     try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice("", 0));
     try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" ", 0));
     try std.testing.expectEqualStrings("", offsets.identifierIndexToNameSlice(" world", 0));
@@ -79,7 +79,7 @@ test "offsets - identifierIndexToNameLoc" {
     try std.testing.expectEqualStrings("world", offsets.identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
 }
 
-test "offsets - lineLocAtIndex" {
+test "lineLocAtIndex" {
     try std.testing.expectEqualStrings("", offsets.lineSliceAtIndex("", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceAtIndex("\n", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceAtIndex("\n", 1));
@@ -92,7 +92,7 @@ test "offsets - lineLocAtIndex" {
     try std.testing.expectEqualStrings("foo", offsets.lineSliceAtIndex("foo\n", 3));
 }
 
-test "offsets - multilineLocAtIndex" {
+test "multilineLocAtIndex" {
     const text =
         \\line0
         \\line1
@@ -109,7 +109,7 @@ test "offsets - multilineLocAtIndex" {
     try std.testing.expectEqualStrings("line3\nline4", offsets.multilineSliceAtIndex(text, 27, 1));
 }
 
-test "offsets - lineLocUntilIndex" {
+test "lineLocUntilIndex" {
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("\n", 0));
     try std.testing.expectEqualStrings("", offsets.lineSliceUntilIndex("\n", 1));
@@ -122,7 +122,7 @@ test "offsets - lineLocUntilIndex" {
     try std.testing.expectEqualStrings("foo", offsets.lineSliceUntilIndex("foo\n", 3));
 }
 
-test "offsets - convertPositionEncoding" {
+test "convertPositionEncoding" {
     try testConvertPositionEncoding("", 0, 0, .{ 0, 0, 0 });
     try testConvertPositionEncoding("\n", 0, 0, .{ 0, 0, 0 });
     try testConvertPositionEncoding("\n", 1, 0, .{ 0, 0, 0 });
@@ -130,7 +130,7 @@ test "offsets - convertPositionEncoding" {
     try testConvertPositionEncoding("a¶↉🠁", 0, 10, .{ 10, 5, 4 });
     try testConvertPositionEncoding("a¶↉🠁\na¶↉🠁", 1, 6, .{ 6, 3, 3 });
 }
-test "offsets - locIntersect" {
+test "locIntersect" {
     const a = Loc{ .start = 2, .end = 5 };
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 0, .end = 2 }) == false);
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 1, .end = 3 }) == true);
@@ -140,7 +140,7 @@ test "offsets - locIntersect" {
     try std.testing.expect(offsets.locIntersect(a, .{ .start = 5, .end = 7 }) == false);
 }
 
-test "offsets - locInside" {
+test "locInside" {
     const outer = Loc{ .start = 2, .end = 5 };
     try std.testing.expect(offsets.locInside(.{ .start = 0, .end = 2 }, outer) == false);
     try std.testing.expect(offsets.locInside(.{ .start = 1, .end = 3 }, outer) == false);
@@ -150,7 +150,7 @@ test "offsets - locInside" {
     try std.testing.expect(offsets.locInside(.{ .start = 5, .end = 7 }, outer) == false);
 }
 
-test "offsets - locMerge" {
+test "locMerge" {
     const a = Loc{ .start = 2, .end = 5 };
     try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 0, .end = 2 }), Loc{ .start = 0, .end = 5 });
     try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 1, .end = 3 }), Loc{ .start = 1, .end = 5 });
@@ -160,7 +160,7 @@ test "offsets - locMerge" {
     try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 5, .end = 7 }), Loc{ .start = 2, .end = 7 });
 }
 
-test "offsets - advancePosition" {
+test "advancePosition" {
     try testAdvancePosition("", 0, 0, 0, 0, 0, 0);
     try testAdvancePosition("foo", 0, 3, 0, 0, 0, 3);
     try testAdvancePosition("\n", 1, 0, 0, 0, 0, 1);
@@ -168,7 +168,7 @@ test "offsets - advancePosition" {
     try testAdvancePosition("foo\nbar", 1, 3, 1, 0, 4, 7);
 }
 
-test "offsets - countCodeUnits" {
+test "countCodeUnits" {
     try testCountCodeUnits("", .{ 0, 0, 0 });
     try testCountCodeUnits("a\na", .{ 3, 3, 3 });
     try testCountCodeUnits("a¶↉🠁", .{ 10, 5, 4 });
@@ -176,7 +176,7 @@ test "offsets - countCodeUnits" {
     try testCountCodeUnits("🇺🇸 🇩🇪", .{ 17, 9, 5 });
 }
 
-test "offsets - getNCodeUnitByteCount" {
+test "getNCodeUnitByteCount" {
     try testGetNCodeUnitByteCount("", .{ 0, 0, 0 });
     try testGetNCodeUnitByteCount("foo", .{ 2, 2, 2 });
     try testGetNCodeUnitByteCount("a¶🠁🠁", .{ 7, 4, 3 });

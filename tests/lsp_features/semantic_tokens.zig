@@ -10,11 +10,11 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "semantic tokens - empty" {
+test "empty" {
     try testSemanticTokens("", &.{});
 }
 
-test "semantic tokens - comment" {
+test "comment" {
     try testSemanticTokens(
         \\// hello world
     , &.{
@@ -43,7 +43,7 @@ test "semantic tokens - comment" {
         .{ "a", .variable, .{ .declaration = true } },
     });
 }
-test "semantic tokens - doc comment" {
+test "doc comment" {
     try testSemanticTokens(
         \\/// line 1
         \\/// line 2
@@ -64,7 +64,7 @@ test "semantic tokens - doc comment" {
     });
 }
 
-test "semantic tokens - string literals" {
+test "string literals" {
     try testSemanticTokens(
         \\const alpha = "";
     , &.{
@@ -98,7 +98,7 @@ test "semantic tokens - string literals" {
     });
 }
 
-test "semantic tokens - type literals" {
+test "type literals" {
     try testSemanticTokens(
         \\bool,
         \\f16,
@@ -114,7 +114,7 @@ test "semantic tokens - type literals" {
     });
 }
 
-test "semantic tokens - value literals" {
+test "value literals" {
     try testSemanticTokens(
         \\true,
         \\false,
@@ -130,7 +130,7 @@ test "semantic tokens - value literals" {
     });
 }
 
-test "semantic tokens - char literals" {
+test "char literals" {
     try testSemanticTokens(
         \\var alpha = ' ';
     , &.{
@@ -141,7 +141,7 @@ test "semantic tokens - char literals" {
     });
 }
 
-test "semantic tokens - var decl" {
+test "var decl" {
     try testSemanticTokens(
         \\var alpha = 3;
     , &.{
@@ -185,7 +185,7 @@ test "semantic tokens - var decl" {
     });
 }
 
-test "semantic tokens - var decl destructure" {
+test "var decl destructure" {
     try testSemanticTokens(
         \\const foo = {
         \\    var alpha: bool, var beta = .{ 1, 2 };
@@ -205,7 +205,7 @@ test "semantic tokens - var decl destructure" {
     });
 }
 
-test "semantic tokens - local var decl" {
+test "local var decl" {
     try testSemanticTokens(
         \\const alpha = {
         \\    comptime var beta: u32 = 3;
@@ -224,7 +224,7 @@ test "semantic tokens - local var decl" {
     });
 }
 
-test "semantic tokens - escaped identifier" {
+test "escaped identifier" {
     try testSemanticTokens(
         \\var @"@" = 3;
     , &.{
@@ -235,7 +235,7 @@ test "semantic tokens - escaped identifier" {
     });
 }
 
-test "semantic tokens - operators" {
+test "operators" {
     try testSemanticTokens(
         \\var alpha = 3 + 3;
     , &.{
@@ -279,7 +279,7 @@ test "semantic tokens - operators" {
     });
 }
 
-test "semantic tokens - field access with @import" {
+test "field access with @import" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
@@ -310,7 +310,7 @@ test "semantic tokens - field access with @import" {
     });
 }
 
-test "semantic tokens - field access" {
+test "field access" {
     try testSemanticTokens(
         \\const S = struct {
         \\    const @"u32" = 5;
@@ -334,7 +334,7 @@ test "semantic tokens - field access" {
     });
 }
 
-test "semantic tokens - field access on unknown" {
+test "field access on unknown" {
     try testSemanticTokens(
         \\const alpha = Unknown.foo;
     , &.{
@@ -361,7 +361,7 @@ test "semantic tokens - field access on unknown" {
     });
 }
 
-test "semantic tokens - alias" {
+test "alias" {
     try testSemanticTokens(
         \\extern fn foo() u32;
         \\const bar = foo;
@@ -378,7 +378,7 @@ test "semantic tokens - alias" {
     });
 }
 
-test "semantic tokens - call" {
+test "call" {
     try testSemanticTokens(
         \\fn foo() void {}
         \\const alpha = foo();
@@ -435,7 +435,7 @@ test "semantic tokens - call" {
     });
 }
 
-test "semantic tokens - function call on return value of generic function" {
+test "function call on return value of generic function" {
     try testSemanticTokens(
         \\const S = struct {
         \\    fn foo() void {}
@@ -492,7 +492,7 @@ test "semantic tokens - function call on return value of generic function" {
     });
 }
 
-test "semantic tokens - catch" {
+test "catch" {
     try testSemanticTokens(
         \\var alpha = a catch b;
     , &.{
@@ -516,7 +516,7 @@ test "semantic tokens - catch" {
     });
 }
 
-test "semantic tokens - try" {
+test "try" {
     try testSemanticTokens(
         \\var alpha = try undefined;
     , &.{
@@ -528,7 +528,7 @@ test "semantic tokens - try" {
     });
 }
 
-test "semantic tokens - slicing" {
+test "slicing" {
     try testSemanticTokens(
         \\var alpha = a[0..1];
     , &.{
@@ -552,7 +552,7 @@ test "semantic tokens - slicing" {
     });
 }
 
-test "semantic tokens - enum literal" {
+test "enum literal" {
     try testSemanticTokens(
         \\var alpha = .beta;
     , &.{
@@ -563,7 +563,7 @@ test "semantic tokens - enum literal" {
     });
 }
 
-test "semantic tokens - error literal" {
+test "error literal" {
     try testSemanticTokens(
         \\var alpha = error.OutOfMemory;
     , &.{
@@ -575,7 +575,7 @@ test "semantic tokens - error literal" {
     });
 }
 
-test "semantic tokens - array literal" {
+test "array literal" {
     try testSemanticTokens(
         \\var alpha = [_]u32{ 1, 2 };
     , &.{
@@ -597,7 +597,7 @@ test "semantic tokens - array literal" {
     });
 }
 
-test "semantic tokens - struct literal" {
+test "struct literal" {
     try testSemanticTokens(
         \\var alpha = .{};
     , &.{
@@ -643,7 +643,7 @@ test "semantic tokens - struct literal" {
     });
 }
 
-test "semantic tokens - optional types" {
+test "optional types" {
     try testSemanticTokens(
         \\const alpha = ?u32;
     , &.{
@@ -655,7 +655,7 @@ test "semantic tokens - optional types" {
     });
 }
 
-test "semantic tokens - array types" {
+test "array types" {
     try testSemanticTokens(
         \\const alpha = [1]u32;
     , &.{
@@ -677,7 +677,7 @@ test "semantic tokens - array types" {
     });
 }
 
-test "semantic tokens - pointer types" {
+test "pointer types" {
     try testSemanticTokens(
         \\const alpha = *u32;
     , &.{
@@ -729,7 +729,7 @@ test "semantic tokens - pointer types" {
     });
 }
 
-test "semantic tokens - anyframe type" {
+test "anyframe type" {
     try testSemanticTokens(
         \\const alpha = anyframe->u32;
     , &.{
@@ -741,7 +741,7 @@ test "semantic tokens - anyframe type" {
     });
 }
 
-test "semantic tokens - error union types" {
+test "error union types" {
     try testSemanticTokens(
         \\const alpha = u32!u32;
     , &.{
@@ -753,7 +753,7 @@ test "semantic tokens - error union types" {
     });
 }
 
-test "semantic tokens - usingnamespace" {
+test "usingnamespace" {
     try testSemanticTokens(
         \\const Foo = struct {
         \\    usingnamespace {};
@@ -787,7 +787,7 @@ test "semantic tokens - usingnamespace" {
     });
 }
 
-test "semantic tokens - container declarations" {
+test "container declarations" {
     try testSemanticTokens(
         \\const Foo = struct {
         \\    /// some
@@ -822,7 +822,7 @@ test "semantic tokens - container declarations" {
     });
 }
 
-test "semantic tokens - root struct" {
+test "root struct" {
     try testSemanticTokens(
         \\alpha: u32,
         \\beta: void,
@@ -856,7 +856,7 @@ test "semantic tokens - root struct" {
     });
 }
 
-test "semantic tokens - struct" {
+test "struct" {
     try testSemanticTokens(
         \\const Foo = struct {};
     , &.{
@@ -941,7 +941,7 @@ test "semantic tokens - struct" {
     });
 }
 
-test "semantic tokens - union" {
+test "union" {
     try testSemanticTokens(
         \\const Foo = union {};
     , &.{
@@ -1014,7 +1014,7 @@ test "semantic tokens - union" {
     });
 }
 
-test "semantic tokens - enum" {
+test "enum" {
     try testSemanticTokens(
         \\const Foo = enum {};
     , &.{
@@ -1049,7 +1049,7 @@ test "semantic tokens - enum" {
     });
 }
 
-test "semantic tokens - enum member" {
+test "enum member" {
     try testSemanticTokens(
         \\const Foo = enum { bar, baz };
         \\const alpha = Foo.bar;
@@ -1075,7 +1075,7 @@ test "semantic tokens - enum member" {
     });
 }
 
-test "semantic tokens - error set" {
+test "error set" {
     try testSemanticTokens(
         \\const Foo = error {};
     , &.{
@@ -1097,7 +1097,7 @@ test "semantic tokens - error set" {
     });
 }
 
-test "semantic tokens - error set member" {
+test "error set member" {
     try testSemanticTokens(
         \\const Foo = error {
         \\    OutOfMemory,
@@ -1118,7 +1118,7 @@ test "semantic tokens - error set member" {
     });
 }
 
-test "semantic tokens - opaque" {
+test "opaque" {
     try testSemanticTokens(
         \\const Foo = opaque {};
     , &.{
@@ -1129,7 +1129,7 @@ test "semantic tokens - opaque" {
     });
 }
 
-test "semantic tokens - function" {
+test "function" {
     try testSemanticTokens(
         \\fn foo() void {}
     , &.{
@@ -1230,7 +1230,7 @@ test "semantic tokens - function" {
     });
 }
 
-test "semantic tokens - method" {
+test "method" {
     try testSemanticTokens(
         \\const S = struct {
         \\    fn create() S {}
@@ -1254,7 +1254,7 @@ test "semantic tokens - method" {
     });
 }
 
-test "semantic tokens - builtin fuctions" {
+test "builtin fuctions" {
     try testSemanticTokens(
         \\const foo = @as(type, u32);
     , &.{
@@ -1267,7 +1267,7 @@ test "semantic tokens - builtin fuctions" {
     });
 }
 
-test "semantic tokens - block" {
+test "block" {
     try testSemanticTokens(
         \\const foo = blk: {};
     , &.{
@@ -1291,7 +1291,7 @@ test "semantic tokens - block" {
     });
 }
 
-test "semantic tokens - if" {
+test "if" {
     try testSemanticTokens(
         \\const foo = if (false) {};
     , &.{
@@ -1339,7 +1339,7 @@ test "semantic tokens - if" {
     });
 }
 
-test "semantic tokens - if error union with invalid then expression" {
+test "if error union with invalid then expression" {
     try testSemanticTokens(
         \\const foo = 
         \\  if (undefined) |value| {
@@ -1364,7 +1364,7 @@ test "semantic tokens - if error union with invalid then expression" {
     });
 }
 
-test "semantic tokens - while" {
+test "while" {
     try testSemanticTokens(
         \\const foo = while (false) {};
     , &.{
@@ -1416,7 +1416,7 @@ test "semantic tokens - while" {
     });
 }
 
-test "semantic tokens - for" {
+test "for" {
     try testSemanticTokens(
         \\const foo = for ("") {};
     , &.{
@@ -1455,7 +1455,7 @@ test "semantic tokens - for" {
     });
 }
 
-test "semantic tokens - for with invalid capture" {
+test "for with invalid capture" {
     try testSemanticTokens(
         \\for (foo bar) baz
     , &.{
@@ -1486,7 +1486,7 @@ test "semantic tokens - for with invalid capture" {
     });
 }
 
-test "semantic tokens - switch" {
+test "switch" {
     try testSemanticTokens(
         \\const foo = switch (3) {};
     , &.{
@@ -1529,7 +1529,7 @@ test "semantic tokens - switch" {
     });
 }
 
-test "semantic tokens - defer" {
+test "defer" {
     try testSemanticTokens(
         \\fn foo() void {
         \\    defer {};
@@ -1542,7 +1542,7 @@ test "semantic tokens - defer" {
     });
 }
 
-test "semantic tokens - errdefer" {
+test "errdefer" {
     try testSemanticTokens(
         \\fn foo() void {
         \\    errdefer {};
@@ -1566,7 +1566,7 @@ test "semantic tokens - errdefer" {
     });
 }
 
-test "semantic tokens - test decl" {
+test "test decl" {
     try testSemanticTokens(
         \\test "test inside a test" {}
     , &.{
@@ -1597,7 +1597,7 @@ test "semantic tokens - test decl" {
     });
 }
 
-test "semantic tokens - assembly" {
+test "assembly" {
     try testSemanticTokens(
         \\fn syscall1(number: usize, arg1: usize) usize {
         \\    return asm volatile ("syscall"
@@ -1656,7 +1656,7 @@ const S = struct {
 };
 const bar = S.foo;
 
-test "semantic tokens - deprecated" {
+test "deprecated" {
     try testSemanticTokens(
         \\const foo = @compileError("some message");
     , &.{
@@ -1706,7 +1706,7 @@ test "semantic tokens - deprecated" {
     });
 }
 
-test "semantic tokens - recursive usingnamespace" {
+test "recursive usingnamespace" {
     // this test is supposed to check against infinite recursion when resolving usingnamespace
     try testSemanticTokens(
         \\const A = struct {
@@ -1722,7 +1722,7 @@ test "semantic tokens - recursive usingnamespace" {
     });
 }
 
-test "semantic tokens - weird code" {
+test "weird code" {
     // the expected output is irrelevant, just ensure no crash
     try testSemanticTokens(
         \\0"" (}; @compileErrors.a

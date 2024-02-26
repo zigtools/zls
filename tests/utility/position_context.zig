@@ -7,7 +7,7 @@ const offsets = zls.offsets;
 
 const allocator = std.testing.allocator;
 
-test "position context - var access" {
+test "var access" {
     try testContext(
         \\const a_var =<cursor> identifier;
     ,
@@ -116,7 +116,7 @@ test "position context - var access" {
     );
 }
 
-test "position context - field access" {
+test "field access" {
     try testContext(
         \\if (bar.<cursor>field == foo) {
     ,
@@ -258,7 +258,7 @@ test "position context - field access" {
     );
 }
 
-test "position context - builtin" {
+test "builtin" {
     try testContext(
         \\var foo = <cursor>@
     ,
@@ -316,7 +316,7 @@ test "position context - builtin" {
     );
 }
 
-test "position context - comment" {
+test "comment" {
     try testContext(
         \\// i am<cursor> a test
     ,
@@ -331,7 +331,7 @@ test "position context - comment" {
     );
 }
 
-test "position context - import/embedfile string literal" {
+test "import/embedfile string literal" {
     try testContext(
         \\const std = @import("s<cursor>t");
     ,
@@ -358,7 +358,7 @@ test "position context - import/embedfile string literal" {
     );
 }
 
-test "position context - string literal" {
+test "string literal" {
     try testContext(
         \\var foo = "he<cursor>llo world!";
     ,
@@ -373,7 +373,7 @@ test "position context - string literal" {
     );
 }
 
-test "position context - global error set" {
+test "global error set" {
     // TODO why is this a .var_access instead of a .global_error_set?
     // try testContext(
     //     \\fn foo() <cursor>error!void {
@@ -421,7 +421,7 @@ test "position context - global error set" {
     // );
 }
 
-test "position context - enum literal" {
+test "enum literal" {
     try testContext(
         \\var foo = .<cursor>tag;
     ,
@@ -454,7 +454,7 @@ test "position context - enum literal" {
     );
 }
 
-test "position context - label" {
+test "label" {
     try testContext(
         \\var foo = blk: { break <cursor>:blk null };
     ,
@@ -481,7 +481,7 @@ test "position context - label" {
     );
 }
 
-test "position context - empty" {
+test "empty" {
     try testContext(
         \\<cursor>
     ,

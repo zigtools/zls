@@ -6,7 +6,7 @@ const URI = zls.URI;
 
 const allocator = std.testing.allocator;
 
-test "uri - parse (Windows)" {
+test "parse (Windows)" {
     if (builtin.os.tag == .windows) {
         const parseWin = try URI.parse(allocator, "file:///c%3A/main.zig");
         defer allocator.free(parseWin);
@@ -18,7 +18,7 @@ test "uri - parse (Windows)" {
     }
 }
 
-test "uri - parse (Unix-style)" {
+test "parse (Unix-style)" {
     if (builtin.os.tag != .windows) {
         const parseUnix = try URI.parse(allocator, "file:///home/main.zig");
         defer allocator.free(parseUnix);
@@ -30,7 +30,7 @@ test "uri - parse (Unix-style)" {
     }
 }
 
-test "uri - fromPath" {
+test "fromPath" {
     if (builtin.os.tag == .windows) {
         const fromPathWin = try URI.fromPath(allocator, "c:\\main.zig");
         defer allocator.free(fromPathWin);
@@ -44,7 +44,7 @@ test "uri - fromPath" {
     }
 }
 
-test "uri - pathRelative" {
+test "pathRelative" {
     const join1 = try URI.pathRelative(allocator, "file:///project/zig", "/src/main+.zig");
     defer allocator.free(join1);
     try std.testing.expectEqualStrings("file:///project/zig/src/main%2B.zig", join1);

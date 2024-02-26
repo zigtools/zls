@@ -25,13 +25,13 @@ test "zig compile server - translate c" {
     try std.testing.expect(result2 == .failure);
 }
 
-test "convertCInclude - empty" {
+test "empty" {
     try testConvertCInclude("@cImport()", "");
     try testConvertCInclude("@cImport({})", "");
     try testConvertCInclude("@cImport({{}, {}})", "");
 }
 
-test "convertCInclude - cInclude" {
+test "cInclude" {
     try testConvertCInclude(
         \\@cImport(@cInclude("foo.zig"))
     ,
@@ -46,7 +46,7 @@ test "convertCInclude - cInclude" {
     );
 }
 
-test "convertCInclude - cDefine" {
+test "cDefine" {
     try testConvertCInclude(
         \\@cImport(@cDefine("FOO", "BAR"))
     ,
@@ -59,7 +59,7 @@ test "convertCInclude - cDefine" {
     );
 }
 
-test "convertCInclude - cUndef" {
+test "cUndef" {
     try testConvertCInclude(
         \\@cImport(@cUndef("FOO"))
     ,
