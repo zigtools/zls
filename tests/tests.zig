@@ -3,7 +3,6 @@ comptime {
 
     _ = @import("utility/ast.zig");
     _ = @import("utility/position_context.zig");
-    _ = @import("utility/uri.zig");
     _ = @import("utility/diff.zig");
 
     _ = @import("lifecycle.zig");
