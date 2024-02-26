@@ -92,9 +92,6 @@ global_cache_path: ?[]const u8 = null,
 /// Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`
 build_runner_global_cache_path: ?[]const u8 = null,
 
-/// Completions confirm behavior. If 'true', replace the text after the cursor
-completions_with_replace: bool = true,
-
 /// When false, the function signature of completion results is hidden. Improves readability in some editors
 completion_label_details: bool = true,
 

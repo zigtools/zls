@@ -149,11 +149,6 @@
             "type": "string",
             "default": null
         },
-        "completions_with_replace": {
-            "description": "Completions confirm behavior. If 'true', replace the text after the cursor",
-            "type": "boolean",
-            "default": true
-        },
         "completion_label_details": {
             "description": "When false, the function signature of completion results is hidden. Improves readability in some editors",
             "type": "boolean",
