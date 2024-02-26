@@ -252,7 +252,7 @@ fn nodeToCompletion(
                         .include_name = true,
                         .skip_first_param = skip_self_param,
                         .parameters = .{ .show = .{
-                            .include_modifiers = false,
+                            .include_modifiers = true,
                             .include_names = true,
                             .include_types = true,
                         } },
