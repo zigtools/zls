@@ -91,16 +91,19 @@ const Builder = struct {
     }
 };
 
-/// `call` is the function call
-/// `ty` should be a function protototype
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(builder: *Builder, call: Ast.full.Call, ty: Analyser.Type) !void {
+fn writeCallHint(
+    builder: *Builder,
+    /// The function call.
+    call: Ast.full.Call,
+) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = builder.handle;
     const tree = handle.tree;
 
+    const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
     const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
 
@@ -116,7 +119,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, ty: Analyser.Type) !voi
     }
 
     const has_self_param = call.ast.params.len + 1 == params.items.len and
-        try builder.analyser.isInstanceCall(handle, call, fn_node.handle, fn_proto);
+        try builder.analyser.isInstanceCall(handle, call, fn_ty);
 
     const parameters = params.items[@intFromBool(has_self_param)..];
     const arguments = call.ast.params;
@@ -302,14 +305,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     const node_tags = tree.nodes.items(.tag);
 
     switch (node_tags[call.ast.fn_expr]) {
-        .identifier => {
-            const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
-            try writeCallHint(builder, call, ty);
-        },
-        .field_access => {
-            const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
-            try writeCallHint(builder, call, ty);
-        },
+        .identifier, .field_access => try writeCallHint(builder, call),
         else => {
             log.debug("cannot deduce fn expression with tag '{}'", .{node_tags[call.ast.fn_expr]});
         },

@@ -1103,7 +1103,7 @@ pub fn interpret(
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call_full = tree.fullCall(&params, node_idx) orelse unreachable;
+            const call_full = tree.fullCall(&params, node_idx).?;
 
             var args = try std.ArrayListUnmanaged(Value).initCapacity(interpreter.allocator, call_full.ast.params.len);
             defer args.deinit(interpreter.allocator);

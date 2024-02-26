@@ -29,7 +29,7 @@ fn fnProtoToSignatureInfo(
     const proto_comments = try Analyser.getDocComments(arena, tree, fn_node);
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analyser.hasSelfParam(fn_handle, proto);
+        const has_self_param = try analyser.hasSelfParam(func_type);
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
