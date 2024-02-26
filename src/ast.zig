@@ -1908,3 +1908,67 @@ pub fn smallestEnclosingSubrange(children: []const offsets.Loc, loc: offsets.Loc
         .len = end - start,
     };
 }
+
+test smallestEnclosingSubrange {
+    const children = &[_]offsets.Loc{
+        .{ .start = 0, .end = 5 },
+        .{ .start = 5, .end = 10 },
+        .{ .start = 12, .end = 18 },
+        .{ .start = 18, .end = 22 },
+        .{ .start = 25, .end = 28 },
+    };
+
+    try std.testing.expect(smallestEnclosingSubrange(&.{}, undefined) == null);
+
+    // children  <-->
+    // loc       <--->
+    // result    null
+    try std.testing.expect(
+        smallestEnclosingSubrange(&.{.{ .start = 0, .end = 4 }}, .{ .start = 0, .end = 5 }) == null,
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc       <---------------------------->
+    // result    null
+    try std.testing.expect(smallestEnclosingSubrange(children, .{ .start = 0, .end = 30 }) == null);
+
+    // children  <---><--->  <----><-->   <->
+    // loc             <--------->
+    // result         <--->  <---->
+    const result1 = smallestEnclosingSubrange(children, .{ .start = 6, .end = 17 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..3],
+        children[result1.start .. result1.start + result1.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc            <------------->
+    // result         <--->  <----><-->
+    const result2 = smallestEnclosingSubrange(children, .{ .start = 6, .end = 20 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..4],
+        children[result2.start .. result2.start + result2.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc                 <----------->
+    // result         <--->  <----><-->   <->
+    const result3 = smallestEnclosingSubrange(children, .{ .start = 10, .end = 23 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..5],
+        children[result3.start .. result3.start + result3.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc                 <>
+    // result         <--->  <---->
+    const result4 = smallestEnclosingSubrange(children, .{ .start = 10, .end = 12 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..3],
+        children[result4.start .. result4.start + result4.len],
+    );
+}
