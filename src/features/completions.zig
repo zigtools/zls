@@ -43,8 +43,6 @@ fn typeToCompletion(
                     .label = "*",
                     .kind = .Operator,
                     .detail = try std.fmt.allocPrint(builder.arena, "{}", .{info.elem_ty.fmtTypeVal(builder.analyser)}),
-                    .insertText = "*",
-                    .insertTextFormat = .PlainText,
                 });
 
                 if (info.size == .C) return;
@@ -60,8 +58,6 @@ fn typeToCompletion(
                     .label = "len",
                     .detail = "usize",
                     .kind = .Field,
-                    .insertText = "len",
-                    .insertTextFormat = .PlainText,
                 });
 
                 var many_ptr_ty = ty;
@@ -71,8 +67,6 @@ fn typeToCompletion(
                     .label = "ptr",
                     .kind = .Field,
                     .detail = try std.fmt.allocPrint(builder.arena, "{}", .{many_ptr_ty.fmtTypeVal(builder.analyser)}),
-                    .insertText = "ptr",
-                    .insertTextFormat = .PlainText,
                 });
             },
             .Many => {},
@@ -86,8 +80,6 @@ fn typeToCompletion(
                 else
                     "usize",
                 .kind = .Field,
-                .insertText = "len",
-                .insertTextFormat = .PlainText,
             });
         },
         .optional => |child_ty| {
@@ -96,8 +88,6 @@ fn typeToCompletion(
                 .label = "?",
                 .kind = .Operator,
                 .detail = try std.fmt.allocPrint(builder.arena, "{}", .{child_ty.fmtTypeVal(builder.analyser)}),
-                .insertText = "?",
-                .insertTextFormat = .PlainText,
             });
         },
         .other => |node_handle| try nodeToCompletion(
@@ -397,8 +387,6 @@ fn nodeToCompletion(
                     .documentation = .{ .MarkupContent = .{ .kind = .markdown, .value = message } },
                     .deprecated = if (builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
                     .tags = if (builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
                 });
             } else {
                 try builder.completions.append(builder.arena, .{
@@ -406,8 +394,6 @@ fn nodeToCompletion(
                     .kind = if (is_const) .Constant else .Variable,
                     .documentation = doc,
                     .detail = try Analyser.getVariableSignature(builder.arena, tree, var_decl, false),
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
                 });
             }
         },
@@ -422,8 +408,6 @@ fn nodeToCompletion(
                 .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                 .documentation = doc,
                 .detail = Analyser.getContainerFieldSignature(tree, field),
-                .insertText = name,
-                .insertTextFormat = .PlainText,
             });
         },
         .array_type,
@@ -444,8 +428,6 @@ fn nodeToCompletion(
                 .kind = .Field,
                 .documentation = doc,
                 .detail = offsets.nodeToSlice(tree, node),
-                .insertText = string,
-                .insertTextFormat = .PlainText,
             });
         },
     }
@@ -508,8 +490,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 .kind = .Constant,
                 .documentation = doc,
                 .detail = offsets.nodeToSlice(tree, param.type_expr),
-                .insertText = name,
-                .insertTextFormat = .PlainText,
             });
         },
         .pointer_payload,
@@ -525,8 +505,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             try builder.completions.append(builder.arena, .{
                 .label = name,
                 .kind = if (decl == .label_decl) .Text else .Variable,
-                .insertText = name,
-                .insertTextFormat = .PlainText,
             });
         },
         .error_token => |token| {
@@ -542,8 +520,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 .kind = .Constant,
                 .documentation = doc,
                 .detail = try std.fmt.allocPrint(builder.arena, "error.{s}", .{name}),
-                .insertText = name,
-                .insertTextFormat = .PlainText,
             });
         },
     }
@@ -1222,8 +1198,6 @@ pub fn collectContainerFields(
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = name,
-            .insertTextFormat = .PlainText,
         });
     }
 }
