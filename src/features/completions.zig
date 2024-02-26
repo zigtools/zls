@@ -232,8 +232,6 @@ fn nodeToCompletion(
 
             const func_name = orig_name orelse tree.tokenSlice(name_token);
             const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-            const use_placeholders = builder.server.config.enable_argument_placeholders;
-            const use_label_details = builder.server.client_capabilities.label_details_support;
 
             const func_ty = Analyser.Type{
                 .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
@@ -242,44 +240,49 @@ fn nodeToCompletion(
 
             const skip_self_param = !(parent_is_type_val orelse true) and try builder.analyser.hasSelfParam(func_ty);
 
-            const insert_text = blk: {
-                if (use_snippets and use_placeholders) {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
-                        .fn_proto = func,
-                        .tree = &tree,
+            const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
-                        .include_fn_keyword = false,
-                        .include_name = true,
-                        .skip_first_param = skip_self_param,
-                        .parameters = .{ .show = .{
-                            .include_modifiers = true,
-                            .include_names = true,
-                            .include_types = true,
-                        } },
-                        .include_return_type = false,
-                        .snippet_placeholders = true,
-                    })});
-                }
+            const new_text = switch (new_text_format) {
+                .only_name => func_name,
+                .snippet => blk: {
+                    if (use_snippets and builder.server.config.enable_argument_placeholders) {
+                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
+                            .fn_proto = func,
+                            .tree = &tree,
 
-                switch (func.ast.params.len) {
-                    // No arguments, leave cursor at the end
-                    0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
-                    1 => {
-                        if (skip_self_param) {
-                            // The one argument is a self parameter, leave cursor at the end
-                            break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
-                        }
+                            .include_fn_keyword = false,
+                            .include_name = true,
+                            .skip_first_param = skip_self_param,
+                            .parameters = .{ .show = .{
+                                .include_modifiers = true,
+                                .include_names = true,
+                                .include_types = true,
+                            } },
+                            .include_return_type = false,
+                            .snippet_placeholders = true,
+                        })});
+                    }
 
-                        // Non-self parameter, leave the cursor in the parentheses
-                        if (!use_snippets) break :blk func_name;
-                        break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                    },
-                    else => {
-                        // Atleast one non-self parameter, leave the cursor in the parentheses
-                        if (!use_snippets) break :blk func_name;
-                        break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                    },
-                }
+                    switch (func.ast.params.len) {
+                        // No arguments, leave cursor at the end
+                        0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
+                        1 => {
+                            if (skip_self_param) {
+                                // The one argument is a self parameter, leave cursor at the end
+                                break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
+                            }
+
+                            // Non-self parameter, leave the cursor in the parentheses
+                            if (!use_snippets) break :blk func_name;
+                            break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
+                        },
+                        else => {
+                            // Atleast one non-self parameter, leave the cursor in the parentheses
+                            if (!use_snippets) break :blk func_name;
+                            break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
+                        },
+                    }
+                },
             };
 
             const kind: types.CompletionItemKind = if (Analyser.isTypeFunction(tree, func))
@@ -290,7 +293,7 @@ fn nodeToCompletion(
                 .Function;
 
             const label_details: ?types.CompletionItemLabelDetails = blk: {
-                if (!use_label_details) break :blk null;
+                if (!builder.server.client_capabilities.label_details_support) break :blk null;
 
                 const detail = try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
                     .fn_proto = func,
@@ -348,8 +351,11 @@ fn nodeToCompletion(
                 .kind = kind,
                 .documentation = doc,
                 .detail = details,
-                .insertText = insert_text,
                 .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+                .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
+                    .{ .InsertReplaceEdit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
+                else
+                    .{ .TextEdit = .{ .newText = new_text, .range = insert_range } },
             });
         },
         .global_var_decl,
@@ -550,22 +556,76 @@ fn populateSnippedCompletions(builder: *Builder, snippets: []const snipped_data.
     }
 }
 
+const FunctionCompletionFormat = enum { snippet, only_name };
+
+fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Range, FunctionCompletionFormat } {
+    const source = builder.orig_handle.tree.source;
+
+    var start_index = builder.source_index;
+    while (start_index > 0 and Analyser.isSymbolChar(source[start_index - 1])) {
+        start_index -= 1;
+    }
+
+    var end_index = builder.source_index;
+    while (end_index < source.len and Analyser.isSymbolChar(source[end_index])) {
+        end_index += 1;
+    }
+
+    var insert_loc = offsets.Loc{ .start = start_index, .end = builder.source_index };
+    var replace_loc = offsets.Loc{ .start = start_index, .end = end_index };
+
+    var format: FunctionCompletionFormat = .only_name;
+
+    const insert_can_be_snippet = std.mem.startsWith(u8, source[insert_loc.end..], "()");
+    const replace_can_be_snippet = std.mem.startsWith(u8, source[replace_loc.end..], "()");
+
+    if (insert_can_be_snippet and replace_can_be_snippet) {
+        insert_loc.end += 2;
+        replace_loc.end += 2;
+        format = .snippet;
+    } else if (insert_can_be_snippet or replace_can_be_snippet) {
+        // snippet completions would be possible but insert and replace would need different `newText`
+    } else if (!std.mem.startsWith(u8, source[builder.source_index..], "(")) {
+        format = .snippet;
+    }
+
+    const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
+    const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
+
+    return .{ insert_range, replace_range, format };
+}
+
 fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const use_placeholders = use_snippets and builder.server.config.enable_argument_placeholders;
+
+    const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
+
     try builder.completions.ensureUnusedCapacity(builder.arena, data.builtins.len);
     for (data.builtins) |builtin| {
-        const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-        const insert_text = if (use_snippets) builtin.snippet else builtin.name;
+        const new_text = switch (new_text_format) {
+            .only_name => builtin.name,
+            .snippet => blk: {
+                if (builtin.arguments.len == 0) break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{builtin.name});
+                if (use_snippets and use_placeholders) break :blk builtin.snippet;
+                if (use_snippets) break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{builtin.name});
+                break :blk builtin.name;
+            },
+        };
 
         builder.completions.appendAssumeCapacity(.{
             .label = builtin.name,
             .kind = .Function,
             .filterText = builtin.name[1..],
             .detail = builtin.signature,
-            .insertText = if (builder.server.client_capabilities.include_at_in_builtins) insert_text else insert_text[1..],
             .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+            .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
+                .{ .InsertReplaceEdit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
+            else
+                .{ .TextEdit = .{ .newText = new_text[1..], .range = insert_range } },
             .documentation = .{
                 .MarkupContent = .{
                     .kind = .markdown,
@@ -836,35 +896,26 @@ pub fn completionAtIndex(
     const completions = builder.completions.items;
     if (completions.len == 0) return null;
 
-    if (server.config.completions_with_replace) {
-        // The cursor is in the middle of a word or before a @, so we can replace
-        // the remaining identifier with the completion instead of just inserting.
-        // TODO Identify function call/struct init and replace the whole thing.
-        const lookahead_context = try Analyser.getPositionContext(arena, source, source_index, true);
-        if (server.client_capabilities.supports_apply_edits and
-            pos_context != .import_string_literal and
-            pos_context != .cinclude_string_literal and
-            pos_context != .embedfile_string_literal and
-            pos_context != .string_literal and
-            pos_context.loc() != null and
-            lookahead_context.loc() != null and
-            pos_context.loc().?.end != lookahead_context.loc().?.end)
-        {
-            var end = lookahead_context.loc().?.end;
-            while (end < source.len and (std.ascii.isAlphanumeric(source[end]) or source[end] == '"')) {
-                end += 1;
-            }
+    {
+        var start_index = source_index;
+        while (start_index > 0 and Analyser.isSymbolChar(source[start_index - 1])) {
+            start_index -= 1;
+        }
 
-            const replaceLoc = offsets.Loc{ .start = lookahead_context.loc().?.start, .end = end };
-            const replaceRange = offsets.locToRange(source, replaceLoc, server.offset_encoding);
+        var end_index = source_index;
+        while (end_index < source.len and Analyser.isSymbolChar(source[end_index])) {
+            end_index += 1;
+        }
 
-            for (completions) |*item| {
-                item.textEdit = .{
-                    .TextEdit = .{
-                        .newText = item.insertText orelse item.label,
-                        .range = replaceRange,
-                    },
-                };
+        const insert_range = offsets.locToRange(source, .{ .start = start_index, .end = source_index }, server.offset_encoding);
+        const replace_range = offsets.locToRange(source, .{ .start = start_index, .end = end_index }, server.offset_encoding);
+
+        for (completions) |*item| {
+            if (item.textEdit == null) {
+                item.textEdit = if (server.client_capabilities.supports_completion_insert_replace_support)
+                    .{ .InsertReplaceEdit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
+                else
+                    .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
             }
         }
     }
@@ -883,11 +934,6 @@ pub fn completionAtIndex(
         const prefix = kindToSortScore(c.kind.?) orelse continue;
 
         c.sortText = try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, c.label });
-
-        if (source_index < source.len and source[source_index] == '(') {
-            c.insertText = c.label;
-            c.insertTextFormat = .PlainText;
-        }
     }
 
     return .{ .isIncomplete = false, .items = completions };
