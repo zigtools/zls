@@ -252,14 +252,9 @@ fn colorIdentifierBasedOnType(
         if (type_node.isGenericFunc()) {
             new_tok_mod.generic = true;
         }
-        const has_self_param = switch (type_node.data) {
-            .other => |node_handle| blk: {
-                var buffer: [1]Ast.Node.Index = undefined;
-                const fn_proto = node_handle.handle.tree.fullFnProto(&buffer, node_handle.node).?;
-                break :blk try builder.analyser.hasSelfParam(node_handle.handle, fn_proto);
-            },
-            else => false,
-        };
+
+        const has_self_param = try builder.analyser.hasSelfParam(type_node);
+
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
         var new_tok_mod = tok_mod;
@@ -418,9 +413,14 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, fn_proto.lib_name, .string);
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
+            const func_ty = Analyser.Type{
+                .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
+                .is_type_val = true,
+            };
+
             const func_name_tok_type: TokenType = if (Analyser.isTypeFunction(tree, fn_proto))
                 .type
-            else if (try builder.analyser.hasSelfParam(builder.handle, fn_proto))
+            else if (try builder.analyser.hasSelfParam(func_ty))
                 .method
             else
                 .function;

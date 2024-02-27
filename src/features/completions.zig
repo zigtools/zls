@@ -255,7 +255,12 @@ fn nodeToCompletion(
             const use_placeholders = server.config.enable_argument_placeholders;
             const use_label_details = server.client_capabilities.label_details_support;
 
-            const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(handle, func);
+            const func_ty = Analyser.Type{
+                .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
+                .is_type_val = true,
+            };
+
+            const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(func_ty);
 
             const insert_text = blk: {
                 if (use_snippets and use_placeholders) {
@@ -1405,7 +1410,7 @@ fn collectFieldAccessContainerNodes(
                 const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
                 const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
                 if (!symbol_type.is_type_val) { // then => instance_of_T
-                    if (try analyser.hasSelfParam(fn_proto_handle, full_fn_proto)) break :blk 2;
+                    if (try analyser.hasSelfParam(node_type)) break :blk 2;
                 }
                 break :blk 1; // is `T`, no SelfParam
             };

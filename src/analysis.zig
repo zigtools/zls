@@ -306,55 +306,55 @@ pub fn isInstanceCall(
     analyser: *Analyser,
     call_handle: *DocumentStore.Handle,
     call: Ast.full.Call,
-    func_handle: *DocumentStore.Handle,
-    func: Ast.full.FnProto,
+    func_ty: Type,
 ) error{OutOfMemory}!bool {
-    const tree = call_handle.tree;
-    return tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
-        try analyser.hasSelfParam(func_handle, func);
+    std.debug.assert(!func_ty.is_type_val);
+    if (call_handle.tree.nodes.items(.tag)[call.ast.fn_expr] != .field_access) return false;
+
+    const container_node = NodeWithHandle{ .node = call_handle.tree.nodes.items(.data)[call.ast.fn_expr].lhs, .handle = call_handle };
+
+    const container_ty = if (try analyser.resolveTypeOfNodeInternal(container_node)) |container_instance|
+        container_instance.typeOf(analyser)
+    else blk: {
+        const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
+        const fn_token = func_node.handle.tree.nodes.items(.main_token)[func_node.node];
+        break :blk try innermostContainer(func_node.handle, func_node.handle.tree.tokens.items(.start)[fn_token]);
+    };
+
+    std.debug.assert(container_ty.is_type_val);
+
+    return analyser.firstParamIs(func_ty, container_ty);
 }
 
-pub fn hasSelfParam(analyser: *Analyser, handle: *DocumentStore.Handle, func: Ast.full.FnProto) error{OutOfMemory}!bool {
-    const token_starts = handle.tree.tokens.items(.start);
-    const in_container = try innermostContainer(handle, token_starts[func.ast.fn_token]);
-    return analyser.firstParamIs(handle, func, in_container);
-}
-
-pub fn isSelfFunction(analyser: *Analyser, func_type: Type, container: Type) error{OutOfMemory}!bool {
-    if (!func_type.isFunc()) return false;
-    const func_decl = try analyser.resolveFuncProtoOfCallable(func_type) orelse return false;
-    if (func_decl.is_type_val) return false;
-
-    const fn_node_handle = func_decl.data.other; // this assumes that function types can only be Ast nodes
-    const fn_node = fn_node_handle.node;
-    const fn_handle = fn_node_handle.handle;
-
-    var buf: [1]Ast.Node.Index = undefined;
-    const func = fn_handle.tree.fullFnProto(&buf, fn_node).?;
-
-    // Non-decl prototypes cannot have a self parameter.
-    if (func.name_token == null) return false;
-
-    return analyser.firstParamIs(fn_handle, func, container);
+pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) error{OutOfMemory}!bool {
+    const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
+    const fn_token = func_node.handle.tree.nodes.items(.main_token)[func_node.node];
+    const in_container = try innermostContainer(func_node.handle, func_node.handle.tree.tokens.items(.start)[fn_token]);
+    std.debug.assert(in_container.is_type_val);
+    return analyser.firstParamIs(func_ty, in_container);
 }
 
 pub fn firstParamIs(
     analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    func: Ast.full.FnProto,
-    expected: Type,
+    func_type: Type,
+    expected_type: Type,
 ) error{OutOfMemory}!bool {
-    const tree = handle.tree;
-    var it = func.iterate(&tree);
+    std.debug.assert(func_type.isFunc());
+    const func_handle = func_type.data.other;
+
+    var buffer: [1]Ast.Node.Index = undefined;
+    const func = func_handle.handle.tree.fullFnProto(&buffer, func_handle.node).?;
+
+    var it = func.iterate(&func_handle.handle.tree);
     const param = ast.nextFnParam(&it) orelse return false;
     if (param.anytype_ellipsis3) |token| {
-        if (tree.tokens.items(.tag)[token] == .keyword_anytype) return true;
+        if (func_handle.handle.tree.tokens.items(.tag)[token] == .keyword_anytype) return true;
     }
     if (param.type_expr == 0) return false;
 
     const resolved_type = try analyser.resolveTypeOfNodeInternal(.{
         .node = param.type_expr,
-        .handle = handle,
+        .handle = func_handle.handle,
     }) orelse return false;
     if (!resolved_type.is_type_val) return false;
 
@@ -366,7 +366,15 @@ pub fn firstParamIs(
         else => resolved_type,
     };
 
-    return deref_type.eql(expected);
+    const deref_expected_type = switch (expected_type.data) {
+        .pointer => |info| switch (info.size) {
+            .One => info.elem_ty.*,
+            .Many, .Slice, .C => return false,
+        },
+        else => expected_type,
+    };
+
+    return deref_type.eql(deref_expected_type);
 }
 
 pub fn getVariableSignature(
@@ -1271,30 +1279,30 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .async_call_one_comma,
         => {
             var buffer: [1]Ast.Node.Index = undefined;
-            const call = tree.fullCall(&buffer, node) orelse unreachable;
+            const call = tree.fullCall(&buffer, node).?;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            const ty = (try analyser.resolveTypeOfNodeInternal(callee)) orelse return null;
-            const decl = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            const ty = try analyser.resolveTypeOfNodeInternal(callee) orelse return null;
+            const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            if (func_ty.is_type_val) return null;
 
-            if (decl.is_type_val) return null;
-            const func_node_handle = decl.data.other; // this assumes that function types can only be Ast nodes
+            const func_node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
             const func_node = func_node_handle.node;
             const func_handle = func_node_handle.handle;
             const func_tree = func_handle.tree;
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = func_tree.fullFnProto(&buf, func_node) orelse return null;
+            const fn_proto = func_tree.fullFnProto(&buf, func_node).?;
 
             var params = try std.ArrayListUnmanaged(Ast.full.FnProto.Param).initCapacity(analyser.arena.allocator(), fn_proto.ast.params.len);
             defer params.deinit(analyser.arena.allocator());
 
-            var it = fn_proto.iterate(&func_tree);
+            var it = fn_proto.iterate(&func_handle.tree);
             while (ast.nextFnParam(&it)) |param| {
                 try params.append(analyser.arena.allocator(), param);
             }
 
             const has_self_param = call.ast.params.len + 1 == params.items.len and
-                try analyser.isInstanceCall(handle, call, func_handle, fn_proto);
+                try analyser.isInstanceCall(handle, call, func_ty);
 
             const parameters = params.items[@intFromBool(has_self_param)..];
             const arguments = call.ast.params;
@@ -3700,12 +3708,10 @@ pub fn iterateSymbolsContainer(
                     if (instance_access) {
                         // allow declarations which evaluate to functions where
                         // the first parameter has the type of the container:
-                        const alias_type = try analyser.resolveTypeOfNode(
-                            NodeWithHandle{ .node = node, .handle = handle },
-                        ) orelse continue;
+                        const alias_type = try analyser.resolveTypeOfNode(.{ .node = node, .handle = handle }) orelse continue;
+                        const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
-                        const container_type = Type.typeVal(container_handle);
-                        if (!try analyser.isSelfFunction(alias_type, container_type)) continue;
+                        if (!try analyser.firstParamIs(func_ty, Type.typeVal(container_handle))) continue;
                     }
                 },
                 else => {},
@@ -4243,26 +4249,20 @@ pub fn resolveExpressionTypeFromAncestors(
             const call = tree.fullCall(&buffer, ancestors[0]).?;
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
-            const fn_type = (try analyser.resolveTypeOfNode(.{
-                .node = call.ast.fn_expr,
-                .handle = handle,
-            })) orelse return null;
-
+            const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
+            const fn_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (fn_type.is_type_val) return null;
 
-            const fn_node_handle = switch (fn_type.data) {
-                .other => |n| n,
-                else => return null,
-            };
+            const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
             const fn_node = fn_node_handle.node;
             const fn_handle = fn_node_handle.handle;
             const fn_tree = fn_handle.tree;
 
             var fn_buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node) orelse return null;
+            const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node).?;
 
             var param_iter = fn_proto.iterate(&fn_tree);
-            if (try analyser.isInstanceCall(handle, call, fn_handle, fn_proto)) {
+            if (try analyser.isInstanceCall(handle, call, fn_type)) {
                 _ = ast.nextFnParam(&param_iter);
             }
 
