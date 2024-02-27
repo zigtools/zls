@@ -9,7 +9,7 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "hover - literal" {
+test "literal" {
     try testHover(
         \\const f<cursor>oo = 42;
     ,
@@ -92,7 +92,7 @@ test "hover - literal" {
     );
 }
 
-test "hover - string literal" {
+test "string literal" {
     try testHover(
         \\const f<cursor>oo = "ipsum lorem";
     ,
@@ -145,7 +145,7 @@ test "hover - string literal" {
     );
 }
 
-test "hover - builtin" {
+test "builtin" {
     try testHover(
         \\@intFr<cursor>omBool(5);
     ,
@@ -162,7 +162,7 @@ test "hover - builtin" {
     , .{ .markup_kind = .plaintext });
 }
 
-test "hover - negation" {
+test "negation" {
     try testHover(
         \\const f<cursor>oo = 1;
         \\const f = -a;
@@ -200,7 +200,7 @@ test "hover - negation" {
     );
 }
 
-test "hover - struct" {
+test "struct" {
     try testHover(
         \\const Str<cursor>uct = packed struct(u32) {};
     ,
@@ -213,7 +213,7 @@ test "hover - struct" {
     );
 }
 
-test "hover - enum member" {
+test "enum member" {
     try testHover(
         \\const Enum = enum { foo, bar };
         \\const enum_member = Enum.f<cursor>oo;
@@ -229,7 +229,7 @@ test "hover - enum member" {
     );
 }
 
-test "hover - block label" {
+test "block label" {
     try testHover(
         \\const foo: i32 = undefined;
         \\const bar = b<cursor>az: {
@@ -258,7 +258,7 @@ test "hover - block label" {
     );
 }
 
-test "hover - if capture" {
+test "if capture" {
     try testHover(
         \\fn func() void {
         \\    const foo: ?i32 = undefined;
@@ -313,7 +313,7 @@ test "hover - if capture" {
     );
 }
 
-test "hover - while capture" {
+test "while capture" {
     try testHover(
         \\fn func() void {
         \\    const foo: ?i32 = undefined;
@@ -368,7 +368,7 @@ test "hover - while capture" {
     );
 }
 
-test "hover - catch capture" {
+test "catch capture" {
     try testHover(
         \\const foo: error{A}!i32 = undefined;
         \\const bar = foo catch |b<cursor>ar| undefined;
@@ -382,7 +382,7 @@ test "hover - catch capture" {
     );
 }
 
-test "hover - for capture" {
+test "for capture" {
     try testHover(
         \\fn func() void {
         \\    const foo: []i32 = undefined;
@@ -411,7 +411,7 @@ test "hover - for capture" {
     );
 }
 
-test "hover - enum literal" {
+test "enum literal" {
     try testHover(
         \\const E = enum { foo };
         \\const e: E = .f<cursor>oo;
@@ -427,7 +427,7 @@ test "hover - enum literal" {
     );
 }
 
-test "hover - switch capture" {
+test "switch capture" {
     try testHover(
         \\const U = union(enum) { a: i32 };
         \\fn func() void {
@@ -463,7 +463,7 @@ test "hover - switch capture" {
     );
 }
 
-test "hover - errdefer capture" {
+test "errdefer capture" {
     try testHover(
         \\fn func() error{A}!void {
         \\    errdefer |f<cursor>oo| {}
@@ -478,7 +478,7 @@ test "hover - errdefer capture" {
     );
 }
 
-test "hover - function" {
+test "function" {
     try testHover(
         \\const A = struct { a: i32 };
         \\const B = struct { b: bool };
@@ -527,7 +527,7 @@ test "hover - function" {
     , .{ .markup_kind = .plaintext });
 }
 
-test "hover - optional" {
+test "optional" {
     try testHover(
         \\const S = struct { a: i32 };
         \\const f<cursor>oo: ?S = undefined;
@@ -543,7 +543,7 @@ test "hover - optional" {
     );
 }
 
-test "hover - error union" {
+test "error union" {
     try testHover(
         \\const S = struct { a: i32 };
         \\const E = error { A, B };
@@ -560,7 +560,7 @@ test "hover - error union" {
     );
 }
 
-test "hover - either types" {
+test "either types" {
     try testHover(
         \\const A = struct {
         \\    ///small type
@@ -615,7 +615,7 @@ test "hover - either types" {
     , .{ .markup_kind = .plaintext });
 }
 
-test "hover - var decl comments" {
+test "var decl comments" {
     try testHover(
         \\///this is a comment
         \\const f<cursor>oo = 0 + 0;
@@ -631,7 +631,7 @@ test "hover - var decl comments" {
     );
 }
 
-test "hover - var decl alias" {
+test "var decl alias" {
     try testHover(
         \\extern fn foo() void;
         \\const b<cursor>ar = foo;
@@ -654,7 +654,7 @@ test "hover - var decl alias" {
 }
 
 // https://github.com/zigtools/zls/issues/1378
-test "hover - type reference cycle" {
+test "type reference cycle" {
     try testHover(
         \\fn fo<cursor>o(
         \\    alpha: anytype,
@@ -672,7 +672,7 @@ test "hover - type reference cycle" {
     );
 }
 
-test "hover - integer overflow on top level container" {
+test "integer overflow on top level container" {
     try testHover(
         \\enum {  foo.bar: b<cursor>az,}
     ,
@@ -685,7 +685,7 @@ test "hover - integer overflow on top level container" {
     );
 }
 
-test "hover - combine doc comments of declaration and definition" {
+test "combine doc comments of declaration and definition" {
     try testHover(
         \\/// Foo
         \\const f<cursor>oo = bar.baz;
@@ -722,7 +722,7 @@ test "hover - combine doc comments of declaration and definition" {
     , .{ .markup_kind = .plaintext });
 }
 
-test "hover - top-level doc comment" {
+test "top-level doc comment" {
     try testHover(
         \\//! B
         \\
@@ -742,7 +742,7 @@ test "hover - top-level doc comment" {
     );
 }
 
-test "hover - deprecated" {
+test "deprecated" {
     try testHover(
         \\const f<cursor>oo = @compileError("some message");
     ,

@@ -11,7 +11,7 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "goto - global variable" {
+test "global variable" {
     try testDefinition(
         \\const <def><decl>foo</decl></def> = 5;
         \\comptime {
@@ -32,7 +32,7 @@ test "goto - global variable" {
     );
 }
 
-test "goto - local variable" {
+test "local variable" {
     try testDefinition(
         \\comptime {
         \\    var <def><decl>foo</decl></def> = 5;
@@ -55,7 +55,7 @@ test "goto - local variable" {
     );
 }
 
-test "goto - assign destructure" {
+test "assign destructure" {
     try testDefinition(
         \\comptime {
         \\    const foo, const <def><decl>bar</decl></def>: <tdef>u32</tdef> = .{ 1, 2 };
@@ -65,7 +65,7 @@ test "goto - assign destructure" {
     );
 }
 
-test "goto - function parameter" {
+test "function parameter" {
     try testDefinition(
         \\fn f(<def><decl>foo</decl></def>: <tdef>u32</tdef>) void {
         \\    _ = <>foo;
@@ -73,7 +73,7 @@ test "goto - function parameter" {
     );
 }
 
-test "goto - field access" {
+test "field access" {
     try testDefinition(
         \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
         \\var s: S = undefined;
@@ -81,14 +81,14 @@ test "goto - field access" {
     );
 }
 
-test "goto - struct init" {
+test "struct init" {
     try testDefinition(
         \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
         \\var s = S{ .<>alpha = 5};
     );
 }
 
-test "goto - capture" {
+test "capture" {
     try testDefinition(
         \\test {
         \\    const S = <tdef>struct</tdef> {};
@@ -107,7 +107,7 @@ test "goto - capture" {
     );
 }
 
-test "goto - label" {
+test "label" {
     try testDefinition(
         \\comptime {
         \\    <def><decl>blk</decl></def>: {
@@ -117,7 +117,7 @@ test "goto - label" {
     );
 }
 
-test "goto - different cursor position" {
+test "different cursor position" {
     try testDefinition(
         \\const <def><decl>foo</decl></def> = 5;
         \\comptime {
@@ -138,7 +138,7 @@ test "goto - different cursor position" {
     );
 }
 
-test "goto - alias" {
+test "alias" {
     try testDefinition(
         \\const <def>Foo</def> = u32;
         \\const <decl>Bar</decl> = Foo;
@@ -147,7 +147,7 @@ test "goto - alias" {
     );
 }
 
-test "definition - multiline builder pattern" {
+test "multiline builder pattern" {
     try testDefinition(
         \\const Foo = struct {
         \\    fn add(foo: Foo) Foo {}

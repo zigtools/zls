@@ -13,7 +13,7 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "ComptimeInterpreter - primitive types" {
+test "primitive types" {
     try testExpr("true", .{ .simple_value = .bool_true });
     try testExpr("false", .{ .simple_value = .bool_false });
     try testExpr("5", .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 5 } });
@@ -26,7 +26,7 @@ test "ComptimeInterpreter - primitive types" {
     try testExpr("noreturn", .{ .simple_type = .noreturn });
 }
 
-test "ComptimeInterpreter - expressions" {
+test "expressions" {
     if (true) return error.SkipZigTest; // TODO
     try testExpr("5 + 3", .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 8 } });
     // try testExpr("5.2 + 4.2", .{ .simple_type = .comptime_float }, null);
@@ -37,13 +37,13 @@ test "ComptimeInterpreter - expressions" {
     try testExpr("@as(?bool, null) orelse true", .{ .simple_value = .bool_true });
 }
 
-test "ComptimeInterpreter - builtins" {
+test "builtins" {
     if (true) return error.SkipZigTest; // TODO
     try testExpr("@as(bool, true)", .{ .simple_value = .bool_true });
     try testExpr("@as(u32, 3)", .{ .int_u64_value = .{ .ty = .u32_type, .int = 3 } });
 }
 
-test "ComptimeInterpreter - @TypeOf" {
+test "@TypeOf" {
     try testExpr("@TypeOf(bool)", .{ .simple_type = .type });
     try testExpr("@TypeOf(5)", .{ .simple_type = .comptime_int });
     try testExpr("@TypeOf(3.14)", .{ .simple_type = .comptime_float });
@@ -56,7 +56,7 @@ test "ComptimeInterpreter - @TypeOf" {
     try testExpr("@TypeOf(null, 2)", .{ .optional_type = .{ .payload_type = .comptime_int_type } });
 }
 
-test "ComptimeInterpreter - string literal" {
+test "string literal" {
     if (true) return error.SkipZigTest; // TODO
     var tester = try Tester.init(
         \\const foobarbaz = "hello world!";
@@ -70,7 +70,7 @@ test "ComptimeInterpreter - string literal" {
     try std.testing.expectEqualStrings("hello world!", result.val.?.bytes);
 }
 
-test "ComptimeInterpreter - labeled block" {
+test "labeled block" {
     try testExpr(
         \\blk: {
         \\    break :blk true;
@@ -83,7 +83,7 @@ test "ComptimeInterpreter - labeled block" {
     , .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } });
 }
 
-test "ComptimeInterpreter - if" {
+test "if" {
     try testExpr(
         \\blk: {
         \\    break :blk if (true) true else false;
@@ -111,7 +111,7 @@ test "ComptimeInterpreter - if" {
     // , .{ .simple_value = .bool_true });
 }
 
-test "ComptimeInterpreter - variable lookup" {
+test "variable lookup" {
     try testExpr(
         \\blk: {
         \\    var foo = 42;
@@ -137,7 +137,7 @@ test "ComptimeInterpreter - variable lookup" {
     try std.testing.expect(result.val.?.eql(Key{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, tester.ip));
 }
 
-test "ComptimeInterpreter - field access" {
+test "field access" {
     try testExpr(
         \\blk: {
         \\    const foo: struct {alpha: u64, beta: bool} = undefined;
@@ -155,7 +155,7 @@ test "ComptimeInterpreter - field access" {
     } });
 }
 
-test "ComptimeInterpreter - optional operations" {
+test "optional operations" {
     if (true) return error.SkipZigTest; // TODO
     try testExpr(
         \\blk: {
@@ -171,7 +171,7 @@ test "ComptimeInterpreter - optional operations" {
     , .{ .simple_value = .bool_false });
 }
 
-test "ComptimeInterpreter - pointer operations" {
+test "pointer operations" {
     if (true) return error.SkipZigTest; // TODO
     try testExpr(
         \\blk: {
@@ -194,7 +194,7 @@ test "ComptimeInterpreter - pointer operations" {
     , .{ .simple_value = .bool_true });
 }
 
-test "ComptimeInterpreter - call return primitive type" {
+test "call return primitive type" {
     try testCall(
         \\pub fn Foo() type {
         \\    return bool;
@@ -221,7 +221,7 @@ test "ComptimeInterpreter - call return primitive type" {
     , &.{}, .{ .int_type = .{ .signedness = .signed, .bits = 128 } });
 }
 
-test "ComptimeInterpreter - call return struct" {
+test "call return struct" {
     var tester = try Tester.init(
         \\pub fn Foo() type {
         \\    return struct {
@@ -244,7 +244,7 @@ test "ComptimeInterpreter - call return struct" {
     try std.testing.expect(struct_info.fields.values()[0].ty == Index.bool_type);
 }
 
-test "ComptimeInterpreter - call comptime argument" {
+test "call comptime argument" {
     var tester = try Tester.init(
         \\pub fn Foo(comptime my_arg: bool) type {
         \\    var abc = z: {break :z if (!my_arg) 123 else 0;};
@@ -271,7 +271,7 @@ test "ComptimeInterpreter - call comptime argument" {
     try std.testing.expect(result2.val.?.eql(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, tester.ip));
 }
 
-test "ComptimeInterpreter - call inner function" {
+test "call inner function" {
     try testCall(
         \\pub fn Inner() type {
         \\    return bool;

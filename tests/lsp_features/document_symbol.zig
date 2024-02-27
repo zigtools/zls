@@ -8,7 +8,7 @@ const types = zls.types;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "documentSymbol - container decl" {
+test "container decl" {
     try testDocumentSymbol(
         \\const S = struct {
         \\    fn f() void {}
@@ -37,7 +37,7 @@ test "documentSymbol - container decl" {
     );
 }
 
-test "documentSymbol - enum" {
+test "enum" {
     try testDocumentSymbol(
         \\const E = enum {
         \\    alpha,
@@ -50,7 +50,7 @@ test "documentSymbol - enum" {
     );
 }
 
-test "documentSymbol - test decl" {
+test "test decl" {
     try testDocumentSymbol(
         \\test foo {}
         \\test "bar" {}
@@ -62,7 +62,7 @@ test "documentSymbol - test decl" {
 }
 
 // https://github.com/zigtools/zls/issues/1583
-test "documentSymbol - builtin" {
+test "builtin" {
     try testDocumentSymbol(
         \\comptime {
         \\    @abs();
@@ -76,7 +76,7 @@ test "documentSymbol - builtin" {
 }
 
 // https://github.com/zigtools/zls/issues/986
-test "documentSymbol - nested struct with self" {
+test "nested struct with self" {
     try testDocumentSymbol(
         \\const Foo = struct {
         \\    const Self = @This();

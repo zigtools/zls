@@ -11,12 +11,12 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "inlayhints - empty" {
+test "empty" {
     try testInlayHints("", .{ .kind = .Parameter });
     try testInlayHints("", .{ .kind = .Type });
 }
 
-test "inlayhints - function call" {
+test "function call" {
     try testInlayHints(
         \\fn foo(alpha: u32) void {}
         \\const _ = foo(<alpha>5);
@@ -38,7 +38,7 @@ test "inlayhints - function call" {
     , .{ .kind = .Parameter });
 }
 
-test "inlayhints - function self parameter" {
+test "function self parameter" {
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: *Foo, alpha: u32) void {} };
         \\const foo: Foo = .{};
@@ -78,7 +78,7 @@ test "inlayhints - function self parameter" {
     , .{ .kind = .Parameter });
 }
 
-test "inlayhints - function self parameter with pointer type in type declaration" {
+test "function self parameter with pointer type in type declaration" {
     try testInlayHints(
         \\const Foo = *opaque { pub fn bar(self: Foo, alpha: u32) void {} };
         \\const foo: Foo = undefined;
@@ -86,7 +86,7 @@ test "inlayhints - function self parameter with pointer type in type declaration
     , .{ .kind = .Parameter });
 }
 
-test "inlayhints - resolve alias" {
+test "resolve alias" {
     try testInlayHints(
         \\fn foo(alpha: u32) void {}
         \\const bar = foo;
@@ -94,7 +94,7 @@ test "inlayhints - resolve alias" {
     , .{ .kind = .Parameter });
 }
 
-test "inlayhints - builtin call" {
+test "builtin call" {
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
         \\const _ = @sizeOf(<T>u32);
@@ -112,7 +112,7 @@ test "inlayhints - builtin call" {
     });
 }
 
-test "inlayhints - exclude single argument" {
+test "exclude single argument" {
     try testInlayHints(
         \\fn func1(alpha: u32) void {}
         \\fn func2(alpha: u32, beta: u32) void {}
@@ -148,7 +148,7 @@ test "inlayhints - exclude single argument" {
     });
 }
 
-test "inlayhints - hide redundant parameter names" {
+test "hide redundant parameter names" {
     try testInlayHints(
         \\fn func(alpha: u32) void {}
         \\test {
@@ -191,7 +191,7 @@ test "inlayhints - hide redundant parameter names" {
     });
 }
 
-test "inlayhints - var decl" {
+test "var decl" {
     try testInlayHints(
         \\const foo<comptime_int> = 5;
     , .{ .kind = .Type });
@@ -245,7 +245,7 @@ test "inlayhints - var decl" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - function alias" {
+test "function alias" {
     try testInlayHints(
         \\fn foo(alpha: u32) void {
         \\    return alpha;
@@ -263,7 +263,7 @@ test "inlayhints - function alias" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - function with error union" {
+test "function with error union" {
     try testInlayHints(
         \\fn foo() !u32 {}
         \\test {
@@ -306,7 +306,7 @@ test "inlayhints - function with error union" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - generic function parameter" {
+test "generic function parameter" {
     // TODO there should be an inlay hint that shows `T`
     try testInlayHints(
         \\fn foo(comptime T: type, param: T) void {
@@ -315,7 +315,7 @@ test "inlayhints - generic function parameter" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - capture values" {
+test "capture values" {
     try testInlayHints(
         \\fn a() void {
         \\  const foo: []const u8 = "abc";
@@ -378,7 +378,7 @@ test "inlayhints - capture values" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - capture value with switch" {
+test "capture value with switch" {
     try testInlayHints(
         \\const U<type> = union(enum) {
         \\    foo: u32,
@@ -393,7 +393,7 @@ test "inlayhints - capture value with switch" {
     , .{ .kind = .Type });
 }
 
-test "inlayhints - capture value with catch" {
+test "capture value with catch" {
     try testInlayHints(
         \\fn foo() !u32 {}
         \\test {

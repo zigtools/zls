@@ -2908,7 +2908,7 @@ fn optionalPtrTy(ip: *InternPool, ty: Index) Index {
 }
 
 /// will panic in during testing, otherwise will return `value`
-inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
+fn panicOrElse(comptime T: type, message: []const u8, value: T) T {
     if (builtin.is_test) {
         @panic(message);
     }
@@ -3579,11 +3579,11 @@ pub fn onePossibleValue(ip: *InternPool, ty: Index) Index {
             };
         },
         .function_type => Index.none,
-        .union_type => panicOrElse("TODO", Index.none),
-        .tuple_type => panicOrElse("TODO", Index.none),
+        .union_type => panicOrElse(Index, "TODO", Index.none),
+        .tuple_type => panicOrElse(Index, "TODO", Index.none),
         .vector_type => |vector_info| {
             if (vector_info.len == 0) {
-                return panicOrElse("TODO return empty array value", Index.the_only_possible_value);
+                return panicOrElse(Index, "TODO return empty array value", Index.the_only_possible_value);
             }
             return ip.onePossibleValue(vector_info.child);
         },
@@ -3891,7 +3891,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
         },
         .struct_type => |struct_index| {
             const optional_decl_index = ip.getStruct(struct_index).owner_decl;
-            const decl_index = optional_decl_index.unwrap() orelse return panicOrElse("TODO", null);
+            const decl_index = optional_decl_index.unwrap() orelse return panicOrElse(?Index, "TODO", null);
             const decl = ip.getDecl(decl_index);
             try writer.print("{}", .{ip.fmtId(decl.name)});
         },
@@ -3920,7 +3920,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             }
             try writer.writeByte('}');
         },
-        .enum_type => return panicOrElse("TODO", null),
+        .enum_type => return panicOrElse(?Index, "TODO", null),
         .function_type => |function_info| {
             try writer.writeAll("fn(");
 
@@ -3957,7 +3957,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
 
             return function_info.return_type;
         },
-        .union_type => return panicOrElse("TODO", null),
+        .union_type => return panicOrElse(?Index, "TODO", null),
         .tuple_type => |tuple_info| {
             assert(tuple_info.types.len == tuple_info.values.len);
             try writer.writeAll("tuple{");

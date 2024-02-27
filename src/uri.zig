@@ -51,6 +51,20 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     return buf.toOwnedSlice(allocator);
 }
 
+test fromPath {
+    if (builtin.os.tag == .windows) {
+        const fromPathWin = try fromPath(std.testing.allocator, "c:\\main.zig");
+        defer std.testing.allocator.free(fromPathWin);
+        try std.testing.expectEqualStrings("file:///c%3A/main.zig", fromPathWin);
+    }
+
+    if (builtin.os.tag != .windows) {
+        const fromPathUnix = try fromPath(std.testing.allocator, "/home/main.zig");
+        defer std.testing.allocator.free(fromPathUnix);
+        try std.testing.expectEqualStrings("file:///home/main.zig", fromPathUnix);
+    }
+}
+
 /// Move along `rel` from `base` with a single allocation.
 /// `base` is a URI of a folder, `rel` is a raw relative path.
 pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) error{ OutOfMemory, UriBadScheme }![]const u8 {
@@ -87,6 +101,20 @@ pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const
     }
 
     return result.toOwnedSlice(allocator);
+}
+
+test pathRelative {
+    const join1 = try pathRelative(std.testing.allocator, "file:///project/zig", "/src/main+.zig");
+    defer std.testing.allocator.free(join1);
+    try std.testing.expectEqualStrings("file:///project/zig/src/main%2B.zig", join1);
+
+    const join2 = try pathRelative(std.testing.allocator, "file:///project/zig/wow", "../]src]/]main.zig");
+    defer std.testing.allocator.free(join2);
+    try std.testing.expectEqualStrings("file:///project/zig/%5Dsrc%5D/%5Dmain.zig", join2);
+
+    const join3 = try pathRelative(std.testing.allocator, "file:///project/zig/wow//", "../src/main.zig");
+    defer std.testing.allocator.free(join3);
+    try std.testing.expectEqualStrings("file:///project/zig/src/main.zig", join3);
 }
 
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
@@ -129,4 +157,26 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     }
 
     return allocator.realloc(uri, i);
+}
+
+test parse {
+    if (builtin.os.tag == .windows) {
+        const parseWin = try parse(std.testing.allocator, "file:///c%3A/main.zig");
+        defer std.testing.allocator.free(parseWin);
+        try std.testing.expectEqualStrings("c:\\main.zig", parseWin);
+
+        const parseWin2 = try parse(std.testing.allocator, "file:///c%3A/main%2B.zig");
+        defer std.testing.allocator.free(parseWin2);
+        try std.testing.expectEqualStrings("c:\\main+.zig", parseWin2);
+    }
+
+    if (builtin.os.tag != .windows) {
+        const parseUnix = try parse(std.testing.allocator, "file:///home/main.zig");
+        defer std.testing.allocator.free(parseUnix);
+        try std.testing.expectEqualStrings("/home/main.zig", parseUnix);
+
+        const parseUnix2 = try parse(std.testing.allocator, "file:///home/main%2B.zig");
+        defer std.testing.allocator.free(parseUnix2);
+        try std.testing.expectEqualStrings("/home/main+.zig", parseUnix2);
+    }
 }

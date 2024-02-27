@@ -23,7 +23,7 @@ const Completion = struct {
 
 const CompletionSet = std.StringArrayHashMapUnmanaged(Completion);
 
-test "completion - root scope" {
+test "root scope" {
     try testCompletion(
         \\const foo = 5;
         \\const bar = <cursor>;
@@ -48,7 +48,7 @@ test "completion - root scope" {
     });
 }
 
-test "completion - root scope with self referential decl" {
+test "root scope with self referential decl" {
     try testCompletion(
         \\const foo = foo;
         \\const bar = <cursor>
@@ -57,7 +57,7 @@ test "completion - root scope with self referential decl" {
     });
 }
 
-test "completion - local scope" {
+test "local scope" {
     if (true) return error.SkipZigTest;
     try testCompletion(
         \\const foo = {
@@ -71,7 +71,7 @@ test "completion - local scope" {
     });
 }
 
-test "completion - symbol lookup on escaped identifiers" {
+test "symbol lookup on escaped identifiers" {
     // decl name:   unescaped
     // symbol name: unescaped
     try testCompletion(
@@ -142,7 +142,7 @@ test "completion - symbol lookup on escaped identifiers" {
     });
 }
 
-test "completion - escaped identifier normalization" {
+test "escaped identifier normalization" {
     if (true) return error.SkipZigTest; // TODO
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -153,7 +153,7 @@ test "completion - escaped identifier normalization" {
     });
 }
 
-test "completion - symbol lookup on identifier named after primitive" {
+test "symbol lookup on identifier named after primitive" {
     try testCompletion(
         \\const Outer = struct { const @"u32" = Bar; };
         \\const Bar = struct { const Some = u32; };
@@ -176,7 +176,7 @@ test "completion - symbol lookup on identifier named after primitive" {
     });
 }
 
-test "completion - function" {
+test "function" {
     try testCompletion(
         \\fn foo(alpha: u32, beta: []const u8) void {
         \\    <cursor>
@@ -224,7 +224,7 @@ test "completion - function" {
     });
 }
 
-test "completion - generic function" {
+test "generic function" {
     // TODO doesn't work for std.ArrayList
 
     try testCompletion(
@@ -281,7 +281,7 @@ test "completion - generic function" {
     });
 }
 
-test "completion - std.ArrayList" {
+test "std.ArrayList" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
@@ -293,7 +293,7 @@ test "completion - std.ArrayList" {
     });
 }
 
-test "completion - std.ArrayHashMap" {
+test "std.ArrayHashMap" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
@@ -325,7 +325,7 @@ test "completion - std.ArrayHashMap" {
     });
 }
 
-test "completion - std.HashMap" {
+test "std.HashMap" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
@@ -357,7 +357,7 @@ test "completion - std.HashMap" {
     });
 }
 
-test "completion - function call" {
+test "function call" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn func() S {}
@@ -407,7 +407,7 @@ test "completion - function call" {
     });
 }
 
-test "completion - optional" {
+test "optional" {
     try testCompletion(
         \\const foo: ?u32 = undefined;
         \\const bar = foo.<cursor>
@@ -424,14 +424,14 @@ test "completion - optional" {
     });
 }
 
-test "completion - optional type" {
+test "optional type" {
     try testCompletion(
         \\const foo = ?u32;
         \\const bar = foo.<cursor>
     , &.{});
 }
 
-test "completion - pointer deref" {
+test "pointer deref" {
     try testCompletion(
         \\const foo: *u32 = undefined;
         \\const bar = foo.<cursor>
@@ -468,7 +468,7 @@ test "completion - pointer deref" {
     });
 }
 
-test "completion - pointer array access" {
+test "pointer array access" {
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -505,7 +505,7 @@ test "completion - pointer array access" {
     });
 }
 
-test "completion - pointer subslicing" {
+test "pointer subslicing" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\const foo: []S = undefined;
@@ -526,7 +526,7 @@ test "completion - pointer subslicing" {
     , &.{});
 }
 
-test "completion - pointer subslicing parser correctness" {
+test "pointer subslicing parser correctness" {
     try testCompletion(
         \\const foo: [*]u32 = undefined;
         \\const bar = foo[foo[0]..].<cursor>
@@ -559,7 +559,7 @@ test "completion - pointer subslicing parser correctness" {
     });
 }
 
-test "completion - slice pointer" {
+test "slice pointer" {
     try testCompletion(
         \\const foo: []const u8 = undefined;
         \\const bar = foo.<cursor>
@@ -569,7 +569,7 @@ test "completion - slice pointer" {
     });
 }
 
-test "completion - many item pointer" {
+test "many item pointer" {
     try testCompletion(
         \\const foo: [*]u32 = undefined;
         \\const bar = foo.<cursor>
@@ -583,7 +583,7 @@ test "completion - many item pointer" {
     , &.{});
 }
 
-test "completion - address of" {
+test "address of" {
     try testCompletion(
         \\const value: u32 = undefined;
         \\const value_ptr = &value;
@@ -602,7 +602,7 @@ test "completion - address of" {
     });
 }
 
-test "completion - pointer type" {
+test "pointer type" {
     try testCompletion(
         \\const foo = *u32;
         \\const bar = foo.<cursor>
@@ -621,7 +621,7 @@ test "completion - pointer type" {
     , &.{});
 }
 
-test "completion - array" {
+test "array" {
     try testCompletion(
         \\const foo: [3]u32 = undefined;
         \\const bar = foo.<cursor>
@@ -654,7 +654,7 @@ test "completion - array" {
     });
 }
 
-test "completion - single pointer to array" {
+test "single pointer to array" {
     try testCompletion(
         \\const foo: *[3]u32 = undefined;
         \\const bar = foo.<cursor>
@@ -678,14 +678,14 @@ test "completion - single pointer to array" {
     });
 }
 
-test "completion - array type" {
+test "array type" {
     try testCompletion(
         \\const foo = [3]u32;
         \\const bar = foo.<cursor>
     , &.{});
 }
 
-test "completion - if/for/while/catch scopes" {
+test "if/for/while/catch scopes" {
     try testCompletion(
         \\const S = struct { pub const T = u32; };
         \\test {
@@ -763,7 +763,7 @@ test "completion - if/for/while/catch scopes" {
     });
 }
 
-test "completion - if captures" {
+test "if captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(bar: ?S) void {
@@ -823,7 +823,7 @@ test "completion - if captures" {
     });
 }
 
-test "completion - for captures" {
+test "for captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(items: []S) void {
@@ -882,7 +882,7 @@ test "completion - for captures" {
     });
 }
 
-test "completion - while captures" {
+test "while captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(bar: ?S) void {
@@ -909,7 +909,7 @@ test "completion - while captures" {
     });
 }
 
-test "completion - catch captures" {
+test "catch captures" {
     try testCompletion(
         \\const E = error{ X, Y };
         \\const S = struct { alpha: u32 };
@@ -926,7 +926,7 @@ test "completion - catch captures" {
     });
 }
 
-test "completion - struct" {
+test "struct" {
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -1010,7 +1010,7 @@ test "completion - struct" {
     });
 }
 
-test "completion - union" {
+test "union" {
     try testCompletion(
         \\const U = union {
         \\    alpha: u32,
@@ -1039,7 +1039,7 @@ test "completion - union" {
     });
 }
 
-test "completion - enum" {
+test "enum" {
     try testCompletion(
         \\const E = enum {
         \\    alpha,
@@ -1270,7 +1270,7 @@ test "completion - enum" {
     });
 }
 
-test "completion - global enum set" {
+test "global enum set" {
     try testCompletion(
         \\const SomeError = error{ e };
         \\const E1 = enum {
@@ -1308,7 +1308,7 @@ test "completion - global enum set" {
     });
 }
 
-test "completion - switch cases" {
+test "switch cases" {
     // Because current logic is to list all enums if all else fails,
     // the following tests include an extra enum to ensure that we're not just 'getting lucky'
     try testCompletion(
@@ -1430,7 +1430,7 @@ test "completion - switch cases" {
     });
 }
 
-test "completion - error set" {
+test "error set" {
     try testCompletion(
         \\const E = error {
         \\    foo,
@@ -1458,7 +1458,7 @@ test "completion - error set" {
     });
 }
 
-test "completion - global error set" {
+test "global error set" {
     try testCompletion(
         \\const SomeEnum = enum { e };
         \\const Error1 = error {
@@ -1505,7 +1505,7 @@ test "completion - global error set" {
     });
 }
 
-test "completion - merged error sets" {
+test "merged error sets" {
     try testCompletion(
         \\const FirstSet = error{
         \\    X,
@@ -1548,7 +1548,7 @@ test "completion - merged error sets" {
     });
 }
 
-test "completion - error union" {
+test "error union" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo() error{Foo}!S {}
@@ -1593,7 +1593,7 @@ test "completion - error union" {
     });
 }
 
-test "completion - struct init" {
+test "struct init" {
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -1898,7 +1898,7 @@ test "completion - struct init" {
     });
 }
 
-test "completion - deprecated " {
+test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(
         \\const foo = @compileError("Deprecated; some message");
@@ -1913,7 +1913,7 @@ test "completion - deprecated " {
     });
 }
 
-test "completion - declarations" {
+test "declarations" {
     try testCompletion(
         \\const S = struct {
         \\    pub const Public = u32;
@@ -1959,7 +1959,7 @@ test "completion - declarations" {
     });
 }
 
-test "completion - usingnamespace" {
+test "usingnamespace" {
     try testCompletion(
         \\const S1 = struct {
         \\    member: u32,
@@ -2046,7 +2046,7 @@ test "completion - usingnamespace" {
     });
 }
 
-test "completion - anytype resolution based on callsite-references" {
+test "anytype resolution based on callsite-references" {
     try testCompletion(
         \\const Writer1 = struct {
         \\    fn write1() void {}
@@ -2091,7 +2091,7 @@ test "completion - anytype resolution based on callsite-references" {
     });
 }
 
-test "completion - builtin fn `field`" {
+test "builtin fn `field`" {
     try testCompletion(
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
@@ -2143,7 +2143,7 @@ test "completion - builtin fn `field`" {
     });
 }
 
-test "completion - block" {
+test "block" {
     try testCompletion(
         \\const foo = blk: {
         \\    break :<cursor>
@@ -2164,7 +2164,7 @@ test "completion - block" {
     });
 }
 
-test "completion - either" {
+test "either" {
     try testCompletion(
         \\const Alpha = struct {
         \\    fn alpha() void {}
@@ -2196,32 +2196,32 @@ test "completion - either" {
 }
 
 // https://github.com/zigtools/zls/issues/1370
-test "completion - cyclic struct init field" {
+test "cyclic struct init field" {
     try testCompletion(
         \\_ = .{} .foo = .{ .<cursor>foo
     , &.{});
 }
 
-test "completion - integer overflow in struct init field without lhs" {
+test "integer overflow in struct init field without lhs" {
     try testCompletion(
         \\= .{ .<cursor>foo
     , &.{});
 }
 
-test "completion - integer overflow in dot completions at beginning of file" {
+test "integer overflow in dot completions at beginning of file" {
     try testCompletion(
         \\.<cursor>
     , &.{});
 }
 
-test "completion - enum completion on out of bound parameter index" {
+test "enum completion on out of bound parameter index" {
     try testCompletion(
         \\fn foo() void {}
         \\const foo = foo(,.<cursor>);
     , &.{});
 }
 
-test "completion - combine doc comments of declaration and definition" {
+test "combine doc comments of declaration and definition" {
     try testCompletion(
         \\const foo = struct {
         \\    /// A
@@ -2248,7 +2248,7 @@ test "completion - combine doc comments of declaration and definition" {
     });
 }
 
-test "completion - top-level doc comment" {
+test "top-level doc comment" {
     try testCompletion(
         \\//! B
         \\
@@ -2270,7 +2270,7 @@ test "completion - top-level doc comment" {
     });
 }
 
-test "completion - function `self` parameter detection" {
+test "function `self` parameter detection" {
     try testCompletion(
         \\const S = struct {
         \\    fn f(self: S) void {}
@@ -2300,7 +2300,7 @@ test "completion - function `self` parameter detection" {
     });
 }
 
-test "completion - snippet - function with `self` parameter" {
+test "snippet - function with `self` parameter" {
     try testCompletion(
         \\const S = struct {
         \\    fn f(self: S) void {}
@@ -2341,7 +2341,7 @@ test "completion - snippet - function with `self` parameter" {
     });
 }
 
-test "completion - snippets disabled" {
+test "snippets disabled" {
     try testCompletionWithOptions(
         \\const S = struct {
         \\    fn f(self: S) void {}
@@ -2375,7 +2375,7 @@ test "completion - snippets disabled" {
     });
 }
 
-test "completion - label details disabled" {
+test "label details disabled" {
     try testCompletionWithOptions(
         \\const S = struct {
         \\    fn f(self: S) void {}
