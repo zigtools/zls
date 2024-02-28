@@ -1067,6 +1067,21 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
+fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle) !?u64 {
+    // When resolve_number_literal_values is set then resolveTypeOfNode will also resolve the value of number literals.
+    // So we can use it to resolve integer values.
+
+    const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+    analyser.resolve_number_literal_values = true;
+    defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+
+    const resolved_length = try analyser.resolveTypeOfNode(node_handle) orelse return null;
+    switch (resolved_length.data) {
+        .ip_index => |payload| return analyser.ip.toInt(payload.index, u64),
+        else => return null,
+    }
+}
+
 const primitives = std.ComptimeStringMap(InternPool.Index, .{
     .{ "anyerror", .anyerror_type },
     .{ "anyframe", .anyframe_type },
@@ -1491,20 +1506,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const array_info = tree.fullArrayType(node).?;
 
-            const elem_count: ?u64 = blk: {
-                // When resolve_number_literal_values is set then resolveTypeOfNode will also resolve the value of number literals.
-                // So we can use it to resolve the element count.
-
-                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
-                analyser.resolve_number_literal_values = true;
-                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
-
-                const resolved_elem_count = try analyser.resolveTypeOfNode(.{ .node = array_info.ast.elem_count, .handle = handle }) orelse break :blk null;
-                switch (resolved_elem_count.data) {
-                    .ip_index => |payload| break :blk analyser.ip.toInt(payload.index, u64),
-                    else => break :blk null,
-                }
-            };
+            const elem_count: ?u64 = try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.elem_count, .handle = handle });
 
             const sentinel: InternPool.Index = if (array_info.ast.sentinel != 0) blk: {
                 // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
@@ -1738,6 +1740,33 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
             if (std.mem.eql(u8, call_name, "@compileError")) {
                 return Type{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
+            }
+
+            if (std.mem.eql(u8, call_name, "@Vector")) {
+                if (params.len != 2) return null;
+
+                const child_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = params[1], .handle = handle }) orelse return null;
+                if (!child_ty.is_type_val) return null;
+
+                const child_ty_ip_index = switch (child_ty.data) {
+                    .ip_index => |payload| payload.index,
+                    else => return null,
+                };
+
+                const len: u64 = try analyser.resolveIntegerLiteral(.{ .node = params[0], .handle = handle }) orelse
+                    return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
+
+                const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
+                    .vector_type = .{
+                        .len = std.math.cast(u32, len) orelse return null,
+                        .child = child_ty_ip_index,
+                    },
+                });
+
+                return Type{
+                    .data = .{ .ip_index = .{ .index = vector_ty_ip_index } },
+                    .is_type_val = true,
+                };
             }
         },
         .fn_proto,
