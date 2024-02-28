@@ -701,10 +701,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
             dot_context,
         );
         for (containers) |container| {
-            if (dot_context.likely == .enum_arg and !container.isEnumType()) continue;
-            if (dot_context.likely != .struct_field)
-                if (!container.isEnumType() and !container.isUnionType()) continue;
-            try collectContainerFields(builder, container);
+            try collectContainerFields(builder, dot_context.likely, container);
         }
     }
 
@@ -917,6 +914,7 @@ pub fn completionAtIndex(
                 else
                     .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
             }
+            item.insertText = null;
         }
     }
 
@@ -1041,11 +1039,12 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
 
 const EnumLiteralContext = struct {
     const Likely = enum { // TODO: better name, tagged union?
-        /// `mye: Enum = .`, `abc.field = .` or `f(.{.field = .` if typeof(field) is enumlike)
-        /// `== .`, `!= .`, switch case
+        /// `mye: Enum = .`, `abc.field = .`, `f(.{.field = .`, `switch` case
         enum_literal,
         /// Same as above, but`f() = .` or `identifier.f() = .` are ignored, ie lhs of `=` is a fn call
         enum_assignment,
+        // `==`, `!=`
+        enum_comparison,
         /// the enum is a fn arg, eg `f(.`
         enum_arg,
         /// `S{.`, `var s:S = .{.`, `f(.{.` or `a.f(.{.`
@@ -1078,12 +1077,15 @@ fn getEnumLiteralContext(
     var dot_context = EnumLiteralContext{ .likely = .enum_literal };
 
     switch (token_tags[token_index]) {
-        .equal, .equal_equal, .bang_equal => |tok_tag| {
+        .equal => {
             token_index -= 1;
-            if (tok_tag == .equal) {
-                if ((token_tags[token_index] == .r_paren)) return null; // `..) = .`, ie lhs is a fn call
-                dot_context.likely = .enum_assignment;
-            }
+            if ((token_tags[token_index] == .r_paren)) return null; // `..) = .`, ie lhs is a fn call
+            dot_context.likely = .enum_assignment;
+            dot_context.identifier_token_index = token_index;
+        },
+        .equal_equal, .bang_equal => {
+            token_index -= 1;
+            dot_context.likely = .enum_comparison;
             dot_context.identifier_token_index = token_index;
         },
         .l_brace, .comma, .l_paren => {
@@ -1227,8 +1229,10 @@ fn getSwitchOrStructInitContext(
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 pub fn collectContainerFields(
     builder: *Builder,
+    likely: EnumLiteralContext.Likely,
     container: Analyser.Type,
 ) error{OutOfMemory}!void {
+    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const node_handle = switch (container.data) {
         .other => |n| n,
         else => return,
@@ -1240,10 +1244,25 @@ pub fn collectContainerFields(
     for (container_decl.ast.members) |member| {
         const field = handle.tree.fullContainerField(member) orelse continue;
         const name = handle.tree.tokenSlice(field.ast.main_token);
-        try builder.completions.append(builder.arena, .{
+        if (likely != .struct_field and likely != .enum_comparison and !field.ast.tuple_like) {
+            try builder.completions.append(builder.arena, .{
+                .label = name,
+                .kind = if (field.ast.tuple_like) .EnumMember else .Field,
+                .detail = Analyser.getContainerFieldSignature(handle.tree, field),
+                .insertText = if (use_snippets)
+                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+                else
+                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
+                .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+            });
+        } else try builder.completions.append(builder.arena, .{
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
+            .insertText = if (field.ast.tuple_like or likely == .enum_comparison)
+                name
+            else
+                try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
         });
     }
 }
@@ -1289,7 +1308,7 @@ fn collectVarAccessContainerNodes(
         const fn_proto_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
         const fn_proto_node = fn_proto_node_handle.node;
         const fn_proto_handle = fn_proto_node_handle.handle;
-        if (dot_context.likely == .enum_literal or dot_context.need_ret_type) { // => we need f()'s return type
+        if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
             var buf: [1]Ast.Node.Index = undefined;
             const full_fn_proto = fn_proto_handle.tree.fullFnProto(&buf, fn_proto_node).?;
             const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
