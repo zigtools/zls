@@ -17,7 +17,6 @@ const Completion = struct {
     kind: types.CompletionItemKind,
     detail: ?[]const u8 = null,
     documentation: ?[]const u8 = null,
-    insert_text: ?[]const u8 = null,
     deprecated: bool = false,
 };
 
@@ -2981,19 +2980,10 @@ fn testCompletionWithOptions(
             return error.InvalidCompletionDoc;
         }
 
-        if (expected_completion.insert_text) |expected_insert| blk: {
-            try std.testing.expectEqual(
-                @as(?types.InsertTextFormat, if (options.enable_snippets) .Snippet else .PlainText),
-                actual_completion.insertTextFormat,
-            );
-            const actual_insert = actual_completion.insertText;
-            if (actual_insert != null and std.mem.eql(u8, expected_insert, actual_insert.?)) break :blk;
-            try error_builder.msgAtIndex("completion item '{s}' should have insert text '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
-                label,
-                expected_insert,
-                actual_insert,
-            });
-            return error.InvalidCompletionInsertText;
+        try std.testing.expect(actual_completion.insertText == null); // 'insertText' is subject to interpretation on the client so 'textEdit' should be prefered
+
+        if (!ctx.server.client_capabilities.supports_snippets) {
+            try std.testing.expectEqual(types.InsertTextFormat.PlainText, actual_completion.insertTextFormat orelse .PlainText);
         }
 
         if (expected_completion.detail) |expected_detail| blk: {
