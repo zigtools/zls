@@ -666,6 +666,59 @@ test "var decl alias" {
     );
 }
 
+test "hover destructuring" {
+    try testHover(
+        \\fn func() void {
+        \\    const foo, const bar = .{ 1, 2 };
+        \\    _ = f<cursor>oo;
+        \\    _ = bar;
+        \\}
+    ,
+        \\```zig
+        \\foo
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+}
+test "hover destructuring multiple" {
+    try testHover(
+        \\fn func() void {
+        \\    const foo, const bar, const baz = .{ 1, 2, 3 };
+        \\    _ = f<cursor>oo;
+        \\    _ = bar;
+        \\    _ = baz;
+        \\}
+    ,
+        \\```zig
+        \\foo
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+}
+test "hover destructuring try" {
+    try testHover(
+        \\fn thing() !struct {usize, isize} {
+        \\    return .{1, 2};
+        \\}
+        \\fn ex() void {
+        \\    const foo, const bar = try thing();
+        \\    _ = f<cursor>oo;
+        \\    _ = bar;
+        \\}
+    ,
+        \\```zig
+        \\foo
+        \\```
+        \\```zig
+        \\(usize)
+        \\```
+    );
+}
+
 // https://github.com/zigtools/zls/issues/1378
 test "type reference cycle" {
     try testHover(

@@ -3660,7 +3660,26 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 .Single,
             ),
-            .assign_destructure => null, // TODO
+            .assign_destructure => |pay| {
+                const data = tree.nodes.items(.data);
+                const rh = data[pay.node].rhs;
+                const node = try analyser.resolveTypeOfNode(.{ .node = rh, .handle = self.handle });
+                if (node) |right| {
+                    return switch (right.data) {
+                        .array => blk: {
+                            var buffer: [2]Ast.Node.Index = undefined;
+                            break :blk try analyser.resolveTypeOfNode(.{
+                                .node = tree.fullArrayInit(&buffer, rh).?.ast.elements[pay.index],
+                                .handle = self.handle,
+                            });
+                        },
+
+                        .other => try analyser.resolveTupleFieldType(node.?, pay.index),
+                        else => null,
+                    };
+                }
+                return null;
+            }, // TODO
             .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,
