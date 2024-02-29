@@ -69,6 +69,7 @@ const ClientCapabilities = struct {
     hover_supports_md: bool = false,
     signature_help_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
+    supports_completion_insert_replace_support: bool = false,
     /// deprecated can be marked through the `CompletionItem.deprecated` field
     supports_completion_deprecated_old: bool = false,
     /// deprecated can be marked through the `CompletionItem.tags` field
@@ -77,8 +78,6 @@ const ClientCapabilities = struct {
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
-    /// workaround for builtin completion in Sublime Text 3
-    include_at_in_builtins: bool = false,
     /// The detail entries for big structs such as std.zig.CrossTarget were
     /// bricking the preview window in Sublime Text.
     /// https://github.com/zigtools/zls/pull/261
@@ -375,19 +374,11 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     if (request.clientInfo) |clientInfo| {
         log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
-        if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
+        if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
             server.client_capabilities.max_detail_length = 256;
             // TODO investigate why fixall doesn't work in sublime text
             server.client_capabilities.supports_code_action_fixall = false;
             skip_set_fixall = true;
-
-            const version_str = clientInfo.version orelse break :blk;
-            const version = std.SemanticVersion.parse(version_str) catch break :blk;
-            // this indicates a LSP version for sublime text 3
-            // this check can be made more precise if the version that fixed this issue is known
-            if (version.major == 0) {
-                server.client_capabilities.include_at_in_builtins = true;
-            }
         } else if (std.mem.eql(u8, clientInfo.name, "Visual Studio Code")) {
             server.client_capabilities.supports_code_action_fixall = true;
             skip_set_fixall = true;
@@ -438,6 +429,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
                 server.client_capabilities.label_details_support = completionItem.labelDetailsSupport orelse false;
                 server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
                 server.client_capabilities.supports_completion_deprecated_old = completionItem.deprecatedSupport orelse false;
+                server.client_capabilities.supports_completion_insert_replace_support = completionItem.insertReplaceSupport orelse false;
                 if (completionItem.tagSupport) |tagSupport| {
                     for (tagSupport.valueSet) |tag| {
                         switch (tag) {

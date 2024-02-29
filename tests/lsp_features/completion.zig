@@ -17,7 +17,6 @@ const Completion = struct {
     kind: types.CompletionItemKind,
     detail: ?[]const u8 = null,
     documentation: ?[]const u8 = null,
-    insert_text: ?[]const u8 = null,
     deprecated: bool = false,
 };
 
@@ -2284,111 +2283,6 @@ test "top-level doc comment" {
     });
 }
 
-test "function `self` parameter detection" {
-    try testCompletion(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: S) void", .insert_text = "f()" },
-    });
-    try testCompletion(
-        \\const S = struct {
-        \\    fn f(self: @This()) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: @This()) void", .insert_text = "f()" },
-    });
-    try testCompletion(
-        \\const S = struct {
-        \\    fn f(self: anytype) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: anytype) void", .insert_text = "f()" },
-    });
-}
-
-test "snippet - function with `self` parameter" {
-    try testCompletion(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: S) void", .insert_text = "f()" },
-    });
-    try testCompletionWithOptions(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: S) void", .insert_text = "f()" },
-    }, .{
-        .enable_argument_placeholders = false,
-    });
-    try testCompletion(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\S.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Function, .detail = "fn (self: S) void", .insert_text = "f(${1:self: S})" },
-    });
-    try testCompletionWithOptions(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\S.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Function, .detail = "fn (self: S) void", .insert_text = "f(${1:})" },
-    }, .{
-        .enable_argument_placeholders = false,
-    });
-}
-
-test "snippets disabled" {
-    try testCompletionWithOptions(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Method, .detail = "fn (self: S) void", .insert_text = "f()" },
-    }, .{
-        .enable_snippets = false,
-    });
-    try testCompletionWithOptions(
-        \\const S = struct {
-        \\    fn f(self: S) void {}
-        \\};
-        \\S.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Function, .detail = "fn (self: S) void", .insert_text = "f" },
-    }, .{
-        .enable_snippets = false,
-    });
-    try testCompletionWithOptions(
-        \\const S = struct {
-        \\    fn f() void {}
-        \\};
-        \\S.<cursor>
-    , &.{
-        .{ .label = "f", .kind = .Function, .detail = "fn () void", .insert_text = "f()" },
-    }, .{
-        .enable_snippets = false,
-    });
-}
-
 test "label details disabled" {
     try testCompletionWithOptions(
         \\const S = struct {
@@ -2405,7 +2299,6 @@ test "label details disabled" {
             },
             .kind = .Method,
             .detail = "fn (self: S) void",
-            .insert_text = "f()",
         },
     }, .{
         .completion_label_details = false,
@@ -2425,22 +2318,573 @@ test "label details disabled" {
             },
             .kind = .Method,
             .detail = "fn (self: S, value: u32) !void",
-            .insert_text = "f(${1:value: u32})",
         },
     }, .{
         .completion_label_details = false,
     });
 }
 
+test "insert replace behaviour - keyword" {
+    try testCompletionTextEdit(.{
+        .source = "const foo = <cursor>@abs(5);",
+        .label = "comptime",
+        .expected_insert_line = "const foo = comptime@abs(5);",
+        .expected_replace_line = "const foo = comptime@abs(5);",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = <cursor>comptime;",
+        .label = "comptime_float",
+        .expected_insert_line = "const foo = comptime_floatcomptime;",
+        .expected_replace_line = "const foo = comptime_float;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = <cursor>comptime;",
+        .label = "comptime_float",
+        .expected_insert_line = "const foo = comptime_floatcomptime;",
+        .expected_replace_line = "const foo = comptime_float;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = comp<cursor>;",
+        .label = "comptime",
+        .expected_insert_line = "const foo = comptime;",
+        .expected_replace_line = "const foo = comptime;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = comp<cursor>time;",
+        .label = "comptime",
+        .expected_insert_line = "const foo = comptimetime;",
+        .expected_replace_line = "const foo = comptime;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = comptime<cursor>;",
+        .label = "comptime",
+        .expected_insert_line = "const foo = comptime;",
+        .expected_replace_line = "const foo = comptime;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = comptime<cursor>;",
+        .label = "comptime_float",
+        .expected_insert_line = "const foo = comptime_float;",
+        .expected_replace_line = "const foo = comptime_float;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = comptime <cursor>;",
+        .label = "comptime_float",
+        .expected_insert_line = "const foo = comptime comptime_float;",
+        .expected_replace_line = "const foo = comptime comptime_float;",
+    });
+}
+
+test "insert replace behaviour - builtin" {
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>;",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @abs;",
+        .expected_replace_line = "const foo = @abs;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @a<cursor>;",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @abs;",
+        .expected_replace_line = "const foo = @abs;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>abs;",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @absabs;",
+        .expected_replace_line = "const foo = @abs;",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @a<cursor>bs;",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @absbs;",
+        .expected_replace_line = "const foo = @abs;",
+    });
+
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(5);",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @abs(5);",
+        .expected_replace_line = "const foo = @abs(5);",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @a<cursor>(5);",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @abs(5);",
+        .expected_replace_line = "const foo = @abs(5);",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>abs(5);",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @absabs(5);",
+        .expected_replace_line = "const foo = @abs(5);",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @a<cursor>bs(5);",
+        .label = "@abs",
+        .expected_insert_line = "const foo = @absbs(5);",
+        .expected_replace_line = "const foo = @abs(5);",
+    });
+}
+
+test "insert replace behaviour - builtin with no parameters" {
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>;",
+        .label = "@src",
+        .expected_insert_line = "const foo = @src();",
+        .expected_replace_line = "const foo = @src();",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>();",
+        .label = "@src",
+        .expected_insert_line = "const foo = @src();",
+        .expected_replace_line = "const foo = @src();",
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(5);",
+        .label = "@src",
+        .expected_insert_line = "const foo = @src(5);",
+        .expected_replace_line = "const foo = @src(5);",
+    });
+}
+
+test "insert replace behaviour - builtin with snippets" {
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>;",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(${1:comptime T: type}, ${2:expression});",
+        .expected_replace_line = "const foo = @as(${1:comptime T: type}, ${2:expression});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(;",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(;",
+        .expected_replace_line = "const foo = @as(;",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>();",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(${1:comptime T: type}, ${2:expression});",
+        .expected_replace_line = "const foo = @as(${1:comptime T: type}, ${2:expression});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>;",
+        .label = "@src",
+        .expected_insert_line = "const foo = @src();",
+        .expected_replace_line = "const foo = @src();",
+        .enable_snippets = true,
+        .enable_argument_placeholders = false,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>;",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(${1:});",
+        .expected_replace_line = "const foo = @as(${1:});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = false,
+    });
+
+    // remove the following test when partial argument placeholders are supported (see test below)
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(u32);",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(u32);",
+        .expected_replace_line = "const foo = @as(u32);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - builtin with partial argument placeholders" {
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(u32,);",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(u32, ${1:expression});",
+        .expected_replace_line = "const foo = @as(u32, ${1:expression});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>( , 5);",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(${1:comptime T: type}, 5);",
+        .expected_replace_line = "const foo = @as(${1:comptime T: type}, 5);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source = "const foo = @<cursor>(u32, 5);",
+        .label = "@as",
+        .expected_insert_line = "const foo = @as(u32, 5);",
+        .expected_replace_line = "const foo = @as(u32, 5);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - function" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo() void {}
+        \\const _ = <cursor>bar()
+        ,
+        .label = "foo",
+        .expected_insert_line = "const _ = foobar()",
+        .expected_replace_line = "const _ = foo()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo(number: u32) void {}
+        \\const _ = <cursor>bar()
+        ,
+        .label = "foo",
+        .expected_insert_line = "const _ = foobar()",
+        .expected_replace_line = "const _ = foo()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo(number: u32) void {}
+        \\const _ = <cursor>()
+        ,
+        .label = "foo",
+        .expected_insert_line = "const _ = foo(${1:})",
+        .expected_replace_line = "const _ = foo(${1:})",
+        .enable_snippets = true,
+        .enable_argument_placeholders = false,
+    });
+}
+
+test "insert replace behaviour - function 'self parameter' detection" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "S.f",
+        .expected_replace_line = "S.f",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f() void {}
+        \\};
+        \\S.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "S.f()",
+        .expected_replace_line = "S.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: @This()) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: anytype) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+    });
+}
+
+test "insert replace behaviour - function with snippets" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>;
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(${1:comptime T: type}, ${2:number: u32});",
+        .expected_replace_line = "const foo = func(${1:comptime T: type}, ${2:number: u32});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>(;
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(;",
+        .expected_replace_line = "const foo = func(;",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>();
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(${1:comptime T: type}, ${2:number: u32});",
+        .expected_replace_line = "const foo = func(${1:comptime T: type}, ${2:number: u32});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "S.f(${1:self: S})",
+        .expected_replace_line = "S.f(${1:self: S})",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S, number: u32) void {}
+        \\};
+        \\var s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f(${1:number: u32})",
+        .expected_replace_line = "s.f(${1:number: u32})",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f()",
+        .expected_replace_line = "s.f()",
+        .enable_snippets = true,
+        .enable_argument_placeholders = false,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S) void {}
+        \\};
+        \\S.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "S.f(${1:})",
+        .expected_replace_line = "S.f(${1:})",
+        .enable_snippets = true,
+        .enable_argument_placeholders = false,
+    });
+
+    // remove the following test when partial argument placeholders are supported (see test below)
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>(u32);
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(u32);",
+        .expected_replace_line = "const foo = func(u32);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - function with partial argument placeholders" {
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>(u32,);
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(u32, ${1:number: u32});",
+        .expected_replace_line = "const foo = func(u32, ${1:number: u32});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>( , 5);
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(${1:comptime T: type}, 5);",
+        .expected_replace_line = "const foo = func(${1:comptime T: type}, 5);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>(u32, 5);
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(u32, 5);",
+        .expected_replace_line = "const foo = func(u32, 5);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - doc test name" {
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo() void {};
+        \\test <cursor>
+        ,
+        .label = "foo",
+        .expected_insert_line = "test foo",
+        .expected_replace_line = "test foo",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo() void {};
+        \\test f<cursor> {}
+        ,
+        .label = "foo",
+        .expected_insert_line = "test foo {}",
+        .expected_replace_line = "test foo {}",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn foo() void {};
+        \\test <cursor>oo {}
+        ,
+        .label = "foo",
+        .expected_insert_line = "test foooo {}",
+        .expected_replace_line = "test foo {}",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - file system completions" {
+    // zig fmt: off
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("<cursor>");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("std");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("s<cursor>td");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("stdtd");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("<cursor>std");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("stdstd");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
+    // TODO
+    // try testCompletionTextEdit(.{
+    //     .source = \\const std = @import("st<cursor>.zig");
+    //     , .label = "std"
+    //     , .expected_insert_line = \\const std = @import("std.zig");
+    //     , .expected_replace_line = \\const std = @import("std");
+    //     ,
+    // });
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("file<cursor>.zig");
+        , .label = "file.zig"
+        , .expected_insert_line = \\const std = @import("file.zig");
+        , .expected_replace_line = \\const std = @import("file.zig");
+        ,
+    });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("fi<cursor>le.zig");
+        , .label = "file.zig"
+        , .expected_insert_line = \\const std = @import("filele.zig");
+        , .expected_replace_line = \\const std = @import("file.zig");
+        ,
+    });
+    // zig fmt: on
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
 
-fn testCompletionWithOptions(source: []const u8, expected_completions: []const Completion, options: struct {
-    enable_argument_placeholders: bool = true,
-    enable_snippets: bool = true,
-    completion_label_details: bool = true,
-}) !void {
+fn testCompletionWithOptions(
+    source: []const u8,
+    expected_completions: []const Completion,
+    options: struct {
+        enable_argument_placeholders: bool = true,
+        enable_snippets: bool = true,
+        completion_label_details: bool = true,
+    },
+) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
@@ -2449,7 +2893,7 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
     defer ctx.deinit();
 
     ctx.server.client_capabilities.completion_doc_supports_md = true;
-    ctx.server.client_capabilities.supports_snippets = options.enable_snippets;
+    ctx.server.client_capabilities.supports_snippets = true;
     ctx.server.client_capabilities.label_details_support = true;
     ctx.server.client_capabilities.supports_completion_deprecated_old = true;
     ctx.server.client_capabilities.supports_completion_deprecated_tag = true;
@@ -2536,19 +2980,10 @@ fn testCompletionWithOptions(source: []const u8, expected_completions: []const C
             return error.InvalidCompletionDoc;
         }
 
-        if (expected_completion.insert_text) |expected_insert| blk: {
-            try std.testing.expectEqual(
-                @as(?types.InsertTextFormat, if (options.enable_snippets) .Snippet else .PlainText),
-                actual_completion.insertTextFormat,
-            );
-            const actual_insert = actual_completion.insertText;
-            if (actual_insert != null and std.mem.eql(u8, expected_insert, actual_insert.?)) break :blk;
-            try error_builder.msgAtIndex("completion item '{s}' should have insert text '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
-                label,
-                expected_insert,
-                actual_insert,
-            });
-            return error.InvalidCompletionInsertText;
+        try std.testing.expect(actual_completion.insertText == null); // 'insertText' is subject to interpretation on the client so 'textEdit' should be prefered
+
+        if (!ctx.server.client_capabilities.supports_snippets) {
+            try std.testing.expectEqual(types.InsertTextFormat.PlainText, actual_completion.insertTextFormat orelse .PlainText);
         }
 
         if (expected_completion.detail) |expected_detail| blk: {
@@ -2668,4 +3103,139 @@ fn printLabels(writer: anytype, labels: std.StringArrayHashMapUnmanaged(void), n
             try writer.print("  - {s}\n", .{label});
         }
     }
+}
+
+/// TODO this function should allow asserting where the cursor is placed after the text edit
+fn testCompletionTextEdit(
+    options: struct {
+        source: []const u8,
+        /// label of the completion item that should be applied
+        label: []const u8,
+        /// expected line when `textDocument.completion.insertReplaceSupport` is unset or the 'insert' text edit is applied.
+        expected_insert_line: []const u8,
+        /// expected line when `textDocument.completion.insertReplaceSupport` is set and the 'replace' text edit is applied.
+        expected_replace_line: []const u8,
+
+        enable_argument_placeholders: bool = false,
+        enable_snippets: bool = false,
+    },
+) !void {
+    const cursor_idx = std.mem.indexOf(u8, options.source, "<cursor>").?;
+    const text = try std.mem.concat(allocator, u8, &.{ options.source[0..cursor_idx], options.source[cursor_idx + "<cursor>".len ..] });
+    defer allocator.free(text);
+
+    const cursor_line_loc = offsets.lineLocAtIndex(text, cursor_idx);
+
+    const expected_insert_text = try std.mem.concat(allocator, u8, &.{ text[0..cursor_line_loc.start], options.expected_insert_line, text[cursor_line_loc.end..] });
+    defer allocator.free(expected_insert_text);
+
+    const expected_replace_text = try std.mem.concat(allocator, u8, &.{ text[0..cursor_line_loc.start], options.expected_replace_line, text[cursor_line_loc.end..] });
+    defer allocator.free(expected_replace_text);
+
+    var ctx = try Context.init();
+    defer ctx.deinit();
+
+    ctx.server.client_capabilities.supports_snippets = true;
+
+    ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
+    ctx.server.config.enable_snippets = options.enable_snippets;
+
+    const test_uri = try ctx.addDocument(text);
+    const handle = ctx.server.document_store.getHandle(test_uri).?;
+
+    const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);
+    const params = types.CompletionParams{
+        .textDocument = .{ .uri = test_uri },
+        .position = cursor_position,
+    };
+
+    for ([_]bool{ false, true }) |supports_insert_replace| {
+        ctx.server.client_capabilities.supports_completion_insert_replace_support = supports_insert_replace;
+
+        @setEvalBranchQuota(5000);
+        const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params) orelse {
+            std.debug.print("Server returned `null` as the result\n", .{});
+            return error.InvalidResponse;
+        };
+        const completion_item = try searchCompletionItemWithLabel(response.CompletionList, options.label);
+
+        std.debug.assert(completion_item.additionalTextEdits == null); // unsupported
+
+        const TextEditOrInsertReplace = std.meta.Child(@TypeOf(completion_item.textEdit));
+
+        const text_edit_or_insert_replace = completion_item.textEdit orelse blk: {
+            var start_index: usize = cursor_idx;
+            while (start_index > 0 and zls.Analyser.isSymbolChar(handle.tree.source[start_index - 1])) {
+                start_index -= 1;
+            }
+
+            const start_position = offsets.indexToPosition(text, start_index, ctx.server.offset_encoding);
+
+            break :blk TextEditOrInsertReplace{
+                .TextEdit = types.TextEdit{
+                    .newText = completion_item.insertText orelse completion_item.label,
+                    .range = types.Range{ .start = start_position, .end = cursor_position },
+                },
+            };
+        };
+
+        switch (text_edit_or_insert_replace) {
+            .TextEdit => |text_edit| {
+                try std.testing.expect(text_edit.range.start.line == text_edit.range.end.line); // text edit range must be a single line
+                try std.testing.expect(offsets.positionInsideRange(cursor_position, text_edit.range)); // text edit range must contain the cursor position
+
+                const actual_text = try zls.diff.applyTextEdits(allocator, text, &.{text_edit}, ctx.server.offset_encoding);
+                defer allocator.free(actual_text);
+
+                try std.testing.expectEqualStrings(expected_insert_text, actual_text);
+
+                if (supports_insert_replace) {
+                    try std.testing.expectEqualStrings(expected_replace_text, actual_text);
+                }
+            },
+            .InsertReplaceEdit => |insert_replace_edit| {
+                std.debug.assert(supports_insert_replace);
+
+                try std.testing.expect(insert_replace_edit.insert.start.line == insert_replace_edit.insert.end.line); // text edit range must be a single line
+                try std.testing.expect(insert_replace_edit.replace.start.line == insert_replace_edit.replace.end.line); // text edit range must be a single line
+                try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.insert)); // text edit range must contain the cursor position
+                try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.replace)); // text edit range must contain the cursor position
+
+                const insert_text_edit = types.TextEdit{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.insert };
+                const replace_text_edit = types.TextEdit{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.replace };
+
+                const actual_insert_text = try zls.diff.applyTextEdits(allocator, text, &.{insert_text_edit}, ctx.server.offset_encoding);
+                defer allocator.free(actual_insert_text);
+
+                const actual_replace_text = try zls.diff.applyTextEdits(allocator, text, &.{replace_text_edit}, ctx.server.offset_encoding);
+                defer allocator.free(actual_replace_text);
+
+                try std.testing.expectEqualStrings(expected_insert_text, actual_insert_text);
+                try std.testing.expectEqualStrings(expected_replace_text, actual_replace_text);
+            },
+        }
+    }
+}
+
+fn searchCompletionItemWithLabel(completion_list: types.CompletionList, label: []const u8) !types.CompletionItem {
+    for (completion_list.items) |item| {
+        if (std.mem.eql(u8, item.label, label)) return item;
+    }
+
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
+
+    const stderr = std.io.getStdErr().writer();
+
+    try stderr.print(
+        \\server returned no completion item with label '{s}'
+        \\
+        \\labels:
+        \\
+    , .{label});
+    for (completion_list.items) |item| {
+        try stderr.print("  - {s}\n", .{item.label});
+    }
+
+    return error.MissingCompletionItem;
 }

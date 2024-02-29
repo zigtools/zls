@@ -426,6 +426,7 @@ pub fn rangeToSlice(text: []const u8, range: types.Range, encoding: Encoding) []
 }
 
 pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc {
+    std.debug.assert(orderPosition(range.start, range.end) != .gt);
     return .{
         .start = positionToIndex(text, range.start, encoding),
         .end = positionToIndex(text, range.end, encoding),
@@ -609,6 +610,7 @@ fn testConvertPositionEncoding(text: [:0]const u8, line: u32, character: u32, ne
 }
 
 pub fn convertRangeEncoding(text: []const u8, range: types.Range, from_encoding: Encoding, to_encoding: Encoding) types.Range {
+    std.debug.assert(orderPosition(range.start, range.end) != .gt);
     if (from_encoding == to_encoding) return range;
     return .{
         .start = convertPositionEncoding(text, range.start, from_encoding, to_encoding),
@@ -665,6 +667,55 @@ test locMerge {
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 3, .end = 5 }), Loc{ .start = 2, .end = 5 });
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 4, .end = 6 }), Loc{ .start = 2, .end = 6 });
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 5, .end = 7 }), Loc{ .start = 2, .end = 7 });
+}
+
+pub fn orderPosition(a: types.Position, b: types.Position) std.math.Order {
+    const line_order = std.math.order(a.line, b.line);
+    if (line_order != .eq) return line_order;
+    return std.math.order(a.character, b.character);
+}
+
+test {
+    try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 0 }, .{ .line = 3, .character = 5 }));
+    try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 3 }, .{ .line = 3, .character = 5 }));
+    try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 6 }, .{ .line = 3, .character = 5 }));
+    try std.testing.expectEqual(.lt, orderPosition(.{ .line = 3, .character = 0 }, .{ .line = 3, .character = 5 }));
+
+    try std.testing.expectEqual(.eq, orderPosition(.{ .line = 3, .character = 3 }, .{ .line = 3, .character = 3 }));
+
+    try std.testing.expectEqual(.gt, orderPosition(.{ .line = 3, .character = 6 }, .{ .line = 3, .character = 3 }));
+    try std.testing.expectEqual(.gt, orderPosition(.{ .line = 5, .character = 0 }, .{ .line = 3, .character = 5 }));
+    try std.testing.expectEqual(.gt, orderPosition(.{ .line = 5, .character = 3 }, .{ .line = 3, .character = 5 }));
+    try std.testing.expectEqual(.gt, orderPosition(.{ .line = 5, .character = 6 }, .{ .line = 3, .character = 5 }));
+}
+
+pub fn positionInsideRange(inner: types.Position, outer: types.Range) bool {
+    std.debug.assert(orderPosition(outer.start, outer.end) != .gt);
+    return orderPosition(outer.start, inner) != .gt and orderPosition(inner, outer.end) != .gt;
+}
+
+test positionInsideRange {
+    const range: types.Range = .{
+        .start = .{ .line = 1, .character = 2 },
+        .end = .{ .line = 2, .character = 4 },
+    };
+    try std.testing.expect(!positionInsideRange(.{ .line = 0, .character = 0 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 0, .character = 2 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 0, .character = 4 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 1, .character = 0 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 1, .character = 1 }, range));
+
+    try std.testing.expect(positionInsideRange(.{ .line = 1, .character = 2 }, range));
+    try std.testing.expect(positionInsideRange(.{ .line = 1, .character = 4 }, range));
+    try std.testing.expect(positionInsideRange(.{ .line = 2, .character = 0 }, range));
+    try std.testing.expect(positionInsideRange(.{ .line = 2, .character = 2 }, range));
+    try std.testing.expect(positionInsideRange(.{ .line = 2, .character = 4 }, range));
+
+    try std.testing.expect(!positionInsideRange(.{ .line = 2, .character = 6 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 3, .character = 0 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 3, .character = 2 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 3, .character = 4 }, range));
+    try std.testing.expect(!positionInsideRange(.{ .line = 3, .character = 6 }, range));
 }
 
 // Helper functions
