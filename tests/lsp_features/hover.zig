@@ -162,6 +162,19 @@ test "builtin" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "vector type" {
+    try testHover(
+        \\const u32<cursor>x4: @Vector(4, u32) = undefined;
+    ,
+        \\```zig
+        \\const u32x4: @Vector(4, u32) = undefined
+        \\```
+        \\```zig
+        \\(@Vector(4,u32))
+        \\```
+    );
+}
+
 test "negation" {
     try testHover(
         \\const f<cursor>oo = 1;
