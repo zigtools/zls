@@ -68,7 +68,7 @@ test "if" {
         \\
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const foo = if (false) {
@@ -77,8 +77,8 @@ test "if" {
         \\
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 2, .endCharacter = 0 },
-        .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 0 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 0 },
     });
 }
 
@@ -88,14 +88,35 @@ test "for/while" {
         \\
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 26, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 0 },
+    });
+    try testFoldingRange(
+        \\const foo = for ("") |_| {
+        \\    return;
+        \\} else {
+        \\
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 11 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 0 },
+    });
+
+    try testFoldingRange(
+        \\const foo = while (true) {
+        \\    //
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 6 },
     });
     try testFoldingRange(
         \\const foo = while (true) {
         \\
+        \\} else {
+        \\    //
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 26, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 0 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 6 },
     });
 }
 
@@ -138,7 +159,7 @@ test "function" {
         \\    return 1 + 1;
         \\}
     , &.{
-        .{ .startLine = 0, .startCharacter = 15, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 15, .endLine = 1, .endCharacter = 17 },
     });
     try testFoldingRange(
         \\fn main(
@@ -156,7 +177,7 @@ test "function" {
         \\}
     , &.{
         .{ .startLine = 0, .startCharacter = 8, .endLine = 1, .endCharacter = 12 },
-        .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 17 },
     });
 }
 
