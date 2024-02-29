@@ -3671,7 +3671,7 @@ pub const DeclWithHandle = struct {
                     .other => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
                 };
-            }, // TODO
+            },
             .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,
