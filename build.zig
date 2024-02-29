@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.http.Client: fix UAF when handling redirects
-const min_zig_string = "0.12.0-dev.3030+032c2ee9b";
+/// decouple Zir, AstGen -> std.zig.Zir/AstGen
+const min_zig_string = "0.12.0-dev.3071+6f7354a04";
 
 const Build = blk: {
     const current_zig = builtin.zig_version;

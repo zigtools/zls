@@ -12,8 +12,8 @@ const Config = @import("Config.zig");
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
-const AstGen = @import("stage2/AstGen.zig");
-const Zir = @import("stage2/Zir.zig");
+const AstGen = std.zig.AstGen;
+const Zir = std.zig.Zir;
 const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
 
