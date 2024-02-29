@@ -666,7 +666,7 @@ test "var decl alias" {
     );
 }
 
-test "hover destructuring" {
+test "hover - destructuring" {
     try testHover(
         \\fn func() void {
         \\    const foo, const bar = .{ 1, 2 };
@@ -682,7 +682,8 @@ test "hover destructuring" {
         \\```
     );
 }
-test "hover destructuring multiple" {
+
+test "hover - destructuring multiple" {
     try testHover(
         \\fn func() void {
         \\    const foo, const bar, const baz = .{ 1, 2, 3 };
@@ -699,7 +700,8 @@ test "hover destructuring multiple" {
         \\```
     );
 }
-test "hover destructuring try" {
+
+test "hover - destructuring try" {
     try testHover(
         \\fn thing() !struct {usize, isize} {
         \\    return .{1, 2};
