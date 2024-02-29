@@ -3661,7 +3661,6 @@ pub const DeclWithHandle = struct {
                 .Single,
             ),
             .assign_destructure => |pay| {
-                const rhs = tree.nodes.items(.data)[pay.node].rhs;
                 const node = try analyser.resolveTypeOfNode(.{
                     .node = tree.nodes.items(.data)[pay.node].rhs,
                     .handle = self.handle,
