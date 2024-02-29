@@ -11,7 +11,12 @@ const FoldingRange = struct {
     kind: ?types.FoldingRangeKind = null,
 };
 
-const Inclusivity = enum { inclusive, exclusive };
+const Inclusivity = enum {
+    inclusive,
+    inclusive_ignore_space,
+    exclusive,
+    exclusive_ignore_space,
+};
 
 const Builder = struct {
     allocator: std.mem.Allocator,
@@ -38,8 +43,16 @@ const Builder = struct {
 
         try builder.locations.append(builder.allocator, .{
             .loc = .{
-                .start = if (start_reach == .exclusive) start_loc.end else start_loc.start,
-                .end = if (end_reach == .exclusive) end_loc.start else end_loc.end,
+                .start = switch (start_reach) {
+                    .inclusive, .inclusive_ignore_space => start_loc.start,
+                    .exclusive => start_loc.end,
+                    .exclusive_ignore_space => std.mem.indexOfNonePos(u8, builder.tree.source, start_loc.end, " \t") orelse builder.tree.source.len,
+                },
+                .end = switch (end_reach) {
+                    .inclusive, .inclusive_ignore_space => end_loc.end,
+                    .exclusive => end_loc.start,
+                    .exclusive_ignore_space => std.mem.lastIndexOfNone(u8, builder.tree.source[0..end_loc.start], " \t") orelse 0,
+                },
             },
             .kind = kind,
         });
@@ -196,7 +209,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             .block,
             .block_semicolon,
             => {
-                try builder.addNode(null, node, .exclusive, .exclusive);
+                try builder.addNode(null, node, .exclusive, .exclusive_ignore_space);
             },
             .@"switch",
             .switch_comma,
