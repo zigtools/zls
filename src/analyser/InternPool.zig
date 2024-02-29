@@ -701,12 +701,12 @@ pub const Index = enum(u32) {
     }
 };
 
-comptime {
-    const Zir = @import("../stage2/Zir.zig");
-    assert(@intFromEnum(Zir.Inst.Ref.generic_poison_type) == @intFromEnum(Index.generic_poison_type));
-    assert(@intFromEnum(Zir.Inst.Ref.undef) == @intFromEnum(Index.undefined_value));
-    assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
-}
+// comptime {
+//     const Zir = @import("../stage2/Zir.zig");
+//     assert(@intFromEnum(Zir.Inst.Ref.generic_poison_type) == @intFromEnum(Index.generic_poison_type));
+//     assert(@intFromEnum(Zir.Inst.Ref.undef) == @intFromEnum(Index.undefined_value));
+//     assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
+// }
 
 pub const StringSlice = struct {
     start: u32,

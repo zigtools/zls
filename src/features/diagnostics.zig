@@ -14,8 +14,7 @@ const URI = @import("../uri.zig");
 const code_actions = @import("code_actions.zig");
 const tracy = @import("tracy");
 
-const Module = @import("../stage2/Module.zig");
-const Zir = @import("../stage2/Zir.zig");
+const Zir = std.zig.Zir;
 
 pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
     const tracy_zone = tracy.trace(@src());
