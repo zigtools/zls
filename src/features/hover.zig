@@ -86,7 +86,7 @@ fn hoverSymbolRecursive(
                 break :def Analyser.nodeToString(tree, node) orelse return null;
             }
         },
-        .param_payload => |pay| def: {
+        .function_parameter => |pay| def: {
             const param = pay.get(tree).?;
 
             if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
@@ -97,13 +97,13 @@ fn hoverSymbolRecursive(
 
             break :def ast.paramSlice(tree, param);
         },
-        .pointer_payload,
+        .optional_payload,
         .error_union_payload,
         .error_union_error,
-        .array_payload,
+        .for_loop_payload,
         .assign_destructure,
         .switch_payload,
-        .label_decl,
+        .label,
         .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
     };

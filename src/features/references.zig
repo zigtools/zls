@@ -19,15 +19,15 @@ fn labelReferences(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    std.debug.assert(decl.decl == .label_decl); // use `symbolReferences` instead
+    std.debug.assert(decl.decl == .label); // use `symbolReferences` instead
     const handle = decl.handle;
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
-    const first_tok = decl.decl.label_decl.label;
-    const last_tok = ast.lastToken(tree, decl.decl.label_decl.block);
+    const first_tok = decl.decl.label.identifier;
+    const last_tok = ast.lastToken(tree, decl.decl.label.block);
 
     var locations = std.ArrayListUnmanaged(types.Location){};
     errdefer locations.deinit(allocator);
@@ -196,7 +196,7 @@ fn symbolReferences(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    std.debug.assert(decl_handle.decl != .label_decl); // use `labelReferences` instead
+    std.debug.assert(decl_handle.decl != .label); // use `labelReferences` instead
 
     var builder = Builder{
         .allocator = allocator,
@@ -216,17 +216,17 @@ fn symbolReferences(
                 try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
             }
         },
-        .pointer_payload,
+        .optional_payload,
         .error_union_payload,
         .error_union_error,
-        .array_payload,
+        .for_loop_payload,
         .assign_destructure,
         .switch_payload,
         => {
             try builder.collectReferences(curr_handle, 0);
         },
-        .param_payload => |payload| try builder.collectReferences(curr_handle, payload.func),
-        .label_decl => unreachable, // handled separately by labelReferences
+        .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
+        .label => unreachable, // handled separately by labelReferences
         .error_token => {},
     }
 
@@ -427,7 +427,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         else => true,
     };
 
-    const locations = if (decl.decl == .label_decl)
+    const locations = if (decl.decl == .label)
         try labelReferences(arena, decl, server.offset_encoding, include_decl)
     else
         try symbolReferences(
