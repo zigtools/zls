@@ -142,24 +142,21 @@ test "function" {
     });
     try testFoldingRange(
         \\fn main(
-        \\  a: ?u32,
-        \\  b: anytype,
+        \\    a: ?u32,
+        \\    b: anytype,
         \\) !u32 {}
     , &.{
-        .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 13 },
+        .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 15 },
     });
     try testFoldingRange(
         \\fn main(
-        \\  a: ?u32,
+        \\    a: ?u32,
         \\) !u32 {
         \\    return 1 + 1;
         \\}
     , &.{
-        .{ .startLine = 0, .startCharacter = 8, .endLine = 1, .endCharacter = 10 },
+        .{ .startLine = 0, .startCharacter = 8, .endLine = 1, .endCharacter = 12 },
         .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
-        // TODO investigate why VS-Code doesn't show the second folding range
-        // .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 0 },
-        // .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
     });
 }
 
@@ -184,57 +181,57 @@ test "function with doc comment" {
 test "container decl" {
     try testFoldingRange(
         \\const Foo = struct {
-        \\  alpha: u32,
-        \\  beta: []const u8,
+        \\    alpha: u32,
+        \\    beta: []const u8,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = struct {
-        \\  /// doc comment
-        \\  alpha: u32,
-        \\  // beta: []const u8,
+        \\    /// doc comment
+        \\    alpha: u32,
+        \\    // beta: []const u8,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = packed struct(u32) {
-        \\  alpha: u16,
-        \\  beta: u16,
+        \\    alpha: u16,
+        \\    beta: u16,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 32, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = union {
-        \\  alpha: u32,
-        \\  beta: []const u8,
+        \\    alpha: u32,
+        \\    beta: []const u8,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 19, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = union(enum) {
-        \\  alpha: u32,
-        \\  beta: []const u8,
+        \\    alpha: u32,
+        \\    beta: []const u8,
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 25, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = struct {
-        \\  fn foo() void {}
+        \\    fn foo() void {}
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 20, .endLine = 2, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = struct {
-        \\  fn foo() void {}
-        \\  fn bar() void {}
-        \\  // some comment
+        \\    fn foo() void {}
+        \\    fn bar() void {}
+        \\    // some comment
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
