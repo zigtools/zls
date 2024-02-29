@@ -3667,14 +3667,7 @@ pub const DeclWithHandle = struct {
                     .handle = self.handle,
                 }) orelse return null;
                 return switch (node.data) {
-                    .array => blk: {
-                        var buffer: [2]Ast.Node.Index = undefined;
-                        const array = tree.fullArrayInit(&buffer, rhs) orelse return null;
-                        break :blk try analyser.resolveTypeOfNode(.{
-                            .node = array.ast.elements[pay.index],
-                            .handle = self.handle,
-                        });
-                    },
+                    .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
                     .other => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
                 };
