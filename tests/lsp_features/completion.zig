@@ -1269,6 +1269,26 @@ test "enum" {
     });
 }
 
+test "tagged union" {
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const Ue = union(enum) {
+        \\    alpha,
+        \\    beta: []const u8,
+        \\};
+        \\const S = struct{ foo: Ue };
+        \\test {
+        \\    const s = S{};
+        \\    s.foo = .<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .Field },
+    });
+}
+
 test "global enum set" {
     try testCompletion(
         \\const SomeError = error{ e };
@@ -1690,6 +1710,30 @@ test "struct init" {
         .{ .label = "gamma", .kind = .Field, .detail = "?S = null" },
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S = null,
+        \\};
+        \\test {
+        \\    const foo: S = undefined;
+        \\    foo.gamma = .<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "gamma", .kind = .Field, .detail = "?S = null" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(s: S) void {}
+        \\test {
+        \\    foo(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -2783,6 +2827,62 @@ test "insert replace behaviour - function with partial argument placeholders" {
         .expected_replace_line = "const foo = func(u32, 5);",
         .enable_snippets = true,
         .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - struct literal" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = ",
+        .expected_replace_line = "const foo: S = .{ .alpha = ",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = $1 }$0",
+        .expected_replace_line = "const foo: S = .{ .alpha = $1 }$0",
+        .enable_snippets = true,
+    });
+}
+
+test "insert replace behaviour - tagged union" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const Birdie = enum { canary };
+        \\const U = union(enum) { alpha: []const u8 };
+        \\const foo: U = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: U = .{ .alpha = $1 }$0",
+        .expected_replace_line = "const foo: U = .{ .alpha = $1 }$0",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const Birdie = enum { canary };
+        \\const U = union(enum) { alpha: []const u8 };
+        \\const foo: U = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: U = .{ .alpha = ",
+        .expected_replace_line = "const foo: U = .{ .alpha = ",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const U = union(enum) { alpha: []const u8 };
+        \\const u: U = undefined;
+        \\const boolean = u == .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const boolean = u == .alpha",
+        .expected_replace_line = "const boolean = u == .alpha",
     });
 }
 
