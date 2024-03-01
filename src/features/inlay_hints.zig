@@ -354,6 +354,18 @@ fn writeNodeInlayHint(
                 try typeStrOfNode(builder, node) orelse return,
             );
         },
+        .assign_destructure => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const dat = tree.nodes.items(.data);
+            const lhs_count = tree.extra_data[dat[node].lhs];
+            const lhs_exprs = tree.extra_data[dat[node].lhs + 1 ..][0..lhs_count];
+
+            for (lhs_exprs) |lhs_node| {
+                const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
+                if (var_decl.ast.type_node != 0) continue;
+                try inferAppendTypeStr(builder, var_decl.ast.mut_token + 1);
+            }
+        },
         .if_simple,
         .@"if",
         => {
