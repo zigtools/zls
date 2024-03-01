@@ -146,7 +146,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     )) orelse return;
 
     const payload = switch (decl.decl) {
-        .param_payload => |pay| pay,
+        .function_parameter => |pay| pay,
         else => return,
     };
 

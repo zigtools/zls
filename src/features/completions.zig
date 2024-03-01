@@ -482,7 +482,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             context.either_descriptor,
             context.doc_strings,
         ),
-        .param_payload => |pay| {
+        .function_parameter => |pay| {
             const param = pay.get(tree).?;
             const name = tree.tokenSlice(param.name_token.?);
             const doc = try completionDoc(
@@ -498,19 +498,19 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 .detail = offsets.nodeToSlice(tree, param.type_expr),
             });
         },
-        .pointer_payload,
+        .optional_payload,
         .error_union_payload,
         .error_union_error,
-        .array_payload,
+        .for_loop_payload,
         .assign_destructure,
         .switch_payload,
-        .label_decl,
+        .label,
         => {
             const name = tree.tokenSlice(decl_handle.nameToken());
 
             try builder.completions.append(builder.arena, .{
                 .label = name,
-                .kind = if (decl == .label_decl) .Text else .Variable,
+                .kind = if (decl == .label) .Text else .Variable,
             });
         },
         .error_token => |token| {
@@ -1318,7 +1318,7 @@ fn collectVarAccessContainerNodes(
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             return;
         }
-        const fn_param_decl = Analyser.Declaration{ .param_payload = .{
+        const fn_param_decl = Analyser.Declaration{ .function_parameter = .{
             .func = fn_proto_node,
             .param_index = @intCast(dot_context.fn_arg_index),
         } };

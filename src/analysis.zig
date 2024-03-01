@@ -3305,34 +3305,56 @@ pub const TokenWithHandle = struct {
 };
 
 pub const Declaration = union(enum) {
-    /// Index of the ast node
+    /// Index of the ast node.
+    /// Can have one of the following tags:
+    ///   - `.root`
+    ///   - `.container_decl`
+    ///   - `.tagged_union`
+    ///   - `.error_set_decl`
+    ///   - `.container_field`
+    ///   - `.fn_proto`
+    ///   - `.fn_decl`
+    ///   - `.var_decl`
+    ///   - `.block`
     ast_node: Ast.Node.Index,
     /// Function parameter
-    param_payload: Param,
-    pointer_payload: struct {
-        name: Ast.TokenIndex,
+    function_parameter: Param,
+    /// - `if (condition) |identifier| {}`
+    /// - `while (condition) |identifier| {}`
+    optional_payload: struct {
+        identifier: Ast.TokenIndex,
         condition: Ast.Node.Index,
     },
+    /// - `for (condition) |identifier| {}`
+    /// - `for (..., condition, ...) |..., identifier, ...| {}`
+    for_loop_payload: struct {
+        identifier: Ast.TokenIndex,
+        condition: Ast.Node.Index,
+    },
+    /// - `if (condition) |identifier| {} else |_| {}`
+    /// - `while (condition) |identifier| {} else |_| {}`
     error_union_payload: struct {
-        name: Ast.TokenIndex,
+        identifier: Ast.TokenIndex,
         condition: Ast.Node.Index,
     },
+    /// - `if (condition) |_| {} else |identifier| {}`
+    /// - `while (condition) |_| {} else |identifier| {}`
+    /// - `condition catch |identifier| {}`
+    /// - `errdefer |identifier| {}` (condition is 0)
     error_union_error: struct {
-        name: Ast.TokenIndex,
+        identifier: Ast.TokenIndex,
         /// may be 0
         condition: Ast.Node.Index,
     },
-    array_payload: struct {
-        identifier: Ast.TokenIndex,
-        array_expr: Ast.Node.Index,
-    },
     assign_destructure: AssignDestructure,
+    // a switch case capture
     switch_payload: Switch,
-    label_decl: struct {
-        label: Ast.TokenIndex,
+    label: struct {
+        identifier: Ast.TokenIndex,
         block: Ast.Node.Index,
     },
     /// always an identifier
+    /// used as child declarations of an error set declaration
     error_token: Ast.TokenIndex,
 
     pub const Param = struct {
@@ -3405,13 +3427,13 @@ pub const Declaration = union(enum) {
     pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
         return switch (decl) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
-            .param_payload => |pp| pp.get(tree).?.name_token.?,
-            .pointer_payload => |pp| pp.name,
-            .error_union_payload => |ep| ep.name,
-            .error_union_error => |ep| ep.name,
-            .array_payload => |ap| ap.identifier,
-            .label_decl => |ld| ld.label,
-            .error_token => |et| et,
+            .function_parameter => |payload| payload.get(tree).?.name_token.?,
+            .optional_payload => |payload| payload.identifier,
+            .error_union_payload => |payload| payload.identifier,
+            .error_union_error => |payload| payload.identifier,
+            .for_loop_payload => |payload| payload.identifier,
+            .label => |payload| payload.identifier,
+            .error_token => |error_token| error_token,
             .assign_destructure => |payload| getDeclNameToken(tree, payload.getVarDeclNode(tree)).?,
             .switch_payload => |payload| {
                 const case = payload.getCase(tree);
@@ -3483,19 +3505,19 @@ pub const DeclWithHandle = struct {
                 if (var_decl.ast.type_node == 0) return null;
                 return .{ .node = var_decl.ast.type_node, .handle = self.handle };
             },
-            .param_payload => |payload| {
+            .function_parameter => |payload| {
                 const param = payload.get(tree).?;
                 if (param.type_expr == 0) return null;
                 return .{ .node = param.type_expr, .handle = self.handle };
             },
-            .pointer_payload,
+            .optional_payload,
             .error_union_payload,
             .error_union_error,
-            .array_payload,
+            .for_loop_payload,
             .switch_payload,
             => return null, // the payloads can't have a type specifier
 
-            .label_decl,
+            .label,
             .error_token,
             => return null,
         }
@@ -3506,7 +3528,7 @@ pub const DeclWithHandle = struct {
         return switch (self.decl) {
             // TODO: delete redundant `Analyser.`
             .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
-            .param_payload => |pay| {
+            .function_parameter => |pay| {
                 const param = pay.get(tree).?;
                 const doc_comments = param.first_doc_comment orelse return null;
                 return try Analyser.collectDocComments(allocator, tree, doc_comments, false);
@@ -3534,7 +3556,7 @@ pub const DeclWithHandle = struct {
             .ast_node => |node| try analyser.resolveTypeOfNodeInternal(
                 .{ .node = node, .handle = self.handle },
             ),
-            .param_payload => |pay| {
+            .function_parameter => |pay| {
                 // the `get` function never fails on declarations from the DocumentScope but
                 // there may be manually created Declarations with invalid parameter indicies.
                 const param = pay.get(tree) orelse return null;
@@ -3632,7 +3654,7 @@ pub const DeclWithHandle = struct {
 
                 return try param_type.instanceTypeVal(analyser);
             },
-            .pointer_payload => |pay| {
+            .optional_payload => |pay| {
                 const ty = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = pay.condition,
                     .handle = self.handle,
@@ -3653,9 +3675,9 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 .error_set,
             ),
-            .array_payload => |pay| try analyser.resolveBracketAccessType(
+            .for_loop_payload => |pay| try analyser.resolveBracketAccessType(
                 (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.array_expr,
+                    .node = pay.condition,
                     .handle = self.handle,
                 })) orelse return null,
                 .Single,
@@ -3678,7 +3700,7 @@ pub const DeclWithHandle = struct {
                     else => null,
                 };
             },
-            .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
+            .label => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,
             }),
@@ -3783,7 +3805,7 @@ pub fn iterateSymbolsContainer(
                 },
                 else => {},
             },
-            .label_decl => continue,
+            .label => continue,
             else => {},
         }
 
@@ -3890,7 +3912,7 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     while (scope_iterator.next().unwrap()) |scope_index| {
         for (document_scope.getScopeDeclarationsConst(scope_index)) |decl_index| {
             const decl = document_scope.declarations.get(@intFromEnum(decl_index));
-            if (decl != .label_decl) continue;
+            if (decl != .label) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
     }
@@ -3910,7 +3932,7 @@ fn iterateSymbolsGlobalInternal(
         for (scope_decls) |decl_index| {
             const decl = document_scope.declarations.get(@intFromEnum(decl_index));
             if (decl == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
-            if (decl == .label_decl) continue;
+            if (decl == .label) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
 
@@ -4023,7 +4045,7 @@ pub fn lookupLabel(
         }).unwrap() orelse continue;
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
 
-        if (decl != .label_decl) continue;
+        if (decl != .label) continue;
 
         return DeclWithHandle{ .decl = decl, .handle = handle };
     }

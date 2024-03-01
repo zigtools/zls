@@ -1012,7 +1012,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
         name,
         tree.tokens.items(.start)[name_token],
     )) |child| {
-        const is_param = child.decl == .param_payload;
+        const is_param = child.decl == .function_parameter;
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
             return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});
