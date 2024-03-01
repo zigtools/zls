@@ -187,13 +187,13 @@ pub fn main() !void {
 
     var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
     for (dependencies.root_deps) |root_dep| {
-        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| {
+        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| blk: {
             if (std.mem.eql(u8, package.name, root_dep[1])) {
                 const package_info = @field(dependencies.packages, package.name);
-                if (!@hasDecl(package_info, "build_root")) continue;
+                if (!@hasDecl(package_info, "build_root")) break :blk;
+                if (!@hasDecl(package_info, "build_zig")) break :blk;
                 try deps_build_roots.append(allocator, .{
                     .name = root_dep[0],
-                    // XXX Check if it exists?
                     .path = try std.fs.path.resolve(allocator, &[_][]const u8{ package_info.build_root, "./build.zig" }),
                 });
             }
