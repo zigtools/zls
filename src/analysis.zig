@@ -3661,6 +3661,13 @@ pub const DeclWithHandle = struct {
                 .Single,
             ),
             .assign_destructure => |pay| {
+                const type_node = pay.getFullVarDecl(tree).ast.type_node;
+                if (type_node != 0) {
+                    if (try analyser.resolveTypeOfNode(.{
+                        .node = type_node,
+                        .handle = self.handle,
+                    })) |ty| return try ty.instanceTypeVal(analyser);
+                }
                 const node = try analyser.resolveTypeOfNode(.{
                     .node = tree.nodes.items(.data)[pay.node].rhs,
                     .handle = self.handle,

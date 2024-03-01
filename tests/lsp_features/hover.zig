@@ -669,9 +669,7 @@ test "var decl alias" {
 test "hover - destructuring" {
     try testHover(
         \\fn func() void {
-        \\    const foo, const bar = .{ 1, 2 };
-        \\    _ = f<cursor>oo;
-        \\    _ = bar;
+        \\    const f<cursor>oo, const bar = .{ 1, 2 };
         \\}
     ,
         \\```zig
@@ -681,35 +679,24 @@ test "hover - destructuring" {
         \\(comptime_int)
         \\```
     );
-}
-
-test "hover - destructuring multiple" {
     try testHover(
         \\fn func() void {
-        \\    const foo, const bar, const baz = .{ 1, 2, 3 };
-        \\    _ = f<cursor>oo;
-        \\    _ = bar;
-        \\    _ = baz;
+        \\    const foo, const b<cursor>ar, const baz = .{ 1, 2, 3 };
         \\}
     ,
         \\```zig
-        \\foo
+        \\bar
         \\```
         \\```zig
         \\(comptime_int)
         \\```
     );
-}
-
-test "hover - destructuring try" {
     try testHover(
         \\fn thing() !struct {usize, isize} {
         \\    return .{1, 2};
         \\}
         \\fn ex() void {
-        \\    const foo, const bar = try thing();
-        \\    _ = f<cursor>oo;
-        \\    _ = bar;
+        \\    const f<cursor>oo, const bar = try thing();
         \\}
     ,
         \\```zig
@@ -717,6 +704,18 @@ test "hover - destructuring try" {
         \\```
         \\```zig
         \\(usize)
+        \\```
+    );
+    try testHover(
+        \\fn func() void {
+        \\    const foo, const b<cursor>ar: u32, const baz = undefined;
+        \\}
+    ,
+        \\```zig
+        \\bar
+        \\```
+        \\```zig
+        \\(u32)
         \\```
     );
 }
