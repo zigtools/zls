@@ -10,28 +10,89 @@ const offsets = @import("offsets.zig");
 
 const logger = std.log.scoped(.zls_config);
 
-pub const ConfigWithPath = struct {
-    config: Config,
-    arena: std.heap.ArenaAllocator.State,
-    /// The path to the file from which the config was read.
-    config_path: ?[]const u8,
+pub fn getLocalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
+    const folder_path = try known_folders.getPath(allocator, .local_configuration) orelse return null;
+    defer allocator.free(folder_path);
+    return try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
+}
 
-    pub fn deinit(self: *ConfigWithPath, allocator: std.mem.Allocator) void {
-        self.arena.promote(allocator).deinit();
-        if (self.config_path) |path| allocator.free(path);
-        self.* = undefined;
+pub fn getGlobalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
+    const folder_path = try known_folders.getPath(allocator, .global_configuration) orelse return null;
+    defer allocator.free(folder_path);
+    return try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
+}
+
+pub fn load(allocator: std.mem.Allocator) error{OutOfMemory}!LoadConfigResult {
+    const local_config_path = getLocalConfigPath(allocator) catch |err| blk: {
+        logger.warn("failed to resolve local configuration path: {}", .{err});
+        break :blk null;
+    };
+    defer if (local_config_path) |path| allocator.free(path);
+
+    const global_config_path = getGlobalConfigPath(allocator) catch |err| blk: {
+        logger.warn("failed to resolve global configuration path: {}", .{err});
+        break :blk null;
+    };
+    defer if (global_config_path) |path| allocator.free(path);
+
+    for ([_]?[]const u8{ local_config_path, global_config_path }) |config_path| {
+        const result = try loadFromFile(allocator, config_path orelse continue);
+        switch (result) {
+            .success, .failure => return result,
+            .not_found => {},
+        }
+    }
+
+    return .not_found;
+}
+
+pub const LoadConfigResult = union(enum) {
+    success: struct {
+        config: std.json.Parsed(Config),
+        /// file path of the config.json
+        path: []const u8,
+    },
+    failure: struct {
+        /// `null` indicates that the error has already been logged
+        error_bundle: ?std.zig.ErrorBundle,
+
+        pub fn toMessage(self: @This(), allocator: std.mem.Allocator) error{OutOfMemory}!?[]u8 {
+            const error_bundle = self.error_bundle orelse return null;
+            var msg: std.ArrayListUnmanaged(u8) = .{};
+            errdefer msg.deinit(allocator);
+            error_bundle.renderToWriter(.{ .ttyconf = .no_color }, msg.writer(allocator)) catch |err| switch (err) {
+                error.OutOfMemory => |e| return e,
+                else => unreachable, // why does renderToWriter return `anyerror!void`?
+            };
+            return try msg.toOwnedSlice(allocator);
+        }
+    },
+    not_found,
+
+    pub fn deinit(self: *LoadConfigResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .success => |*config_with_path| {
+                config_with_path.config.deinit();
+                allocator.free(config_with_path.path);
+            },
+            .failure => |*payload| {
+                if (payload.error_bundle) |*error_bundle| error_bundle.deinit(allocator);
+            },
+            .not_found => {},
+        }
     }
 };
 
-pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?ConfigWithPath {
+pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) error{OutOfMemory}!LoadConfigResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const file_buf = std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize)) catch |err| switch (err) {
-        error.FileNotFound => return null,
+    const file_buf = std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(u32)) catch |err| switch (err) {
+        error.FileNotFound => return .not_found,
+        error.OutOfMemory => |e| return e,
         else => {
             logger.warn("Error while reading configuration file: {}", .{err});
-            return null;
+            return .{ .failure = .{ .error_bundle = null } };
         },
     };
     defer allocator.free(file_buf);
@@ -46,65 +107,40 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     defer scanner.deinit();
     scanner.enableDiagnostics(&parse_diagnostics);
 
-    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
-    errdefer arena_allocator.deinit();
-
     @setEvalBranchQuota(10000);
-    // TODO: report errors using "textDocument/publishDiagnostics"
-    const config = std.json.parseFromTokenSourceLeaky(
+    const config = std.json.parseFromTokenSource(
         Config,
-        arena_allocator.allocator(),
+        allocator,
         &scanner,
         parse_options,
     ) catch |err| {
-        logger.warn(
-            "{s}:{d}:{d}: Error while parsing configuration file {}",
-            .{ file_path, parse_diagnostics.getLine(), parse_diagnostics.getColumn(), err },
-        );
-        return null;
+        var eb: std.zig.ErrorBundle.Wip = undefined;
+        try eb.init(allocator);
+        errdefer eb.deinit();
+
+        const src_path = try eb.addString(file_path);
+        const msg = try eb.addString(@errorName(err));
+
+        const src_loc = try eb.addSourceLocation(.{
+            .src_path = src_path,
+            .line = @intCast(parse_diagnostics.getLine()),
+            .column = @intCast(parse_diagnostics.getColumn()),
+            .span_start = @intCast(parse_diagnostics.getByteOffset()),
+            .span_main = @intCast(parse_diagnostics.getByteOffset()),
+            .span_end = @intCast(parse_diagnostics.getByteOffset()),
+        });
+        try eb.addRootErrorMessage(.{
+            .msg = msg,
+            .src_loc = src_loc,
+        });
+
+        return .{ .failure = .{ .error_bundle = try eb.toOwnedBundle("") } };
     };
 
-    return .{
+    return .{ .success = .{
         .config = config,
-        .arena = arena_allocator.state,
-        .config_path = file_path,
-    };
-}
-
-pub fn getConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !ConfigWithPath {
-    if (config_path) |path| {
-        if (loadFromFile(allocator, path)) |config| {
-            var cfg = config;
-            errdefer cfg.deinit(allocator);
-            cfg.config_path = try allocator.dupe(u8, path);
-            return cfg;
-        }
-        logger.info(
-            \\Could not open configuration file '{s}'
-            \\Falling back to a lookup in the local and global configuration folders
-            \\
-        , .{path});
-    }
-
-    if (try known_folders.getPath(allocator, .local_configuration)) |folder_path| {
-        defer allocator.free(folder_path);
-        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
-        if (loadFromFile(allocator, file_path)) |config| return config;
-        allocator.free(file_path);
-    }
-
-    if (try known_folders.getPath(allocator, .global_configuration)) |folder_path| {
-        defer allocator.free(folder_path);
-        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
-        if (loadFromFile(allocator, file_path)) |config| return config;
-        allocator.free(file_path);
-    }
-
-    return ConfigWithPath{
-        .config = .{},
-        .arena = .{},
-        .config_path = null,
-    };
+        .path = try allocator.dupe(u8, file_path),
+    } };
 }
 
 pub const Env = struct {
@@ -116,7 +152,6 @@ pub const Env = struct {
     target: ?[]const u8 = null,
 };
 
-/// result has to be freed with `json_compat.parseFree`
 pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.json.Parsed(Env) {
     const zig_env_result = std.process.Child.run(.{
         .allocator = allocator,
@@ -173,32 +208,47 @@ fn getConfigurationType() type {
     return @Type(config_info);
 }
 
-pub fn findZig(allocator: std.mem.Allocator) !?[]const u8 {
+pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => {
+        error.EnvironmentVariableNotFound => return null,
+        error.OutOfMemory => |e| return e,
+        error.InvalidWtf8 => |e| {
+            logger.err("failed to load 'PATH' enviorment variable: {}", .{e});
             return null;
         },
-        else => return err,
     };
     defer allocator.free(env_path);
 
-    const exe_extension = builtin.target.exeFileExt();
-    const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
-    defer allocator.free(zig_exe);
+    const zig_exe = "zig" ++ comptime builtin.target.exeFileExt();
 
-    var it = std.mem.tokenize(u8, env_path, &[_]u8{std.fs.path.delimiter});
+    var it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);
     while (it.next()) |path| {
-        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, zig_exe });
+        var full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, zig_exe });
         defer allocator.free(full_path);
 
-        if (!std.fs.path.isAbsolute(full_path)) continue;
+        if (!std.fs.path.isAbsolute(full_path)) {
+            logger.warn("ignoring entry in PATH '{s}' because it is not an absolute file path", .{full_path});
+            continue;
+        }
 
-        const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
+        const file = std.fs.openFileAbsolute(full_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => |e| {
+                logger.warn("failed to open entry in PATH '{s}': {}", .{ full_path, e });
+                continue;
+            },
+        };
         defer file.close();
-        const stat = file.stat() catch continue;
-        if (stat.kind == .directory) continue;
 
-        return try allocator.dupe(u8, full_path);
+        stat_failed: {
+            const stat = file.stat() catch break :stat_failed;
+            if (stat.kind == .directory) {
+                logger.warn("ignoring entry in PATH '{s}' because it is a directory", .{full_path});
+            }
+        }
+
+        defer full_path = "";
+        return full_path;
     }
     return null;
 }
