@@ -39,6 +39,8 @@ const log = std.log.scoped(.zls_server);
 allocator: std.mem.Allocator,
 // use updateConfiguration or updateConfiguration2 for setting config options
 config: Config = .{},
+/// will default to lookup in the system and user configuration folder provided by known-folders.
+config_path: ?[]const u8 = null,
 document_store: DocumentStore,
 transport: ?*Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
@@ -58,8 +60,6 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper = null,
-recording_enabled: bool = false,
-replay_enabled: bool = false,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -526,14 +526,34 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
 
     server.status = .initializing;
 
-    server.updateConfiguration(.{}) catch |err| {
-        log.err("failed to load configuration: {}", .{err});
-    };
+    if (!zig_builtin.is_test) {
+        var maybe_config_result = if (server.config_path) |config_path|
+            configuration.loadFromFile(server.allocator, config_path)
+        else
+            configuration.load(server.allocator);
 
-    if (server.recording_enabled) {
-        server.showMessage(.Info,
-            \\This zls session is being recorded to {s}.
-        , .{server.config.record_session_path.?});
+        if (maybe_config_result) |*config_result| {
+            defer config_result.deinit(server.allocator);
+            switch (config_result.*) {
+                .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value),
+                .failure => |payload| blk: {
+                    try server.updateConfiguration(.{});
+                    const message = try payload.toMessage(server.allocator) orelse break :blk;
+                    defer server.allocator.free(message);
+                    server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
+                },
+                .not_found => {
+                    log.info("No config file zls.json found. This is not an error.", .{});
+                    try server.updateConfiguration(.{});
+                },
+            }
+        } else |err| {
+            log.err("failed to load configuration: {}", .{err});
+        }
+    } else {
+        server.updateConfiguration(.{}) catch |err| {
+            log.err("failed to load configuration: {}", .{err});
+        };
     }
 
     if (server.runtime_zig_version) |zig_version_wrapper| {
@@ -640,7 +660,7 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
 
     server.status = .initialized;
 
-    if (!server.recording_enabled and server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
+    if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
         try server.registerCapability("workspace/didChangeConfiguration");
     }
 
@@ -693,11 +713,6 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
 }
 
 fn requestConfiguration(server: *Server) Error!void {
-    if (server.recording_enabled) {
-        log.info("workspace/configuration are disabled during a recording session!", .{});
-        return;
-    }
-
     const configuration_items = comptime config: {
         var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
         for (std.meta.fields(Config), 0..) |field, index| {
@@ -722,11 +737,6 @@ fn requestConfiguration(server: *Server) Error!void {
 fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    if (server.replay_enabled) {
-        log.info("workspace/configuration are disabled during a replay!", .{});
-        return;
-    }
 
     const fields = std.meta.fields(configuration.Configuration);
     const result = switch (json) {
@@ -810,12 +820,10 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    server.updateConfiguration(new_config) catch |err| {
-        log.err("failed to update configuration: {}", .{err});
-    };
+    try server.updateConfiguration(new_config);
 }
 
-pub fn updateConfiguration2(server: *Server, new_config: Config) !void {
+pub fn updateConfiguration2(server: *Server, new_config: Config) error{OutOfMemory}!void {
     var cfg: configuration.Configuration = .{};
     inline for (std.meta.fields(Config)) |field| {
         @field(cfg, field.name) = @field(new_config, field.name);
@@ -823,7 +831,7 @@ pub fn updateConfiguration2(server: *Server, new_config: Config) !void {
     try server.updateConfiguration(cfg);
 }
 
-pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration) !void {
+pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration) error{OutOfMemory}!void {
     // NOTE every changed configuration will increase the amount of memory allocated by the arena
     // This is unlikely to cause any big issues since the user is probably not going set settings
     // often in one session
@@ -836,9 +844,14 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         @field(new_cfg, field.name) = if (@field(new_config, field.name)) |new_value| new_value else @field(server.config, field.name);
     }
 
-    try server.validateConfiguration(&new_cfg);
-    try server.resolveConfiguration(config_arena, &new_cfg);
-    try server.validateConfiguration(&new_cfg);
+    server.validateConfiguration(&new_cfg);
+    resolve_failed: {
+        server.resolveConfiguration(config_arena, &new_cfg) catch |err| {
+            log.err("failed to resolve missing config values: {}", .{err});
+            break :resolve_failed;
+        };
+        server.validateConfiguration(&new_cfg);
+    }
 
     // <---------------------------------------------------------->
     //                        apply changes
@@ -938,7 +951,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 }
 
-fn validateConfiguration(server: *Server, config: *configuration.Configuration) !void {
+fn validateConfiguration(server: *Server, config: *configuration.Configuration) void {
     inline for (comptime std.meta.fieldNames(Config)) |field_name| {
         const FileCheckInfo = struct {
             kind: enum { file, directory },
@@ -1038,13 +1051,6 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
             @field(config, field_name) = null;
         }
     }
-
-    // some config options can't be changed after initialization
-    if (server.status != .uninitialized) {
-        config.record_session = null;
-        config.record_session_path = null;
-        config.replay_session_path = null;
-    }
 }
 
 fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config: *configuration.Configuration) !void {
@@ -1061,11 +1067,11 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
 
         if (config.zig_lib_path == null) {
             if (env.value.lib_dir) |lib_dir| {
-                const cwd = try std.process.getCwdAlloc(server.allocator);
-                defer server.allocator.free(cwd);
                 if (std.fs.path.isAbsolute(lib_dir)) {
                     config.zig_lib_path = try config_arena.dupe(u8, lib_dir);
                 } else {
+                    const cwd = try std.process.getCwdAlloc(server.allocator);
+                    defer server.allocator.free(cwd);
                     config.zig_lib_path = try std.fs.path.resolve(config_arena, &.{ cwd, lib_dir });
                 }
             }
@@ -1081,8 +1087,13 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         const duped_zig_version_string = try server.allocator.dupe(u8, env.value.version);
         errdefer server.allocator.free(duped_zig_version_string);
 
+        const version = std.SemanticVersion.parse(duped_zig_version_string) catch |err| {
+            log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
+            break :blk;
+        };
+
         server.runtime_zig_version = .{
-            .version = try std.SemanticVersion.parse(duped_zig_version_string),
+            .version = version,
             .allocator = server.allocator,
             .raw_string = duped_zig_version_string,
         };
@@ -1110,12 +1121,12 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(server.runtime_zig_version.?.version);
 
         const build_runner_file_name = try std.fmt.allocPrint(config_arena, "build_runner_{s}.zig", .{@tagName(build_runner_version)});
-        const build_runner_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, build_runner_file_name });
+        const build_runner_path = try std.fs.path.join(config_arena, &[_][]const u8{ config.global_cache_path.?, build_runner_file_name });
 
         const build_runner_file = try std.fs.createFileAbsolute(build_runner_path, .{});
         defer build_runner_file.close();
 
-        const build_config_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, "BuildConfig.zig" });
+        const build_config_path = try std.fs.path.join(config_arena, &[_][]const u8{ config.global_cache_path.?, "BuildConfig.zig" });
 
         const build_config_file = try std.fs.createFileAbsolute(build_config_path, .{});
         defer build_config_file.close();
