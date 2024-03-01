@@ -190,7 +190,18 @@ test "hide redundant parameter names" {
         .hide_redundant_param_names_last_token = true,
     });
 }
-
+test "inlay destructuring" {
+    try testInlayHints(
+        \\fn func() void {
+        \\    const foo<comptime_int>, const bar<comptime_int> = .{1, 2};
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\fn func() void {
+        \\    const foo: comptime_int, const bar<comptime_int> = .{1, 2};
+        \\}
+    , .{ .kind = .Type });
+}
 test "var decl" {
     try testInlayHints(
         \\const foo<comptime_int> = 5;
