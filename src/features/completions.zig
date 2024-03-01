@@ -1039,7 +1039,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
 
 const EnumLiteralContext = struct {
     const Likely = enum { // TODO: better name, tagged union?
-        /// `mye: Enum = .`, `abc.field = .`, `f(.{.field = .`, `switch` case
+        /// `mye: Enum = .`, `abc.field = .`, `f(.{.field = .`
         enum_literal,
         /// Same as above, but`f() = .` or `identifier.f() = .` are ignored, ie lhs of `=` is a fn call
         enum_assignment,
@@ -1049,6 +1049,7 @@ const EnumLiteralContext = struct {
         enum_arg,
         /// `S{.`, `var s:S = .{.`, `f(.{.` or `a.f(.{.`
         struct_field,
+        switch_case,
         // TODO Abort, don't list any enums
         //  - lhs of `=` is a fn call
         //  - able to resolve the type of a switch condition, but it is a struct
@@ -1179,7 +1180,7 @@ fn getSwitchOrStructInitContext(
                                 if (parens_depth == one_opening)
                                     switch (token_tags[token_index - 1]) {
                                         .keyword_switch => {
-                                            likely = .enum_literal;
+                                            likely = .switch_case;
                                             upper_index -= 1; // eat the switch's .r_paren
                                             break :find_identifier;
                                         },
@@ -1244,7 +1245,7 @@ pub fn collectContainerFields(
     for (container_decl.ast.members) |member| {
         const field = handle.tree.fullContainerField(member) orelse continue;
         const name = handle.tree.tokenSlice(field.ast.main_token);
-        if (likely != .struct_field and likely != .enum_comparison and !field.ast.tuple_like) {
+        if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
             try builder.completions.append(builder.arena, .{
                 .label = name,
                 .kind = if (field.ast.tuple_like) .EnumMember else .Field,
@@ -1259,7 +1260,7 @@ pub fn collectContainerFields(
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = if (field.ast.tuple_like or likely == .enum_comparison)
+            .insertText = if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
                 name
             else
                 try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),

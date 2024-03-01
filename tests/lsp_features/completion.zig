@@ -2884,6 +2884,23 @@ test "insert replace behaviour - tagged union" {
         .expected_insert_line = "const boolean = u == .alpha",
         .expected_replace_line = "const boolean = u == .alpha",
     });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const E = union(enum) {
+        \\    foo: []const u8,
+        \\    bar,
+        \\};
+        \\
+        \\test {
+        \\    var e: E = undefined;
+        \\    switch (e) {.<cursor>}
+        \\}
+        ,
+        .label = "foo",
+        .expected_insert_line = "    switch (e) {.foo}",
+        .expected_replace_line = "    switch (e) {.foo}",
+        .enable_snippets = true,
+    });
 }
 
 test "insert replace behaviour - doc test name" {
