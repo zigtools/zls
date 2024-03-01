@@ -120,24 +120,6 @@
             "default": true
         },
         {
-            "name": "record_session",
-            "description": "When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`",
-            "type": "bool",
-            "default": false
-        },
-        {
-            "name": "record_session_path",
-            "description": "Output file path when `record_session` is set. The recommended file extension *.zlsreplay",
-            "type": "?[]const u8",
-            "default": null
-        },
-        {
-            "name": "replay_session_path",
-            "description": "Used when calling `zls replay` for specifying the replay file. If no extra argument is given `record_session_path` is used as the default path.",
-            "type": "?[]const u8",
-            "default": null
-        },
-        {
             "name": "builtin_path",
             "description": "Path to 'builtin;' useful for debugging, automatically set if let null",
             "type": "?[]const u8",
