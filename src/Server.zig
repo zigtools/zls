@@ -311,6 +311,16 @@ fn showMessage(
     }
 }
 
+fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
+    return Analyser.init(
+        server.allocator,
+        &server.document_store,
+        &server.ip,
+        handle,
+        server.config.dangerous_comptime_experiments_do_not_enable,
+    );
+}
+
 fn getAutofixMode(server: *Server) enum {
     on_save,
     will_save_wait_until,
@@ -335,13 +345,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     if (diagnostics.items.len == 0) return .{};
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     var builder = code_actions.Builder{
@@ -1309,13 +1313,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
     // semantic tokens can be quite expensive to compute on large files
     // and disabling callsite references can help with bringing the cost down.
@@ -1337,13 +1335,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     return try semantic_tokens.writeSemanticTokens(
@@ -1361,13 +1353,7 @@ fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     return .{
@@ -1384,13 +1370,7 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     const signature_info = (try signature_help.getSignatureInfo(
@@ -1466,13 +1446,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
@@ -1533,13 +1507,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     return try inlay_hints.writeRangeInlayHint(
@@ -1556,13 +1524,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     var builder = code_actions.Builder{
