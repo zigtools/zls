@@ -248,7 +248,13 @@ pub fn gotoHandler(
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
+    var analyser = Analyser.init(
+        server.allocator,
+        &server.document_store,
+        &server.ip,
+        handle,
+        server.config.dangerous_comptime_experiments_do_not_enable,
+    );
     defer analyser.deinit();
 
     const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);

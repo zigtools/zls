@@ -8,7 +8,6 @@ const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/BuildConfig.zig");
 const tracy = @import("tracy");
-const Config = @import("Config.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = std.zig.AstGen;
@@ -17,6 +16,15 @@ const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
 
 const DocumentStore = @This();
+
+allocator: std.mem.Allocator,
+/// the DocumentStore assumes that `config` is not modified while calling one of its functions.
+config: Config,
+lock: std.Thread.RwLock = .{},
+thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
+handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
+build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
+cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
 pub const Uri = []const u8;
 
@@ -32,6 +40,24 @@ pub fn computeHash(bytes: []const u8) Hash {
     hasher.final(&hash);
     return hash;
 }
+
+pub const Config = struct {
+    zig_exe_path: ?[]const u8,
+    zig_lib_path: ?[]const u8,
+    build_runner_path: ?[]const u8,
+    builtin_path: ?[]const u8,
+    global_cache_path: ?[]const u8,
+
+    pub fn fromMainConfig(config: @import("Config.zig")) Config {
+        return .{
+            .zig_exe_path = config.zig_exe_path,
+            .zig_lib_path = config.zig_lib_path,
+            .build_runner_path = config.build_runner_path,
+            .builtin_path = config.builtin_path,
+            .global_cache_path = config.global_cache_path,
+        };
+    }
+};
 
 pub const BuildFile = struct {
     uri: Uri,
@@ -594,15 +620,6 @@ pub const ErrorMessage = struct {
     code: []const u8,
     message: []const u8,
 };
-
-allocator: std.mem.Allocator,
-/// the DocumentStore assumes that `config` is not modified while calling one of its functions.
-config: *const Config,
-lock: std.Thread.RwLock = .{},
-thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
-handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
-build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
-cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
 pub fn deinit(self: *DocumentStore) void {
     for (self.handles.values()) |handle| {
@@ -1505,7 +1522,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
 
     const maybe_result = translate_c.translate(
         self.allocator,
-        self.config.*,
+        self.config,
         include_dirs.items,
         source,
     ) catch |err| switch (err) {

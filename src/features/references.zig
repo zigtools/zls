@@ -403,7 +403,13 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
 
-    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip, handle);
+    var analyser = Analyser.init(
+        server.allocator,
+        &server.document_store,
+        &server.ip,
+        handle,
+        server.config.dangerous_comptime_experiments_do_not_enable,
+    );
     defer analyser.deinit();
 
     // TODO: Make this work with branching types

@@ -29,10 +29,17 @@ collect_callsite_references: bool,
 resolve_number_literal_values: bool,
 /// handle of the doc where the request originated
 root_handle: ?*DocumentStore.Handle,
+dangerous_comptime_experiments_do_not_enable: bool,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
-pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool, root_handle: ?*DocumentStore.Handle) Analyser {
+pub fn init(
+    gpa: std.mem.Allocator,
+    store: *DocumentStore,
+    ip: *InternPool,
+    root_handle: ?*DocumentStore.Handle,
+    dangerous_comptime_experiments_do_not_enable: bool,
+) Analyser {
     return .{
         .gpa = gpa,
         .arena = std.heap.ArenaAllocator.init(gpa),
@@ -41,6 +48,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool, root
         .collect_callsite_references = true,
         .resolve_number_literal_values = false,
         .root_handle = root_handle,
+        .dangerous_comptime_experiments_do_not_enable = dangerous_comptime_experiments_do_not_enable,
     };
 }
 
@@ -1338,7 +1346,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const body = func_tree.nodes.items(.data)[func_node].rhs;
             if (try analyser.resolveReturnType(fn_proto, func_handle, if (has_body) body else null)) |ret| {
                 return ret;
-            } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
+            } else if (analyser.dangerous_comptime_experiments_do_not_enable) {
                 // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
                 // probably better to use it more liberally
                 // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
