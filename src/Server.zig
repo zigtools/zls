@@ -845,13 +845,8 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     server.validateConfiguration(&new_cfg);
-    resolve_failed: {
-        server.resolveConfiguration(config_arena, &new_cfg) catch |err| {
-            log.err("failed to resolve missing config values: {}", .{err});
-            break :resolve_failed;
-        };
-        server.validateConfiguration(&new_cfg);
-    }
+    try server.resolveConfiguration(server.allocator, config_arena, &new_cfg);
+    server.validateConfiguration(&new_cfg);
 
     // <---------------------------------------------------------->
     //                        apply changes
@@ -1053,26 +1048,39 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
     }
 }
 
-fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config: *configuration.Configuration) !void {
+fn resolveConfiguration(
+    server: *Server,
+    allocator: std.mem.Allocator,
+    /// try leaking as little memory as possible since the ArenaAllocator is only deinit on exit
+    config_arena: std.mem.Allocator,
+    config: *configuration.Configuration,
+) error{OutOfMemory}!void {
     if (config.zig_exe_path == null) blk: {
-        std.debug.assert(!zig_builtin.is_test);
-        if (zig_builtin.is_test or !std.process.can_spawn) break :blk;
-        config.zig_exe_path = try configuration.findZig(config_arena);
+        if (zig_builtin.is_test) unreachable;
+        if (!std.process.can_spawn) break :blk;
+        const zig_exe_path = try configuration.findZig(allocator) orelse break :blk;
+        config.zig_exe_path = try config_arena.dupe(u8, zig_exe_path);
     }
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
+        const env = configuration.getZigEnv(config, exe_path) orelse break :blk;
         defer env.deinit();
 
         if (config.zig_lib_path == null) {
-            if (env.value.lib_dir) |lib_dir| {
+            if (env.value.lib_dir) |lib_dir| resolve_lib_failed: {
                 if (std.fs.path.isAbsolute(lib_dir)) {
                     config.zig_lib_path = try config_arena.dupe(u8, lib_dir);
                 } else {
-                    const cwd = try std.process.getCwdAlloc(server.allocator);
-                    defer server.allocator.free(cwd);
-                    config.zig_lib_path = try std.fs.path.resolve(config_arena, &.{ cwd, lib_dir });
+                    const cwd = std.process.getCwdAlloc(allocator) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        else => |e| {
+                            log.err("failed to resolve current working directory: {}", .{e});
+                            break :resolve_lib_failed;
+                        },
+                    };
+                    defer allocator.free(cwd);
+                    config.zig_lib_path = try std.fs.path.join(config_arena, &.{ cwd, lib_dir });
                 }
             }
         }
@@ -1100,77 +1108,91 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
     }
 
     if (config.global_cache_path == null) blk: {
-        std.debug.assert(!zig_builtin.is_test);
-        if (zig_builtin.is_test) break :blk;
-        const cache_dir_path = (try known_folders.getPath(server.allocator, .cache)) orelse {
+        if (zig_builtin.is_test) unreachable;
+        const cache_dir_path = known_folders.getPath(allocator, .cache) catch null orelse {
             log.warn("Known-folders could not fetch the cache path", .{});
-            return;
+            break :blk;
         };
-        defer server.allocator.free(cache_dir_path);
+        defer allocator.free(cache_dir_path);
 
-        config.global_cache_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ cache_dir_path, "zls" });
+        config.global_cache_path = try std.fs.path.join(config_arena, &[_][]const u8{ cache_dir_path, "zls" });
 
-        try std.fs.cwd().makePath(config.global_cache_path.?);
+        std.fs.cwd().makePath(config.global_cache_path.?) catch |err| {
+            log.warn("failed to create directory '{s}': {}", .{ config.global_cache_path.?, err });
+            config.global_cache_path = null;
+        };
     }
 
-    if (config.build_runner_path == null and
-        config.global_cache_path != null and
-        config.zig_exe_path != null and
-        server.runtime_zig_version != null)
-    {
-        const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(server.runtime_zig_version.?.version);
+    if (config.build_runner_path == null) blk: {
+        if (!std.process.can_spawn) break :blk;
+        const global_cache_path = config.global_cache_path orelse break :blk;
+        const zig_version = server.runtime_zig_version orelse break :blk;
 
-        const build_runner_file_name = try std.fmt.allocPrint(config_arena, "build_runner_{s}.zig", .{@tagName(build_runner_version)});
-        const build_runner_path = try std.fs.path.join(config_arena, &[_][]const u8{ config.global_cache_path.?, build_runner_file_name });
+        const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version.version);
 
-        const build_runner_file = try std.fs.createFileAbsolute(build_runner_path, .{});
-        defer build_runner_file.close();
+        const build_runner_file_name = try std.fmt.allocPrint(allocator, "build_runner_{s}.zig", .{@tagName(build_runner_version)});
+        defer allocator.free(build_runner_file_name);
 
-        const build_config_path = try std.fs.path.join(config_arena, &[_][]const u8{ config.global_cache_path.?, "BuildConfig.zig" });
+        const build_runner_path = try std.fs.path.join(config_arena, &[_][]const u8{ global_cache_path, build_runner_file_name });
 
-        const build_config_file = try std.fs.createFileAbsolute(build_config_path, .{});
-        defer build_config_file.close();
+        const build_config_path = try std.fs.path.join(allocator, &[_][]const u8{ global_cache_path, "BuildConfig.zig" });
+        defer allocator.free(build_config_path);
 
-        try build_config_file.writeAll(@embedFile("build_runner/BuildConfig.zig"));
+        std.fs.cwd().writeFile2(.{
+            .sub_path = build_config_path,
+            .data = @embedFile("build_runner/BuildConfig.zig"),
+        }) catch |err| {
+            log.err("failed to write file '{s}': {}", .{ build_config_path, err });
+            break :blk;
+        };
 
-        try build_runner_file.writeAll(
-            switch (build_runner_version) {
+        std.fs.cwd().writeFile2(.{
+            .sub_path = build_runner_path,
+            .data = switch (build_runner_version) {
                 inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
             },
-        );
+        }) catch |err| {
+            log.err("failed to write file '{s}': {}", .{ build_config_path, err });
+            break :blk;
+        };
 
         config.build_runner_path = build_runner_path;
     }
 
     if (config.builtin_path == null) blk: {
         if (!std.process.can_spawn) break :blk;
-        if (config.zig_exe_path == null) break :blk;
-        if (config.global_cache_path == null) break :blk;
+        const zig_exe_path = config.zig_exe_path orelse break :blk;
+        const global_cache_path = config.global_cache_path orelse break :blk;
 
-        const result = try std.process.Child.run(.{
-            .allocator = server.allocator,
-            .argv = &.{
-                config.zig_exe_path.?,
-                "build-exe",
-                "--show-builtin",
-            },
-            .max_output_bytes = 1024 * 1024 * 50,
-        });
-        defer server.allocator.free(result.stdout);
-        defer server.allocator.free(result.stderr);
-
-        var d = try std.fs.cwd().openDir(config.global_cache_path.?, .{});
-        defer d.close();
-
-        const f = d.createFile("builtin.zig", .{}) catch |err| switch (err) {
-            error.AccessDenied => break :blk,
-            else => |e| return e,
+        const argv = [_][]const u8{
+            zig_exe_path,
+            "build-exe",
+            "--show-builtin",
         };
-        defer f.close();
 
-        try f.writeAll(result.stdout);
+        const run_result = std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &argv,
+            .max_output_bytes = 1024 * 1024 * 50,
+        }) catch |err| {
+            const args = std.mem.join(allocator, " ", &argv) catch break :blk;
+            log.err("failed to run command '{s}': {}", .{ args, err });
+            break :blk;
+        };
+        defer allocator.free(run_result.stdout);
+        defer allocator.free(run_result.stderr);
 
-        config.builtin_path = try std.fs.path.join(config_arena, &.{ config.global_cache_path.?, "builtin.zig" });
+        const builtin_path = try std.fs.path.join(config_arena, &.{ global_cache_path, "builtin.zig" });
+
+        std.fs.cwd().writeFile2(.{
+            .sub_path = builtin_path,
+            .data = run_result.stdout,
+        }) catch |err| {
+            log.err("failed to write file '{s}': {}", .{ builtin_path, err });
+            break :blk;
+        };
+
+        config.builtin_path = builtin_path;
     }
 }
 
