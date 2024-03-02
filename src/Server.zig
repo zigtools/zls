@@ -50,7 +50,11 @@ wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = .{},
-zig_exe_lock: std.Thread.Mutex = .{},
+// ensure that build on save is only executed once at a time
+running_build_on_save_processes: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+/// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
+/// See https://github.com/ziglang/zig/issues/16369
+zig_ast_check_lock: std.Thread.Mutex = .{},
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper = null,
@@ -2047,19 +2051,23 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             server.allocator.free(json_message);
         },
         .run_build_on_save => {
-            std.debug.assert(std.process.can_spawn);
-            if (!std.process.can_spawn) return;
+            if (!std.process.can_spawn) unreachable;
+
+            if (server.running_build_on_save_processes.load(.SeqCst) != 0) return;
 
             for (server.client_capabilities.workspace_folders) |workspace_folder_uri| {
+                _ = server.running_build_on_save_processes.fetchAdd(1, .AcqRel);
+                defer _ = server.running_build_on_save_processes.fetchSub(1, .AcqRel);
+
                 var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
                 defer arena_allocator.deinit();
                 var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
                 diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace_folder_uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
                     log.err("failed to run build on save on {s}: {}", .{ workspace_folder_uri, err });
+                    return;
                 };
 
                 for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
-                    if (diagnostics.items.len == 0) continue;
                     const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
                         .uri = document_uri,
                         .diagnostics = diagnostics.items,
