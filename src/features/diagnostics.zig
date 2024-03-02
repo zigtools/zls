@@ -251,21 +251,16 @@ pub fn generateBuildOnSaveDiagnostics(
         }
     }
 
-    const result = blk: {
-        server.zig_exe_lock.lock();
-        defer server.zig_exe_lock.unlock();
-
-        break :blk std.process.Child.run(.{
-            .allocator = server.allocator,
-            .argv = argv.items,
-            .cwd = workspace_path,
-            .max_output_bytes = 1024 * 1024,
-        }) catch |err| {
-            const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
-            defer server.allocator.free(joined);
-            log.err("failed zig build command:\n{s}\nerror:{}\n", .{ joined, err });
-            return err;
-        };
+    const result = std.process.Child.run(.{
+        .allocator = server.allocator,
+        .argv = argv.items,
+        .cwd = workspace_path,
+        .max_output_bytes = 1024 * 1024,
+    }) catch |err| {
+        const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
+        defer server.allocator.free(joined);
+        log.err("failed zig build command:\n{s}\nerror:{}\n", .{ joined, err });
+        return err;
     };
     defer server.allocator.free(result.stdout);
     defer server.allocator.free(result.stderr);
@@ -393,8 +388,8 @@ fn getDiagnosticsFromAstCheck(
     const zig_exe_path = server.config.zig_exe_path.?;
 
     const stderr_bytes = blk: {
-        server.zig_exe_lock.lock();
-        defer server.zig_exe_lock.unlock();
+        server.zig_ast_check_lock.lock();
+        defer server.zig_ast_check_lock.unlock();
 
         var process = std.process.Child.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
         process.stdin_behavior = .Pipe;
