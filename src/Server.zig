@@ -15,7 +15,6 @@ const tracy = @import("tracy");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
-const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const Transport = @import("Transport.zig");
 const known_folders = @import("known-folders");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
@@ -59,7 +58,6 @@ running_build_on_save_processes: std.atomic.Value(usize) = std.atomic.Value(usiz
 zig_ast_check_lock: std.Thread.Mutex = .{},
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
-runtime_zig_version: ?ZigVersionWrapper = null,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -556,35 +554,6 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         };
     }
 
-    if (server.runtime_zig_version) |zig_version_wrapper| {
-        const zig_version = zig_version_wrapper.version;
-
-        const zig_version_simple = std.SemanticVersion{
-            .major = zig_version.major,
-            .minor = zig_version.minor,
-            .patch = 0,
-        };
-        const zls_version_simple = std.SemanticVersion{
-            .major = build_options.version.major,
-            .minor = build_options.version.minor,
-            .patch = 0,
-        };
-
-        switch (zig_version_simple.order(zls_version_simple)) {
-            .lt => {
-                server.showMessage(.Warning,
-                    \\Zig `{s}` is older than ZLS `{s}`. Update Zig to avoid unexpected behavior.
-                , .{ zig_version_wrapper.raw_string, build_options.version_string });
-            },
-            .eq => {},
-            .gt => {
-                server.showMessage(.Warning,
-                    \\Zig `{s}` is newer than ZLS `{s}`. Update ZLS to avoid unexpected behavior.
-                , .{ zig_version_wrapper.raw_string, build_options.version_string });
-            },
-        }
-    }
-
     return .{
         .serverInfo = .{
             .name = "zls",
@@ -845,7 +814,8 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     server.validateConfiguration(&new_cfg);
-    try server.resolveConfiguration(server.allocator, config_arena, &new_cfg);
+    const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_cfg);
+    defer resolve_result.deinit();
     server.validateConfiguration(&new_cfg);
 
     // <---------------------------------------------------------->
@@ -890,13 +860,6 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         }
     }
 
-    if (server.config.zig_exe_path == null and
-        server.runtime_zig_version != null)
-    {
-        server.runtime_zig_version.?.free();
-        server.runtime_zig_version = null;
-    }
-
     if (new_zig_exe_path or new_build_runner_path) blk: {
         if (!std.process.can_spawn) break :blk;
 
@@ -935,6 +898,44 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
         // TODO there should a way to supress this message
         server.showMessage(.Warning, "zig executable could not be found", .{});
+    }
+
+    if (resolve_result.zig_runtime_version) |zig_version| version_check: {
+        const min_zig_string = comptime std.SemanticVersion.parse(build_options.min_zig_string) catch unreachable;
+
+        const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
+        const zls_version_is_tagged = build_options.version.pre == null and build_options.version.build == null;
+
+        const zig_version_simple = std.SemanticVersion{ .major = zig_version.major, .minor = zig_version.minor, .patch = 0 };
+        const zls_version_simple = std.SemanticVersion{ .major = build_options.version.major, .minor = build_options.version.minor, .patch = 0 };
+
+        if (zig_version_is_tagged != zls_version_is_tagged) {
+            if (zig_version_is_tagged) {
+                server.showMessage(
+                    .Warning,
+                    "Zig {} should be used with ZLS {} but ZLS {} is being used.",
+                    .{ zig_version, zig_version_simple, build_options.version },
+                );
+            } else if (zls_version_is_tagged) {
+                server.showMessage(
+                    .Warning,
+                    "ZLS {} should be used with Zig {} but found Zig {}. ",
+                    .{ build_options.version, zls_version_simple, zig_version },
+                );
+            } else unreachable;
+            break :version_check;
+        }
+
+        if (zig_version.order(min_zig_string) == .lt) {
+            // don't report a warning when using a Zig version that has a matching build runner
+            if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.? != .master) break :version_check;
+            server.showMessage(
+                .Warning,
+                "ZLS {s} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
+                .{ build_options.version_string, build_options.min_zig_string, zig_version },
+            );
+            break :version_check;
+        }
     }
 
     if (server.config.prefer_ast_check_as_child_process) {
@@ -1048,13 +1049,29 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
     }
 }
 
+const ResolveConfigurationResult = struct {
+    zig_env: ?std.json.Parsed(configuration.Env),
+    zig_runtime_version: ?std.SemanticVersion,
+    build_runner_version: ?BuildRunnerVersion,
+
+    fn deinit(result: ResolveConfigurationResult) void {
+        if (result.zig_env) |parsed| parsed.deinit();
+    }
+};
+
 fn resolveConfiguration(
-    server: *Server,
     allocator: std.mem.Allocator,
     /// try leaking as little memory as possible since the ArenaAllocator is only deinit on exit
     config_arena: std.mem.Allocator,
     config: *configuration.Configuration,
-) error{OutOfMemory}!void {
+) error{OutOfMemory}!ResolveConfigurationResult {
+    var result: ResolveConfigurationResult = .{
+        .zig_env = null,
+        .zig_runtime_version = null,
+        .build_runner_version = null,
+    };
+    errdefer result.deinit();
+
     if (config.zig_exe_path == null) blk: {
         if (zig_builtin.is_test) unreachable;
         if (!std.process.can_spawn) break :blk;
@@ -1064,8 +1081,8 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        const env = configuration.getZigEnv(config, exe_path) orelse break :blk;
-        defer env.deinit();
+        result.zig_env = configuration.getZigEnv(allocator, exe_path);
+        const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
             if (env.value.lib_dir) |lib_dir| resolve_lib_failed: {
@@ -1089,21 +1106,9 @@ fn resolveConfiguration(
             config.build_runner_global_cache_path = try config_arena.dupe(u8, env.value.global_cache_dir);
         }
 
-        if (server.runtime_zig_version) |current_version| current_version.free();
-        server.runtime_zig_version = null;
-
-        const duped_zig_version_string = try server.allocator.dupe(u8, env.value.version);
-        errdefer server.allocator.free(duped_zig_version_string);
-
-        const version = std.SemanticVersion.parse(duped_zig_version_string) catch |err| {
+        result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
             log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
             break :blk;
-        };
-
-        server.runtime_zig_version = .{
-            .version = version,
-            .allocator = server.allocator,
-            .raw_string = duped_zig_version_string,
         };
     }
 
@@ -1126,11 +1131,11 @@ fn resolveConfiguration(
     if (config.build_runner_path == null) blk: {
         if (!std.process.can_spawn) break :blk;
         const global_cache_path = config.global_cache_path orelse break :blk;
-        const zig_version = server.runtime_zig_version orelse break :blk;
+        const zig_version = result.zig_runtime_version orelse break :blk;
 
-        const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version.version);
+        result.build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version) orelse break :blk;
 
-        const build_runner_file_name = try std.fmt.allocPrint(allocator, "build_runner_{s}.zig", .{@tagName(build_runner_version)});
+        const build_runner_file_name = try std.fmt.allocPrint(allocator, "build_runner_{s}.zig", .{@tagName(result.build_runner_version.?)});
         defer allocator.free(build_runner_file_name);
 
         const build_runner_path = try std.fs.path.join(config_arena, &[_][]const u8{ global_cache_path, build_runner_file_name });
@@ -1148,7 +1153,7 @@ fn resolveConfiguration(
 
         std.fs.cwd().writeFile2(.{
             .sub_path = build_runner_path,
-            .data = switch (build_runner_version) {
+            .data = switch (result.build_runner_version.?) {
                 inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
             },
         }) catch |err| {
@@ -1194,6 +1199,8 @@ fn resolveConfiguration(
 
         config.builtin_path = builtin_path;
     }
+
+    return result;
 }
 
 fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
@@ -1817,7 +1824,6 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
         .document_store = .{
             .allocator = allocator,
             .config = &server.config,
-            .runtime_zig_version = &server.runtime_zig_version,
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
         },
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
@@ -1851,7 +1857,6 @@ pub fn destroy(server: *Server) void {
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     server.client_capabilities.deinit(server.allocator);
-    if (server.runtime_zig_version) |zig_version| zig_version.free();
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
 }

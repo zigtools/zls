@@ -9,7 +9,6 @@ const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/BuildConfig.zig");
 const tracy = @import("tracy");
 const Config = @import("Config.zig");
-const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = std.zig.AstGen;
@@ -599,8 +598,6 @@ pub const ErrorMessage = struct {
 allocator: std.mem.Allocator,
 /// the DocumentStore assumes that `config` is not modified while calling one of its functions.
 config: *const Config,
-/// the DocumentStore assumes that `runtime_zig_version` is not modified while calling one of its functions.
-runtime_zig_version: *const ?ZigVersionWrapper,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
@@ -772,8 +769,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 /// Invalidates a build files.
 /// **Thread safe** takes a shared lock
 pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
-    std.debug.assert(std.process.can_spawn);
-    if (!std.process.can_spawn) return;
+    comptime std.debug.assert(std.process.can_spawn);
 
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
