@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const tracy = @import("tracy");
 const known_folders = @import("known-folders");
 

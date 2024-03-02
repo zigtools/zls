@@ -10,7 +10,7 @@ const min_zig_string = "0.12.0-dev.3071+6f7354a04";
 const Build = blk: {
     const current_zig = builtin.zig_version;
     const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
-    const is_current_zig_tagged_release = current_zig.pre == null;
+    const is_current_zig_tagged_release = current_zig.pre == null and current_zig.build == null;
     if (current_zig.order(min_zig) == .lt) {
         const message = std.fmt.comptimePrint(
             \\Your Zig version does not meet the minimum build requirement:
@@ -20,6 +20,7 @@ const Build = blk: {
             \\
         ++ if (is_current_zig_tagged_release)
             \\Please download or compile a tagged release of ZLS.
+            \\  -> https://github.com/zigtools/zls/releases
             \\  -> https://github.com/zigtools/zls/releases/tag/{[current_version]}
         else
             \\You can take one of the following actions to resolve this issue:
@@ -343,4 +344,11 @@ fn getTracyModule(
     }
 
     return tracy_module;
+}
+
+comptime {
+    const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
+    const min_zig_simple = std.SemanticVersion{ .major = min_zig.major, .minor = min_zig.minor, .patch = 0 };
+    const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
+    std.debug.assert(zls_version_simple.order(min_zig_simple) == .eq);
 }

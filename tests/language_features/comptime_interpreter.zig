@@ -3,7 +3,6 @@ const zls = @import("zls");
 const builtin = @import("builtin");
 
 const Ast = std.zig.Ast;
-const ZigVersionWrapper = zls.ZigVersionWrapper;
 const ComptimeInterpreter = zls.ComptimeInterpreter;
 const InternPool = zls.analyser.InternPool;
 const Index = InternPool.Index;

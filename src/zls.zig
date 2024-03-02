@@ -19,7 +19,6 @@ pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
 pub const configuration = @import("configuration.zig");
-pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 pub const DocumentScope = @import("DocumentScope.zig");
 
 pub const signature_help = @import("features/signature_help.zig");

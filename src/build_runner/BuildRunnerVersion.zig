@@ -8,7 +8,7 @@ pub const BuildRunnerVersion = enum {
     @"0.11.0",
     @"0.10.0",
 
-    pub fn selectBuildRunnerVersion(runtime_zig_version: std.SemanticVersion) BuildRunnerVersion {
+    pub fn selectBuildRunnerVersion(runtime_zig_version: std.SemanticVersion) ?BuildRunnerVersion {
         const runtime_zig_version_simple = std.SemanticVersion{
             .major = runtime_zig_version.major,
             .minor = runtime_zig_version.minor,
@@ -22,18 +22,16 @@ pub const BuildRunnerVersion = enum {
 
         return switch (runtime_zig_version_simple.order(zls_version_simple)) {
             .eq, .gt => .master,
-            .lt => blk: {
-                const available_versions = std.meta.tags(BuildRunnerVersion);
-                for (available_versions[1..]) |build_runner_version| {
-                    const version = std.SemanticVersion.parse(@tagName(build_runner_version)) catch unreachable;
+            .lt => {
+                const available_versions = comptime std.meta.tags(BuildRunnerVersion);
+                inline for (available_versions[1..]) |build_runner_version| {
+                    const version = comptime std.SemanticVersion.parse(@tagName(build_runner_version)) catch unreachable;
                     switch (runtime_zig_version.order(version)) {
-                        .eq, .gt => break :blk build_runner_version,
-                        .lt => {},
+                        .eq => return build_runner_version,
+                        .lt, .gt => {},
                     }
                 }
-
-                // failed to find compatible build runner, falling back to oldest supported version
-                break :blk available_versions[available_versions.len - 1];
+                return null;
             },
         };
     }
