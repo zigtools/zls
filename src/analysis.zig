@@ -1600,9 +1600,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             };
         },
 
-        .anyframe_type,
-        .error_set_decl,
+        // TODO represent through InternPool
         .merge_error_sets,
+        .error_set_decl,
+
         .container_decl,
         .container_decl_arg,
         .container_decl_arg_trailing,
@@ -2058,6 +2059,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .unreachable_literal => return try Type.typeValFromIP(analyser, .noreturn_type),
         .anyframe_literal => return try Type.typeValFromIP(analyser, .anyframe_type),
 
+        .anyframe_type => return try Type.typeValFromIP(analyser, .type_type),
+
         .mul,
         .div,
         .mod,
@@ -2176,10 +2179,9 @@ pub const Type = struct {
         /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
         union_tag: *Type,
 
-        /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
-        /// - Error type: `Foo || Bar`, `Foo!Bar`
+        /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`
+        /// - Error type: `error{Foo}`, `Foo || Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
-        /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
         other: NodeWithHandle,
 
         /// - `@compileError("")`
@@ -2504,6 +2506,13 @@ pub const Type = struct {
         switch (self.data) {
             .other => |node_handle| return Analyser.isMetaType(node_handle.handle.tree, node_handle.node),
             .ip_index => |payload| return payload.index == .type_type,
+            else => return false,
+        }
+    }
+
+    pub fn isEnumLiteral(self: Type, analyser: *Analyser) bool {
+        switch (self.data) {
+            .ip_index => |payload| return analyser.ip.typeOf(payload.index) == .enum_literal_type,
             else => return false,
         }
     }
@@ -3583,6 +3592,50 @@ pub const DeclWithHandle = struct {
             .error_token,
             => return null,
         }
+    }
+
+    pub fn isConst(self: DeclWithHandle) bool {
+        const tree = self.handle.tree;
+        return switch (self.decl) {
+            .ast_node => |node| switch (tree.nodes.items(.tag)[node]) {
+                .global_var_decl,
+                .local_var_decl,
+                .aligned_var_decl,
+                .simple_var_decl,
+                => {
+                    const mut_token = tree.fullVarDecl(node).?.ast.mut_token;
+                    switch (tree.tokens.items(.tag)[mut_token]) {
+                        .keyword_var => return false,
+                        .keyword_const => return true,
+                        else => unreachable,
+                    }
+                },
+                // `.container_decl_*`
+                // `.tagged_union_*`
+                // `.container_field_*`
+                // `.fn_proto_*`
+                // `.fn_decl`
+                else => true,
+            },
+            .assign_destructure => |payload| {
+                const mut_token = payload.getFullVarDecl(tree).ast.mut_token;
+                switch (tree.tokens.items(.tag)[mut_token]) {
+                    .keyword_var => return false,
+                    .keyword_const => return true,
+                    else => unreachable,
+                }
+            },
+            // some payload may be capture by ref but the pointer value is constant
+            .function_parameter,
+            .optional_payload,
+            .for_loop_payload,
+            .error_union_payload,
+            .error_union_error,
+            .switch_payload,
+            .label,
+            .error_token,
+            => true,
+        };
     }
 
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
