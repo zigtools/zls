@@ -659,23 +659,6 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
 
             return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle }, node_trail);
         },
-        .builtin_call,
-        .builtin_call_comma,
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        => blk: {
-            const lhs = datas[node_handle.node].lhs;
-            const name = tree.tokenSlice(main_tokens[lhs]);
-            if (!std.mem.eql(u8, name, "@import") and !std.mem.eql(u8, name, "@cImport"))
-                return null;
-
-            const inner_node = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
-            // assert root node
-            std.debug.assert(@intFromEnum(inner_node.data.container.scope) == 0);
-            const document_scope = try inner_node.data.container.handle.getDocumentScope();
-            const root_decl = document_scope.declarations.get(0);
-            break :blk DeclWithHandle{ .decl = root_decl, .handle = inner_node.data.container.handle };
-        },
         else => return null,
     } orelse return null;
 
