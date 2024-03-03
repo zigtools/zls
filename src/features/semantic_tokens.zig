@@ -229,15 +229,15 @@ fn colorIdentifierBasedOnType(
 ) !void {
     if (type_node.is_type_val) {
         const token_type: TokenType =
-            if (type_node.isNamespace())
+            if (try type_node.isNamespace())
             .namespace
-        else if (type_node.isStructType())
+        else if (try type_node.isStructType())
             .@"struct"
-        else if (type_node.isEnumType())
+        else if (try type_node.isEnumType())
             .@"enum"
-        else if (type_node.isUnionType())
+        else if (try type_node.isUnionType())
             .@"union"
-        else if (type_node.isOpaqueType())
+        else if (try type_node.isOpaqueType())
             .@"opaque"
         else if (is_parameter)
             .typeParameter
@@ -607,7 +607,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
                 )) |struct_type| switch (struct_type.data) {
-                    .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, false),
+                    .container => |scope_handle| fieldTokenType(try scope_handle.toNode(), scope_handle.handle, false),
                     else => null,
                 } else null;
             }
@@ -873,7 +873,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
                             const tok_type = switch (lhs_type.data) {
-                                .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, lhs_type.is_type_val),
+                                .container => |scope_handle| fieldTokenType(try scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
                                 else => null,
                             };
 

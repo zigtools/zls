@@ -100,6 +100,16 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 ),
             });
         },
+        .container => |scope_handle| {
+            var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+            try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
+
+            for (decls.items) |decl_with_handle| {
+                try declToCompletion(builder, decl_with_handle, .{
+                    .parent_container_ty = ty,
+                });
+            }
+        },
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .merge_error_sets => {
                 const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
@@ -110,29 +120,8 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
-            .error_set_decl,
-            .root,
-            .container_decl,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            => {
-                var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
-                try builder.analyser.collectDeclarationsOfContainer(node_handle, builder.orig_handle, !ty.is_type_val, &decls);
-                for (decls.items) |decl_with_handle| {
-                    try declToCompletion(builder, decl_with_handle, .{
-                        .parent_container_ty = ty,
-                    });
-                }
-            },
+            .error_set_decl => {}, // TODO
+
             .fn_proto,
             .fn_proto_multi,
             .fn_proto_one,
@@ -249,13 +238,13 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                     item.documentation = documentation;
                     builder.completions.appendAssumeCapacity(item);
                     return;
-                } else if (ty.isEnumType()) {
+                } else if (try ty.isEnumType()) {
                     if (ty.is_type_val) {
                         kind = .Enum;
                     } else {
                         kind = .EnumMember;
                     }
-                } else if (ty.isStructType() or ty.isUnionType()) {
+                } else if (try ty.isStructType() or try ty.isUnionType()) {
                     kind = .Struct;
                 } else if (decl_handle.decl == .function_parameter and ty.isMetaType()) {
                     kind = .TypeParameter;
@@ -1183,12 +1172,12 @@ fn collectContainerFields(
     container: Analyser.Type,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    const node_handle = switch (container.data) {
-        .other => |n| n,
+    const scope_handle = switch (container.data) {
+        .container => |s| s,
         else => return,
     };
-    const node = node_handle.node;
-    const handle = node_handle.handle;
+    const node = try scope_handle.toNode();
+    const handle = scope_handle.handle;
     var buffer: [2]Ast.Node.Index = undefined;
     const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
@@ -1298,7 +1287,7 @@ fn collectFieldAccessContainerNodes(
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
-            if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
+            if (try unwrapped.isEnumType() or try unwrapped.isUnionType()) {
                 try types_with_handles.append(arena, unwrapped);
                 return;
             }
