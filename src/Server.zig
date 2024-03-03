@@ -911,26 +911,30 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     if (resolve_result.zig_runtime_version) |zig_version| version_check: {
+        // the ZLS version may not be available because it is being resolved with `git` which may fail.
+        const zls_version_string = build_options.precise_version_string orelse break :version_check;
+
+        const zls_version = comptime std.SemanticVersion.parse(zls_version_string) catch unreachable;
         const min_zig_string = comptime std.SemanticVersion.parse(build_options.min_zig_string) catch unreachable;
 
         const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
-        const zls_version_is_tagged = build_options.version.pre == null and build_options.version.build == null;
+        const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
 
         const zig_version_simple = std.SemanticVersion{ .major = zig_version.major, .minor = zig_version.minor, .patch = 0 };
-        const zls_version_simple = std.SemanticVersion{ .major = build_options.version.major, .minor = build_options.version.minor, .patch = 0 };
+        const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
 
         if (zig_version_is_tagged != zls_version_is_tagged) {
             if (zig_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "Zig {} should be used with ZLS {} but ZLS {} is being used.",
-                    .{ zig_version, zig_version_simple, build_options.version },
+                    "Zig {} should be used with ZLS {} but ZLS {s} is being used.",
+                    .{ zig_version, zig_version_simple, zls_version_string },
                 );
             } else if (zls_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "ZLS {} should be used with Zig {} but found Zig {}. ",
-                    .{ build_options.version, zls_version_simple, zig_version },
+                    "ZLS {s} should be used with Zig {} but found Zig {}. ",
+                    .{ zls_version_string, zls_version_simple, zig_version },
                 );
             } else unreachable;
             break :version_check;
@@ -942,7 +946,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
             server.showMessage(
                 .Warning,
                 "ZLS {s} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
-                .{ build_options.version_string, build_options.min_zig_string, zig_version },
+                .{ zls_version_string, build_options.min_zig_string, zig_version },
             );
             break :version_check;
         }

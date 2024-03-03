@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
+/// set this to true when tagging a new ZLS release and then unset it on the next development cycle.
+const zls_version_is_tagged: bool = false;
 
 /// document the latest breaking change that caused a change to the string below:
 /// decouple Zir, AstGen -> std.zig.Zir/AstGen
@@ -48,12 +50,16 @@ pub fn build(b: *Build) !void {
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
     const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
 
-    const version_string = getVersion(b);
+    const maybe_version_string = getVersion(b);
+    const fallback_version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
+    const version_string = maybe_version_string orelse fallback_version_string;
+    const precise_version_string = if (zls_version_is_tagged) version_string else maybe_version_string;
 
     const build_options = b.addOptions();
     const build_options_module = build_options.createModule();
     build_options.addOption([]const u8, "version_string", version_string);
     build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
+    build_options.addOption(?[]const u8, "precise_version_string", precise_version_string);
     build_options.addOption([]const u8, "min_zig_string", min_zig_string);
 
     const exe_options = b.addOptions();
@@ -262,14 +268,14 @@ pub fn build(b: *Build) !void {
     }
 }
 
-fn getVersion(b: *Build) []const u8 {
+fn getVersion(b: *Build) ?[]const u8 {
     const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
     const build_root_path = b.build_root.path orelse ".";
 
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
         "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
-    }, &code, .Ignore) catch return version_string;
+    }, &code, .Ignore) catch return null;
 
     const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
 
