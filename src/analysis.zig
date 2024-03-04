@@ -3119,6 +3119,7 @@ pub const PositionContext = union(enum) {
     var_access: offsets.Loc,
     global_error_set,
     enum_literal: offsets.Loc,
+    keyword: std.zig.Token.Tag,
     pre_label,
     label: bool,
     other,
@@ -3135,6 +3136,7 @@ pub const PositionContext = union(enum) {
             .field_access => |r| r,
             .var_access => |r| r,
             .enum_literal => |r| r,
+            .keyword => null,
             .pre_label => null,
             .label => null,
             .other => null,
@@ -3308,6 +3310,7 @@ pub fn getPositionContext(
                     .empty, .pre_label => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                     .enum_literal => curr_ctx.ctx = .empty,
                     .field_access => {},
+                    .keyword => return .other, // no keyword can be `.`/`.*` accessed
                     .other => {},
                     .global_error_set => {},
                     .label => |filled| if (filled) {
@@ -3342,6 +3345,7 @@ pub fn getPositionContext(
                     }
                 },
                 .keyword_error => curr_ctx.ctx = .global_error_set,
+                .keyword_callconv, .keyword_addrspace => curr_ctx.ctx = .{ .keyword = tok.tag },
                 else => curr_ctx.ctx = .empty,
             }
 

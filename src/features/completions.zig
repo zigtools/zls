@@ -1181,7 +1181,9 @@ fn getSwitchOrStructInitContext(
                                 .l_paren => {
                                     parens_depth -= 1;
                                     if (parens_depth == one_opening and switch (token_tags[upper_index - 1]) {
-                                        .identifier, .builtin => true,
+                                        .identifier,
+                                        .builtin,
+                                        => true,
                                         else => false,
                                     }) {
                                         upper_index -= 1;
@@ -1215,7 +1217,9 @@ fn getSwitchOrStructInitContext(
                                                 upper_index -= 1; // eat the switch's .r_paren
                                                 break :find_identifier;
                                             },
-                                            .identifier, .builtin => {
+                                            .identifier,
+                                            // .builtin, // `@f(){.`
+                                            => {
                                                 upper_index = token_index - 1; // the fn name
                                                 break :find_identifier;
                                             },
@@ -1241,6 +1245,8 @@ fn getSwitchOrStructInitContext(
                     // `f(.`
                     .identifier,
                     .builtin,
+                    .keyword_addrspace,
+                    .keyword_callconv,
                     => {
                         likely = .enum_arg;
                         break :find_identifier;
@@ -1329,6 +1335,7 @@ fn collectContainerNodes(
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, &types_with_handles),
         .builtin => |loc| try collectBuiltinContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
+        .keyword => |tag| try collectKeywordFnContainerNodes(builder, tag, dot_context, &types_with_handles),
         else => {},
     }
     return types_with_handles.toOwnedSlice(builder.arena);
@@ -1595,4 +1602,27 @@ fn collectEnumLiteralContainerNodes(
         if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
+}
+
+fn collectKeywordFnContainerNodes(
+    builder: *Builder,
+    tag: std.zig.Token.Tag,
+    dot_context: EnumLiteralContext,
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+) error{OutOfMemory}!void {
+    const builtin_type_name: []const u8 = name: {
+        switch (tag) {
+            .keyword_addrspace => switch (dot_context.fn_arg_index) {
+                0 => break :name "AddressSpace",
+                else => return,
+            },
+            .keyword_callconv => switch (dot_context.fn_arg_index) {
+                0 => break :name "CallingConvention",
+                else => return,
+            },
+            else => return,
+        }
+    };
+    const ty = try builder.analyser.instanceStdBuiltinType(builtin_type_name) orelse return;
+    try types_with_handles.append(builder.arena, ty);
 }

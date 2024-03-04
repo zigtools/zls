@@ -2382,6 +2382,18 @@ test "completion - builtin fns taking an enum arg" {
         .{ .label = "always_inline", .kind = .EnumMember, .detail = "always_inline" },
         .{ .label = "compile_time", .kind = .EnumMember, .detail = "compile_time" },
     });
+    try testCompletionTextEdit(.{
+        .source = "var a: u16 addrspace(.<cursor>",
+        .label = "constant",
+        .expected_insert_line = "var a: u16 addrspace(.constant",
+        .expected_replace_line = "var a: u16 addrspace(.constant",
+    });
+    try testCompletionTextEdit(.{
+        .source = "fn foo() callconv(.<cursor>",
+        .label = "AAPCS",
+        .expected_insert_line = "fn foo() callconv(.AAPCS",
+        .expected_replace_line = "fn foo() callconv(.AAPCS",
+    });
 }
 
 test "block" {
