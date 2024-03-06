@@ -116,7 +116,7 @@ fn hoverSymbolRecursive(
             resolved_type,
             &reference_collector,
         );
-        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser)});
+        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser, .{ .truncate_container_decls = false })});
     }
     const referenced_types: []const Analyser.ReferencedType = type_references.keys();
 

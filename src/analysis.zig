@@ -2593,19 +2593,24 @@ pub const Type = struct {
         return analyser.lookupSymbolContainer(node_handle, symbol, .other);
     }
 
-    pub fn fmt(ty: Type, analyser: *Analyser) std.fmt.Formatter(format) {
+    pub fn fmt(ty: Type, analyser: *Analyser, options: FormatOptions) std.fmt.Formatter(format) {
         const typeof = ty.typeOf(analyser);
-        return .{ .data = .{ .ty = typeof, .analyser = analyser } };
+        return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
     }
 
-    pub fn fmtTypeVal(ty: Type, analyser: *Analyser) std.fmt.Formatter(format) {
+    pub fn fmtTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) std.fmt.Formatter(format) {
         std.debug.assert(ty.is_type_val);
-        return .{ .data = .{ .ty = ty, .analyser = analyser } };
+        return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
     }
+
+    pub const FormatOptions = struct {
+        truncate_container_decls: bool,
+    };
 
     const FormatContext = struct {
         ty: Type,
         analyser: *Analyser,
+        options: FormatOptions,
     };
 
     fn format(
@@ -2629,7 +2634,7 @@ pub const Type = struct {
                 };
                 const const_prefix = if (info.is_const) "const " else "";
 
-                return try writer.print("{s}{s}{}", .{ size_prefix, const_prefix, info.elem_ty.fmtTypeVal(analyser) });
+                return try writer.print("{s}{s}{}", .{ size_prefix, const_prefix, info.elem_ty.fmtTypeVal(analyser, ctx.options) });
             },
             .array => |info| {
                 try writer.writeByte('[');
@@ -2642,16 +2647,16 @@ pub const Type = struct {
                     try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
                 }
                 try writer.writeByte(']');
-                try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser)});
+                try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
             },
-            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser)}),
+            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser, ctx.options)}),
             .error_union => |info| {
                 if (info.error_set) |error_set| {
-                    try writer.print("{}", .{error_set.fmtTypeVal(analyser)});
+                    try writer.print("{}", .{error_set.fmtTypeVal(analyser, ctx.options)});
                 }
-                try writer.print("!{}", .{info.payload.fmtTypeVal(analyser)});
+                try writer.print("!{}", .{info.payload.fmtTypeVal(analyser, ctx.options)});
             },
-            .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser)}),
+            .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
             .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
                 .root => {
                     const path = URI.parse(analyser.arena.allocator(), node_handle.handle.uri) catch node_handle.handle.uri;
@@ -2665,7 +2670,6 @@ pub const Type = struct {
                 .container_decl_two,
                 .container_decl_two_trailing,
                 .error_set_decl,
-                .merge_error_sets,
                 .tagged_union,
                 .tagged_union_trailing,
                 .tagged_union_two,
@@ -2696,7 +2700,52 @@ pub const Type = struct {
                         try writer.print("{s}(...)", .{func_name});
                         return;
                     }
-                    try writer.writeAll(offsets.nodeToSlice(tree, node));
+
+                    if (!ctx.options.truncate_container_decls) {
+                        try writer.writeAll(offsets.nodeToSlice(tree, node));
+                        return;
+                    }
+
+                    if (tree.nodes.items(.tag)[node] == .error_set_decl) {
+                        const field_count = ast.errorSetFieldCount(tree, node);
+                        if (field_count > 2) {
+                            try writer.writeAll("error{...}");
+                            return;
+                        }
+
+                        var it = ast.ErrorSetIterator.init(tree, node);
+                        var i: usize = 0;
+
+                        try writer.writeAll("error{");
+                        while (it.next()) |identifier_token| : (i += 1) {
+                            if (i != 0) {
+                                try writer.writeByte(',');
+                            }
+                            const name = offsets.tokenToSlice(tree, identifier_token);
+                            try writer.writeAll(name);
+                        }
+                        try writer.writeByte('}');
+
+                        return;
+                    }
+
+                    var buffer: [2]Ast.Node.Index = undefined;
+                    const container_decl = tree.fullContainerDecl(&buffer, node).?;
+
+                    const start_token = container_decl.layout_token orelse container_decl.ast.main_token;
+                    const end_token = if (container_decl.ast.arg != 0)
+                        @min(ast.lastToken(tree, container_decl.ast.arg) + 1, tree.tokens.len)
+                    else if (container_decl.ast.enum_token) |enum_token|
+                        @min(enum_token + 1, tree.tokens.len)
+                    else
+                        container_decl.ast.main_token;
+
+                    try writer.writeAll(offsets.tokensToSlice(tree, start_token, end_token));
+                    if (container_decl.ast.members.len == 0) {
+                        try writer.writeAll(" {}");
+                    } else {
+                        try writer.writeAll(" {...}");
+                    }
                 },
                 .fn_proto,
                 .fn_proto_multi,
@@ -2722,6 +2771,7 @@ pub const Type = struct {
                         .snippet_placeholders = false,
                     })});
                 },
+                .merge_error_sets => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
             .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),

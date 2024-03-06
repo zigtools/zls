@@ -1231,6 +1231,47 @@ pub fn blockStatements(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index)
     };
 }
 
+pub const ErrorSetIterator = struct {
+    token_tags: []const std.zig.Token.Tag,
+    current_token: Ast.TokenIndex,
+    last_token: Ast.TokenIndex,
+
+    pub fn init(tree: Ast, node: Ast.Node.Index) ErrorSetIterator {
+        std.debug.assert(tree.nodes.items(.tag)[node] == .error_set_decl);
+        return .{
+            .token_tags = tree.tokens.items(.tag),
+            .current_token = tree.nodes.items(.main_token)[node] + 2,
+            .last_token = tree.nodes.items(.data)[node].rhs,
+        };
+    }
+
+    pub fn next(it: *ErrorSetIterator) ?Ast.TokenIndex {
+        for (it.token_tags[it.current_token..it.last_token], it.current_token..) |tag, token| {
+            switch (tag) {
+                .doc_comment, .comma => {},
+                .identifier => {
+                    it.current_token = @min(token + 1, it.last_token);
+                    return @intCast(token);
+                },
+                else => {},
+            }
+        }
+        return null;
+    }
+};
+
+pub fn errorSetFieldCount(tree: Ast, node: Ast.Node.Index) usize {
+    std.debug.assert(tree.nodes.items(.tag)[node] == .error_set_decl);
+    const token_tags = tree.tokens.items(.tag);
+    const start = tree.nodes.items(.main_token)[node] + 2;
+    const end = tree.nodes.items(.data)[node].rhs;
+    var count: usize = 0;
+    for (token_tags[start..end]) |tag| {
+        count += @intFromBool(tag == .identifier);
+    }
+    return count;
+}
+
 /// Iterates over FnProto Params w/ added bounds check to support incomplete ast nodes
 pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
     const token_tags = it.tree.tokens.items(.tag);

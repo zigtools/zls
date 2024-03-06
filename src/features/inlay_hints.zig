@@ -324,33 +324,17 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
     }
 }
 
-// Restrict whitespace to only one space at a time.
-// TODO: Reduce long type hints (>x characters) to just the overall type i.e. `struct { .. }`.
-fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
-    // Overallocates by a small amount if whitespace is reduced, but it should be fine.
-    var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len);
-    var skip = false;
-    for (str) |char| {
-        if (char == '\n' or char == ' ') {
-            if (!skip) {
-                reduced_type_str.appendAssumeCapacity(' ');
-            }
-            skip = true;
-        } else {
-            reduced_type_str.appendAssumeCapacity(char);
-            skip = false;
-        }
-    }
-    return reduced_type_str.items;
-}
-
 fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = builder.handle, .node = node }) orelse return null;
 
-    const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{resolved_type.fmt(builder.analyser)});
+    const type_str: []const u8 = try std.fmt.allocPrint(
+        builder.arena,
+        "{}",
+        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+    );
     if (type_str.len == 0) return null;
 
-    return try reduceTypeWhitespace(type_str, builder.arena);
+    return type_str;
 }
 
 fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
@@ -361,10 +345,14 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
     ) orelse return null;
     const resolved_type = try things.resolveType(builder.analyser) orelse return null;
 
-    const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{resolved_type.fmt(builder.analyser)});
+    const type_str: []const u8 = try std.fmt.allocPrint(
+        builder.arena,
+        "{}",
+        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+    );
     if (type_str.len == 0) return null;
 
-    return try reduceTypeWhitespace(type_str, builder.arena);
+    return type_str;
 }
 
 /// Append a hint in the form `: hint`
@@ -568,12 +556,16 @@ fn writeNodeInlayHint(
                 const name = offsets.locToSlice(tree.source, name_loc);
                 const decl = (try builder.analyser.getSymbolEnumLiteral(builder.arena, builder.handle, name_loc.start, name)) orelse continue;
                 const ty = try decl.resolveType(builder.analyser) orelse continue;
-                const type_str: []const u8 = try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser)});
+                const type_str: []const u8 = try std.fmt.allocPrint(
+                    builder.arena,
+                    "{}",
+                    .{ty.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+                );
                 if (type_str.len == 0) continue;
                 try appendTypeHintString(
                     builder,
                     name_token,
-                    try reduceTypeWhitespace(type_str, builder.arena),
+                    type_str,
                 );
             }
         },

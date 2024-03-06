@@ -256,14 +256,14 @@ test "var decl" {
         \\     return .{
         \\         .a<u32> = a,
         \\         .b<i32> = b,
-        \\         .c<struct { d: usize, e: []const u8, }> = .{
+        \\         .c<struct {...}> = .{
         \\             .d<usize> = 0,
         \\             .e<[]const u8> = "Testing",
         \\         }
         \\     }; 
         \\ }
         \\
-        \\ var a<struct { a: u32, b: i32, c: struct { d: usize, e: []const u8, }, }> = thing(10, -4);
+        \\ var a<struct {...}> = thing(10, -4);
         \\ _ = a;
     , .{ .kind = .Type });
 }
@@ -435,6 +435,24 @@ test "capture value with catch" {
         \\test {
         \\    foo() catch |err<error{OutOfMemory}>| {}
         \\}
+    , .{ .kind = .Type });
+}
+
+test "truncate anonymous container declarations" {
+    try testInlayHints(
+        \\const A<struct {...}> = @as(struct { a: u32 }, undefined);
+        \\const B<packed union {...}> = @as(packed union { a: u32 }, undefined);
+        \\const C<union(enum) {...}> = @as(union(enum) { a: u32 }, undefined);
+        \\const D<union(u32) {...}> = @as(union(u32) { a: u32 }, undefined);
+    , .{ .kind = .Type });
+}
+
+test "truncate anonymous error sets" {
+    try testInlayHints(
+        \\const A<error{Foo}> = @as(error{Foo}, undefined);
+        \\const B<error{Foo,Bar}> = @as(error{Foo,Bar}, undefined);
+        \\const C<error{...}> = @as(error{Foo,Bar,Baz}, undefined);
+        \\const D<error{...}> = @as(error{A,B,C,D}, undefined);
     , .{ .kind = .Type });
 }
 
