@@ -1090,6 +1090,7 @@ fn resolveConfiguration(
         if (zig_builtin.is_test) unreachable;
         if (!std.process.can_spawn) break :blk;
         const zig_exe_path = try configuration.findZig(allocator) orelse break :blk;
+        defer allocator.free(zig_exe_path);
         config.zig_exe_path = try config_arena.dupe(u8, zig_exe_path);
     }
 
