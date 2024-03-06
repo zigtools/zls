@@ -42,7 +42,11 @@ fn typeToCompletion(
                 try builder.completions.append(builder.arena, .{
                     .label = "*",
                     .kind = .Operator,
-                    .detail = try std.fmt.allocPrint(builder.arena, "{}", .{info.elem_ty.fmtTypeVal(builder.analyser)}),
+                    .detail = try std.fmt.allocPrint(
+                        builder.arena,
+                        "{}",
+                        .{info.elem_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                    ),
                 });
 
                 if (info.size == .C) return;
@@ -66,7 +70,11 @@ fn typeToCompletion(
                 try builder.completions.append(builder.arena, .{
                     .label = "ptr",
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(builder.arena, "{}", .{many_ptr_ty.fmtTypeVal(builder.analyser)}),
+                    .detail = try std.fmt.allocPrint(
+                        builder.arena,
+                        "{}",
+                        .{many_ptr_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                    ),
                 });
             },
             .Many => {},
@@ -87,7 +95,11 @@ fn typeToCompletion(
             try builder.completions.append(builder.arena, .{
                 .label = "?",
                 .kind = .Operator,
-                .detail = try std.fmt.allocPrint(builder.arena, "{}", .{child_ty.fmtTypeVal(builder.analyser)}),
+                .detail = try std.fmt.allocPrint(
+                    builder.arena,
+                    "{}",
+                    .{child_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                ),
             });
         },
         .other => |node_handle| try nodeToCompletion(

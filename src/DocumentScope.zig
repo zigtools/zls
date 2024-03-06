@@ -725,8 +725,6 @@ noinline fn walkErrorSetNode(
     node_idx: Ast.Node.Index,
 ) error{OutOfMemory}!void {
     const token_tags = tree.tokens.items(.tag);
-    const data = tree.nodes.items(.data);
-    const main_tokens = tree.nodes.items(.main_token);
 
     const scope = try context.startScope(
         .container,
@@ -734,27 +732,21 @@ noinline fn walkErrorSetNode(
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
-    // All identifiers in main_token..data.rhs are error fields.
-    var tok_i = main_tokens[node_idx] + 2;
-    while (tok_i < data[node_idx].rhs) : (tok_i += 1) {
-        switch (token_tags[tok_i]) {
-            .doc_comment, .comma => {},
-            .identifier => {
-                const name = offsets.identifierTokenToNameSlice(tree, tok_i);
-                try scope.pushDeclaration(name, .{ .error_token = tok_i }, .other);
-                const gop = try context.doc_scope.global_error_set.getOrPutContext(
-                    context.allocator,
-                    tok_i,
-                    IdentifierTokenContext{ .tree = tree },
-                );
-                if (!gop.found_existing) {
-                    gop.key_ptr.* = tok_i;
-                } else if (gop.found_existing and token_tags[tok_i - 1] == .doc_comment) {
-                    // a token with a doc comment takes priority.
-                    gop.key_ptr.* = tok_i;
-                }
-            },
-            else => {},
+    var it = ast.ErrorSetIterator.init(tree, node_idx);
+
+    while (it.next()) |identifier_token| {
+        const name = offsets.identifierTokenToNameSlice(tree, identifier_token);
+        try scope.pushDeclaration(name, .{ .error_token = identifier_token }, .other);
+        const gop = try context.doc_scope.global_error_set.getOrPutContext(
+            context.allocator,
+            identifier_token,
+            IdentifierTokenContext{ .tree = tree },
+        );
+        if (!gop.found_existing) {
+            gop.key_ptr.* = identifier_token;
+        } else if (gop.found_existing and token_tags[identifier_token - 1] == .doc_comment) {
+            // a token with a doc comment takes priority.
+            gop.key_ptr.* = identifier_token;
         }
     }
 
