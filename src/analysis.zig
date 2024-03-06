@@ -3972,14 +3972,13 @@ pub const DeclWithHandle = struct {
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         const tree = self.handle.tree;
         return switch (self.decl) {
-            // TODO: delete redundant `Analyser.`
-            .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
+            .ast_node => |node| try getDocComments(allocator, tree, node),
             .function_parameter => |pay| {
                 const param = pay.get(tree).?;
                 const doc_comments = param.first_doc_comment orelse return null;
-                return try Analyser.collectDocComments(allocator, tree, doc_comments, false);
+                return try collectDocComments(allocator, tree, doc_comments, false);
             },
-            .error_token => |token| try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
+            .error_token => |token| try getDocCommentsBeforeToken(allocator, tree, token),
             else => null,
         };
     }
