@@ -1744,6 +1744,12 @@ test "weird code" {
     , &.{
         .{ "bar", .variable, .{} },
     });
+    try testSemanticTokens(
+        \\error. .foo
+    , &.{
+        .{ "error", .keyword, .{} },
+        .{ "foo", .variable, .{} },
+    });
 }
 
 const TokenData = struct {

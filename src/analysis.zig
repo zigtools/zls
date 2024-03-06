@@ -1982,6 +1982,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return try Type.typeValFromIP(analyser, string_literal_type);
         },
         .error_value => {
+            if (token_tags[datas[node].rhs] != .identifier) return null;
             const name = offsets.identifierTokenToNameSlice(tree, datas[node].rhs);
             const name_index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
 
