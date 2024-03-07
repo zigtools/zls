@@ -923,7 +923,9 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         const zig_version_simple = std.SemanticVersion{ .major = zig_version.major, .minor = zig_version.minor, .patch = 0 };
         const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
 
-        if (zig_version_is_tagged != zls_version_is_tagged) {
+        const are_different_tagged_versions = zig_version_is_tagged and zls_version_is_tagged and zig_version_simple.order(zls_version_simple) != .eq;
+
+        if (zig_version_is_tagged != zls_version_is_tagged or are_different_tagged_versions) {
             if (zig_version_is_tagged) {
                 server.showMessage(
                     .Warning,
