@@ -90,6 +90,60 @@ fn typeToCompletion(
                 .detail = try std.fmt.allocPrint(builder.arena, "{}", .{child_ty.fmtTypeVal(builder.analyser)}),
             });
         },
+        .container => |scope_handle| {
+            const doc_scope = try scope_handle.handle.getDocumentScope();
+
+            const tree = scope_handle.handle.tree;
+            const node = doc_scope.getScopeAstNode(scope_handle.scope).?;
+
+            const context = DeclToCompletionContext{
+                .builder = builder,
+                .parent_is_type_val = ty.is_type_val,
+                .either_descriptor = either_descriptor,
+            };
+            try builder.analyser.iterateSymbolsContainer(
+                scope_handle,
+                builder.orig_handle,
+                declToCompletion,
+                context,
+                !ty.is_type_val,
+            );
+
+            var doc_strings = std.ArrayListUnmanaged([]const u8){};
+            if (try Analyser.getDocComments(builder.arena, tree, node)) |doc|
+                try doc_strings.append(builder.arena, doc);
+
+            if (try builder.analyser.resolveVarDeclAlias(.{ .handle = scope_handle.handle, .node = node })) |result| {
+                const context_2 = DeclToCompletionContext{
+                    .builder = builder,
+                    .orig_name = Analyser.getDeclName(tree, node),
+                    .either_descriptor = either_descriptor,
+                    .doc_strings = &doc_strings,
+                };
+                try declToCompletion(context_2, result);
+                return;
+            }
+
+            if (try builder.analyser.resolveTypeOfNode(.{ .handle = scope_handle.handle, .node = node })) |resolved_type| {
+                if (try resolved_type.docComments(builder.arena)) |doc|
+                    try doc_strings.append(builder.arena, doc);
+            }
+
+            const doc = try completionDoc(
+                builder,
+                either_descriptor,
+                doc_strings.items,
+            );
+
+            if (Analyser.nodeToString(tree, node)) |string| {
+                try builder.completions.append(builder.arena, .{
+                    .label = string,
+                    .kind = .Field,
+                    .documentation = doc,
+                    .detail = offsets.nodeToSlice(tree, node),
+                });
+            }
+        },
         .other => |node_handle| try nodeToCompletion(
             builder,
             node_handle,
@@ -189,21 +243,6 @@ fn nodeToCompletion(
         either_descriptor,
         doc_strings.items,
     );
-
-    if (ast.isContainer(tree, node)) {
-        const context = DeclToCompletionContext{
-            .builder = builder,
-            .parent_is_type_val = is_type_val,
-            .either_descriptor = either_descriptor,
-        };
-        try builder.analyser.iterateSymbolsContainer(
-            node_handle,
-            builder.orig_handle,
-            declToCompletion,
-            context,
-            !is_type_val,
-        );
-    }
 
     switch (node_tags[node]) {
         .merge_error_sets => {
@@ -1234,12 +1273,12 @@ pub fn collectContainerFields(
     container: Analyser.Type,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    const node_handle = switch (container.data) {
-        .other => |n| n,
+    const scope_handle = switch (container.data) {
+        .container => |s| s,
         else => return,
     };
-    const node = node_handle.node;
-    const handle = node_handle.handle;
+    const node = try scope_handle.toNode();
+    const handle = scope_handle.handle;
     var buffer: [2]Ast.Node.Index = undefined;
     const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
@@ -1349,7 +1388,7 @@ fn collectFieldAccessContainerNodes(
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
-            if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
+            if (try unwrapped.isEnumType() or try unwrapped.isUnionType()) {
                 try types_with_handles.append(arena, unwrapped);
                 return;
             }

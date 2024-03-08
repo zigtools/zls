@@ -36,7 +36,7 @@ fn gotoDefinitionSymbol(
             const type_declaration = try decl_handle.typeDeclarationNode() orelse {
                 // just resolve the type and guess
                 if (try decl_handle.resolveType(analyser)) |resolved_type| {
-                    if (resolved_type.typeDefinitionToken()) |token_handle| {
+                    if (try resolved_type.typeDefinitionToken()) |token_handle| {
                         break :blk token_handle;
                     }
                 }
