@@ -1021,7 +1021,7 @@ pub const Union = struct {
     tag_type: InternPool.Index,
     fields: std.AutoArrayHashMapUnmanaged(String, Field),
     namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout = .Auto,
+    layout: std.builtin.Type.ContainerLayout = .auto,
     status: FieldStatus,
 
     pub const Field = struct {
@@ -4483,7 +4483,7 @@ test "struct value" {
         .fields = .{},
         .owner_decl = .none,
         .namespace = .none,
-        .layout = .Auto,
+        .layout = .auto,
         .backing_int_ty = .none,
         .status = .none,
     });
@@ -4561,7 +4561,7 @@ test "union value" {
         .tag_type = .none,
         .fields = .{},
         .namespace = .none,
-        .layout = .Auto,
+        .layout = .auto,
         .status = .none,
     });
     const union_type = try ip.get(gpa, .{ .union_type = union_index });
