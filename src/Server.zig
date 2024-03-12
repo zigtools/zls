@@ -2106,11 +2106,11 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
         .run_build_on_save => {
             if (!std.process.can_spawn) unreachable;
 
-            if (server.running_build_on_save_processes.load(.SeqCst) != 0) return;
+            if (server.running_build_on_save_processes.load(.seq_cst) != 0) return;
 
             for (server.client_capabilities.workspace_folders) |workspace_folder_uri| {
-                _ = server.running_build_on_save_processes.fetchAdd(1, .AcqRel);
-                defer _ = server.running_build_on_save_processes.fetchSub(1, .AcqRel);
+                _ = server.running_build_on_save_processes.fetchAdd(1, .acq_rel);
+                defer _ = server.running_build_on_save_processes.fetchSub(1, .acq_rel);
 
                 var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
                 defer arena_allocator.deinit();
