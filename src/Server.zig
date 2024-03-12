@@ -1294,6 +1294,15 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 
 fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) error{}!void {
     server.document_store.closeDocument(notification.textDocument.uri);
+
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        // clear diagnostics on closed file
+        const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
+            .uri = notification.textDocument.uri,
+            .diagnostics = &.{},
+        }) catch return;
+        server.allocator.free(json_message);
+    }
 }
 
 fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: types.WillSaveTextDocumentParams) Error!?[]types.TextEdit {
