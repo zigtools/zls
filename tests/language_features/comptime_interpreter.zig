@@ -236,7 +236,7 @@ test "call return struct" {
     try std.testing.expect(result.ty.simple_type == .type);
     const struct_info = tester.ip.getStruct(result.val.?.struct_type);
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
-    try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
+    try std.testing.expectEqual(std.builtin.Type.ContainerLayout.auto, struct_info.layout);
 
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.count());
     try std.testing.expectFmt("slay", "{}", .{tester.ip.fmtId(struct_info.fields.keys()[0])});
