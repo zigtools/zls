@@ -204,7 +204,7 @@ pub fn interpret(
                 .fields = .{},
                 .owner_decl = .none, // TODO
                 .namespace = container_namespace,
-                .layout = .Auto, // TODO
+                .layout = .auto, // TODO
                 .backing_int_ty = .none, // TODO
                 .status = .none, // TODO
             });
@@ -879,7 +879,7 @@ pub fn interpret(
                         .fields = .{},
                         .owner_decl = .none, // TODO
                         .namespace = .none,
-                        .layout = .Auto,
+                        .layout = .auto,
                         .backing_int_ty = .none,
                         .status = .none,
                     });
@@ -892,7 +892,11 @@ pub fn interpret(
                     } };
                 }
 
-                const import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle(), import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+                const import_uri = (try interpreter.document_store.uriFromImportStr(
+                    interpreter.allocator,
+                    interpreter.getHandle(),
+                    import_str[1 .. import_str.len - 1],
+                )) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
                 const import_handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;

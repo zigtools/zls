@@ -138,13 +138,13 @@ pub fn BinnedAllocator(comptime config: Config) type {
                     return .{ .count = std.atomic.Value(usize).init(0) };
                 }
                 fn load(self: *const @This()) usize {
-                    return self.count.load(.Acquire);
+                    return self.count.load(.acquire);
                 }
                 fn increment(self: *@This()) void {
-                    _ = self.count.fetchAdd(1, .AcqRel);
+                    _ = self.count.fetchAdd(1, .acq_rel);
                 }
                 fn decrement(self: *@This()) void {
-                    _ = self.count.fetchSub(1, .AcqRel);
+                    _ = self.count.fetchSub(1, .acq_rel);
                 }
             }
         else

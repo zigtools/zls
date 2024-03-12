@@ -993,7 +993,7 @@ pub const Struct = struct {
     fields: std.AutoArrayHashMapUnmanaged(String, Field),
     owner_decl: Decl.OptionalIndex,
     namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout = .Auto,
+    layout: std.builtin.Type.ContainerLayout = .auto,
     backing_int_ty: InternPool.Index,
     status: FieldStatus,
 
@@ -3269,7 +3269,7 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
             },
             .struct_type => |struct_index| {
                 const struct_info = ip.getStruct(struct_index);
-                assert(struct_info.layout == .Packed);
+                assert(struct_info.layout == .@"packed");
                 index = struct_info.backing_int_ty;
             },
             // TODO revisit this when error sets support custom int types (comment taken from zig codebase)

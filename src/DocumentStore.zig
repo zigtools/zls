@@ -389,7 +389,7 @@ pub const Handle = struct {
                 // another thread is currently computing the document scope
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .Release) != 0) {
+            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0) {
                 // another thread is currently computing the document scope
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
@@ -406,7 +406,7 @@ pub const Handle = struct {
 
                 break :blk document_scope;
             };
-            const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .Release); // atomically set has_document_scope
+            const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .release); // atomically set has_document_scope
             std.debug.assert(old_has_document_scope == 0); // race condition: another thread set `has_document_scope` even though we hold the lock
 
             self.impl.condition.broadcast();
@@ -428,7 +428,7 @@ pub const Handle = struct {
                 // another thread is currently computing the ZIR
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .Release) != 0) {
+            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0) {
                 // another thread is currently computing the ZIR
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
@@ -448,8 +448,8 @@ pub const Handle = struct {
 
                 break :blk zir;
             };
-            _ = self.impl.status.bitReset(@bitOffsetOf(Status, "zir_outdated"), .Release); // atomically set zir_outdated
-            const old_has_zir = self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir"), .Release); // atomically set has_zir
+            _ = self.impl.status.bitReset(@bitOffsetOf(Status, "zir_outdated"), .release); // atomically set zir_outdated
+            const old_has_zir = self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir"), .release); // atomically set has_zir
             std.debug.assert(old_has_zir == 0); // race condition: another thread set `has_zir` even though we hold the lock
 
             self.impl.condition.broadcast();
@@ -457,7 +457,11 @@ pub const Handle = struct {
         return self.impl.zir;
     }
 
-    fn getComptimeInterpreterCold(self: *Handle, document_store: *DocumentStore, ip: *InternPool) error{OutOfMemory}!*ComptimeInterpreter {
+    fn getComptimeInterpreterCold(
+        self: *Handle,
+        document_store: *DocumentStore,
+        ip: *InternPool,
+    ) error{OutOfMemory}!*ComptimeInterpreter {
         @setCold(true);
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
@@ -482,7 +486,7 @@ pub const Handle = struct {
                 return self.impl.comptime_interpreter;
             }
             self.impl.comptime_interpreter = comptime_interpreter;
-            const old = self.impl.status.bitSet(@bitOffsetOf(Status, "has_comptime_interpreter"), .Release); // atomically set has_imports
+            const old = self.impl.status.bitSet(@bitOffsetOf(Status, "has_comptime_interpreter"), .release); // atomically set has_imports
             std.debug.assert(old == 0); // race condition: another thread set the resource even though we hold the lock
             self.impl.lock.unlock();
         }
@@ -491,7 +495,7 @@ pub const Handle = struct {
     }
 
     fn getStatus(self: Handle) Status {
-        return @bitCast(self.impl.status.load(.Acquire));
+        return @bitCast(self.impl.status.load(.acquire));
     }
 
     pub fn isOpen(self: Handle) bool {
@@ -501,9 +505,9 @@ pub const Handle = struct {
     /// returns the previous value
     fn setOpen(self: *Handle, open: bool) bool {
         if (open) {
-            return self.impl.status.bitSet(@offsetOf(Handle.Status, "open"), .Release) == 1;
+            return self.impl.status.bitSet(@offsetOf(Handle.Status, "open"), .release) == 1;
         } else {
-            return self.impl.status.bitReset(@offsetOf(Handle.Status, "open"), .Release) == 1;
+            return self.impl.status.bitReset(@offsetOf(Handle.Status, "open"), .release) == 1;
         }
     }
 
@@ -539,7 +543,7 @@ pub const Handle = struct {
         self.impl.lock.lock();
         errdefer @compileError("");
 
-        const old_status: Handle.Status = @bitCast(self.impl.status.swap(@bitCast(new_status), .AcqRel));
+        const old_status: Handle.Status = @bitCast(self.impl.status.swap(@bitCast(new_status), .acq_rel));
 
         var old_tree = self.tree;
         var old_import_uris = self.import_uris;
@@ -670,7 +674,14 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         log.err("file path is not absolute `{s}`", .{file_path});
         return null;
     }
-    const file_contents = std.fs.cwd().readFileAllocOptions(self.allocator, file_path, max_document_size, null, @alignOf(u8), 0) catch |err| {
+    const file_contents = std.fs.cwd().readFileAllocOptions(
+        self.allocator,
+        file_path,
+        max_document_size,
+        null,
+        @alignOf(u8),
+        0,
+    ) catch |err| {
         log.err("failed to load document `{s}`: {}", .{ file_path, err });
         return null;
     };
