@@ -839,5 +839,5 @@ pub inline fn rangeLessThan(a: types.Range, b: types.Range) bool {
 }
 
 pub inline fn positionLessThan(a: types.Position, b: types.Position) bool {
-    return (a.line < b.line or a.character < b.character);
+    return (a.line < b.line or (a.line == b.line and a.character < b.character));
 }
