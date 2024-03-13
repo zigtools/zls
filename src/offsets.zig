@@ -834,21 +834,10 @@ fn testGetNCodeUnitByteCount(text: []const u8, n: [3]usize) !void {
     try std.testing.expectEqual(n[0], getNCodeUnitByteCount(text, n[2], .@"utf-32"));
 }
 
-pub fn rangeLessThan(a: types.Range, b: types.Range) bool {
+pub inline fn rangeLessThan(a: types.Range, b: types.Range) bool {
     return positionLessThan(a.start, b.start) or positionLessThan(a.end, b.end);
 }
 
-pub fn positionLessThan(a: types.Position, b: types.Position) bool {
-    if (a.line < b.line) {
-        return true;
-    }
-    if (a.line > b.line) {
-        return false;
-    }
-
-    if (a.character < b.character) {
-        return true;
-    }
-
-    return false;
+pub inline fn positionLessThan(a: types.Position, b: types.Position) bool {
+    return (a.line < b.line or a.character < b.character);
 }
