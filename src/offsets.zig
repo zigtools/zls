@@ -246,7 +246,43 @@ pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) [
 }
 
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
-    return tree.tokens.items(.start)[token_index];
+    // move the source index back until we find a non continuation bytes (i.e. 10******)
+    var source_index = tree.tokens.items(.start)[token_index];
+    while (source_index > 0 and 0b10000000 <= tree.source[source_index] and tree.source[source_index] <= 0b10111111) {
+        source_index -= 1;
+    }
+    return source_index;
+}
+
+test tokenToIndex {
+    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶a", .zig);
+    defer tree.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualSlices(std.zig.Token.Tag, &.{
+        .invalid, .invalid, .invalid, .invalid, // 🠁
+        .invalid, .invalid, .invalid, // ↉
+        .invalid, .invalid, // ¶
+        .identifier, // a
+        .eof,
+    }, tree.tokens.items(.tag));
+
+    // 🠁
+    try std.testing.expectEqual(0, tokenToIndex(tree, 0));
+    try std.testing.expectEqual(0, tokenToIndex(tree, 1));
+    try std.testing.expectEqual(0, tokenToIndex(tree, 2));
+    try std.testing.expectEqual(0, tokenToIndex(tree, 3));
+
+    // ↉
+    try std.testing.expectEqual(4, tokenToIndex(tree, 4));
+    try std.testing.expectEqual(4, tokenToIndex(tree, 5));
+    try std.testing.expectEqual(4, tokenToIndex(tree, 6));
+
+    // ¶
+    try std.testing.expectEqual(7, tokenToIndex(tree, 7));
+    try std.testing.expectEqual(7, tokenToIndex(tree, 8));
+
+    // a
+    try std.testing.expectEqual(9, tokenToIndex(tree, 9));
 }
 
 pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
