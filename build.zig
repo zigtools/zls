@@ -25,13 +25,13 @@ pub fn build(b: *Build) !void {
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
     const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
 
-    const version_string, const precise_version_string = getVersion(b);
+    const version_result = getVersion(b);
 
     const build_options = b.addOptions();
     const build_options_module = build_options.createModule();
-    build_options.addOption([]const u8, "version_string", version_string);
-    build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
-    build_options.addOption(?[]const u8, "precise_version_string", precise_version_string);
+    build_options.addOption([]const u8, "version_string", version_result.version_string);
+    build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_result.version_string));
+    build_options.addOption(?[]const u8, "precise_version_string", version_result.precise_version_string);
     build_options.addOption([]const u8, "min_zig_string", min_zig_string);
 
     const exe_options = b.addOptions();
@@ -241,10 +241,8 @@ pub fn build(b: *Build) !void {
 }
 
 fn getVersion(b: *Build) struct {
-    /// version_string
-    []const u8,
-    /// precise_version_string
-    ?[]const u8,
+    version_string: []const u8,
+    precise_version_string: ?[]const u8,
 } {
     const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
     const build_root_path = b.build_root.path orelse ".";
@@ -254,8 +252,8 @@ fn getVersion(b: *Build) struct {
         "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
     }, &code, .Ignore) catch {
         return .{
-            version_string,
-            if (zls_version_is_tagged) version_string else null,
+            .version_string = version_string,
+            .precise_version_string = if (zls_version_is_tagged) version_string else null,
         };
     };
 
@@ -266,7 +264,7 @@ fn getVersion(b: *Build) struct {
             // Tagged release version (e.g. 0.10.0).
             std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
             std.debug.assert(zls_version_is_tagged); // `zls_version_is_tagged` disagrees with git describe
-            return .{ version_string, version_string };
+            return .{ .version_string = version_string, .precise_version_string = version_string };
         },
         2 => {
             // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
@@ -281,7 +279,7 @@ fn getVersion(b: *Build) struct {
             std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
 
             const precise_version_string = b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
-            return .{ precise_version_string, precise_version_string };
+            return .{ .version_string = precise_version_string, .precise_version_string = precise_version_string };
         },
         else => {
             std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
