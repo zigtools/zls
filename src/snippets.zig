@@ -18,6 +18,7 @@ pub const top_level_decl_data = [_]Snipped{
     .{ .label = "union tagged", .kind = .Snippet, .text = "const $1 = union(${2:enum}) {$0};" },
     .{ .label = "test", .kind = .Snippet, .text = "test \"$1\" {$0}" },
     .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
+    .{ .label = "std_options", .kind = .Snippet, .text = "pub const std_options: std.Options = .{${0}};" },
 };
 
 pub const generic = [_]Snipped{
