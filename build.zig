@@ -6,8 +6,8 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 const zls_version_is_tagged: bool = false;
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.builtin: make enum fields lowercase
-const min_zig_string = "0.12.0-dev.3245+4f782d1e8";
+/// extract std.posix from std.os
+const min_zig_string = "0.12.0-dev.3381+982eff7985";
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
