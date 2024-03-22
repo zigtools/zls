@@ -240,16 +240,16 @@ test "generic function" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(comptime T: type) T {}
-        \\const s = foo(S);
-        \\const foo = s.<cursor>
+        \\const S1 = foo(S);
+        \\const S2 = S1.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(any: anytype, comptime T: type) T {}
-        \\const s = foo(null, S);
-        \\const foo = s.<cursor>
+        \\const S1 = foo(null, S);
+        \\const S2 = S1.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
@@ -1840,7 +1840,9 @@ test "struct init" {
         \\    brefa: A,
         \\    this_is_b: []const u8,
         \\};
-        \\ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
+        \\test {
+        \\    ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
+        \\}
     , &.{
         .{ .label = "arefb", .kind = .Field, .detail = "B = 8" },
         .{ .label = "this_is_a", .kind = .Field, .detail = "u32 = 9" },
@@ -1879,7 +1881,9 @@ test "struct init" {
         \\  const Self = @This();
         \\  pub fn s3(self: *Self, p0: es, p1: S2) void {}
         \\};
-        \\S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
+        \\test {
+        \\  S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
+        \\}
     , &.{
         .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
         .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
@@ -1905,8 +1909,10 @@ test "struct init" {
         \\  const Self = @This();
         \\  pub fn s3(self: Self, p0: es, p1: S1) void {}
         \\};
-        \\const iofs3 = S3{};
-        \\iofs3.s3(.{.<cursor>});
+        \\test {
+        \\  const iofs3 = S3{};
+        \\  iofs3.s3(.{.<cursor>});
+        \\}
     , &.{
         .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
         .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
@@ -2987,6 +2993,126 @@ test "insert replace behaviour - file system completions" {
         ,
     });
     // zig fmt: on
+}
+
+// These only work with the modified parser
+test "parser dependent" {
+    try testCompletion(
+        \\fn alias() void {
+        \\    var s = Alias{.<cursor>};
+        \\}
+        \\pub const Outer = struct {
+        \\    pub const Inner = struct {
+        \\        isf1: bool = true,
+        \\        isf2: bool = false,
+        \\    };
+        \\};
+        \\const Alias0 = Outer.Inner;
+        \\const Alias = Alias0;
+    , &.{
+        .{ .label = "isf1", .kind = .Field, .detail = "bool = true" },
+        .{ .label = "isf2", .kind = .Field, .detail = "bool = false" },
+    });
+    try testCompletion(
+        \\const MyStruct = struct {
+        \\    a: bool,
+        \\    b: bool,
+        \\    fn inside() void {
+        \\        var s = MyStruct{.<cursor>};
+        \\    }
+        \\};
+    , &.{
+        .{ .label = "a", .kind = .Field, .detail = "bool" },
+        .{ .label = "b", .kind = .Field, .detail = "bool" },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const E = enum {
+        \\    foo,
+        \\    bar,
+        \\    fn foo(e: E) void {
+        \\        switch (e) {.<cursor>};
+        \\    }
+        \\};
+    , &.{
+        .{ .label = "foo", .kind = .EnumMember },
+        .{ .label = "bar", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\pub const bar = struct {
+        \\    pub const baz = struct {
+        \\        pub const Foo = struct {
+        \\            alpha: u32 = 0,
+        \\        };
+        \\
+        \\        pub fn qux() u32 {
+        \\            return Foo{
+        \\                .<cursor>
+        \\            };
+        \\        }
+        \\    };
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field },
+    });
+    try testCompletion(
+        \\pub var state: S = undefined;
+        \\pub const S = struct { foo: u32 };
+        \\
+        \\pub fn main() void {
+        \\    state.<cursor>
+        \\    {
+        \\        _ = state.foo;
+        \\    }
+        \\    state.foo;
+        \\}
+    , &.{
+        .{ .label = "foo", .kind = .Field },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\fn foo(e: Enum) void {
+        \\    switch (e) {.<cursor>}
+        \\}
+        \\
+        \\const Enum = enum {
+        \\    foo,
+        \\};
+    , &.{
+        .{ .label = "foo", .kind = .EnumMember },
+    });
+    // TODO
+    // Test for `fnCall(.{.})` and `fnCall(Parser.Node{. .some})` because they are handled in different places
+    // Test for completions after `.{` and every `,` in the following snippet
+    // ```
+    // pub fn gamma(p: Parser) void {
+    //     return p.addNode(.{
+    //         .tag = 1,
+    //         .main_token = 1,
+    //         .data = .{
+    //             .lhs = undefined,
+    //             .rhs = p.addNode(Parser.Node{
+    //                 .tag,
+    //             }),
+    //         },
+    //     });
+    // }
+    // const Parser = struct {
+    //     const Node = struct {
+    //         tag: u32,
+    //         main_token: u32,
+    //         data: struct {
+    //             lhs: u32,
+    //             rhs: u32,
+    //         },
+    //     };
+    //     pub fn addNode(_: Node) u32 {}
+    // };
+    // ```
 }
 
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
