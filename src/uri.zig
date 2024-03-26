@@ -15,7 +15,7 @@ const reserved_escapes = blk: {
         escapes[i][0] = '%';
         _ = std.fmt.bufPrint(escapes[i][1..], "{X}", .{c}) catch unreachable;
     }
-    break :blk &escapes;
+    break :blk escapes;
 };
 
 /// Returns a URI from a path, caller owns the memory allocated with `allocator`
