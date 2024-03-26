@@ -107,7 +107,7 @@ pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bo
             for (fields[0 .. fields.len - 1], 0..) |field, i| {
                 kvs_array[i] = .{ field.name, @field(T, field.name) };
             }
-            break :build_kvs kvs_array[0..];
+            break :build_kvs kvs_array;
         };
         /// NOTE: this maps 'empty' to .empty when T contains an empty enum
         /// this shouldn't happen but this doesn't do any harm
