@@ -6,8 +6,8 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 const zls_version_is_tagged: bool = false;
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.os: extract and separate std.posix
-const min_zig_string = "0.12.0-dev.3385+3a836b480";
+/// compiler: implement analysis-local comptime-mutable memory
+const min_zig_string = "0.12.0-dev.3451+405502286";
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
