@@ -264,6 +264,7 @@ fn nodeToCompletion(
 
                             .include_fn_keyword = false,
                             .include_name = true,
+                            .override_name = func_name,
                             .skip_first_param = skip_self_param,
                             .parameters = .{ .show = .{
                                 .include_modifiers = true,
