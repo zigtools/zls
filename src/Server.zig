@@ -146,7 +146,7 @@ pub const Status = enum {
 };
 
 const Job = union(enum) {
-    incoming_message: std.json.Parsed(Message),
+    incoming_message: std.json.Parsed(types.Message),
     generate_diagnostics: DocumentStore.Uri,
     run_build_on_save,
 
@@ -171,14 +171,14 @@ const Job = union(enum) {
 
     fn syncMode(self: Job) SynchronizationMode {
         return switch (self) {
-            .incoming_message => |parsed_message| if (parsed_message.value.isBlocking()) .exclusive else .shared,
+            .incoming_message => |parsed_message| if (isBlockingMessage(parsed_message.value)) .exclusive else .shared,
             .generate_diagnostics => .shared,
             .run_build_on_save => .atomic,
         };
     }
 };
 
-fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientResponse(server: *Server, id: types.Message.ID, result: anytype) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientResponse(" ++ @typeName(@TypeOf(result)) ++ ")");
     defer tracy_zone.end();
 
@@ -189,7 +189,7 @@ fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) e
     return try server.sendToClientInternal(id, null, null, "result", result);
 }
 
-fn sendToClientRequest(server: *Server, id: types.RequestId, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientRequest(server: *Server, id: types.Message.ID, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
     defer tracy_zone.end();
 
@@ -211,7 +211,7 @@ fn sendToClientNotification(server: *Server, method: []const u8, params: anytype
     return try server.sendToClientInternal(null, method, null, "params", params);
 }
 
-fn sendToClientResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) error{OutOfMemory}![]u8 {
+fn sendToClientResponseError(server: *Server, id: types.Message.ID, err: ?types.Message.Response.Error) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -220,9 +220,9 @@ fn sendToClientResponseError(server: *Server, id: types.RequestId, err: ?types.R
 
 fn sendToClientInternal(
     server: *Server,
-    maybe_id: ?types.RequestId,
+    maybe_id: ?types.Message.ID,
     maybe_method: ?[]const u8,
-    maybe_err: ?types.ResponseError,
+    maybe_err: ?types.Message.Response.Error,
     extra_name: []const u8,
     extra: anytype,
 ) error{OutOfMemory}![]u8 {
@@ -1578,265 +1578,86 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-/// workaround for https://github.com/ziglang/zig/issues/16392
-/// ```zig
-/// union(enum) {
-///    request: Request,
-///    notification: Notification,
-///    response: Response,
-/// }
-/// ```zig
-pub const Message = struct {
-    tag: enum(u32) {
-        request,
-        notification,
-        response,
-    },
-    request: ?Request = null,
-    notification: ?Notification = null,
-    response: ?Response = null,
-
-    pub const Request = struct {
-        id: types.RequestId,
-        params: Params,
-
-        pub const Params = union(enum) {
-            initialize: types.InitializeParams,
-            shutdown: void,
-            @"textDocument/willSaveWaitUntil": types.WillSaveTextDocumentParams,
-            @"textDocument/semanticTokens/full": types.SemanticTokensParams,
-            @"textDocument/semanticTokens/range": types.SemanticTokensRangeParams,
-            @"textDocument/inlayHint": types.InlayHintParams,
-            @"textDocument/completion": types.CompletionParams,
-            @"textDocument/signatureHelp": types.SignatureHelpParams,
-            @"textDocument/definition": types.DefinitionParams,
-            @"textDocument/typeDefinition": types.TypeDefinitionParams,
-            @"textDocument/implementation": types.ImplementationParams,
-            @"textDocument/declaration": types.DeclarationParams,
-            @"textDocument/hover": types.HoverParams,
-            @"textDocument/documentSymbol": types.DocumentSymbolParams,
-            @"textDocument/formatting": types.DocumentFormattingParams,
-            @"textDocument/rename": types.RenameParams,
-            @"textDocument/references": types.ReferenceParams,
-            @"textDocument/documentHighlight": types.DocumentHighlightParams,
-            @"textDocument/codeAction": types.CodeActionParams,
-            @"textDocument/foldingRange": types.FoldingRangeParams,
-            @"textDocument/selectionRange": types.SelectionRangeParams,
-            unknown: []const u8,
-        };
-    };
-
-    pub const Notification = union(enum) {
-        initialized: types.InitializedParams,
-        exit: void,
-        @"$/cancelRequest": types.CancelParams,
-        @"$/setTrace": types.SetTraceParams,
-        @"textDocument/didOpen": types.DidOpenTextDocumentParams,
-        @"textDocument/didChange": types.DidChangeTextDocumentParams,
-        @"textDocument/didSave": types.DidSaveTextDocumentParams,
-        @"textDocument/didClose": types.DidCloseTextDocumentParams,
-        @"workspace/didChangeWorkspaceFolders": types.DidChangeWorkspaceFoldersParams,
-        @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
-        unknown: []const u8,
-    };
-
-    pub const Response = struct {
-        id: types.RequestId,
-        data: Data,
-
-        pub const Data = union(enum) {
-            result: types.LSPAny,
-            @"error": types.ResponseError,
-        };
-    };
-
-    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!Message {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-        const json_value = try std.json.parseFromTokenSourceLeaky(std.json.Value, allocator, source, options);
-        return try jsonParseFromValue(allocator, json_value, options);
-    }
-
-    pub fn jsonParseFromValue(
-        allocator: std.mem.Allocator,
-        source: std.json.Value,
-        options: std.json.ParseOptions,
-    ) !Message {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        if (source != .object) return error.UnexpectedToken;
-        const object = source.object;
-
-        @setEvalBranchQuota(10_000);
-        if (object.get("id")) |id_obj| {
-            const msg_id = try std.json.parseFromValueLeaky(types.RequestId, allocator, id_obj, options);
-
-            if (object.get("method")) |method_obj| {
-                const msg_method = try std.json.parseFromValueLeaky([]const u8, allocator, method_obj, options);
-
-                const msg_params = object.get("params") orelse .null;
-
-                const fields = @typeInfo(Request.Params).Union.fields;
-
-                inline for (fields) |field| {
-                    if (std.mem.eql(u8, msg_method, field.name)) {
-                        const params = if (field.type == void)
-                            void{}
-                        else
-                            try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
-
-                        return .{
-                            .tag = .request,
-                            .request = .{
-                                .id = msg_id,
-                                .params = @unionInit(Request.Params, field.name, params),
-                            },
-                        };
-                    }
-                }
-                return .{
-                    .tag = .request,
-                    .request = .{
-                        .id = msg_id,
-                        .params = .{ .unknown = msg_method },
-                    },
-                };
-            } else {
-                const result = object.get("result") orelse .null;
-                const error_obj = object.get("error") orelse .null;
-
-                const err = try std.json.parseFromValueLeaky(?types.ResponseError, allocator, error_obj, options);
-
-                if (result != .null and err != null) return error.UnexpectedToken;
-
-                if (err) |e| {
-                    return .{
-                        .tag = .response,
-                        .response = .{
-                            .id = msg_id,
-                            .data = .{ .@"error" = e },
-                        },
-                    };
-                } else {
-                    return .{
-                        .tag = .response,
-                        .response = .{
-                            .id = msg_id,
-                            .data = .{ .result = result },
-                        },
-                    };
-                }
-            }
-        } else {
-            const method_obj = object.get("method") orelse return error.UnexpectedToken;
-            const msg_method = try std.json.parseFromValueLeaky([]const u8, allocator, method_obj, options);
-
-            const msg_params = object.get("params") orelse .null;
-
-            const fields = @typeInfo(Notification).Union.fields;
-
-            inline for (fields) |field| {
-                if (std.mem.eql(u8, msg_method, field.name)) {
-                    const params = if (field.type == void)
-                        void{}
-                    else
-                        try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
-
-                    return .{
-                        .tag = .notification,
-                        .notification = @unionInit(Notification, field.name, params),
-                    };
-                }
-            }
-            return .{
-                .tag = .notification,
-                .notification = .{ .unknown = msg_method },
-            };
-        }
-    }
-
-    pub fn isBlocking(self: Message) bool {
-        switch (self.tag) {
-            .request => switch (self.request.?.params) {
-                .initialize,
-                .shutdown,
-                => return true,
-                .@"textDocument/willSaveWaitUntil",
-                .@"textDocument/semanticTokens/full",
-                .@"textDocument/semanticTokens/range",
-                .@"textDocument/inlayHint",
-                .@"textDocument/completion",
-                .@"textDocument/signatureHelp",
-                .@"textDocument/definition",
-                .@"textDocument/typeDefinition",
-                .@"textDocument/implementation",
-                .@"textDocument/declaration",
-                .@"textDocument/hover",
-                .@"textDocument/documentSymbol",
-                .@"textDocument/formatting",
-                .@"textDocument/rename",
-                .@"textDocument/references",
-                .@"textDocument/documentHighlight",
-                .@"textDocument/codeAction",
-                .@"textDocument/foldingRange",
-                .@"textDocument/selectionRange",
-                => return false,
-                .unknown => return false,
-            },
-            .notification => switch (self.notification.?) {
-                .@"$/cancelRequest" => return false,
-                .initialized,
-                .exit,
-                .@"$/setTrace",
-                .@"textDocument/didOpen",
-                .@"textDocument/didChange",
-                .@"textDocument/didSave",
-                .@"textDocument/didClose",
-                .@"workspace/didChangeWorkspaceFolders",
-                .@"workspace/didChangeConfiguration",
-                => return true,
-                .unknown => return false,
-            },
-            .response => return true,
-        }
-    }
-
-    pub fn format(message: Message, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        _ = options;
-        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, message);
-        switch (message.tag) {
-            .request => try writer.print("request-{}-{s}", .{ message.request.?.id, switch (message.request.?.params) {
-                .unknown => |method| method,
-                else => @tagName(message.request.?.params),
-            } }),
-            .notification => try writer.print("notification-{s}", .{switch (message.notification.?) {
-                .unknown => |method| method,
-                else => @tagName(message.notification.?),
-            }}),
-            .response => try writer.print("response-{}", .{message.response.?.id}),
-        }
-    }
-
-    test "https://github.com/ziglang/zig/issues/16392" {
-        const parsed_message = try std.json.parseFromSlice(
-            @This(),
-            std.testing.allocator,
-            \\{"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///tmp/tmp.zig"},"position":{"line":3,"character":21}}}
-        ,
-            .{},
-        );
-        defer parsed_message.deinit();
-        try std.testing.expect(parsed_message.value == .request);
-        try std.testing.expect(parsed_message.value.request.id == .number);
-        try std.testing.expectEqual(@as(u32, 7), parsed_message.value.request.id.number);
-        try std.testing.expectEqual(.@"textDocument/definition", parsed_message.value.request.params);
-        const params = parsed_message.value.request.params.@"textDocument/definition";
-        try std.testing.expectEqualStrings("file:///tmp/tmp.zig", params.textDocument.uri);
-        try std.testing.expectEqual(@as(u32, 3), params.position.line);
-        try std.testing.expectEqual(@as(u32, 21), params.position.character);
-    }
+const HandledRequestMethods = enum {
+    initialize,
+    shutdown,
+    @"textDocument/willSaveWaitUntil",
+    @"textDocument/semanticTokens/full",
+    @"textDocument/semanticTokens/range",
+    @"textDocument/inlayHint",
+    @"textDocument/completion",
+    @"textDocument/signatureHelp",
+    @"textDocument/definition",
+    @"textDocument/typeDefinition",
+    @"textDocument/implementation",
+    @"textDocument/declaration",
+    @"textDocument/hover",
+    @"textDocument/documentSymbol",
+    @"textDocument/formatting",
+    @"textDocument/rename",
+    @"textDocument/references",
+    @"textDocument/documentHighlight",
+    @"textDocument/codeAction",
+    @"textDocument/foldingRange",
+    @"textDocument/selectionRange",
 };
+
+const HandledNotificationMethods = enum {
+    initialized,
+    exit,
+    @"$/cancelRequest",
+    @"$/setTrace",
+    @"textDocument/didOpen",
+    @"textDocument/didChange",
+    @"textDocument/didSave",
+    @"textDocument/didClose",
+    @"workspace/didChangeWorkspaceFolders",
+    @"workspace/didChangeConfiguration",
+};
+
+fn isBlockingMessage(msg: types.Message) bool {
+    switch (msg) {
+        .request => |request| switch (std.meta.stringToEnum(HandledRequestMethods, request.method) orelse return false) {
+            .initialize,
+            .shutdown,
+            => return true,
+            .@"textDocument/willSaveWaitUntil",
+            .@"textDocument/semanticTokens/full",
+            .@"textDocument/semanticTokens/range",
+            .@"textDocument/inlayHint",
+            .@"textDocument/completion",
+            .@"textDocument/signatureHelp",
+            .@"textDocument/definition",
+            .@"textDocument/typeDefinition",
+            .@"textDocument/implementation",
+            .@"textDocument/declaration",
+            .@"textDocument/hover",
+            .@"textDocument/documentSymbol",
+            .@"textDocument/formatting",
+            .@"textDocument/rename",
+            .@"textDocument/references",
+            .@"textDocument/documentHighlight",
+            .@"textDocument/codeAction",
+            .@"textDocument/foldingRange",
+            .@"textDocument/selectionRange",
+            => return false,
+        },
+        .notification => |notification| switch (std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return false) {
+            .@"$/cancelRequest" => return false,
+            .initialized,
+            .exit,
+            .@"$/setTrace",
+            .@"textDocument/didOpen",
+            .@"textDocument/didChange",
+            .@"textDocument/didSave",
+            .@"textDocument/didClose",
+            .@"workspace/didChangeWorkspaceFolders",
+            .@"workspace/didChangeConfiguration",
+            => return true,
+        },
+        .response => return true,
+    }
+}
 
 /// make sure to also set the `transport` field
 pub fn create(allocator: std.mem.Allocator) !*Server {
@@ -1934,22 +1755,21 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try server.job_queue.ensureUnusedCapacity(1);
     const parsed_message = std.json.parseFromSlice(
-        Message,
+        types.Message,
         server.allocator,
         json_message,
-        .{ .ignore_unknown_fields = true, .max_value_len = null },
+        .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
     ) catch return error.ParseError;
-    server.job_queue.writeItemAssumeCapacity(.{ .incoming_message = parsed_message });
+    try server.pushJob(.{ .incoming_message = parsed_message });
 }
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
     const parsed_message = std.json.parseFromSlice(
-        Message,
+        types.Message,
         server.allocator,
         json_message,
-        .{ .ignore_unknown_fields = true, .max_value_len = null },
+        .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
     ) catch return error.ParseError;
     defer parsed_message.deinit();
     return try server.processMessage(parsed_message.value);
@@ -1961,9 +1781,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    const RequestMethods = std.meta.Tag(Message.Request.Params);
-
-    return switch (comptime std.meta.stringToEnum(RequestMethods, method).?) {
+    return switch (comptime std.meta.stringToEnum(HandledRequestMethods, method) orelse return null) {
         .initialize => try server.initializeHandler(arena, params),
         .shutdown => try server.shutdownHandler(arena, params),
         .@"textDocument/willSaveWaitUntil" => try server.willSaveWaitUntilHandler(arena, params),
@@ -1985,7 +1803,6 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
-        .unknown => return null,
     };
 }
 
@@ -1995,9 +1812,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    const NotificationMethods = std.meta.Tag(Message.Notification);
-
-    return switch (comptime std.meta.stringToEnum(NotificationMethods, method).?) {
+    return switch (comptime std.meta.stringToEnum(HandledNotificationMethods, method) orelse return) {
         .initialized => try server.initializedHandler(arena, params),
         .exit => try server.exitHandler(arena, params),
         .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
@@ -2008,7 +1823,6 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
         .@"workspace/didChangeWorkspaceFolders" => try server.didChangeWorkspaceFoldersHandler(arena, params),
         .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
-        .unknown => return,
     };
 }
 
@@ -2022,7 +1836,7 @@ pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime metho
     } else unreachable;
 }
 
-fn processMessage(server: *Server, message: Message) Error!?[]u8 {
+fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2043,35 +1857,57 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     defer arena_allocator.deinit();
 
     @setEvalBranchQuota(5_000);
-    switch (message.tag) {
-        .request => switch (message.request.?.params) {
-            inline else => |params, method| {
-                const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
-                return try server.sendToClientResponse(message.request.?.id, result);
-            },
-            .unknown => return try server.sendToClientResponse(message.request.?.id, null),
+    switch (message) {
+        .request => |request| {
+            const handled_method = std.meta.stringToEnum(HandledRequestMethods, request.method) orelse {
+                return try server.sendToClientResponse(request.id, null);
+            };
+            switch (handled_method) {
+                inline else => |method| {
+                    const Params = ParamsType(@tagName(method));
+                    const params = if (Params == void) {} else std.json.parseFromValueLeaky(
+                        Params,
+                        arena_allocator.allocator(),
+                        request.params orelse .null,
+                        .{ .ignore_unknown_fields = true },
+                    ) catch return error.ParseError;
+
+                    const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
+                    return try server.sendToClientResponse(request.id, result);
+                },
+            }
         },
-        .notification => switch (message.notification.?) {
-            inline else => |params, method| {
-                try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params);
-            },
-            .unknown => {},
+        .notification => |notification| {
+            const handled_method = std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return null;
+            switch (handled_method) {
+                inline else => |method| {
+                    const Params = ParamsType(@tagName(method));
+                    const params = if (Params == void) {} else std.json.parseFromValueLeaky(
+                        Params,
+                        arena_allocator.allocator(),
+                        notification.params orelse .null,
+                        .{ .ignore_unknown_fields = true },
+                    ) catch return error.ParseError;
+
+                    try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params);
+                },
+            }
         },
-        .response => try server.handleResponse(message.response.?),
+        .response => |response| try server.handleResponse(response),
     }
     return null;
 }
 
-fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
+fn processMessageReportError(server: *Server, message: types.Message) ?[]const u8 {
     return server.processMessage(message) catch |err| {
         log.err("failed to process {}: {}", .{ message, err });
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpStackTrace(trace.*);
         }
 
-        switch (message.tag) {
-            .request => return server.sendToClientResponseError(message.request.?.id, types.ResponseError{
-                .code = switch (err) {
+        switch (message) {
+            .request => |request| return server.sendToClientResponseError(request.id, types.Message.Response.Error{
+                .code = @enumFromInt(switch (err) {
                     error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
                     error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
                     error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
@@ -2083,7 +1919,7 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
                     error.ServerCancelled => @intFromEnum(types.LSPErrorCodes.ServerCancelled),
                     error.ContentModified => @intFromEnum(types.LSPErrorCodes.ContentModified),
                     error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
-                },
+                }),
                 .message = @errorName(err),
             }) catch null,
             .notification, .response => return null,
@@ -2141,24 +1977,18 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
     }
 }
 
-fn validateMessage(server: *const Server, message: Message) Error!void {
+fn validateMessage(server: *const Server, message: types.Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const method = switch (message.tag) {
-        .request => switch (message.request.?.params) {
-            .unknown => |method| blk: {
-                if (!isRequestMethod(method)) return error.MethodNotFound;
-                break :blk method;
-            },
-            else => @tagName(message.request.?.params),
+    const method = switch (message) {
+        .request => |request| blk: {
+            if (!isRequestMethod(request.method)) return error.MethodNotFound;
+            break :blk request.method;
         },
-        .notification => switch (message.notification.?) {
-            .unknown => |method| blk: {
-                if (!isNotificationMethod(method)) return error.MethodNotFound;
-                break :blk method;
-            },
-            else => @tagName(message.notification.?),
+        .notification => |notification| blk: {
+            if (!isNotificationMethod(notification.method)) return error.MethodNotFound;
+            break :blk notification.method;
         },
         .response => return, // validation happens in `handleResponse`
     };
@@ -2188,20 +2018,24 @@ fn validateMessage(server: *const Server, message: Message) Error!void {
     }
 }
 
-fn handleResponse(server: *Server, response: Message.Response) Error!void {
+fn handleResponse(server: *Server, response: types.Message.Response) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const id: []const u8 = switch (response.id) {
+    if (response.id == null) {
+        log.warn("received response from client without id!", .{});
+        return;
+    }
+
+    const id: []const u8 = switch (response.id.?) {
         .string => |id| id,
-        .integer => |id| {
+        .number => |id| {
             log.warn("received response from client with id '{d}' that has no handler!", .{id});
             return;
         },
     };
 
-    if (response.data == .@"error") {
-        const err = response.data.@"error";
+    if (response.@"error") |err| {
         log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
         return;
     }
@@ -2213,7 +2047,7 @@ fn handleResponse(server: *Server, response: Message.Response) Error!void {
     } else if (std.mem.eql(u8, id, "apply_edit")) {
         //
     } else if (std.mem.eql(u8, id, "i_haz_configuration")) {
-        try server.handleConfiguration(response.data.result);
+        try server.handleConfiguration(response.result.?); // `response.@"error"` and `response.result` can't both be null
     } else {
         log.warn("received response from client with id '{s}' that has no handler!", .{id});
     }
