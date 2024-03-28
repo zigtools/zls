@@ -5,8 +5,6 @@ const build_options = @import("build_options");
 // There should be no need to have a build runner for minor patches (e.g. 0.10.1)
 pub const BuildRunnerVersion = enum {
     master,
-    @"0.11.0",
-    @"0.10.0",
 
     pub fn selectBuildRunnerVersion(runtime_zig_version: std.SemanticVersion) ?BuildRunnerVersion {
         const runtime_zig_version_simple = std.SemanticVersion{
