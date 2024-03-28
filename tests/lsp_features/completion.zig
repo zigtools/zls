@@ -2830,6 +2830,31 @@ test "insert replace behaviour - function with partial argument placeholders" {
     });
 }
 
+test "insert replace behaviour - function alias" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func() void {}
+        \\const alias = func;
+        \\const foo = <cursor>();
+        ,
+        .label = "alias",
+        .expected_insert_line = "const foo = alias();",
+        .expected_replace_line = "const foo = alias();",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func() void {}
+        \\const alias = func;
+        \\const foo = <cursor>();
+        ,
+        .label = "alias",
+        .expected_insert_line = "const foo = alias();",
+        .expected_replace_line = "const foo = alias();",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
 test "insert replace behaviour - struct literal" {
     try testCompletionTextEdit(.{
         .source =

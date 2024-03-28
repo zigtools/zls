@@ -167,6 +167,7 @@ pub const FormatFunctionOptions = struct {
     include_fn_keyword: bool,
     /// only included if available
     include_name: bool,
+    override_name: ?[]const u8 = null,
     skip_first_param: bool = false,
     parameters: union(enum) {
         collapse,
@@ -197,7 +198,9 @@ pub fn formatFunction(
     }
 
     if (data.include_name) {
-        if (data.fn_proto.name_token) |name_token| {
+        if (data.override_name) |name| {
+            try writer.writeAll(name);
+        } else if (data.fn_proto.name_token) |name_token| {
             try writer.writeAll(tree.tokenSlice(name_token));
         }
     }
