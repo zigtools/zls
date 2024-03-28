@@ -310,10 +310,10 @@ fn getTracyModule(
     });
     tracy_module.addImport("options", tracy_options.createModule());
     if (!options.enable) return tracy_module;
+    const tracy_dependency = b.lazyDependency("tracy", .{}) orelse return tracy_module;
+
     tracy_module.link_libc = true;
     tracy_module.link_libcpp = true;
-
-    const client_cpp = "src/tracy/public/TracyClient.cpp";
 
     // On mingw, we need to opt into windows 7+ to get some features required by tracy.
     const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
@@ -321,9 +321,9 @@ fn getTracyModule(
     else
         &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
-    tracy_module.addIncludePath(.{ .path = "src/tracy" });
+    tracy_module.addIncludePath(tracy_dependency.path(""));
     tracy_module.addCSourceFile(.{
-        .file = .{ .path = client_cpp },
+        .file = tracy_dependency.path("public/TracyClient.cpp"),
         .flags = tracy_c_flags,
     });
 
