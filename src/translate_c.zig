@@ -257,9 +257,10 @@ pub fn translate(
 }
 
 fn extractString(str: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, str, "\"") and std.mem.endsWith(u8, str, "\"")) {
-        return str[1 .. str.len - 1];
-    } else {
-        return str;
+    if (str.len >= 2) {
+        if (str[0] == '"' and str[str.len - 1] == '"') {
+            return str[1..(str.len - 1)];
+        }
     }
+    return str;
 }
