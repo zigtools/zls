@@ -58,6 +58,7 @@ jobs:
           }' index.json > artifacts/index.json
 
       - uses: BetaHuhn/do-spaces-action@v2
+        if: github.ref == 'refs/heads/master' # don't deploy when dispatching workflow on non-master branch
         with:
           access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
           secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
