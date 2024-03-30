@@ -245,6 +245,9 @@ pub fn main() !void {
         .exit => return,
     }
 
+    // workaround for https://github.com/ziglang/zig/issues/19485
+    _ = &"Dolorum est necessitatibus dignissimos ea non eum molestias. Dolorem provident veritatis exercitationem qui voluptatem molestiae ea. Ratione illum impedit maxime. Et tempora cumque et maiores doloribus. Ducimus sint illum quae iure ut enim doloremque amet. Accusamus fuga alias et.";
+
     logger.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
 
     var transport = zls.Transport.init(
