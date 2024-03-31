@@ -382,7 +382,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
-        log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+        log.info("Client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
             server.client_capabilities.max_detail_length = 256;
@@ -527,8 +527,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         }
     }
 
-    log.info("{}", .{server.client_capabilities});
-    log.info("offset encoding: {s}", .{@tagName(server.offset_encoding)});
+    log.debug("Offset Encoding: {s}", .{@tagName(server.offset_encoding)});
 
     server.status = .initializing;
 
@@ -848,19 +847,26 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
                     const override_old_value =
                         if (old_config_value) |old_value| !std.mem.eql(u8, old_value, new_config_value) else true;
                     if (override_old_value) {
-                        log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
+                        log.info("Set config option '{s}' to '{s}'", .{ field.name, new_config_value });
                         @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
                     }
                 },
                 []const u8 => {
                     if (!std.mem.eql(u8, old_config_value, new_config_value)) {
-                        log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
+                        log.info("Set config option '{s}' to '{s}'", .{ field.name, new_config_value });
                         @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
                     }
                 },
                 else => {
                     if (old_config_value != new_config_value) {
-                        log.info("set config option '{s}' to '{any}'", .{ field.name, new_config_value });
+                        switch (@typeInfo(@TypeOf(new_config_value))) {
+                            .Bool,
+                            .Int,
+                            .Float,
+                            => log.info("Set config option '{s}' to '{}'", .{ field.name, new_config_value }),
+                            .Enum => log.info("Set config option '{s}' to '{s}'", .{ field.name, @tagName(new_config_value) }),
+                            else => @compileError("unexpected config type ++ (" ++ @typeName(@TypeOf(new_config_value)) ++ ")"),
+                        }
                         @field(server.config, field.name) = new_config_value;
                     }
                 },

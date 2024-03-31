@@ -321,7 +321,7 @@ pub const Handle = struct {
         // special case when there is only one potential build file
         if (unresolved.potential_build_files.len == 1) blk: {
             const build_file = document_store.getOrLoadBuildFile(unresolved.potential_build_files[0]) orelse break :blk;
-            log.info("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
+            log.debug("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
             self.impl.associated_build_file = .{ .resolved = build_file.uri };
             return .{ .resolved = build_file.uri };
@@ -347,7 +347,7 @@ pub const Handle = struct {
                 continue;
             }
 
-            log.info("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
+            log.debug("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
             self.impl.associated_build_file = .{ .resolved = build_file.uri };
             return .{ .resolved = build_file.uri };
