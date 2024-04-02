@@ -217,7 +217,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     var config_file = try std.fs.cwd().createFile(path, .{});
     defer config_file.close();
 
-    const predefined_configurations: usize = 3;
+    const predefined_configurations: usize = 4;
     var configuration: std.json.ArrayHashMap(ConfigurationProperty) = .{};
     try configuration.map.ensureTotalCapacity(allocator, @intCast(predefined_configurations + config.options.len));
     defer {
@@ -225,6 +225,11 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         configuration.map.deinit(allocator);
     }
 
+    configuration.map.putAssumeCapacityNoClobber("zig.zls.debugLog", .{
+        .scope = "resource",
+        .type = "boolean",
+        .description = "Enable debug logging in release builds of ZLS.",
+    });
     configuration.map.putAssumeCapacityNoClobber("zig.trace.server", .{
         .scope = "window",
         .type = "string",
