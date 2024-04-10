@@ -1463,7 +1463,7 @@ test "switch cases" {
         \\    }
         \\}
     , &.{
-        .{ .label = "sef1", .kind = .EnumMember },
+        // .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
 }
@@ -1650,8 +1650,6 @@ test "struct init" {
         \\};
         \\const foo = S{ .alpha = 3, .<cursor>, .gamma = null };
     , &.{
-        // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
         // TODO `gamma` should be excluded
         .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
@@ -1663,8 +1661,6 @@ test "struct init" {
         \\};
         \\const foo = S{ .alpha = S{ .beta = "{}" }, .<cursor> };
     , &.{
-        // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
     try testCompletion(
@@ -1697,8 +1693,6 @@ test "struct init" {
         \\};
         \\const foo = S{ .gamma = undefined, .<cursor> , .alpha = undefined };
     , &.{
-        // TODO `gamma` should be excluded
-        .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
         // TODO `alpha` should be excluded
         .{ .label = "alpha", .kind = .Field, .detail = "*const S" },

@@ -706,7 +706,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     if (dot_token_index < 2) return;
 
     blk: {
-        const dot_context = getEnumLiteralContext(tree, dot_token_index) orelse break :blk;
+        const dot_context = getEnumLiteralContext(builder, tree, dot_token_index) orelse break :blk;
         const containers = try collectContainerNodes(
             builder,
             builder.orig_handle,
@@ -714,7 +714,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
             dot_context,
         );
         for (containers) |container| {
-            try collectContainerFields(builder, dot_context.likely, container);
+            try collectContainerFields(builder, dot_context, container);
         }
     }
 
@@ -1074,9 +1074,11 @@ const EnumLiteralContext = struct {
     identifier_token_index: Ast.TokenIndex = 0,
     fn_arg_index: usize = 0,
     need_ret_type: bool = false,
+    fields_found: std.StringArrayHashMapUnmanaged([]const u8) = .{},
 };
 
 fn getEnumLiteralContext(
+    builder: *Builder,
     tree: Ast,
     dot_token_index: Ast.TokenIndex,
 ) ?EnumLiteralContext {
@@ -1103,7 +1105,7 @@ fn getEnumLiteralContext(
             dot_context.identifier_token_index = token_index;
         },
         .l_brace, .comma, .l_paren => {
-            dot_context = getSwitchOrStructInitContext(tree, dot_token_index) orelse return null;
+            dot_context = getSwitchOrStructInitContext(builder, tree, dot_token_index) orelse return null;
         },
         else => return null,
     }
@@ -1114,6 +1116,7 @@ fn getEnumLiteralContext(
 /// Returns the token index of the identifer
 /// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
 fn getSwitchOrStructInitContext(
+    builder: *Builder,
     tree: Ast,
     dot_index: Ast.TokenIndex,
 ) ?EnumLiteralContext {
@@ -1130,6 +1133,7 @@ fn getSwitchOrStructInitContext(
     if (token_tags[upper_index] == .equal) return null;
 
     var likely: EnumLiteralContext.Likely = .struct_field;
+    var fields_found = std.StringArrayHashMapUnmanaged([]const u8){};
 
     var fn_arg_index: usize = 0;
     var need_ret_type: bool = false;
@@ -1144,6 +1148,15 @@ fn getSwitchOrStructInitContext(
     var parens_depth: i32 = even;
     find_identifier: while (upper_index > 0) : (upper_index -= 1) {
         switch (token_tags[upper_index]) {
+            .period => {
+                if (braces_depth != even) continue;
+                if (token_tags[upper_index + 1] == .identifier and (token_tags[upper_index - 1] == .comma or token_tags[upper_index - 1] == .l_brace)) {
+                    _ = fields_found.getOrPut(builder.arena, tree.tokenSlice(upper_index + 1)) catch |e| {
+                        // Could be used to push a duplicate field diag.
+                        std.log.err("err getOrPut field name when completing '.': {}", .{e});
+                    };
+                }
+            },
             .r_brace => braces_depth += 1,
             .l_brace => {
                 braces_depth -= 1;
@@ -1271,13 +1284,14 @@ fn getSwitchOrStructInitContext(
         .identifier_token_index = upper_index,
         .fn_arg_index = fn_arg_index,
         .need_ret_type = need_ret_type,
+        .fields_found = fields_found,
     };
 }
 
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 pub fn collectContainerFields(
     builder: *Builder,
-    likely: EnumLiteralContext.Likely,
+    dot_context: EnumLiteralContext,
     container: Analyser.Type,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
@@ -1292,7 +1306,8 @@ pub fn collectContainerFields(
     for (container_decl.ast.members) |member| {
         const field = handle.tree.fullContainerField(member) orelse continue;
         const name = handle.tree.tokenSlice(field.ast.main_token);
-        if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
+        if (dot_context.fields_found.contains(name)) continue;
+        if (dot_context.likely != .struct_field and dot_context.likely != .enum_comparison and dot_context.likely != .switch_case and !field.ast.tuple_like) {
             try builder.completions.append(builder.arena, .{
                 .label = name,
                 .kind = if (field.ast.tuple_like) .EnumMember else .Field,
@@ -1307,7 +1322,7 @@ pub fn collectContainerFields(
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+            .insertText = if (field.ast.tuple_like or dot_context.likely == .enum_comparison or dot_context.likely == .switch_case)
                 name
             else
                 try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
@@ -1587,7 +1602,7 @@ fn collectEnumLiteralContainerNodes(
     const arena = builder.arena;
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);
-    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index) orelse return;
+    const el_dot_context = getSwitchOrStructInitContext(builder, handle.tree, dot_index) orelse return;
     const containers = try collectContainerNodes(
         builder,
         handle,
