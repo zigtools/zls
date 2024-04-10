@@ -2293,8 +2293,8 @@ test "completion - builtin fns taking an enum arg" {
         \\    @setFloatMode(.<cursor>)
         \\}
     , &.{
-        .{ .label = "Strict", .kind = .EnumMember, .detail = "Strict" },
-        .{ .label = "Optimized", .kind = .EnumMember, .detail = "Optimized" },
+        .{ .label = "strict", .kind = .EnumMember, .detail = "strict" },
+        .{ .label = "optimized", .kind = .EnumMember, .detail = "optimized" },
     });
     try testCompletion(
         \\test {
@@ -2334,37 +2334,37 @@ test "completion - builtin fns taking an enum arg" {
     });
     try testCompletionTextEdit(.{
         .source = "test { @fence(.<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @fence(.AcqRel",
-        .expected_replace_line = "test { @fence(.AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @fence(.acq_rel",
+        .expected_replace_line = "test { @fence(.acq_rel",
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
         .source = "test { @cmpxchgWeak(1,2,3,4, .<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @cmpxchgWeak(1,2,3,4, .AcqRel",
-        .expected_replace_line = "test { @cmpxchgWeak(1,2,3,4, .AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",
+        .expected_replace_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
         .source = "test { @cmpxchgStrong(1,2,3,4,5,.<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @cmpxchgStrong(1,2,3,4,5,.AcqRel",
-        .expected_replace_line = "test { @cmpxchgStrong(1,2,3,4,5,.AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @cmpxchgStrong(1,2,3,4,5,.acq_rel",
+        .expected_replace_line = "test { @cmpxchgStrong(1,2,3,4,5,.acq_rel",
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
         .source = "test { @atomicLoad(1,2,.<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @atomicLoad(1,2,.AcqRel",
-        .expected_replace_line = "test { @atomicLoad(1,2,.AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicLoad(1,2,.acq_rel",
+        .expected_replace_line = "test { @atomicLoad(1,2,.acq_rel",
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
         .source = "test { @atomicStore(1,2,3,.<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @atomicStore(1,2,3,.AcqRel",
-        .expected_replace_line = "test { @atomicStore(1,2,3,.AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicStore(1,2,3,.acq_rel",
+        .expected_replace_line = "test { @atomicStore(1,2,3,.acq_rel",
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
@@ -2376,9 +2376,9 @@ test "completion - builtin fns taking an enum arg" {
     });
     try testCompletionTextEdit(.{
         .source = "test { @atomicRmw(1,2,3,4,.<cursor>",
-        .label = "AcqRel",
-        .expected_insert_line = "test { @atomicRmw(1,2,3,4,.AcqRel",
-        .expected_replace_line = "test { @atomicRmw(1,2,3,4,.AcqRel",
+        .label = "acq_rel",
+        .expected_insert_line = "test { @atomicRmw(1,2,3,4,.acq_rel",
+        .expected_replace_line = "test { @atomicRmw(1,2,3,4,.acq_rel",
         .enable_snippets = false,
     });
     try testCompletion(
