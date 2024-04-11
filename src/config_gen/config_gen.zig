@@ -987,7 +987,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
         );
         defer request.deinit();
 
-        try request.send(.{});
+        try request.send();
         try request.finish();
         try request.wait();
 
