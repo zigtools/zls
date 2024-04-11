@@ -987,7 +987,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
         );
         defer request.deinit();
 
-        try request.send(.{});
+        try request.send();
         try request.finish();
         try request.wait();
 
@@ -1032,7 +1032,7 @@ pub fn main() !void {
                 \\
                 \\    --help                               Prints this message
                 \\    --readme-path [path]                 Update readme file (see README.md)
-                \\    --vscode-config-path [path]          Output zls-vscode configurations 
+                \\    --vscode-config-path [path]          Output zls-vscode configurations
                 \\    --generate-config-path [path]        Output path to config file (see src/Config.zig)
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
                 \\    --generate-version-data [version]    Output version data file (default: master)
