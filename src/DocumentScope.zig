@@ -742,10 +742,7 @@ noinline fn walkErrorSetNode(
             identifier_token,
             IdentifierTokenContext{ .tree = tree },
         );
-        if (!gop.found_existing) {
-            gop.key_ptr.* = identifier_token;
-        } else if (gop.found_existing and token_tags[identifier_token - 1] == .doc_comment) {
-            // a token with a doc comment takes priority.
+        if (!gop.found_existing or token_tags[identifier_token - 1] == .doc_comment) {
             gop.key_ptr.* = identifier_token;
         }
     }
