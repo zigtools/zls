@@ -18,6 +18,11 @@ test "literal" {
         \\```
         \\```zig
         \\(comptime_int)
+        \\
+        \\Hex: 0x2a
+        \\Dec: 42
+        \\Oct: 0o52
+        \\Bin: 0b101010
         \\```
     );
     try testHover(
@@ -187,6 +192,11 @@ test "negation" {
         \\```
         \\```zig
         \\(comptime_int)
+        \\
+        \\Hex: 0x1
+        \\Dec: 1
+        \\Oct: 0o1
+        \\Bin: 0b1
         \\```
     );
     try testHover(
@@ -662,6 +672,11 @@ test "var decl alias" {
         \\```
         \\```zig
         \\(comptime_int)
+        \\
+        \\Hex: 0x5
+        \\Dec: 5
+        \\Oct: 0o5
+        \\Bin: 0b101
         \\```
     );
 }
