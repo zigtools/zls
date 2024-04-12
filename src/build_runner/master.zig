@@ -418,6 +418,7 @@ const copied_from_zig = struct {
     fn getPath(path: std.Build.LazyPath, builder: *Build) ?[]const u8 {
         switch (path) {
             .path => |p| return builder.pathFromRoot(p),
+            .src_path => |sp| return sp.owner.pathFromRoot(sp.sub_path),
             .cwd_relative => |p| return pathFromCwd(builder, p),
             .generated => |gen| {
                 if (gen.path) |gen_path|
