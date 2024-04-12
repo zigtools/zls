@@ -18,13 +18,13 @@ test "var access" {
         \\const a_var = <cursor>identifier;
     ,
         .var_access,
-        "i",
+        "identifier",
     );
     try testContext(
         \\const a_var = iden<cursor>tifier;
     ,
         .var_access,
-        "ident",
+        "identifier",
     );
     try testContext(
         \\const a_var = identifier<cursor>;
@@ -43,7 +43,7 @@ test "var access" {
         \\    fn foo() !<cursor>Str {
     ,
         .var_access,
-        "S",
+        "Str",
     );
     try testContext(
         \\    fn foo() !St<cursor>r {
@@ -68,7 +68,7 @@ test "var access" {
         \\    fn foo() <cursor>Err!void {
     ,
         .var_access,
-        "E",
+        "Err",
     );
     try testContext(
         \\    fn foo() Er<cursor>r!void {
@@ -86,14 +86,14 @@ test "var access" {
         \\    fn foo() Err!<cursor>void {
     ,
         .var_access,
-        "v",
+        "void",
     );
 
     try testContext(
         \\if (<cursor>bar.field == foo) {
     ,
         .var_access,
-        "b",
+        "bar",
     );
     try testContext(
         \\if (ba<cursor>r.field == foo) {
@@ -121,13 +121,13 @@ test "field access" {
         \\if (bar.<cursor>field == foo) {
     ,
         .field_access,
-        "bar.f",
+        "bar.field",
     );
     try testContext(
         \\if (bar.fie<cursor>ld == foo) {
     ,
         .field_access,
-        "bar.fiel",
+        "bar.field",
     );
     try testContext(
         \\if (bar.field<cursor> == foo) {
@@ -146,13 +146,13 @@ test "field access" {
         \\if (bar.member.<cursor>field == foo) {
     ,
         .field_access,
-        "bar.member.f",
+        "bar.member.field",
     );
     try testContext(
         \\if (bar.member.fie<cursor>ld == foo) {
     ,
         .field_access,
-        "bar.member.fiel",
+        "bar.member.field",
     );
     try testContext(
         \\if (bar.member.field<cursor> == foo) {
@@ -171,27 +171,27 @@ test "field access" {
         \\if (bar.*.?.<cursor>field == foo) {
     ,
         .field_access,
-        "bar.*.?.f",
+        "bar.*.?.field",
     );
 
     try testContext(
         \\if (bar[0].<cursor>field == foo) {
     ,
         .field_access,
-        "bar[0].f",
+        "bar[0].field",
     );
 
     try testContext(
         \\if (bar.<cursor>@"field" == foo) {
     ,
         .field_access,
-        "bar.@\"",
+        "bar.@\"field",
     );
     try testContext(
         \\if (bar.@"fie<cursor>ld" == foo) {
     ,
         .field_access,
-        "bar.@\"fiel",
+        "bar.@\"field",
     );
     try testContext(
         \\if (bar.@"field"<cursor> == foo) {
@@ -204,13 +204,13 @@ test "field access" {
         \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).<cursor>init(allocator);
     ,
         .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).i",
+        "std.ArrayList(SomeStruct(a, b, c, d)).init",
     );
     try testContext(
         \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).in<cursor>it(allocator);
     ,
         .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).ini",
+        "std.ArrayList(SomeStruct(a, b, c, d)).init",
     );
     try testContext(
         \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).init<cursor>(allocator);
@@ -223,7 +223,7 @@ test "field access" {
         \\fn foo() !Foo.<cursor>bar {
     ,
         .field_access,
-        "Foo.b",
+        "Foo.bar",
     );
     try testContext(
         \\fn foo() !Foo.ba<cursor>r {
@@ -242,7 +242,7 @@ test "field access" {
         \\fn foo() Foo.<cursor>bar!void {
     ,
         .field_access,
-        "Foo.b",
+        "Foo.bar",
     );
     try testContext(
         \\fn foo() Foo.ba<cursor>r!void {
@@ -269,13 +269,13 @@ test "builtin" {
         \\var foo = <cursor>@intC(u32, 5);
     ,
         .builtin,
-        "@i",
+        "@intC",
     );
     try testContext(
         \\var foo = @<cursor>intC(u32, 5);
     ,
         .builtin,
-        "@i",
+        "@intC",
     );
     try testContext(
         \\var foo = @int<cursor>C(u32, 5);
@@ -294,19 +294,19 @@ test "builtin" {
         \\fn foo() void { <cursor>@setRuntime(false); };
     ,
         .builtin,
-        "@s",
+        "@setRuntime",
     );
     try testContext(
         \\fn foo() void { @<cursor>setRuntime(false); };
     ,
         .builtin,
-        "@s",
+        "@setRuntime",
     );
     try testContext(
         \\fn foo() void { @set<cursor>Runtime(false); };
     ,
         .builtin,
-        "@setR",
+        "@setRuntime",
     );
     try testContext(
         \\fn foo() void { @setRuntime<cursor>(false); };
@@ -363,13 +363,13 @@ test "string literal" {
         \\var foo = "he<cursor>llo world!";
     ,
         .string_literal,
-        "\"hel", // maybe report just "he"
+        "\"hello",
     );
     try testContext(
         \\var foo = \\hell<cursor>o;
     ,
         .string_literal,
-        "\\\\hello", // maybe report just "hello;"
+        "\\\\hell", // XXX: where's the 'o'?
     );
 }
 
@@ -426,13 +426,13 @@ test "enum literal" {
         \\var foo = .<cursor>tag;
     ,
         .enum_literal,
-        ".t",
+        ".tag",
     );
     try testContext(
         \\var foo = .ta<cursor>g;
     ,
         .enum_literal,
-        ".tag",
+        ".ta",
     );
     try testContext(
         \\var foo = .tag<cursor>;
@@ -455,6 +455,18 @@ test "enum literal" {
 }
 
 test "label" {
+    try testContext(
+        \\var foo = blk<cursor>: { break :blk null };
+    ,
+        .label,
+        null,
+    );
+    try testContext(
+        \\var foo = <cursor>blk: { break :blk null };
+    ,
+        .label,
+        null,
+    );
     try testContext(
         \\var foo = blk: { break <cursor>:blk null };
     ,

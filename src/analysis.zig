@@ -3185,16 +3185,24 @@ pub fn getPositionContext(
     defer tracy_zone.end();
 
     var new_index = doc_index;
-    if (lookahead and new_index < text.len and isSymbolChar(text[new_index])) {
-        new_index += 1;
-    } else if (lookahead and new_index + 1 < text.len and text[new_index] == '@') {
-        new_index += 2;
+    if (lookahead and new_index + 2 < text.len) {
+        if (text[new_index] == '@') new_index += 2;
+        while (new_index < text.len and isSymbolChar(text[new_index])) : (new_index += 1) {}
+        switch (text[new_index]) {
+            ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
+                var b_index = new_index + 1;
+                while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
+                if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
+            },
+            // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
+            else => {},
+        }
     }
+
     const prev_char = if (new_index > 0) text[new_index - 1] else 0;
-
     var line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
-
     const line = offsets.locToSlice(text, line_loc);
+
     if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return .comment;
 
     // Check if the (trimmed) line starts with a '.', ie a continuation
@@ -3323,6 +3331,8 @@ pub fn getPositionContext(
                 .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
                 .colon => if (curr_ctx.ctx == .pre_label) {
                     curr_ctx.ctx = .{ .label = false };
+                } else if (curr_ctx.ctx == .var_access) {
+                    curr_ctx.ctx = .{ .label = true };
                 } else {
                     curr_ctx.ctx = .empty;
                 },
@@ -4130,11 +4140,11 @@ pub fn lookupLabel(
         const decl_index = document_scope.getScopeDeclaration(.{
             .scope = scope_index,
             .name = symbol,
-            .kind = .other,
+            .kind = .label,
         }).unwrap() orelse continue;
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
 
-        if (decl != .label) continue;
+        std.debug.assert(decl == .label);
 
         return DeclWithHandle{ .decl = decl, .handle = handle };
     }
