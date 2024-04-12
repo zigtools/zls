@@ -743,6 +743,7 @@ noinline fn walkErrorSetNode(
             IdentifierTokenContext{ .tree = tree },
         );
         if (!gop.found_existing or token_tags[identifier_token - 1] == .doc_comment) {
+            // a token with a doc comment takes priority.
             gop.key_ptr.* = identifier_token;
         }
     }
