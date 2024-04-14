@@ -167,7 +167,7 @@ pub fn main() !void {
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try processStep(builder, &packages, &include_dirs, step);
+            try processStep(step, &packages, &include_dirs);
         }
     }
 
@@ -272,13 +272,12 @@ const Packages = struct {
 };
 
 fn processStep(
-    builder: *std.Build,
+    step: *Build.Step,
     packages: *Packages,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    step: *Build.Step,
 ) anyerror!void {
     for (step.dependencies.items) |dependant_step| {
-        try processStep(builder, packages, include_dirs, dependant_step);
+        try processStep(dependant_step, packages, include_dirs);
     }
 
     const exe = blk: {
@@ -287,23 +286,22 @@ fn processStep(
         return;
     };
 
-    try processPkgConfig(builder.allocator, include_dirs, exe);
+    try processPkgConfig(step.owner.allocator, include_dirs, exe);
 
     if (exe.root_module.root_source_file) |src| {
-        if (copied_from_zig.getPath(src, builder)) |path| {
+        if (copied_from_zig.getPath(src, exe.root_module.owner)) |path| {
             _ = try packages.addPackage("root", path);
         }
     }
-    try processModule(builder, packages, include_dirs, exe.root_module);
+    try processModule(exe.root_module, packages, include_dirs);
 }
 
 fn processModule(
-    builder: *Build,
+    module: Build.Module,
     packages: *Packages,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    module: Build.Module,
 ) anyerror!void {
-    try processIncludeDirs(builder, include_dirs, module.include_dirs.items);
+    try processModuleIncludeDirs(module, include_dirs);
 
     for (module.import_table.keys(), module.import_table.values()) |name, mod| {
         const path = copied_from_zig.getPath(
@@ -315,38 +313,37 @@ fn processModule(
         // if the package has already been added short circuit here or recursive modules will ruin us
         if (already_added) continue;
 
-        try processModule(builder, packages, include_dirs, mod.*);
+        try processModule(mod.*, packages, include_dirs);
     }
 }
 
-fn processIncludeDirs(
-    builder: *Build,
+fn processModuleIncludeDirs(
+    module: Build.Module,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    dirs: []Build.Module.IncludeDir,
 ) !void {
-    for (dirs) |dir| {
+    for (module.include_dirs.items) |dir| {
         switch (dir) {
             .path, .path_system, .path_after => |path| {
-                const resolved_path = copied_from_zig.getPath(path, builder) orelse continue;
-                try include_dirs.put(builder.allocator, resolved_path, {});
+                const resolved_path = copied_from_zig.getPath(path, module.owner) orelse continue;
+                try include_dirs.put(module.owner.allocator, resolved_path, {});
             },
             .other_step => |other_step| {
                 if (other_step.generated_h) |header| {
                     if (header.path) |path| {
-                        try include_dirs.put(builder.allocator, std.fs.path.dirname(path).?, {});
+                        try include_dirs.put(module.owner.allocator, std.fs.path.dirname(path).?, {});
                     }
                 }
                 if (other_step.installed_headers.items.len > 0) {
-                    const path = builder.pathJoin(&.{
+                    const path = module.owner.pathJoin(&.{
                         other_step.step.owner.install_prefix, "include",
                     });
-                    try include_dirs.put(builder.allocator, path, {});
+                    try include_dirs.put(module.owner.allocator, path, {});
                 }
             },
             .config_header_step => |config_header| {
                 const full_file_path = config_header.output_file.path orelse continue;
                 const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
-                try include_dirs.put(builder.allocator, header_dir_path, {});
+                try include_dirs.put(module.owner.allocator, header_dir_path, {});
             },
             .framework_path, .framework_path_system => {},
         }
