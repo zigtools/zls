@@ -78,7 +78,7 @@ pub const DeclarationLookupContext = struct {
 };
 
 pub const Scope = struct {
-    pub const Tag = enum {
+    pub const Tag = enum(u3) {
         /// `node_tags[ast_node]` is ContainerDecl or Root or ErrorSetDecl
         container,
         /// index into `DocumentScope.extra`
