@@ -67,6 +67,10 @@ pub fn main() !void {
         .zig_exe = zig_exe,
         .env_map = try process.getEnvMap(allocator),
         .global_cache_root = global_cache_directory,
+        .host = .{
+            .query = .{},
+            .result = try std.zig.system.resolveTargetQuery(.{}),
+        },
     };
 
     graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
@@ -119,14 +123,6 @@ pub fn main() !void {
             builder.zig_lib_dir = .{ .cwd_relative = zig_lib_dir };
         }
     }
-
-    const host_query = std.Build.parseTargetQuery(graph.host_query_options) catch |err| switch (err) {
-        error.ParseFailed => process.exit(1),
-    };
-    builder.host = .{
-        .query = .{},
-        .result = try std.zig.system.resolveTargetQuery(host_query),
-    };
 
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
