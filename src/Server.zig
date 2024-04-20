@@ -950,7 +950,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
 
         if (zig_version.order(minimum_runtime_zig_version) == .lt) {
             // don't report a warning when using a Zig version that has a matching build runner
-            if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.? != .master) break :version_check;
+            if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.?.isTaggedRelease()) break :version_check;
             server.showMessage(
                 .Warning,
                 "ZLS {s} requires at least Zig {} but got Zig {}. Update Zig to avoid unexpected behavior.",

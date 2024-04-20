@@ -18,10 +18,8 @@ jobs:
     strategy:
       matrix:
         include:
+          # - zig-version: master
           - zig-version: 0.12.0
-            zig-init: init
-          - zig-version: 0.11.0
-            zig-init: init-exe
     runs-on: ubuntu-latest
 
     steps:
@@ -38,7 +36,7 @@ jobs:
         run: |
           mkdir $RUNNER_TEMP/TEMP_ZIG_PROJECT
           cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
-          zig ${{ matrix.zig-init }}
+          zig init
 
       - name: Check build_runner builds
         run: |

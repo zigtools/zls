@@ -1,29 +1,37 @@
+//! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
+//! Update the `minimum_runtime_zig_version` field in `build.zig` a breaking change occured.
+//!
+//! You can test out the build runner on ZLS's `build.zig` with the following command:
+//! `zig build --build-runner src/build_runner/0.12.0.zig`
+//!
+//! You can also test the build runner on any other `build.zig` with the following command:
+//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/0.12.0.zig`
+//! `zig build --build-runner /path/to/zls/src/build_runner/0.12.0.zig` (if the cwd contains build.zig)
+
 const root = @import("@build");
 const std = @import("std");
 const log = std.log;
 const process = std.process;
+const builtin = @import("builtin");
 
 const BuildConfig = @import("BuildConfig.zig");
 
 pub const dependencies = @import("@dependencies");
 
 const Build = std.Build;
-const Cache = std.Build.Cache;
-const CompileStep = Build.CompileStep;
-
-const InstallArtifactStep = Build.InstallArtifactStep;
-const OptionsStep = Build.OptionsStep;
 
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
+    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
+    // one shot program. We don't need to waste time freeing memory and finding places to squish
+    // bytes into. So we free everything all at once at the very end.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
     const args = try process.argsAlloc(allocator);
-    defer process.argsFree(allocator, args);
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -45,47 +53,59 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
-    const build_root_directory = Cache.Directory{
+    const build_root_directory = Build.Cache.Directory{
         .path = build_root,
         .handle = try std.fs.cwd().openDir(build_root, .{}),
     };
 
-    const local_cache_directory = Cache.Directory{
+    const local_cache_directory = Build.Cache.Directory{
         .path = cache_root,
         .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
     };
 
-    const global_cache_directory = Cache.Directory{
+    const global_cache_directory = Build.Cache.Directory{
         .path = global_cache_root,
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var cache = Cache{
-        .gpa = allocator,
-        .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+    var graph: std.Build.Graph = .{
+        .arena = allocator,
+        .cache = .{
+            .gpa = allocator,
+            .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+        },
+        .zig_exe = zig_exe,
+        .env_map = try process.getEnvMap(allocator),
+        .global_cache_root = global_cache_directory,
+        .host = .{
+            .query = .{},
+            .result = try std.zig.system.resolveTargetQuery(.{}),
+        },
     };
 
-    cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
-    cache.addPrefix(build_root_directory);
-    cache.addPrefix(local_cache_directory);
-    cache.addPrefix(global_cache_directory);
-
-    const host = try std.zig.system.NativeTargetInfo.detect(.{});
+    graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+    graph.cache.addPrefix(build_root_directory);
+    graph.cache.addPrefix(local_cache_directory);
+    graph.cache.addPrefix(global_cache_directory);
+    graph.cache.hash.addBytes(builtin.zig_version_string);
 
     const builder = try Build.create(
-        allocator,
-        zig_exe,
+        &graph,
         build_root_directory,
         local_cache_directory,
-        global_cache_directory,
-        host,
-        &cache,
+        dependencies.root_deps,
     );
 
-    defer builder.destroy();
+    var output_tmp_nonce: ?[16]u8 = null;
 
     while (nextArg(args, &arg_idx)) |arg| {
-        if (std.mem.startsWith(u8, arg, "-D")) {
+        if (std.mem.startsWith(u8, arg, "-Z")) {
+            if (arg.len != 18) {
+                log.err("bad argument: '{s}'", .{arg});
+                return error.InvalidArgs;
+            }
+            output_tmp_nonce = arg[2..18].*;
+        } else if (std.mem.startsWith(u8, arg, "-D")) {
             const option_contents = arg[2..];
             if (option_contents.len == 0) {
                 log.err("Expected option name after '-D'\n\n", .{});
@@ -105,23 +125,46 @@ pub fn main() !void {
                     return error.InvalidArgs;
                 }
             }
+        } else if (std.mem.eql(u8, arg, "--zig-lib-dir")) {
+            const zig_lib_dir = nextArg(args, &arg_idx) orelse {
+                log.err("Expected argument after '{s}'", .{arg});
+                return error.InvalidArgs;
+            };
+            builder.zig_lib_dir = .{ .cwd_relative = zig_lib_dir };
         }
     }
 
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
 
+    if (graph.needed_lazy_dependencies.entries.len != 0) {
+        var buffer: std.ArrayListUnmanaged(u8) = .{};
+        for (graph.needed_lazy_dependencies.keys()) |k| {
+            try buffer.appendSlice(allocator, k);
+            try buffer.append(allocator, '\n');
+        }
+        const s = std.fs.path.sep_str;
+        const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse std.debug.panic("missing -Z arg", .{}));
+        local_cache_directory.handle.writeFile2(.{
+            .sub_path = tmp_sub_path,
+            .data = buffer.items,
+            .flags = .{ .exclusive = true },
+        }) catch |err| {
+            std.debug.panic("unable to write configuration results to '{}{s}': {s}", .{
+                local_cache_directory, tmp_sub_path, @errorName(err),
+            });
+        };
+        process.exit(3); // Indicate configure phase failed with meaningful stdout.
+    }
+
     var packages = Packages{ .allocator = allocator };
-    defer packages.deinit();
-
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(allocator);
 
-    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // This scans the graph of Steps to find all `OptionsStep`s and installed headers then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
     for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try reifyOptions(step);
+            try reifySteps(step);
         }
     }
 
@@ -130,25 +173,85 @@ pub fn main() !void {
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try processStep(allocator, &packages, &include_dirs, step);
+            try processStep(step, &packages, &include_dirs);
         }
     }
 
-    const package_list = try packages.toPackageList();
-    defer allocator.free(package_list);
+    // Sample `@dependencies` structure:
+    // pub const packages = struct {
+    //     pub const @"1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" = struct {
+    //         pub const build_root = "/home/rad/.cache/zig/p/1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5";
+    //         pub const build_zig = @import("1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5");
+    //         pub const deps: []const struct { []const u8, []const u8 } = &.{};
+    //     };
+    // ...
+    // };
+    // pub const root_deps: []const struct { []const u8, []const u8 } = &.{
+    //     .{ "known_folders", "1220bb12c9bfe291eed1afe6a2070c7c39918ab1979f24a281bba39dfb23f5bcd544" },
+    //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
+    // };
+
+    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    for (dependencies.root_deps) |root_dep| {
+        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| blk: {
+            if (std.mem.eql(u8, package.name, root_dep[1])) {
+                const package_info = @field(dependencies.packages, package.name);
+                if (!@hasDecl(package_info, "build_root")) break :blk;
+                if (!@hasDecl(package_info, "build_zig")) break :blk;
+                try deps_build_roots.append(allocator, .{
+                    .name = root_dep[0],
+                    .path = try std.fs.path.resolve(allocator, &[_][]const u8{ package_info.build_root, "./build.zig" }),
+                });
+            }
+        }
+    }
 
     try std.json.stringify(
         BuildConfig{
-            .packages = package_list,
+            .deps_build_roots = try deps_build_roots.toOwnedSlice(allocator),
+            .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
         },
-        .{},
+        .{
+            .whitespace = .indent_1,
+        },
         std.io.getStdOut().writer(),
     );
 }
 
-fn reifyOptions(step: *Build.Step) anyerror!void {
-    if (step.cast(OptionsStep)) |option| {
+fn makeStep(step: *Build.Step) anyerror!void {
+    // dependency loop detection and make phase merged into one.
+    switch (step.state) {
+        .precheck_started => return, // dependency loop
+        .precheck_unstarted => {
+            step.state = .precheck_started;
+
+            for (step.dependencies.items) |unknown_step| {
+                try makeStep(unknown_step);
+            }
+
+            var progress: std.Progress = .{};
+            const main_progress_node = progress.start("", 0);
+            defer main_progress_node.end();
+
+            try step.make(main_progress_node);
+
+            step.state = .precheck_done;
+        },
+        .precheck_done => {},
+
+        .dependency_failure,
+        .running,
+        .success,
+        .failure,
+        .skipped,
+        .skipped_oom,
+        => {},
+    }
+}
+
+fn reifySteps(step: *Build.Step) anyerror!void {
+    if (step.cast(Build.Step.Options)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
         if (step.dependencies.items.len == 0) {
             var progress: std.Progress = .{};
@@ -159,8 +262,17 @@ fn reifyOptions(step: *Build.Step) anyerror!void {
         }
     }
 
+    if (step.cast(Build.Step.Compile)) |compile| {
+        if (compile.generated_h) |header| {
+            try makeStep(header.step);
+        }
+        if (compile.installed_headers_include_tree) |include_tree| {
+            try makeStep(include_tree.generated_directory.step);
+        }
+    }
+
     for (step.dependencies.items) |unknown_step| {
-        try reifyOptions(unknown_step);
+        try reifySteps(unknown_step);
     }
 }
 
@@ -206,97 +318,89 @@ const Packages = struct {
 };
 
 fn processStep(
-    allocator: std.mem.Allocator,
+    step: *Build.Step,
     packages: *Packages,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    step: *Build.Step,
 ) anyerror!void {
-    if (step.cast(InstallArtifactStep)) |install_exe| {
-        if (install_exe.artifact.root_src) |src| {
-            const maybe_path = switch (src) {
-                .path => |path| path,
-                .generated => |generated| generated.path,
-            };
-            if (maybe_path) |path| _ = try packages.addPackage("root", path);
-        }
+    for (step.dependencies.items) |dependant_step| {
+        try processStep(dependant_step, packages, include_dirs);
+    }
 
-        try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
-        try processPkgConfig(allocator, include_dirs, install_exe.artifact);
+    const exe = blk: {
+        if (step.cast(Build.Step.InstallArtifact)) |install_exe| break :blk install_exe.artifact;
+        if (step.cast(Build.Step.Compile)) |exe| break :blk exe;
+        return;
+    };
 
-        var modules_it = install_exe.artifact.modules.iterator();
-        while (modules_it.next()) |module_entry| {
-            try processModule(allocator, packages, module_entry);
-        }
-    } else if (step.cast(CompileStep)) |exe| {
-        if (exe.root_src) |src| {
-            const maybe_path = switch (src) {
-                .path => |path| path,
-                .generated => |generated| generated.path,
-            };
-            if (maybe_path) |path| _ = try packages.addPackage("root", path);
-        }
-        try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
-        try processPkgConfig(allocator, include_dirs, exe);
+    try processPkgConfig(step.owner.allocator, include_dirs, exe);
 
-        var modules_it = exe.modules.iterator();
-        while (modules_it.next()) |module_entry| {
-            try processModule(allocator, packages, module_entry);
-        }
-    } else {
-        for (step.dependencies.items) |unknown_step| {
-            try processStep(allocator, packages, include_dirs, unknown_step);
+    if (exe.root_module.root_source_file) |src| {
+        if (copied_from_zig.getPath(src, exe.root_module.owner)) |path| {
+            _ = try packages.addPackage("root", path);
         }
     }
+    try processModule(exe.root_module, packages, include_dirs);
 }
 
 fn processModule(
-    allocator: std.mem.Allocator,
+    module: Build.Module,
     packages: *Packages,
-    module: std.StringArrayHashMap(*Build.Module).Entry,
-) !void {
-    const builder = module.value_ptr.*.builder;
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
+) anyerror!void {
+    try processModuleIncludeDirs(module, include_dirs);
 
-    const maybe_path = switch (module.value_ptr.*.source_file) {
-        .path => |path| path,
-        .generated => |generated| generated.path,
-    };
+    for (module.import_table.keys(), module.import_table.values()) |name, mod| {
+        const path = copied_from_zig.getPath(
+            mod.root_source_file orelse continue,
+            mod.owner,
+        ) orelse continue;
 
-    if (maybe_path) |path| {
-        const already_added = try packages.addPackage(module.key_ptr.*, builder.pathFromRoot(path));
+        const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
-        if (already_added) return;
-    }
+        if (already_added) continue;
 
-    var deps_it = module.value_ptr.*.dependencies.iterator();
-    while (deps_it.next()) |module_dep| {
-        try processModule(allocator, packages, module_dep);
+        try processModule(mod.*, packages, include_dirs);
     }
 }
 
-fn processIncludeDirs(
-    allocator: std.mem.Allocator,
+fn processModuleIncludeDirs(
+    module: Build.Module,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    dirs: []CompileStep.IncludeDir,
 ) !void {
-    try include_dirs.ensureUnusedCapacity(allocator, dirs.len);
-
-    for (dirs) |dir| {
-        const candidate: []const u8 = switch (dir) {
-            .raw_path => |path| path,
-            .raw_path_system => |path| path,
-            else => continue,
-        };
-
-        include_dirs.putAssumeCapacity(candidate, {});
+    for (module.include_dirs.items) |dir| {
+        switch (dir) {
+            .path, .path_system, .path_after => |path| {
+                const resolved_path = copied_from_zig.getPath(path, module.owner) orelse continue;
+                try include_dirs.put(module.owner.allocator, resolved_path, {});
+            },
+            .other_step => |other_step| {
+                if (other_step.generated_h) |header| {
+                    if (header.path) |path| {
+                        try include_dirs.put(module.owner.allocator, std.fs.path.dirname(path).?, {});
+                    }
+                }
+                if (other_step.installed_headers_include_tree) |include_tree| {
+                    if (include_tree.generated_directory.path) |path| {
+                        try include_dirs.put(module.owner.allocator, path, {});
+                    }
+                }
+            },
+            .config_header_step => |config_header| {
+                const full_file_path = config_header.output_file.path orelse continue;
+                const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
+                try include_dirs.put(module.owner.allocator, header_dir_path, {});
+            },
+            .framework_path, .framework_path_system => {},
+        }
     }
 }
 
 fn processPkgConfig(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *CompileStep,
+    exe: *Build.Step.Compile,
 ) !void {
-    for (exe.link_objects.items) |link_object| {
+    for (exe.root_module.link_objects.items) |link_object| {
         if (link_object != .system_lib) continue;
         const system_lib = link_object.system_lib;
 
@@ -325,7 +429,7 @@ fn processPkgConfig(
 fn getPkgConfigIncludes(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *CompileStep,
+    exe: *Build.Step.Compile,
     name: []const u8,
 ) !void {
     if (copied_from_zig.runPkgConfig(exe, name)) |args| {
@@ -338,9 +442,59 @@ fn getPkgConfigIncludes(
     } else |err| return err;
 }
 
+fn reify(step: *Build.Step) anyerror!void {
+    var progress: std.Progress = .{};
+    const main_progress_node = progress.start("", 0);
+    defer main_progress_node.end();
+
+    for (step.dependencies.items) |unknown_step| {
+        try reify(unknown_step);
+    }
+
+    try step.make(main_progress_node);
+}
+
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
-    fn runPkgConfig(self: *CompileStep, lib_name: []const u8) ![]const []const u8 {
+    /// Copied from `std.Build.LazyPath.getPath2` and massaged a bit.
+    fn getPath(path: std.Build.LazyPath, builder: *Build) ?[]const u8 {
+        switch (path) {
+            .path => |p| return builder.pathFromRoot(p),
+            .src_path => |sp| return sp.owner.pathFromRoot(sp.sub_path),
+            .cwd_relative => |p| return pathFromCwd(builder, p),
+            .generated => |gen| {
+                if (gen.path) |gen_path|
+                    return builder.pathFromRoot(gen_path)
+                else {
+                    reify(gen.step) catch return null;
+                    if (gen.path) |gen_path|
+                        return builder.pathFromRoot(gen_path)
+                    else
+                        return null;
+                }
+            },
+            .generated_dirname => |gen| {
+                var dirname = getPath(.{ .generated = gen.generated }, builder) orelse return null;
+                var i: usize = 0;
+                while (i <= gen.up) : (i += 1) {
+                    dirname = std.fs.path.dirname(dirname) orelse return null;
+                }
+                return dirname;
+            },
+            .dependency => |dep| return dep.dependency.builder.pathJoin(&[_][]const u8{
+                dep.dependency.builder.build_root.path.?,
+                dep.sub_path,
+            }),
+        }
+    }
+
+    /// Copied from `std.Build.pathFromCwd` as it is non-pub.
+    fn pathFromCwd(b: *Build, p: []const u8) []u8 {
+        const cwd = process.getCwdAlloc(b.allocator) catch @panic("OOM");
+        return std.fs.path.resolve(b.allocator, &.{ cwd, p }) catch @panic("OOM");
+    }
+
+    fn runPkgConfig(self: *Build.Step.Compile, lib_name: []const u8) ![]const []const u8 {
         const b = self.step.owner;
         const pkg_name = match: {
             // First we have to map the library name to pkg config name. Unfortunately,
@@ -388,7 +542,7 @@ const copied_from_zig = struct {
         };
 
         var code: u8 = undefined;
-        const stdout = if (b.execAllowFail(&[_][]const u8{
+        const stdout = if (b.runAllowFail(&[_][]const u8{
             "pkg-config",
             pkg_name,
             "--cflags",
@@ -434,8 +588,8 @@ const copied_from_zig = struct {
         return zig_args.toOwnedSlice();
     }
 
-    fn execPkgConfigList(self: *std.Build, out_code: *u8) (PkgConfigError || ExecError)![]const PkgConfigPkg {
-        const stdout = try self.execAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
+    fn execPkgConfigList(self: *std.Build, out_code: *u8) (PkgConfigError || RunError)![]const PkgConfigPkg {
+        const stdout = try self.runAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
         var list = std.ArrayList(PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = std.mem.tokenize(u8, stdout, "\r\n");
@@ -473,7 +627,7 @@ const copied_from_zig = struct {
         }
     }
 
-    pub const ExecError = std.Build.ExecError;
+    pub const RunError = std.Build.RunError;
     pub const PkgConfigError = std.Build.PkgConfigError;
     pub const PkgConfigPkg = std.Build.PkgConfigPkg;
 };
