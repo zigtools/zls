@@ -129,8 +129,7 @@ pub fn build(b: *Build) !void {
         .{ .cpu_arch = .x86_64, .os_tag = .windows },
         .{ .cpu_arch = .x86_64, .os_tag = .linux },
         .{ .cpu_arch = .x86_64, .os_tag = .macos },
-        // See: https://github.com/ziglang/zig/issues/19619
-        // .{ .cpu_arch = .x86, .os_tag = .windows },
+        .{ .cpu_arch = .x86, .os_tag = .windows },
         .{ .cpu_arch = .x86, .os_tag = .linux },
         .{ .cpu_arch = .aarch64, .os_tag = .linux },
         .{ .cpu_arch = .aarch64, .os_tag = .macos },
