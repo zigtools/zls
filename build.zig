@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Must match the `version` in `build.zig.zon`. Add a `-dev` suffix when `zls_version_is_tagged == false`.
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 /// set this to true when tagging a new ZLS release and then unset it on the next development cycle.
 const zls_version_is_tagged: bool = false;
