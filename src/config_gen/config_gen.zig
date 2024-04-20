@@ -945,67 +945,35 @@ const Response = union(enum) {
 };
 
 fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
-    // TODO remove duplicate logic once https://github.com/ziglang/zig/issues/19071 has been fixed
-    comptime std.debug.assert(zig_builtin.zig_version.order(.{ .major = 0, .minor = 12, .patch = 0 }) == .lt);
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
 
-    // https://github.com/ziglang/zig/pull/18955
-    const zig_version_at_18955 = comptime std.SemanticVersion.parse("0.12.0-dev.2918+cfce81f7d") catch unreachable;
-    const zig_is_pre_18955 = comptime zig_builtin.zig_version.order(zig_version_at_18955) == .lt;
-    if (zig_is_pre_18955) {
-        var client = std.http.Client{ .allocator = allocator };
-        defer client.deinit();
-        try client.ca_bundle.rescan(allocator);
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    try client.initDefaultProxies(arena_allocator.allocator());
 
-        if (@hasDecl(std.http.Client, "loadDefaultProxies"))
-            try client.loadDefaultProxies();
+    var server_header_buffer: [1024]u8 = undefined;
 
-        var request = try client.open(.GET, uri, .{ .allocator = allocator }, .{});
-        defer request.deinit();
+    var request = try client.open(
+        .GET,
+        uri,
+        .{ .server_header_buffer = &server_header_buffer },
+    );
+    defer request.deinit();
 
-        try request.send(.{});
-        // try request.finish();
-        try request.wait();
+    try request.send();
+    try request.finish();
+    try request.wait();
 
-        if (request.response.status.class() != .success) {
-            return .{
-                .other = request.response.status,
-            };
-        }
-
+    if (request.response.status.class() != .success) {
         return .{
-            .success = try request.reader().readAllAlloc(allocator, std.math.maxInt(usize)),
-        };
-    } else {
-        var arena_allocator = std.heap.ArenaAllocator.init(allocator);
-        defer arena_allocator.deinit();
-
-        var client = std.http.Client{ .allocator = allocator };
-        defer client.deinit();
-        try client.initDefaultProxies(arena_allocator.allocator());
-
-        var server_header_buffer: [1024]u8 = undefined;
-
-        var request = try client.open(
-            .GET,
-            uri,
-            .{ .server_header_buffer = &server_header_buffer },
-        );
-        defer request.deinit();
-
-        try request.send();
-        try request.finish();
-        try request.wait();
-
-        if (request.response.status.class() != .success) {
-            return .{
-                .other = request.response.status,
-            };
-        }
-
-        return .{
-            .success = try request.reader().readAllAlloc(allocator, std.math.maxInt(usize)),
+            .other = request.response.status,
         };
     }
+
+    return .{
+        .success = try request.reader().readAllAlloc(allocator, std.math.maxInt(usize)),
+    };
 }
 
 pub fn main() !void {
