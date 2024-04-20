@@ -150,11 +150,11 @@ pub fn main() !void {
     var packages = Packages{ .allocator = allocator };
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
 
-    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // This scans the graph of Steps to find all `OptionsStep`s and installed headers then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
     for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try reifyOptions(step);
+            try reifySteps(step);
         }
     }
 
@@ -209,7 +209,7 @@ pub fn main() !void {
     );
 }
 
-fn reifyOptions(step: *Build.Step) anyerror!void {
+fn reifySteps(step: *Build.Step) anyerror!void {
     if (step.cast(Build.Step.Options)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
         if (step.dependencies.items.len == 0) {
@@ -221,8 +221,25 @@ fn reifyOptions(step: *Build.Step) anyerror!void {
         }
     }
 
+    if (step.cast(Build.Step.Compile)) |compile| {
+        if (compile.generated_h) |header| {
+            var progress: std.Progress = .{};
+            const main_progress_node = progress.start("", 0);
+            defer main_progress_node.end();
+
+            try header.step.make(main_progress_node);
+        }
+        if (compile.installed_headers_include_tree) |include_tree| {
+            var progress: std.Progress = .{};
+            const main_progress_node = progress.start("", 0);
+            defer main_progress_node.end();
+
+            try include_tree.generated_directory.step.make(main_progress_node);
+        }
+    }
+
     for (step.dependencies.items) |unknown_step| {
-        try reifyOptions(unknown_step);
+        try reifySteps(unknown_step);
     }
 }
 
@@ -329,11 +346,10 @@ fn processModuleIncludeDirs(
                         try include_dirs.put(module.owner.allocator, std.fs.path.dirname(path).?, {});
                     }
                 }
-                if (other_step.installed_headers.items.len > 0) {
-                    const path = module.owner.pathJoin(&.{
-                        other_step.step.owner.install_prefix, "include",
-                    });
-                    try include_dirs.put(module.owner.allocator, path, {});
+                if (other_step.installed_headers_include_tree) |include_tree| {
+                    if (include_tree.generated_directory.path) |path| {
+                        try include_dirs.put(module.owner.allocator, path, {});
+                    }
                 }
             },
             .config_header_step => |config_header| {
