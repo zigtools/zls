@@ -127,6 +127,13 @@ pub fn build(b: *Build) !void {
     };
 
     const release_step = b.step("release", "Build all release binaries");
+    const release_compress = b.option(bool, "release-compress", "Install release binaries as compress files. Requires tar and 7z") orelse false;
+    const release_minisig = b.option(bool, "release-minisig", "Sign release binaries with Minisign.") orelse false;
+
+    if (release_minisig and !release_compress) {
+        std.log.err("-Drelease-minisig can only be used along with -Drelease-compress", .{});
+        return;
+    }
 
     for (targets) |target_query| {
         const exe = b.addExecutable(.{
@@ -144,14 +151,65 @@ pub fn build(b: *Build) !void {
         exe.root_module.addImport("known-folders", known_folders_module);
         exe.root_module.addImport("zls", zls_module);
 
-        const target_output = b.addInstallArtifact(exe, .{
-            .dest_dir = .{
-                .override = .{
-                    .custom = try target_query.zigTriple(b.allocator),
+        if (!release_compress) {
+            const target_output = b.addInstallArtifact(exe, .{
+                .dest_dir = .{
+                    .override = .{
+                        .custom = try target_query.zigTriple(b.allocator),
+                    },
                 },
-            },
-        });
-        release_step.dependOn(&target_output.step);
+            });
+            release_step.dependOn(&target_output.step);
+            continue;
+        }
+
+        const resolved_target = exe.root_module.resolved_target.?.result;
+        const is_windows = resolved_target.os.tag == .windows;
+        const zig_triple = try target_query.zigTriple(b.allocator);
+
+        const install_dir: std.Build.InstallDir = .{ .custom = "artifacts" };
+        const file_name = b.fmt("{s}.{s}", .{ zig_triple, if (is_windows) "zip" else "tar.xz" });
+        const exe_name = b.fmt("{s}{s}", .{ exe.name, resolved_target.exeFileExt() });
+
+        const compress_cmd = std.Build.Step.Run.create(b, b.fmt("create {s}", .{file_name}));
+        const output_path = if (is_windows) blk: {
+            compress_cmd.addArgs(&.{ "7z", "a", "-mx=9" });
+            const output_path = compress_cmd.addOutputFileArg(file_name);
+            compress_cmd.addArtifactArg(exe);
+            compress_cmd.addFileArg(exe.getEmittedPdb());
+            compress_cmd.addFileArg(.{ .path = "LICENSE" });
+            compress_cmd.addFileArg(.{ .path = "README.md" });
+            break :blk output_path;
+        } else blk: {
+            compress_cmd.setEnvironmentVariable("XZ_OPT", "9");
+            compress_cmd.addArgs(&.{ "tar", "cJf" });
+            const output_path = compress_cmd.addOutputFileArg(file_name);
+            compress_cmd.addArg("-C");
+            compress_cmd.addDirectoryArg(exe.getEmittedBinDirectory());
+            compress_cmd.addArg(exe_name);
+
+            compress_cmd.addArg("-C");
+            compress_cmd.addArg(b.pathFromRoot("."));
+            compress_cmd.addArg("LICENSE");
+            compress_cmd.addArg("README.md");
+            break :blk output_path;
+        };
+
+        const install_tarball = b.addInstallFileWithDir(output_path, install_dir, file_name);
+        release_step.dependOn(&install_tarball.step);
+
+        if (release_minisig) {
+            const minisign_basename = b.fmt("{s}.minisign", .{file_name});
+
+            const minising_cmd = b.addSystemCommand(&.{ "minisign", "-Sm" });
+            // uncomment the followng line when https://github.com/ziglang/zig/issues/18281 is fixed:
+            // minising_cmd.has_side_effects = true; // the secret key file may change
+            minising_cmd.addFileArg(output_path);
+            minising_cmd.addArg("-x");
+            const minising_file_path = minising_cmd.addOutputFileArg(minisign_basename);
+            const install_minising = b.addInstallFileWithDir(minising_file_path, install_dir, minisign_basename);
+            release_step.dependOn(&install_minising.step);
+        }
     }
 
     const exe = b.addExecutable(.{
