@@ -139,7 +139,7 @@
         },
         {
             "name": "build_runner_path",
-            "description": "Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`",
+            "description": "Path to the `build_runner.zig` file provided by ZLS. null is equivalent to `${executable_directory}/build_runner.zig`",
             "type": "?[]const u8",
             "default": null
         },

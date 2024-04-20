@@ -21,7 +21,7 @@ body:
     id: zls-version
     attributes:
       label: Zig Language Server Version
-      description: "Your zls release or commit"
+      description: "Your ZLS release or commit"
       placeholder: "b21039d51261923c665d3bc58fadc4b4d5e221ea"
     validations:
       required: true
