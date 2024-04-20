@@ -39,6 +39,7 @@ pub fn build(b: *Build) !void {
     const version_result = getVersion(b);
 
     const build_options = b.addOptions();
+    build_options.step.name = "ZLS build options";
     const build_options_module = build_options.createModule();
     build_options.addOption([]const u8, "version_string", version_result.version_string);
     build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_result.version_string));
@@ -46,6 +47,7 @@ pub fn build(b: *Build) !void {
     build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
 
     const exe_options = b.addOptions();
+    exe_options.step.name = "ZLS exe options";
     const exe_options_module = exe_options.createModule();
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
@@ -58,6 +60,7 @@ pub fn build(b: *Build) !void {
     };
 
     const test_options = b.addOptions();
+    test_options.step.name = "ZLS test options";
     const test_options_module = test_options.createModule();
     test_options.addOption([]const u8, "zig_exe_path", b.graph.zig_exe);
     test_options.addOption([]const u8, "global_cache_path", global_cache_path);
@@ -368,6 +371,7 @@ fn getTracyModule(
     },
 ) *Build.Module {
     const tracy_options = b.addOptions();
+    tracy_options.step.name = "tracy options";
     tracy_options.addOption(bool, "enable", options.enable);
     tracy_options.addOption(bool, "enable_allocation", options.enable and options.enable_allocation);
     tracy_options.addOption(bool, "enable_callstack", options.enable and options.enable_callstack);
