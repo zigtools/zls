@@ -979,13 +979,10 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
         @setEvalBranchQuota(2_000);
         const file_info: FileCheckInfo = comptime if (std.mem.indexOf(u8, field_name, "path") != null) blk: {
             if (std.mem.eql(u8, field_name, "zig_exe_path") or
-                std.mem.eql(u8, field_name, "replay_session_path") or
                 std.mem.eql(u8, field_name, "builtin_path") or
                 std.mem.eql(u8, field_name, "build_runner_path"))
             {
                 break :blk .{ .kind = .file, .is_accessible = true };
-            } else if (std.mem.eql(u8, field_name, "record_session_path")) {
-                break :blk .{ .kind = .file, .is_accessible = false };
             } else if (std.mem.eql(u8, field_name, "zig_lib_path")) {
                 break :blk .{ .kind = .directory, .is_accessible = true };
             } else if (std.mem.eql(u8, field_name, "global_cache_path") or
