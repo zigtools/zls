@@ -7,6 +7,9 @@
 /// Enables snippet completions when the client also supports them
 enable_snippets: bool = true,
 
+/// Whether or not to add things like parenthesis to completions
+enable_insert_helpers: bool = false,
+
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 

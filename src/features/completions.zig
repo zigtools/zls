@@ -244,6 +244,7 @@ fn nodeToCompletion(
 
             const func_name = orig_name orelse tree.tokenSlice(name_token);
             const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+            const use_insert_helpers = builder.server.config.enable_insert_helpers;
 
             const func_ty = Analyser.Type{
                 .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
@@ -266,11 +267,13 @@ fn nodeToCompletion(
                             .include_name = true,
                             .override_name = func_name,
                             .skip_first_param = skip_self_param,
-                            .parameters = .{ .show = .{
-                                .include_modifiers = true,
-                                .include_names = true,
-                                .include_types = true,
-                            } },
+                            .parameters = .{
+                                .show = .{
+                                    .include_modifiers = true,
+                                    .include_names = true,
+                                    .include_types = true,
+                                },
+                            },
                             .include_return_type = false,
                             .snippet_placeholders = true,
                         })});
@@ -278,11 +281,17 @@ fn nodeToCompletion(
 
                     switch (func.ast.params.len) {
                         // No arguments, leave cursor at the end
-                        0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
+                        0 => if (use_insert_helpers)
+                            break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name})
+                        else
+                            break :blk try std.fmt.allocPrint(builder.arena, "{s}", .{func_name}),
                         1 => {
                             if (skip_self_param) {
                                 // The one argument is a self parameter, leave cursor at the end
-                                break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
+                                if (use_insert_helpers)
+                                    break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name})
+                                else
+                                    break :blk try std.fmt.allocPrint(builder.arena, "{s}", .{func_name});
                             }
 
                             // Non-self parameter, leave the cursor in the parentheses
@@ -1247,6 +1256,7 @@ pub fn collectContainerFields(
     container: Analyser.Type,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const use_insert_helpers = builder.server.config.enable_insert_helpers;
     const node_handle = switch (container.data) {
         .other => |n| n,
         else => return,
@@ -1265,8 +1275,10 @@ pub fn collectContainerFields(
                 .detail = Analyser.getContainerFieldSignature(handle.tree, field),
                 .insertText = if (use_snippets)
                     try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+                else if (use_insert_helpers)
+                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name})
                 else
-                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
+                    name,
                 .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
             });
         } else try builder.completions.append(builder.arena, .{
@@ -1275,8 +1287,10 @@ pub fn collectContainerFields(
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
             .insertText = if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
                 name
+            else if (use_insert_helpers)
+                try std.fmt.allocPrint(builder.arena, "{s} = ", .{name})
             else
-                try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
+                name,
         });
     }
 }
