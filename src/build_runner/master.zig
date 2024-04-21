@@ -209,6 +209,37 @@ pub fn main() !void {
     );
 }
 
+fn makeStep(step: *Build.Step) anyerror!void {
+    // dependency loop detection and make phase merged into one.
+    switch (step.state) {
+        .precheck_started => return, // dependency loop
+        .precheck_unstarted => {
+            step.state = .precheck_started;
+
+            for (step.dependencies.items) |unknown_step| {
+                try makeStep(unknown_step);
+            }
+
+            var progress: std.Progress = .{};
+            const main_progress_node = progress.start("", 0);
+            defer main_progress_node.end();
+
+            try step.make(main_progress_node);
+
+            step.state = .precheck_done;
+        },
+        .precheck_done => {},
+
+        .dependency_failure,
+        .running,
+        .success,
+        .failure,
+        .skipped,
+        .skipped_oom,
+        => {},
+    }
+}
+
 fn reifySteps(step: *Build.Step) anyerror!void {
     if (step.cast(Build.Step.Options)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
@@ -223,18 +254,10 @@ fn reifySteps(step: *Build.Step) anyerror!void {
 
     if (step.cast(Build.Step.Compile)) |compile| {
         if (compile.generated_h) |header| {
-            var progress: std.Progress = .{};
-            const main_progress_node = progress.start("", 0);
-            defer main_progress_node.end();
-
-            try header.step.make(main_progress_node);
+            try makeStep(header.step);
         }
         if (compile.installed_headers_include_tree) |include_tree| {
-            var progress: std.Progress = .{};
-            const main_progress_node = progress.start("", 0);
-            defer main_progress_node.end();
-
-            try include_tree.generated_directory.step.make(main_progress_node);
+            try makeStep(include_tree.generated_directory.step);
         }
     }
 
