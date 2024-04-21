@@ -48,7 +48,7 @@ jobs:
           --arg targets                   "${targets[*]}"                                       \
           --arg zig_version               "$(zig version)"                                      \
           --arg zls_version               "$(artifacts/master/x86_64-linux/zls --version)"               \
-          --arg zls_minimum_build_version "$(artifacts/master/x86_64-linux/zls --minimum-build-version)" \
+          --arg zls_minimum_build_version "$(artifacts/master/x86_64-linux/zls --minimum-runtime-version)" \
           '.latest = $zls_version | .versions[$zls_version] = {
           "date": now | todateiso8601,
           "builtWithZigVersion": $zig_version,

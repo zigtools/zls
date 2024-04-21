@@ -921,7 +921,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         const zls_version_string = build_options.precise_version_string orelse break :version_check;
 
         const zls_version = comptime std.SemanticVersion.parse(zls_version_string) catch unreachable;
-        const min_zig_string = comptime std.SemanticVersion.parse(build_options.min_zig_string) catch unreachable;
+        const minimum_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
 
         const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
         const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
@@ -948,13 +948,13 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
             break :version_check;
         }
 
-        if (zig_version.order(min_zig_string) == .lt) {
+        if (zig_version.order(minimum_runtime_zig_version) == .lt) {
             // don't report a warning when using a Zig version that has a matching build runner
             if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.? != .master) break :version_check;
             server.showMessage(
                 .Warning,
-                "ZLS {s} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
-                .{ zls_version_string, build_options.min_zig_string, zig_version },
+                "ZLS {s} requires at least Zig {} but got Zig {}. Update Zig to avoid unexpected behavior.",
+                .{ zls_version_string, minimum_runtime_zig_version, zig_version },
             );
             break :version_check;
         }

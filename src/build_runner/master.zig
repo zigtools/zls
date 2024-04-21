@@ -1,3 +1,13 @@
+//! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
+//! Update the `minimum_runtime_zig_version` field in `build.zig` a breaking change occured.
+//!
+//! You can test out the build runner on ZLS's `build.zig` with the following command:
+//! `zig build --build-runner src/build_runner/master.zig`
+//!
+//! You can also test the build runner on any other `build.zig` with the following command:
+//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/master.zig`
+//! `zig build --build-runner /path/to/zls/src/build_runner/master.zig` (if the cwd contains build.zig)
+
 const root = @import("@build");
 const std = @import("std");
 const log = std.log;

@@ -2,7 +2,8 @@
 .{
     .name = "zls",
     .version = "0.11.0",
-
+    // Must match the `minimum_zig_version` in `build.zig`
+    .minimum_zig_version = "0.12.0-dev.3631+c4587dc9f",
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/bf79988adcfce166f848e4b11e718c1966365329.tar.gz",
