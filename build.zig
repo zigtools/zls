@@ -422,14 +422,17 @@ const Build = blk: {
     } else {
         const min_zig_simple = std.SemanticVersion{ .major = min_zig.major, .minor = min_zig.minor, .patch = 0 };
         const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
-        if (zls_version_simple.order(min_zig_simple) != .eq) {
+        const min_zig_is_tagged = min_zig.build == null and min_zig.pre == null;
+        if (!min_zig_is_tagged and zls_version_simple.order(min_zig_simple) != .eq) {
             const message = std.fmt.comptimePrint(
-                \\A development build of ZLS should have a development build of Zig as the minimum build requirement with the same major and minor version:
+                \\A development build of ZLS should have a tagged release of Zig as the minimum build requirement or
+                \\have a development build of Zig as the minimum build requirement with the same major and minor version.
                 \\          ZLS version: {d}.{d}.*
-                \\  minimum Zig version: {d}.{d}.*
+                \\  minimum Zig version: {}
+                \\
                 \\
                 \\This is a developer error.
-            , .{ zls_version.major, zls_version.minor, min_zig_simple.major, min_zig_simple.minor });
+            , .{ zls_version.major, zls_version.minor, min_zig });
             @compileError(message);
         }
     }
