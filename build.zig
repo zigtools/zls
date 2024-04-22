@@ -199,6 +199,7 @@ pub fn build(b: *Build) !void {
             compress_cmd.setEnvironmentVariable("XZ_OPT", "9");
             compress_cmd.addArgs(&.{ "tar", "cJf" });
             const output_path = compress_cmd.addOutputFileArg(file_name);
+            compress_cmd.addArgs(&.{ "--owner=0", "--group=0" });
             compress_cmd.addArg("-C");
             compress_cmd.addDirectoryArg(exe.getEmittedBinDirectory());
             compress_cmd.addArg(exe_name);
