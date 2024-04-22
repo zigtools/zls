@@ -12,6 +12,11 @@
             .url = "https://github.com/ziglibs/diffz/archive/e10bf15962e45affb3fcd7d9a950977a69c901b3.tar.gz",
             .hash = "12200d71e4b7029ea56a429e24260c6c0e85a3069b0d4ba85eace21a0fd75910aa64",
         },
+        .tracy = .{
+            .url = "https://github.com/wolfpld/tracy/archive/37aff70dfa50cf6307b3fee6074d627dc2929143.tar.gz",
+            .hash = "12202aac930cebaf2b57f443cacc2483478580a72f1316b4f0a720ddd91246fce69d",
+            .lazy = true,
+        },
     },
     .paths = .{""},
 }
