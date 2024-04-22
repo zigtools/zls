@@ -31,7 +31,7 @@ pub fn build(b: *Build) !void {
     const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
-    const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
+    const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.");
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
     const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
@@ -97,18 +97,19 @@ pub fn build(b: *Build) !void {
     gen_step.dependOn(&gen_cmd.step);
 
     const gen_version_data_cmd = b.addRunArtifact(gen_exe);
-    gen_version_data_cmd.addArgs(&.{ "--generate-version-data", data_version });
+    const resolved_data_version = data_version orelse if (zls_version_is_tagged) b.fmt("{}", .{zls_version}) else "master";
+    gen_version_data_cmd.addArgs(&.{ "--generate-version-data", resolved_data_version });
     if (data_version_path) |path| {
         gen_version_data_cmd.addArg("--langref_path");
         gen_version_data_cmd.addFileArg(.{ .cwd_relative = path });
     }
     const version_data_file_name = if (data_version_path != null)
-        b.fmt("version_data_{s}.zig", .{data_version})
+        b.fmt("version_data_{s}.zig", .{resolved_data_version})
     else blk: {
         // invalidate version data periodically from cache because the website content may change
         // setting `has_side_effects` would also be possible but that would always force a re-run
         const timestamp = @divFloor(std.time.timestamp(), std.time.s_per_day);
-        break :blk b.fmt("version_data_{s}_{d}.zig", .{ data_version, timestamp });
+        break :blk b.fmt("version_data_{s}_{d}.zig", .{ resolved_data_version, timestamp });
     };
     gen_version_data_cmd.addArg("--generate-version-data-path");
     const version_data_path: std.Build.LazyPath = if (override_version_data_file_path) |path|

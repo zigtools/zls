@@ -992,7 +992,7 @@ pub fn main() !void {
     var config_path: ?[]const u8 = null;
     var schema_path: ?[]const u8 = null;
     var vscode_config_path: ?[]const u8 = null;
-    var data_version: []const u8 = "master";
+    var data_version: ?[]const u8 = null;
     var data_path: ?[]const u8 = null;
     var langref_path: ?[]const u8 = null;
 
@@ -1008,9 +1008,9 @@ pub fn main() !void {
                 \\    --vscode-config-path [path]          Output zls-vscode configurations 
                 \\    --generate-config-path [path]        Output path to config file (see src/Config.zig)
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
-                \\    --generate-version-data [version]    Output version data file (default: master)
+                \\    --generate-version-data [version]    Specify version of data file
                 \\    --generate-version-data-path [path]  Output data file
-                \\    --langref_path [path]                Input langref file (default: fetch from https://raw.githubusercontent.com/ziglang/zig/master/doc/langref.html.in)
+                \\    --langref_path [path]                Input langref file (default: fetch from https://raw.githubusercontent.com/ziglang/zig/{[default_data_version]s}/doc/langref.html.in)
                 \\
             );
         } else if (std.mem.eql(u8, argname, "--readme-path")) {
@@ -1039,12 +1039,12 @@ pub fn main() !void {
                 return;
             };
             const is_valid_version = blk: {
-                if (std.mem.eql(u8, data_version, "master")) break :blk true;
-                _ = std.SemanticVersion.parse(data_version) catch break :blk false;
+                if (std.mem.eql(u8, data_version.?, "master")) break :blk true;
+                _ = std.SemanticVersion.parse(data_version.?) catch break :blk false;
                 break :blk true;
             };
             if (!is_valid_version) {
-                try stderr.print("'{s}' is not a valid argument after --generate-version-data.\n", .{data_version});
+                try stderr.print("'{s}' is not a valid argument after --generate-version-data.\n", .{data_version.?});
                 return;
             }
         } else if (std.mem.eql(u8, argname, "--generate-version-data-path")) {
@@ -1085,6 +1085,11 @@ pub fn main() !void {
         );
     }
     if (data_path) |output_path| {
-        try generateVersionDataFile(gpa, data_version, output_path, langref_path);
+        if (data_version) |version| {
+            try generateVersionDataFile(gpa, version, output_path, langref_path);
+        } else {
+            try stderr.writeAll("--generate-version-data-path requires --generate-version-data to be specified");
+            return;
+        }
     }
 }
