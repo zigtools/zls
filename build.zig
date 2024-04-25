@@ -6,19 +6,19 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 const zls_version_is_tagged: bool = false;
 
 /// Specify the minimum Zig version that is required to compile ZLS:
-/// Uri: propagate per-component encoding
+/// Release 0.12.0
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_zig_version = "0.12.0-dev.3631+c4587dc9f";
+const minimum_zig_version = "0.12.0";
 
 /// Specify the minimum Zig version that is required to run ZLS:
-/// Uri: propagate per-component encoding
+/// Release 0.12.0
 ///
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///   - breaking change to the build system (see `src/build_runner`)
-const minimum_runtime_zig_version = "0.12.0-dev.3631+c4587dc9f";
+const minimum_runtime_zig_version = "0.12.0";
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
