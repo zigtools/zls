@@ -6,7 +6,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 /// set this to true when tagging a new ZLS release and then unset it on the next development cycle.
 const zls_version_is_tagged: bool = false;
 
-/// Specify the minimum Zig version that is required to compile ZLS:
+/// Specify the minimum Zig version that is required to compile and test ZLS:
 /// Release 0.12.0
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
@@ -410,6 +410,20 @@ fn getTracyModule(
 
 const Build = blk: {
     const min_zig = std.SemanticVersion.parse(minimum_zig_version) catch unreachable;
+    const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
+
+    if (min_runtime_zig.order(min_zig) == .gt) {
+        const message = std.fmt.comptimePrint(
+            \\A Zig version that is able to build ZLS must be compatible with ZLS at runtime.
+            \\
+            \\This means that the minimum runtime Zig version must be less or equal to the minimum build Zig version:
+            \\  minimum build   Zig version: {[min_build_zig]}
+            \\  minimum runtime Zig version: {[min_runtime_zig]}
+            \\
+            \\This is a developer error.
+        , .{ .min_build_zig = min_zig, .min_runtime_zig = min_runtime_zig });
+        @compileError(message);
+    }
 
     // check that the ZLS version and minimum build version make sense
     if (zls_version_is_tagged) {
