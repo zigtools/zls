@@ -77,7 +77,7 @@ pub fn build(b: *Build) !void {
 
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
-        .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
+        .root_source_file = b.path("src/config_gen/config_gen.zig"),
         .target = b.host,
         .single_threaded = true,
     });
@@ -118,7 +118,7 @@ pub fn build(b: *Build) !void {
     const version_data_module = b.addModule("version_data", .{ .root_source_file = version_data_path });
 
     const zls_module = b.addModule("zls", .{
-        .root_source_file = .{ .path = "src/zls.zig" },
+        .root_source_file = b.path("src/zls.zig"),
         .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
@@ -151,7 +151,7 @@ pub fn build(b: *Build) !void {
     for (targets) |target_query| {
         const exe = b.addExecutable(.{
             .name = "zls",
-            .root_source_file = .{ .path = "src/main.zig" },
+            .root_source_file = b.path("src/main.zig"),
             .target = b.resolveTargetQuery(target_query),
             .optimize = optimize,
             .single_threaded = single_threaded,
@@ -190,8 +190,8 @@ pub fn build(b: *Build) !void {
             const output_path = compress_cmd.addOutputFileArg(file_name);
             compress_cmd.addArtifactArg(exe);
             compress_cmd.addFileArg(exe.getEmittedPdb());
-            compress_cmd.addFileArg(.{ .path = "LICENSE" });
-            compress_cmd.addFileArg(.{ .path = "README.md" });
+            compress_cmd.addFileArg(b.path("LICENSE"));
+            compress_cmd.addFileArg(b.path("README.md"));
             break :blk output_path;
         } else blk: {
             compress_cmd.setEnvironmentVariable("XZ_OPT", "9");
@@ -227,7 +227,7 @@ pub fn build(b: *Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "zls",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .single_threaded = single_threaded,
@@ -245,7 +245,7 @@ pub fn build(b: *Build) !void {
     test_step.dependOn(b.getInstallStep());
 
     const tests = b.addTest(.{
-        .root_source_file = .{ .path = "tests/tests.zig" },
+        .root_source_file = b.path("tests/tests.zig"),
         .target = target,
         .optimize = optimize,
         .filters = test_filters,
@@ -259,7 +259,7 @@ pub fn build(b: *Build) !void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     const src_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/zls.zig" },
+        .root_source_file = b.path("src/zls.zig"),
         .target = target,
         .optimize = optimize,
         .filters = test_filters,
@@ -303,7 +303,7 @@ pub fn build(b: *Build) !void {
         merge_step.step.dependOn(&src_tests_run.step);
 
         const install_coverage = b.addInstallDirectory(.{
-            .source_dir = .{ .path = b.pathJoin(&.{ coverage_output_dir, "output" }) },
+            .source_dir = .{ .cwd_relative = b.pathJoin(&.{ coverage_output_dir, "output" }) },
             .install_dir = .{ .custom = "coverage" },
             .install_subdir = "",
         });
@@ -377,7 +377,7 @@ fn getTracyModule(
     tracy_options.addOption(bool, "enable_callstack", options.enable and options.enable_callstack);
 
     const tracy_module = b.addModule("tracy", .{
-        .root_source_file = .{ .path = "src/tracy.zig" },
+        .root_source_file = b.path("src/tracy.zig"),
         .target = options.target,
         .optimize = options.optimize,
     });
@@ -386,17 +386,15 @@ fn getTracyModule(
     tracy_module.link_libc = true;
     tracy_module.link_libcpp = true;
 
-    const client_cpp = "src/tracy/public/TracyClient.cpp";
-
     // On mingw, we need to opt into windows 7+ to get some features required by tracy.
     const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
         &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
     else
         &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
-    tracy_module.addIncludePath(.{ .path = "src/tracy" });
+    tracy_module.addIncludePath(b.path("src/tracy"));
     tracy_module.addCSourceFile(.{
-        .file = .{ .path = client_cpp },
+        .file = b.path("src/tracy/public/TracyClient.cpp"),
         .flags = tracy_c_flags,
     });
 
