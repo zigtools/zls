@@ -459,10 +459,16 @@ const Build = blk: {
     const is_current_zig_tagged_release = builtin.zig_version.pre == null and builtin.zig_version.build == null;
     const is_min_zig_tagged_release = min_zig.pre == null and min_zig.build == null;
     const min_zig_simple = std.SemanticVersion{ .major = min_zig.major, .minor = min_zig.minor, .patch = 0 };
-    if (builtin.zig_version.order(min_zig) == .lt) {
+    const current_zig_simple = std.SemanticVersion{ .major = builtin.zig_version.major, .minor = builtin.zig_version.minor, .patch = 0 };
+    if (switch (builtin.zig_version.order(min_zig)) {
+        .lt => true,
+        .eq => false,
+        // a tagged release of ZLS must be build with a tagged release of Zig that has the same major and minor version.
+        .gt => zls_version_is_tagged and (min_zig_simple.order(current_zig_simple) != .eq),
+    }) {
         const message = std.fmt.comptimePrint(
             \\Your Zig version does not meet the minimum build requirement:
-            \\  required Zig version: {[minimum_version]} (or greater)
+            \\  required Zig version: {[minimum_version]} {[required_zig_version_note]s}
             \\  actual   Zig version: {[current_version]}
             \\
             \\
@@ -480,7 +486,12 @@ const Build = blk: {
             \\You can take one of the following actions to resolve this issue:
             \\  - Download the latest nightly of Zig (https://ziglang.org/download/)
             \\  - Compile an older version of ZLS that is compatible with your Zig version
-        , .{ .current_version = builtin.zig_version, .minimum_version = min_zig, .minimum_version_simple = min_zig_simple });
+        , .{
+            .current_version = builtin.zig_version,
+            .minimum_version = min_zig,
+            .minimum_version_simple = min_zig_simple,
+            .required_zig_version_note = if (!zls_version_is_tagged) "(or greater)" else "",
+        });
         @compileError(message);
     }
     break :blk std.Build;
