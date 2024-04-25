@@ -1,13 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0 };
+const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 /// set this to true when tagging a new ZLS release and then unset it on the next development cycle.
 const zls_version_is_tagged: bool = false;
 
 /// document the latest breaking change that caused a change to the string below:
-/// `ComptimeStringMap`->`StaticStringMap`
-const min_zig_string = "0.13.0-dev.33+8af59d1f9";
+/// Uri: propagate per-component encoding
+const min_zig_string = "0.12.0-dev.3631+c4587dc9f";
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});

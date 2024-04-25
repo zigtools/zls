@@ -17,7 +17,7 @@ const data = @import("version_data");
 /// meaningful information or are trivial deductible based on the builtin name.
 const excluded_builtins_set = blk: {
     @setEvalBranchQuota(2000);
-    break :blk std.StaticStringMap(void).initComptime(.{
+    break :blk std.ComptimeStringMap(void, &.{
         .{"addrSpaceCast"},
         .{"addWithOverflow"},
         .{"alignCast"},

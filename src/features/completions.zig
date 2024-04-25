@@ -475,7 +475,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         if (std.mem.startsWith(u8, name, "_")) return;
         // TODO figuring out which declarations should be excluded could be made more complete and accurate
         // by translating an empty file to acquire all exclusions
-        const exclusions = std.StaticStringMap(void).initComptime(.{
+        const exclusions = std.ComptimeStringMap(void, .{
             .{ "linux", {} },
             .{ "unix", {} },
             .{ "WIN32", {} },

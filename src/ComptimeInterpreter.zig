@@ -371,7 +371,7 @@ pub fn interpret(
         .identifier => {
             const identifier = offsets.nodeToSlice(tree, node_idx);
 
-            const simples = std.StaticStringMap(Index).initComptime(.{
+            const simples = std.ComptimeStringMap(Index, .{
                 .{ "anyerror", Index.anyerror_type },
                 .{ "anyframe", Index.anyframe_type },
                 .{ "anyopaque", Index.anyopaque_type },
