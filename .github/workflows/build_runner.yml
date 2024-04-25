@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - zig-version: master
+          - zig-version: 0.12.0
             zig-init: init
           - zig-version: 0.11.0
             zig-init: init-exe
