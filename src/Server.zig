@@ -642,6 +642,10 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
 
     if (server.client_capabilities.supports_configuration)
         try server.requestConfiguration();
+
+    if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
+        server.showMessage(.Warning, "HELP ME, I AM STUCK INSIDE AN LSP!", .{});
+    }
 }
 
 fn shutdownHandler(server: *Server, _: std.mem.Allocator, _: void) Error!?void {
