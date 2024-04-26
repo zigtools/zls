@@ -24,14 +24,14 @@
     flake-utils.lib.eachSystem systems (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}."0.12.0";
+        zig = zig-overlay.packages.${system}.master;
       in
       rec {
         formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
         packages.default = packages.zls;
         packages.zls = pkgs.stdenvNoCC.mkDerivation {
           name = "zls";
-          version = "0.12.0";
+          version = "master";
           src = gitignoreSource ./.;
           nativeBuildInputs = [ zig ];
           dontConfigure = true;

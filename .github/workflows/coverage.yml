@@ -15,7 +15,7 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.12.0
+          version: master
           cache: false
 
       - run: zig env
