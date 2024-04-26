@@ -2104,13 +2104,13 @@ fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetad
     return null;
 }
 
-const RequestMethodSet = blk: {
+const RequestMethodSet: std.StaticStringMap(void) = blk: {
     @setEvalBranchQuota(5000);
     var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
     for (types.request_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
-    break :blk std.ComptimeStringMap(void, &kvs_list);
+    break :blk std.StaticStringMap(void).initComptime(kvs_list);
 };
 
 const NotificationMethodSet = blk: {
@@ -2119,7 +2119,7 @@ const NotificationMethodSet = blk: {
     for (types.notification_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
-    break :blk std.ComptimeStringMap(void, &kvs_list);
+    break :blk std.StaticStringMap(void).initComptime(&kvs_list);
 };
 
 /// return true if there is a request with the given method name
