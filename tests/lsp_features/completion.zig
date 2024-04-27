@@ -1447,6 +1447,25 @@ test "switch cases" {
         .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum() SomeEnum {}
+        \\test {
+        \\    switch(retEnum()) {
+        \\        .sef1 => {const a = 1;},
+        \\        .<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
 }
 
 test "error set" {

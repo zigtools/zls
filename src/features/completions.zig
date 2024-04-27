@@ -1223,8 +1223,8 @@ fn getSwitchOrStructInitContext(
                 },
                 else => {},
             },
-            // Exit conditions
-            .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+            // Exit conditions; generic exit, maybe also .keyword_(var/const)
+            .semicolon => if (braces_depth < even) return null, // the braces_depth check handles switch case blocks, ie `.a => {..;}, .`
             else => {},
         }
     }
