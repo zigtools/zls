@@ -3125,14 +3125,20 @@ test "insert replace behaviour - file system completions" {
         , .expected_replace_line = \\const std = @import("std");
         ,
     });
-    // TODO
-    // try testCompletionTextEdit(.{
-    //     .source = \\const std = @import("st<cursor>.zig");
-    //     , .label = "std"
-    //     , .expected_insert_line = \\const std = @import("std.zig");
-    //     , .expected_replace_line = \\const std = @import("std");
-    //     ,
-    // });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("<cursor>.zig");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("std.zig");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("st<cursor>.zig");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("std.zig");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
     if (true) return error.SkipZigTest; // TODO
     try testCompletionTextEdit(.{
         .source = \\const std = @import("file<cursor>.zig");

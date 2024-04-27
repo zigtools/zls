@@ -648,25 +648,32 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) !void {
     var completions: CompletionSet = .{};
     const store = &builder.server.document_store;
+    const source = builder.orig_handle.tree.source;
 
-    if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
-
-    const loc = switch (pos_context) {
+    const string_content_loc: offsets.Loc = switch (pos_context) {
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
         .string_literal,
-        => |loc| loc,
+        => |loc| .{ .start = loc.start + 1, .end = loc.end - 1 },
         else => unreachable,
     };
 
-    var completing = builder.orig_handle.tree.source[loc.start + 1 .. loc.end - 1];
+    if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
+    if (builder.source_index < string_content_loc.start or string_content_loc.end < builder.source_index) return;
 
-    var separator_index = completing.len;
-    while (separator_index > 0) : (separator_index -= 1) {
-        if (std.fs.path.isSep(completing[separator_index - 1])) break;
-    }
-    completing = completing[0..separator_index];
+    const previous_seperator_index: ?usize = blk: {
+        var index: usize = builder.source_index;
+        break :blk while (index > string_content_loc.start) : (index -= 1) {
+            if (std.fs.path.isSep(source[index - 1])) break index - 1;
+        } else null;
+    };
+
+    const next_seperator_index: ?usize = for (builder.source_index..string_content_loc.end) |index| {
+        if (std.fs.path.isSep(source[index])) break index;
+    } else null;
+
+    const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_seperator_index orelse string_content_loc.start });
 
     var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
@@ -680,6 +687,13 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         const document_path = try URI.parse(builder.arena, builder.orig_handle.uri);
         try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
     }
+
+    const after_seperator_index = if (previous_seperator_index) |index| index + 1 else string_content_loc.start;
+    const insert_loc: offsets.Loc = .{ .start = after_seperator_index, .end = builder.source_index };
+    const replace_loc: offsets.Loc = .{ .start = after_seperator_index, .end = next_seperator_index orelse string_content_loc.end };
+
+    const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
+    const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
 
     for (search_paths.items) |path| {
         if (!std.fs.path.isAbsolute(path)) continue;
@@ -706,14 +720,20 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 else => continue,
             }
 
+            const label = try builder.arena.dupe(u8, entry.name);
+            const insert_text = if (entry.kind == .directory)
+                try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
+            else
+                label;
+
             _ = try completions.getOrPut(builder.arena, types.CompletionItem{
-                .label = try builder.arena.dupe(u8, entry.name),
-                .detail = if (pos_context == .cinclude_string_literal) path else null,
-                .insertText = if (entry.kind == .directory)
-                    try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
-                else
-                    null,
+                .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
+                .detail = if (pos_context == .cinclude_string_literal) path else null,
+                .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
+                    .{ .InsertReplaceEdit = .{ .newText = insert_text, .insert = insert_range, .replace = replace_range } }
+                else
+                    .{ .TextEdit = .{ .newText = insert_text, .range = insert_range } },
             });
         }
     }
@@ -761,6 +781,18 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 .kind = .Module,
                 .detail = builtin_path,
             }, {});
+        }
+
+        const string_content_range = offsets.locToRange(source, string_content_loc, builder.server.offset_encoding);
+
+        // completions on module replace the entire string literal
+        for (completions.keys()) |*item| {
+            if (item.kind == .Module and item.textEdit == null) {
+                item.textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
+                    .{ .InsertReplaceEdit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
+                else
+                    .{ .TextEdit = .{ .newText = item.label, .range = insert_range } };
+            }
         }
     }
 
