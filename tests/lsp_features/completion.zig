@@ -1084,10 +1084,8 @@ test "struct" {
         \\const foo = Foo{};
         \\const baz = foo.<cursor>;
     , &.{
-        // TODO kind should be .Method
-        .{ .label = "foo", .kind = .Function, .detail = "fn (_: Foo) void" },
-        // TODO kind should be .Method
-        .{ .label = "bar", .kind = .Function, .detail = "fn (_: *const Foo) void" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (_: Foo) void" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (_: *const Foo) void" },
     });
 }
 
@@ -2154,8 +2152,7 @@ test "usingnamespace" {
         \\const foo: Foo = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO kind should be .Method
-        .{ .label = "inner", .kind = .Function, .detail = "fn (self: Self) void" },
+        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Self) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
     try testCompletion(

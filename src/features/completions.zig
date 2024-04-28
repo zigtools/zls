@@ -243,8 +243,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         .assign_destructure,
         .switch_payload,
         => {
-            const parent_is_type_val = if (context.parent_container_ty) |container_ty| container_ty.is_type_val else null;
             var kind: types.CompletionItemKind = blk: {
+                const parent_is_type_val = if (context.parent_container_ty) |container_ty| container_ty.is_type_val else null;
                 if (!(parent_is_type_val orelse true)) break :blk .Field;
                 break :blk if (decl_handle.isConst()) .Constant else .Variable;
             };
@@ -252,7 +252,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             var is_deprecated: bool = false;
             if (maybe_resolved_ty) |ty| {
                 if (try builder.analyser.resolveFuncProtoOfCallable(ty)) |func_ty| blk: {
-                    var item = try functionTypeCompletion(builder, name, parent_is_type_val, func_ty) orelse break :blk;
+                    var item = try functionTypeCompletion(builder, name, context.parent_container_ty, func_ty) orelse break :blk;
                     item.documentation = documentation;
                     builder.completions.appendAssumeCapacity(item);
                     return;
@@ -313,7 +313,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
 fn functionTypeCompletion(
     builder: *Builder,
     func_name: []const u8,
-    parent_is_type_val: ?bool,
+    parent_container_ty: ?Analyser.Type,
     func_ty: Analyser.Type,
 ) error{OutOfMemory}!?types.CompletionItem {
     std.debug.assert(func_ty.isFunc());
@@ -326,7 +326,10 @@ fn functionTypeCompletion(
 
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
-    const has_self_param = !(parent_is_type_val orelse false) and try builder.analyser.hasSelfParam(func_ty);
+    const has_self_param = if (parent_container_ty) |container_ty|
+        if (container_ty.is_type_val) false else try builder.analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser))
+    else
+        false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
