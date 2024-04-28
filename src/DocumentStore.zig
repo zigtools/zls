@@ -23,6 +23,7 @@ config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
+handles_in_workspace_folders: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
@@ -47,14 +48,16 @@ pub const Config = struct {
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_path: ?[]const u8,
+    workspace_folders: []const Uri = &.{},
 
-    pub fn fromMainConfig(config: @import("Config.zig")) Config {
+    pub fn fromMainConfig(config: @import("Config.zig"), workspace_folders: []const Uri) Config {
         return .{
             .zig_exe_path = config.zig_exe_path,
             .zig_lib_path = config.zig_lib_path,
             .build_runner_path = config.build_runner_path,
             .builtin_path = config.builtin_path,
             .global_cache_path = config.global_cache_path,
+            .workspace_folders = workspace_folders,
         };
     }
 };
@@ -180,6 +183,8 @@ pub const Handle = struct {
 
     /// error messages from comptime_interpreter or astgen_analyser
     analysis_errors: std.ArrayListUnmanaged(ErrorMessage) = .{},
+
+    is_in_workspace_folders: bool = false,
 
     /// private field
     impl: struct {
@@ -642,6 +647,7 @@ pub fn deinit(self: *DocumentStore) void {
         result.deinit(self.allocator);
     }
     self.cimports.deinit(self.allocator);
+    self.handles_in_workspace_folders.deinit(self.allocator);
     self.* = undefined;
 }
 
@@ -752,6 +758,8 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
 pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    _ = self.handles_in_workspace_folders.swapRemove(uri);
 
     {
         self.lock.lockShared();
@@ -954,6 +962,14 @@ pub fn isBuiltinFile(uri: Uri) bool {
 pub fn isInStd(uri: Uri) bool {
     // TODO: Better logic for detecting std or subdirectories?
     return std.mem.indexOf(u8, uri, "/std/") != null;
+}
+
+pub fn isInWorkspaceFolders(store: DocumentStore, uri: Uri) bool {
+    // TODO: Better logic for detecting workspace folders?
+    return for (store.config.workspace_folders) |wf| {
+        // NOTE: terrible but it should work
+        if (std.mem.startsWith(u8, uri, wf)) break true;
+    } else false;
 }
 
 /// looks for a `zls.build.json` file in the build file directory
@@ -1317,10 +1333,24 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, op
         self.allocator.destroy(handle_ptr);
     }
 
-    if (isBuildFile(gop.value_ptr.*.uri)) {
+    const is_build_file = isBuildFile(gop.value_ptr.*.uri);
+    const is_in_workspace_folders = self.isInWorkspaceFolders(uri);
+
+    if (is_in_workspace_folders) {
+        handle_ptr.is_in_workspace_folders = true;
+        if (is_in_workspace_folders) {
+            try self.handles_in_workspace_folders.put(self.allocator, gop.value_ptr.*.uri, handle_ptr);
+        }
+    }
+
+    if (is_build_file) {
         log.debug("Opened document `{s}` (build file)", .{gop.value_ptr.*.uri});
     } else {
-        log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
+        if (is_in_workspace_folders) {
+            log.debug("Opened document `{s}` (in workspace folders)", .{gop.value_ptr.*.uri});
+        } else {
+            log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
+        }
     }
 
     return gop.value_ptr.*;
@@ -1635,5 +1665,16 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             error.OutOfMemory => return error.OutOfMemory,
             error.UriBadScheme => return null,
         };
+    }
+}
+
+pub fn updateHandlesInWorkspaceFolders(store: *DocumentStore) error{OutOfMemory}!void {
+    store.handles_in_workspace_folders.clearRetainingCapacity();
+    for (store.handles.values()) |handle| {
+        const is_in_workspace_folders = store.isInWorkspaceFolders(handle.uri);
+        handle.is_in_workspace_folders = is_in_workspace_folders;
+        if (is_in_workspace_folders) {
+            try store.handles_in_workspace_folders.put(store.allocator, handle.uri, handle);
+        }
     }
 }

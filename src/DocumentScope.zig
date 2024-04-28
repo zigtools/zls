@@ -199,6 +199,7 @@ const ScopeContext = struct {
 
         scopes_start: u32,
         declarations_start: u32,
+        should_trigrams_be_index: bool,
 
         fn pushDeclaration(
             pushed: PushedScope,
@@ -224,22 +225,24 @@ const ScopeContext = struct {
             try doc_scope.declarations.append(allocator, declaration);
             const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
 
-            if (std.unicode.Utf8View.init(name)) |view| {
-                var iterator = view.iterator();
-                while (iterator.nextCodepoint()) |codepoint_0| {
-                    const next_idx = iterator.i;
-                    const codepoint_1 = iterator.nextCodepoint() orelse break;
-                    const codepoint_2 = iterator.nextCodepoint() orelse break;
-                    try doc_scope.appendTrigram(allocator, .{
-                        .codepoint_0 = codepoint_0,
-                        .codepoint_1 = codepoint_1,
-                        .codepoint_2 = codepoint_2,
-                    }, declaration_index);
-                    iterator.i = next_idx;
+            if (pushed.should_trigrams_be_index) {
+                if (std.unicode.Utf8View.init(name)) |view| {
+                    var iterator = view.iterator();
+                    while (iterator.nextCodepoint()) |codepoint_0| {
+                        const next_idx = iterator.i;
+                        const codepoint_1 = iterator.nextCodepoint() orelse break;
+                        const codepoint_2 = iterator.nextCodepoint() orelse break;
+                        try doc_scope.appendTrigram(allocator, .{
+                            .codepoint_0 = codepoint_0,
+                            .codepoint_1 = codepoint_1,
+                            .codepoint_2 = codepoint_2,
+                        }, declaration_index);
+                        iterator.i = next_idx;
+                    }
+                } else |_| {
+                    // NOTE(SuperAuguste): We ignore this error and simply
+                    // skip indexing this name; is this as good idea?
                 }
-            } else |_| {
-                // NOTE(SuperAuguste): We ignore this error and simply
-                // skip indexing this name; is this as good idea?
             }
 
             const data = &doc_scope.scopes.items(.data)[@intFromEnum(pushed.scope)];
@@ -334,6 +337,10 @@ const ScopeContext = struct {
             .scope = context.current_scope.unwrap().?,
             .scopes_start = @intCast(context.child_scopes_scratch.items.len),
             .declarations_start = @intCast(context.child_declarations_scratch.items.len),
+            .should_trigrams_be_index = switch (tag) {
+                .container, .container_usingnamespace => true,
+                else => false,
+            },
         };
     }
 
