@@ -2617,6 +2617,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2639,6 +2641,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "S.f()",
         .expected_replace_line = "S.f()",
+
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2651,6 +2655,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2663,6 +2669,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2675,6 +2683,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2687,6 +2697,8 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+
+        .enable_insert_helpers = true,
     });
 }
 
@@ -2735,6 +2747,7 @@ test "insert replace behaviour - function with snippets" {
         .expected_insert_line = "S.f(${1:self: S})",
         .expected_replace_line = "S.f(${1:self: S})",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
         .enable_argument_placeholders = true,
     });
     try testCompletionTextEdit(.{
@@ -2749,6 +2762,7 @@ test "insert replace behaviour - function with snippets" {
         .expected_insert_line = "s.f(${1:number: u32})",
         .expected_replace_line = "s.f(${1:number: u32})",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
         .enable_argument_placeholders = true,
     });
     try testCompletionTextEdit(.{
@@ -2763,6 +2777,7 @@ test "insert replace behaviour - function with snippets" {
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
         .enable_argument_placeholders = false,
     });
     try testCompletionTextEdit(.{
@@ -2776,6 +2791,7 @@ test "insert replace behaviour - function with snippets" {
         .expected_insert_line = "S.f(${1:})",
         .expected_replace_line = "S.f(${1:})",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
         .enable_argument_placeholders = false,
     });
 
@@ -2840,6 +2856,7 @@ test "insert replace behaviour - function alias" {
         .label = "alias",
         .expected_insert_line = "const foo = alias();",
         .expected_replace_line = "const foo = alias();",
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2851,6 +2868,7 @@ test "insert replace behaviour - function alias" {
         .expected_insert_line = "const foo = alias();",
         .expected_replace_line = "const foo = alias();",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
         .enable_argument_placeholders = true,
     });
 }
@@ -2864,6 +2882,7 @@ test "insert replace behaviour - struct literal" {
         .label = "alpha",
         .expected_insert_line = "const foo: S = .{ .alpha = ",
         .expected_replace_line = "const foo: S = .{ .alpha = ",
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -2874,6 +2893,7 @@ test "insert replace behaviour - struct literal" {
         .expected_insert_line = "const foo: S = .{ .alpha = $1 }$0",
         .expected_replace_line = "const foo: S = .{ .alpha = $1 }$0",
         .enable_snippets = true,
+        .enable_insert_helpers = true,
     });
 }
 
@@ -2887,6 +2907,7 @@ test "insert replace behaviour - tagged union" {
         .label = "alpha",
         .expected_insert_line = "const foo: U = .{ .alpha = $1 }$0",
         .expected_replace_line = "const foo: U = .{ .alpha = $1 }$0",
+        .enable_insert_helpers = true,
         .enable_snippets = true,
     });
     try testCompletionTextEdit(.{
@@ -2898,6 +2919,7 @@ test "insert replace behaviour - tagged union" {
         .label = "alpha",
         .expected_insert_line = "const foo: U = .{ .alpha = ",
         .expected_replace_line = "const foo: U = .{ .alpha = ",
+        .enable_insert_helpers = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -3260,6 +3282,7 @@ fn testCompletionTextEdit(
 
         enable_argument_placeholders: bool = false,
         enable_snippets: bool = false,
+        enable_insert_helpers: bool = false,
     },
 ) !void {
     const cursor_idx = std.mem.indexOf(u8, options.source, "<cursor>").?;
@@ -3281,6 +3304,7 @@ fn testCompletionTextEdit(
 
     ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
     ctx.server.config.enable_snippets = options.enable_snippets;
+    ctx.server.config.enable_insert_helpers = options.enable_insert_helpers;
 
     const test_uri = try ctx.addDocument(text);
     const handle = ctx.server.document_store.getHandle(test_uri).?;
