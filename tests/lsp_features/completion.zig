@@ -2182,7 +2182,6 @@ test "usingnamespace" {
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn () void" },
     });
-    if (true) return error.SkipZigTest; // TODO
     try testCompletion(
         \\pub const chip_mod = struct {
         \\    pub const devices = struct {
@@ -2206,7 +2205,7 @@ test "usingnamespace" {
         \\}
     , &.{
         .{ .label = "inner", .kind = .Struct, .detail = "type" },
-        .{ .label = "peripherals", .kind = .Constant, .detail = "type" },
+        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
         .{ .label = "chip1fn1", .kind = .Function, .detail = "fn () void" },
         .{ .label = "chip1fn2", .kind = .Function, .detail = "fn (_: u32) void" },
     });

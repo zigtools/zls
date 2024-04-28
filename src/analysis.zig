@@ -3865,13 +3865,20 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) !?Scope.Index {
     } else null;
 }
 
-pub fn iterateSymbolsContainer(
+/// Collects all symbols/declarations that can be a acccessed on the given container type.
+pub fn collectDeclarationsOfContainer(
     analyser: *Analyser,
+    /// a ast-node to a container type (i.e. `struct`, `union`, `enum`, `opaque`)
     container_handle: NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    comptime callback: anytype,
-    context: anytype,
+    original_handle: *DocumentStore.Handle,
+    /// Whether or not the container type is a instance of its type.
+    /// ```zig
+    /// const NotInstance = struct{};
+    /// const instance = @as(struct{}, ...);
+    /// ```
     instance_access: bool,
+    /// allocated with `analyser.arena.allocator()`
+    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
 ) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
@@ -3925,28 +3932,26 @@ pub fn iterateSymbolsContainer(
         }
 
         const decl_with_handle = DeclWithHandle{ .decl = decl, .handle = handle };
-        if (handle != orig_handle and !decl_with_handle.isPublic()) continue;
-        try callback(context, decl_with_handle);
+        if (handle != original_handle and !decl_with_handle.isPublic()) continue;
+        try decl_collection.append(analyser.arena.allocator(), decl_with_handle);
     }
 
     for (document_scope.getScopeUsingnamespaceNodesConst(container_scope_index)) |use| {
-        try analyser.iterateUsingnamespaceContainerSymbols(
+        try analyser.collectUsingnamespaceDeclarationsOfContainer(
             .{ .node = use, .handle = handle },
-            orig_handle,
-            callback,
-            context,
+            original_handle,
             false,
+            decl_collection,
         );
     }
 }
 
-fn iterateUsingnamespaceContainerSymbols(
+fn collectUsingnamespaceDeclarationsOfContainer(
     analyser: *Analyser,
     usingnamespace_node: NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    comptime callback: anytype,
-    context: anytype,
+    original_handle: *DocumentStore.Handle,
     instance_access: bool,
+    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
 ) !void {
     const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
     if (gop.found_existing) return;
@@ -3957,7 +3962,7 @@ fn iterateUsingnamespaceContainerSymbols(
 
     const use_token = tree.nodes.items(.main_token)[usingnamespace_node.node];
     const is_pub = use_token > 0 and tree.tokens.items(.tag)[use_token - 1] == .keyword_pub;
-    if (handle != orig_handle and !is_pub) return;
+    if (handle != original_handle and !is_pub) return;
 
     const use_expr = (try analyser.resolveTypeOfNode(.{
         .node = tree.nodes.items(.data)[usingnamespace_node.node].lhs,
@@ -3966,24 +3971,22 @@ fn iterateUsingnamespaceContainerSymbols(
 
     switch (use_expr.data) {
         .other => |expr| {
-            try analyser.iterateSymbolsContainer(
+            try analyser.collectDeclarationsOfContainer(
                 expr,
-                orig_handle,
-                callback,
-                context,
+                original_handle,
                 instance_access,
+                decl_collection,
             );
         },
         .either => |entries| {
             for (entries) |entry| {
                 switch (entry.type_data) {
                     .other => |expr| {
-                        try analyser.iterateSymbolsContainer(
+                        try analyser.collectDeclarationsOfContainer(
                             expr,
-                            orig_handle,
-                            callback,
-                            context,
+                            original_handle,
                             instance_access,
+                            decl_collection,
                         );
                     },
                     else => continue,
@@ -3991,6 +3994,41 @@ fn iterateUsingnamespaceContainerSymbols(
             }
         },
         else => return,
+    }
+}
+
+/// Collects all symbols/declarations that are accessible at the given source index.
+pub fn collectAllSymbolsAtSourceIndex(
+    analyser: *Analyser,
+    /// a handle to a Document
+    handle: *DocumentStore.Handle,
+    /// a byte-index into `handle.tree.source`
+    source_index: usize,
+    /// allocated with `analyser.arena.allocator()`
+    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
+) error{OutOfMemory}!void {
+    std.debug.assert(source_index <= handle.tree.source.len);
+    analyser.use_trail.clearRetainingCapacity();
+
+    const document_scope = try handle.getDocumentScope();
+    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    while (scope_iterator.next().unwrap()) |scope_index| {
+        const scope_decls = document_scope.getScopeDeclarationsConst(scope_index);
+        for (scope_decls) |decl_index| {
+            const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+            if (decl == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
+            if (decl == .label) continue;
+            try decl_collection.append(analyser.arena.allocator(), .{ .decl = decl, .handle = handle });
+        }
+
+        for (document_scope.getScopeUsingnamespaceNodesConst(scope_index)) |use| {
+            try analyser.collectUsingnamespaceDeclarationsOfContainer(
+                .{ .node = use, .handle = handle },
+                handle,
+                false,
+                decl_collection,
+            );
+        }
     }
 }
 
@@ -4031,47 +4069,6 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
     }
-}
-
-fn iterateSymbolsGlobalInternal(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
-    const document_scope = try handle.getDocumentScope();
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
-    while (scope_iterator.next().unwrap()) |scope_index| {
-        const scope_decls = document_scope.getScopeDeclarationsConst(scope_index);
-        for (scope_decls) |decl_index| {
-            const decl = document_scope.declarations.get(@intFromEnum(decl_index));
-            if (decl == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
-            if (decl == .label) continue;
-            try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
-        }
-
-        for (document_scope.getScopeUsingnamespaceNodesConst(scope_index)) |use| {
-            try analyser.iterateUsingnamespaceContainerSymbols(
-                .{ .node = use, .handle = handle },
-                handle,
-                callback,
-                context,
-                false,
-            );
-        }
-    }
-}
-
-pub fn iterateSymbolsGlobal(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
-    analyser.use_trail.clearRetainingCapacity();
-    return try analyser.iterateSymbolsGlobalInternal(handle, source_index, callback, context);
 }
 
 pub fn innermostBlockScopeIndex(document_scope: DocumentScope, source_index: usize) Scope.OptionalIndex {
@@ -4125,16 +4122,12 @@ fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const
         defer std.debug.assert(analyser.use_trail.remove(.{ .node = index, .uri = handle.uri }));
 
         const tree = handle.tree;
-        if (tree.nodes.items(.data).len <= index) continue;
 
         const expr = .{ .node = tree.nodes.items(.data)[index].lhs, .handle = handle };
-        const expr_type = (try analyser.resolveTypeOfNode(expr)) orelse
+        const expr_type = (try analyser.resolveTypeOfNodeUncached(expr)) orelse
             continue;
 
-        if (!expr_type.is_type_val) {
-            // TODO: publish diagnostic; this is a compile error
-            continue;
-        }
+        if (!expr_type.is_type_val) continue;
 
         if (try expr_type.lookupSymbol(analyser, symbol)) |candidate| {
             if (candidate.handle == handle or candidate.isPublic()) {

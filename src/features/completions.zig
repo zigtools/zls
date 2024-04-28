@@ -125,17 +125,13 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             .tagged_union_enum_tag,
             .tagged_union_enum_tag_trailing,
             => {
-                const context: DeclToCompletionContext = .{
-                    .builder = builder,
-                    .parent_container_ty = ty,
-                };
-                try builder.analyser.iterateSymbolsContainer(
-                    node_handle,
-                    builder.orig_handle,
-                    declToCompletion,
-                    context,
-                    !ty.is_type_val,
-                );
+                var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+                try builder.analyser.collectDeclarationsOfContainer(node_handle, builder.orig_handle, !ty.is_type_val, &decls);
+                for (decls.items) |decl_with_handle| {
+                    try declToCompletion(builder, decl_with_handle, .{
+                        .parent_container_ty = ty,
+                    });
+                }
             },
             .fn_proto,
             .fn_proto_multi,
@@ -164,14 +160,11 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
     }
 }
 
-const DeclToCompletionContext = struct {
-    builder: *Builder,
+const DeclToCompletionOptions = struct {
     parent_container_ty: ?Analyser.Type = null,
-    orig_name: ?[]const u8 = null,
 };
 
-fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
-    const builder = context.builder;
+fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, options: DeclToCompletionOptions) error{OutOfMemory}!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
@@ -244,7 +237,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         .switch_payload,
         => {
             var kind: types.CompletionItemKind = blk: {
-                const parent_is_type_val = if (context.parent_container_ty) |container_ty| container_ty.is_type_val else null;
+                const parent_is_type_val = if (options.parent_container_ty) |container_ty| container_ty.is_type_val else null;
                 if (!(parent_is_type_val orelse true)) break :blk .Field;
                 break :blk if (decl_handle.isConst()) .Constant else .Variable;
             };
@@ -252,7 +245,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             var is_deprecated: bool = false;
             if (maybe_resolved_ty) |ty| {
                 if (try builder.analyser.resolveFuncProtoOfCallable(ty)) |func_ty| blk: {
-                    var item = try functionTypeCompletion(builder, name, context.parent_container_ty, func_ty) orelse break :blk;
+                    var item = try functionTypeCompletion(builder, name, options.parent_container_ty, func_ty) orelse break :blk;
                     item.documentation = documentation;
                     builder.completions.appendAssumeCapacity(item);
                     return;
@@ -567,8 +560,11 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const context: DeclToCompletionContext = .{ .builder = builder };
-    try builder.analyser.iterateSymbolsGlobal(builder.orig_handle, builder.source_index, declToCompletion, context);
+    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+    try builder.analyser.collectAllSymbolsAtSourceIndex(builder.orig_handle, builder.source_index, &decls);
+    for (decls.items) |decl_with_handle| {
+        try declToCompletion(builder, decl_with_handle, .{});
+    }
     try populateSnippedCompletions(builder, &snipped_data.generic);
 }
 
