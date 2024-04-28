@@ -8,9 +8,9 @@ pub fn printTree(tree: std.zig.Ast) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
     std.debug.print(
-        \\
-        \\nodes   tag                  lhs rhs token
-        \\-----------------------------------------------
+        \\printTree:
+        \\nodes   tag                  lhs         rhs         token
+        \\-----------------------------------------------------------
         \\
     , .{});
     for (
@@ -20,7 +20,7 @@ pub fn printTree(tree: std.zig.Ast) void {
         0..,
     ) |tag, data, main_token, i| {
         std.debug.print(
-            "    {d:<3} {s:<20} {d:<3} {d:<3} {d:<3} {s}\n",
+            "    {d:<3} {s:<20} {d:<11} {d:<11} {d:<5} {s}\n",
             .{ i, @tagName(tag), data.lhs, data.rhs, main_token, offsets.tokenToSlice(tree, main_token) },
         );
     }
