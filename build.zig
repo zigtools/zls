@@ -68,6 +68,7 @@ pub fn build(b: *Build) !void {
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
+    const fastfilter_module = b.dependency("fastfilter", .{}).module("fastfilter");
     const tracy_module = getTracyModule(b, .{
         .target = target,
         .optimize = optimize,
@@ -124,6 +125,7 @@ pub fn build(b: *Build) !void {
         .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "fastfilter", .module = fastfilter_module },
             .{ .name = "tracy", .module = tracy_module },
             .{ .name = "build_options", .module = build_options_module },
             .{ .name = "version_data", .module = version_data_module },

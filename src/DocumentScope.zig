@@ -4,13 +4,14 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy");
 const offsets = @import("offsets.zig");
 const Analyser = @import("analysis.zig");
+const fastfilter = @import("fastfilter");
 const Declaration = Analyser.Declaration;
 
 const DocumentScope = @This();
 
 scopes: std.MultiArrayList(Scope) = .{},
 declarations: std.MultiArrayList(Declaration) = .{},
-/// used for looking up a child declaration in a given scope
+/// Used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
 /// All identifier token that are in error sets.
@@ -23,6 +24,23 @@ global_error_set: IdentifierSet = .{},
 /// A token that has a doc comment takes priority.
 /// This means that if there a multiple enums with the same name, only one of them is included.
 global_enum_set: IdentifierSet = .{},
+
+// Workspace symbol lookup.
+
+/// Fast lookup with false positives.
+trigram_filter: fastfilter.BinaryFuse8,
+/// Index into `extra`.
+/// Body:
+///     prev: u32 or none = maxInt(u32)
+///     decl: Declaration.Index
+trigram_lookup_map: std.AutoArrayHashMapUnmanaged(Trigram, u32) = .{},
+
+pub const Trigram = packed struct(u64) {
+    codepoint_0: u21,
+    codepoint_1: u21,
+    codepoint_2: u21,
+    padding: u1 = 0,
+};
 
 /// Stores a set of identifier tokens with unique names
 pub const IdentifierSet = std.ArrayHashMapUnmanaged(Ast.TokenIndex, void, IdentifierTokenContext, true);
@@ -206,6 +224,24 @@ const ScopeContext = struct {
             try doc_scope.declarations.append(allocator, declaration);
             const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
 
+            if (std.unicode.Utf8View.init(name)) |view| {
+                var iterator = view.iterator();
+                while (iterator.nextCodepoint()) |codepoint_0| {
+                    const next_idx = iterator.i;
+                    const codepoint_1 = iterator.nextCodepoint() orelse break;
+                    const codepoint_2 = iterator.nextCodepoint() orelse break;
+                    try doc_scope.appendTrigram(allocator, Trigram{
+                        .codepoint_0 = codepoint_0,
+                        .codepoint_1 = codepoint_1,
+                        .codepoint_2 = codepoint_2,
+                    }, declaration_index);
+                    iterator.i = next_idx;
+                }
+            } else |_| {
+                // NOTE(SuperAuguste): We ignore this error and simply
+                // skip indexing this name; is this as good idea?
+            }
+
             const data = &doc_scope.scopes.items(.data)[@intFromEnum(pushed.scope)];
             const child_declarations = &doc_scope.scopes.items(.child_declarations)[@intFromEnum(pushed.scope)];
 
@@ -336,7 +372,9 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var document_scope = DocumentScope{};
+    var document_scope = DocumentScope{
+        .trigram_filter = undefined,
+    };
     errdefer document_scope.deinit(allocator);
 
     var context = ScopeContext{
@@ -346,6 +384,17 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
     };
     defer context.deinit();
     try walkContainerDecl(&context, tree, 0);
+
+    document_scope.trigram_filter = try fastfilter.BinaryFuse8.init(allocator, document_scope.trigram_lookup_map.count());
+    document_scope.trigram_filter.populate(allocator, @ptrCast(document_scope.trigram_lookup_map.keys())) catch |err| switch (err) {
+        error.KeysLikelyNotUnique => {
+            // NOTE(SuperAuguste): Ignore this? It shouldn't happen ever
+            // and should, at worst, break lookups for one document, unless
+            // the filter state is all messed up (might crash at lookup time?).
+            // TODO: Look into this more.
+        },
+        else => |e| return e,
+    };
 
     return document_scope;
 }
@@ -358,6 +407,9 @@ pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
 
     scope.global_enum_set.deinit(allocator);
     scope.global_error_set.deinit(allocator);
+
+    scope.trigram_filter.deinit(allocator);
+    scope.trigram_lookup_map.deinit(allocator);
 }
 
 fn locToSmallLoc(loc: offsets.Loc) Scope.SmallLoc {
@@ -1162,6 +1214,21 @@ noinline fn walkOtherNode(
     try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, walkNode);
 }
 
+fn appendTrigram(
+    doc_scope: *DocumentScope,
+    allocator: std.mem.Allocator,
+    trigram: Trigram,
+    declaration: Declaration.Index,
+) error{OutOfMemory}!void {
+    const gop = try doc_scope.trigram_lookup_map.getOrPut(allocator, trigram);
+
+    const prev_or_none = if (gop.found_existing) gop.value_ptr.* else std.math.maxInt(u32);
+    const new_last = doc_scope.extra.items.len;
+    try doc_scope.extra.appendSlice(allocator, &.{ prev_or_none, @intFromEnum(declaration) });
+
+    gop.value_ptr.* = @intCast(new_last);
+}
+
 // Lookup
 
 pub fn getScopeTag(
@@ -1260,4 +1327,23 @@ pub fn getScopeChildScopesConst(
         const other = slice.items(.child_scopes)[@intFromEnum(scope)].other;
         return @ptrCast(doc_scope.extra.items[other.start..other.end]);
     }
+}
+
+pub const TrigramIterator = struct {
+    extra: []const u32,
+    extra_index: ?u32,
+
+    pub fn next(iterator: *TrigramIterator) Declaration.OptionalIndex {
+        if (iterator.extra_index == null) return .none;
+        const prev, const decl = iterator.extra[iterator.extra_index..][0..2];
+        iterator.extra_index = if (prev == std.math.maxInt(u32)) null else prev;
+        return decl;
+    }
+};
+
+pub fn declarationsWithTrigramIterator(doc_scope: DocumentScope, trigram: Trigram) TrigramIterator {
+    return .{
+        .extra = doc_scope.extra.items,
+        .extra_index = doc_scope.trigram_lookup_map.get(trigram),
+    };
 }
