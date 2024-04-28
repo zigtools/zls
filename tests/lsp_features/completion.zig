@@ -735,6 +735,17 @@ test "array" {
     });
 }
 
+test "single pointer to slice" {
+    try testCompletion(
+        \\const foo: *[]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "[]u32" },
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]u32" },
+    });
+}
+
 test "single pointer to array" {
     try testCompletion(
         \\const foo: *[3]u32 = undefined;
