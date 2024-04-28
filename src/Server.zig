@@ -6,6 +6,7 @@ const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
+const DocumentScope = @import("DocumentScope.zig");
 const types = @import("lsp.zig");
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
@@ -607,7 +608,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -1595,6 +1596,94 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!ResultType("workspace/symbol") {
+    if (request.query.len < 3) return null;
+
+    var trigrams = std.ArrayListUnmanaged(DocumentScope.Trigram){};
+    // TODO: ensure capacity
+
+    if (std.unicode.Utf8View.init(request.query)) |view| {
+        var iterator = view.iterator();
+        while (iterator.nextCodepoint()) |codepoint_0| {
+            const next_idx = iterator.i;
+            const codepoint_1 = iterator.nextCodepoint() orelse break;
+            const codepoint_2 = iterator.nextCodepoint() orelse break;
+            try trigrams.append(arena, .{
+                .codepoint_0 = codepoint_0,
+                .codepoint_1 = codepoint_1,
+                .codepoint_2 = codepoint_2,
+            });
+            iterator.i = next_idx;
+        }
+    } else |_| return null;
+
+    var workspace_symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
+
+    var candidates_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
+    defer candidates_decl_map.deinit(arena);
+
+    var narrowing_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
+    defer narrowing_decl_map.deinit(arena);
+
+    // TODO: make sure we're only looking at handles that are actually in our workspace
+    doc_loop: for (server.document_store.handles.values()) |handle| {
+        const tree = handle.tree;
+        const doc_scope = try handle.getDocumentScope();
+
+        for (trigrams.items) |trigram| {
+            if (!doc_scope.trigram_filter.contain(@bitCast(trigram))) continue :doc_loop;
+        }
+
+        candidates_decl_map.clearRetainingCapacity();
+        narrowing_decl_map.clearRetainingCapacity();
+
+        var first_pass = true;
+        for (trigrams.items) |trigram| {
+            if (!first_pass and candidates_decl_map.count() == 0) break;
+
+            var it = doc_scope.declarationsWithTrigramIterator(trigram);
+            while (it.next().unwrap()) |decl| {
+                if (first_pass) {
+                    try candidates_decl_map.put(arena, decl, {});
+                } else {
+                    try narrowing_decl_map.put(arena, decl, {});
+                }
+            }
+
+            if (!first_pass) {
+                var index: usize = 0;
+                while (index < candidates_decl_map.keys().len) {
+                    if (!narrowing_decl_map.contains(candidates_decl_map.keys()[index])) {
+                        candidates_decl_map.orderedRemoveAt(index);
+                    } else index += 1;
+                }
+            }
+
+            first_pass = false;
+        }
+
+        for (candidates_decl_map.keys()) |key| {
+            const decl = doc_scope.declarations.get(@intFromEnum(key));
+            const name_token = decl.nameToken(tree);
+
+            // TODO: integrate with document_symbol.zig for right kind info
+            // TODO: only index/lookup non-locals (I believe that is the correct behavior)
+            try workspace_symbols.append(arena, .{
+                .name = tree.tokenSlice(name_token),
+                .kind = .Variable,
+                .location = .{
+                    .Location = .{
+                        .uri = handle.uri,
+                        .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
+                    },
+                },
+            });
+        }
+    }
+
+    return .{ .array_of_WorkspaceSymbol = workspace_symbols.items };
+}
+
 const HandledRequestMethods = enum {
     initialize,
     shutdown,
@@ -1617,6 +1706,7 @@ const HandledRequestMethods = enum {
     @"textDocument/codeAction",
     @"textDocument/foldingRange",
     @"textDocument/selectionRange",
+    @"workspace/symbol",
 };
 
 const HandledNotificationMethods = enum {
@@ -1657,6 +1747,7 @@ fn isBlockingMessage(msg: types.Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
         },
         .notification => |notification| switch (std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return false) {
@@ -1820,6 +1911,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
     };
 }
 

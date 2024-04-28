@@ -230,7 +230,7 @@ const ScopeContext = struct {
                     const next_idx = iterator.i;
                     const codepoint_1 = iterator.nextCodepoint() orelse break;
                     const codepoint_2 = iterator.nextCodepoint() orelse break;
-                    try doc_scope.appendTrigram(allocator, Trigram{
+                    try doc_scope.appendTrigram(allocator, .{
                         .codepoint_0 = codepoint_0,
                         .codepoint_1 = codepoint_1,
                         .codepoint_2 = codepoint_2,
@@ -1335,9 +1335,9 @@ pub const TrigramIterator = struct {
 
     pub fn next(iterator: *TrigramIterator) Declaration.OptionalIndex {
         if (iterator.extra_index == null) return .none;
-        const prev, const decl = iterator.extra[iterator.extra_index..][0..2];
+        const prev, const decl = iterator.extra[iterator.extra_index.?..][0..2].*;
         iterator.extra_index = if (prev == std.math.maxInt(u32)) null else prev;
-        return decl;
+        return @as(Declaration.Index, @enumFromInt(decl)).toOptional();
     }
 };
 
