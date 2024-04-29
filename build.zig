@@ -7,10 +7,10 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0 };
 const zls_version_is_tagged: bool = false;
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// ComptimeStringMap: return a regular struct and optimize
+/// std.posix.iovec: use .base and .len instead of .iov_base and .iov_len
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_zig_version = "0.13.0-dev.33+8af59d1f9";
+const minimum_zig_version = "0.13.0-dev.48+aecd9cc6d";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0
