@@ -7,6 +7,7 @@ const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const DocumentScope = @import("DocumentScope.zig");
+const TrigramStore = @import("TrigramStore.zig");
 const types = @import("lsp.zig");
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
@@ -520,7 +521,6 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             dest.* = try server.allocator.dupe(u8, src.uri);
         }
         server.document_store.config.workspace_folders = server.client_capabilities.workspace_folders;
-        try server.document_store.updateHandlesInWorkspaceFolders();
     }
 
     if (request.trace) |trace| {
@@ -783,7 +783,6 @@ fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, n
     server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
 
     server.document_store.config.workspace_folders = server.client_capabilities.workspace_folders;
-    try server.document_store.updateHandlesInWorkspaceFolders();
 }
 
 fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
@@ -1604,12 +1603,7 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
 fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    // TODO: implement Uri -> TrigramData map
-    // to reduce long-term memory usage
-
-    // NOTE: this is not one for loop as
-    // the TODO described above will require
-    // these to be two discrete steps
+    var trigrams = std.ArrayListUnmanaged(TrigramStore.Trigram){};
 
     for (server.client_capabilities.workspace_folders) |workspace_folder| {
         const path = URI.parse(arena, workspace_folder) catch return error.InternalError;
@@ -1622,13 +1616,10 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         while (walker.next() catch return error.InternalError) |entry| {
             if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
                 const uri = URI.pathRelative(arena, workspace_folder, entry.path) catch return error.InternalError;
-                _ = server.document_store.getOrLoadHandle(uri);
+                _ = try server.document_store.getOrConstructTrigramStore(uri);
             }
         }
     }
-
-    var trigrams = std.ArrayListUnmanaged(DocumentScope.Trigram){};
-    // TODO: ensure capacity
 
     if (std.unicode.Utf8View.init(request.query)) |view| {
         var iterator = view.iterator();
@@ -1649,12 +1640,15 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
     var candidates_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
     var narrowing_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
 
-    doc_loop: for (server.document_store.handles_in_workspace_folders.values()) |handle| {
+    doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
+        const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
+        if (trigram_store.filter == null) continue;
+
         const tree = handle.tree;
         const doc_scope = try handle.getDocumentScope();
 
         for (trigrams.items) |trigram| {
-            if (!doc_scope.trigram_filter.contain(@bitCast(trigram))) continue :doc_loop;
+            if (!trigram_store.filter.?.contain(@bitCast(trigram))) continue :doc_loop;
         }
 
         candidates_decl_map.clearRetainingCapacity();
@@ -1664,7 +1658,7 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         for (trigrams.items) |trigram| {
             if (!first_pass and candidates_decl_map.count() == 0) break;
 
-            var it = doc_scope.declarationsWithTrigramIterator(trigram);
+            var it = trigram_store.iterate(trigram);
             while (it.next().unwrap()) |decl| {
                 if (first_pass) {
                     try candidates_decl_map.put(arena, decl, {});

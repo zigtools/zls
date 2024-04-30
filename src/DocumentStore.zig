@@ -14,6 +14,7 @@ const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
 const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -23,7 +24,15 @@ config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
-handles_in_workspace_folders: std.StringArrayHashMapUnmanaged(*Handle) = .{},
+/// All `Handle`s in the current workspace folders
+/// have a `TrigramStore`, but there will be some
+/// `TrigramStore`s with no associated `Handle`.
+///
+/// This is an optimization that allows closed
+/// or seldom accessed documents to return results
+/// during Workspace Symbol searches without
+/// maintaining an otherwise useless `Handle`.
+trigram_stores: std.StringArrayHashMapUnmanaged(*TrigramStore) = .{},
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
@@ -183,8 +192,6 @@ pub const Handle = struct {
 
     /// error messages from comptime_interpreter or astgen_analyser
     analysis_errors: std.ArrayListUnmanaged(ErrorMessage) = .{},
-
-    is_in_workspace_folders: bool = false,
 
     /// private field
     impl: struct {
@@ -647,7 +654,14 @@ pub fn deinit(self: *DocumentStore) void {
         result.deinit(self.allocator);
     }
     self.cimports.deinit(self.allocator);
-    self.handles_in_workspace_folders.deinit(self.allocator);
+
+    for (self.trigram_stores.keys()) |uri| self.allocator.free(uri);
+    for (self.trigram_stores.values()) |trigram_store| {
+        trigram_store.deinit(self.allocator);
+        self.allocator.destroy(trigram_store);
+    }
+    self.trigram_stores.deinit(self.allocator);
+
     self.* = undefined;
 }
 
@@ -693,6 +707,41 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     };
 
     return self.createAndStoreDocument(uri, file_contents, false) catch return null;
+}
+
+/// Returns a handle to the given document
+/// **Thread safe** takes a shared lock
+/// This function does not protect against data races from modifying the Handle
+pub fn getTrigramStore(store: *DocumentStore, uri: Uri) error{OutOfMemory}!?*TrigramStore {
+    store.lock.lockShared();
+    defer store.lock.unlockShared();
+    return store.trigram_stores.get(uri);
+}
+
+pub fn getOrConstructTrigramStore(store: *DocumentStore, uri: Uri) error{OutOfMemory}!?*TrigramStore {
+    if (try store.getTrigramStore(uri)) |trigram_store| return trigram_store;
+
+    if (store.getOrLoadHandle(uri)) |handle| {
+        const duped_uri = try store.allocator.dupe(u8, uri);
+        errdefer store.allocator.free(duped_uri);
+
+        var trigram_store = try store.allocator.create(TrigramStore);
+        errdefer store.allocator.destroy(trigram_store);
+
+        trigram_store.* = TrigramStore.init(store.allocator, handle) catch |err| switch (err) {
+            error.InvalidUtf8 => {
+                store.allocator.free(duped_uri);
+                store.allocator.destroy(trigram_store);
+                return null;
+            },
+            else => |e| return e,
+        };
+        errdefer trigram_store.deinit(store.allocator);
+
+        try store.trigram_stores.put(store.allocator, duped_uri, trigram_store);
+    }
+
+    return null;
 }
 
 /// **Thread safe** takes a shared lock
@@ -758,8 +807,6 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
 pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    _ = self.handles_in_workspace_folders.swapRemove(uri);
 
     {
         self.lock.lockShared();
@@ -1334,23 +1381,11 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, op
     }
 
     const is_build_file = isBuildFile(gop.value_ptr.*.uri);
-    const is_in_workspace_folders = self.isInWorkspaceFolders(uri);
-
-    if (is_in_workspace_folders) {
-        handle_ptr.is_in_workspace_folders = true;
-        if (is_in_workspace_folders) {
-            try self.handles_in_workspace_folders.put(self.allocator, gop.value_ptr.*.uri, handle_ptr);
-        }
-    }
 
     if (is_build_file) {
         log.debug("Opened document `{s}` (build file)", .{gop.value_ptr.*.uri});
     } else {
-        if (is_in_workspace_folders) {
-            log.debug("Opened document `{s}` (in workspace folders)", .{gop.value_ptr.*.uri});
-        } else {
-            log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
-        }
+        log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
     }
 
     return gop.value_ptr.*;
@@ -1665,16 +1700,5 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             error.OutOfMemory => return error.OutOfMemory,
             error.UriBadScheme => return null,
         };
-    }
-}
-
-pub fn updateHandlesInWorkspaceFolders(store: *DocumentStore) error{OutOfMemory}!void {
-    store.handles_in_workspace_folders.clearRetainingCapacity();
-    for (store.handles.values()) |handle| {
-        const is_in_workspace_folders = store.isInWorkspaceFolders(handle.uri);
-        handle.is_in_workspace_folders = is_in_workspace_folders;
-        if (is_in_workspace_folders) {
-            try store.handles_in_workspace_folders.put(store.allocator, handle.uri, handle);
-        }
     }
 }
