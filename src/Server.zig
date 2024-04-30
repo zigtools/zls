@@ -1637,7 +1637,7 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
     } else |_| return null;
 
     var workspace_symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
-    var candidates_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
+    var candidates_decl_map = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
     var narrowing_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
 
     doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
@@ -1656,12 +1656,12 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
         var first_pass = true;
         for (trigrams.items) |trigram| {
-            if (!first_pass and candidates_decl_map.count() == 0) break;
+            if (!first_pass and candidates_decl_map.items.len == 0) break;
 
             var it = trigram_store.iterate(trigram);
             while (it.next().unwrap()) |decl| {
                 if (first_pass) {
-                    try candidates_decl_map.put(arena, decl, {});
+                    try candidates_decl_map.append(arena, decl);
                 } else {
                     try narrowing_decl_map.put(arena, decl, {});
                 }
@@ -1669,9 +1669,9 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
             if (!first_pass) {
                 var index: usize = 0;
-                while (index < candidates_decl_map.keys().len) {
-                    if (!narrowing_decl_map.contains(candidates_decl_map.keys()[index])) {
-                        candidates_decl_map.orderedRemoveAt(index);
+                while (index < candidates_decl_map.items.len) {
+                    if (!narrowing_decl_map.contains(candidates_decl_map.items[index])) {
+                        _ = candidates_decl_map.swapRemove(index);
                     } else index += 1;
                 }
             }
@@ -1679,8 +1679,8 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
             first_pass = false;
         }
 
-        for (candidates_decl_map.keys()) |key| {
-            const decl = doc_scope.declarations.get(@intFromEnum(key));
+        for (candidates_decl_map.items) |decl_idx| {
+            const decl = doc_scope.declarations.get(@intFromEnum(decl_idx));
             const name_token = decl.nameToken(tree);
 
             // TODO: integrate with document_symbol.zig for right kind info
