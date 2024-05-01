@@ -806,7 +806,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 .label = try builder.arena.dupe(u8, entry.name),
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
                 .insertText = if (entry.kind == .directory)
-                    try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
+                    try std.fmt.allocPrint(builder.arena, "{s}", .{entry.name})
                 else
                     null,
                 .kind = if (entry.kind == .file) .File else .Folder,
