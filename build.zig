@@ -474,11 +474,16 @@ const Build = blk: {
             \\
             \\
         ++ if (is_min_zig_tagged_release)
-            \\Please download the {[minimum_version]} release of Zig. (https://ziglang.org/download/)
-            \\
-            \\Tagged releases of ZLS are also available.
-            \\  -> https://github.com/zigtools/zls/releases
-            \\  -> https://github.com/zigtools/zls/releases/tag/{[minimum_version_simple]} (may not exist yet)
+            std.fmt.comptimePrint(
+                \\Please download the {[minimum_version]} release of Zig. (https://ziglang.org/download/)
+                \\
+                \\Tagged releases of ZLS are also available.
+                \\  -> https://github.com/zigtools/zls/releases
+                \\  -> https://github.com/zigtools/zls/releases/tag/{[minimum_version_simple]} (may not exist yet)
+            , .{
+                .minimum_version = min_zig,
+                .minimum_version_simple = min_zig_simple,
+            })
         else if (is_current_zig_tagged_release)
             \\Please download or compile a tagged release of ZLS.
             \\  -> https://github.com/zigtools/zls/releases
@@ -490,7 +495,6 @@ const Build = blk: {
         , .{
             .current_version = builtin.zig_version,
             .minimum_version = min_zig,
-            .minimum_version_simple = min_zig_simple,
             .required_zig_version_note = if (!zls_version_is_tagged) "(or greater)" else "",
         });
         @compileError(message);
