@@ -484,7 +484,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         if (std.mem.startsWith(u8, name, "_")) return;
         // TODO figuring out which declarations should be excluded could be made more complete and accurate
         // by translating an empty file to acquire all exclusions
-        const exclusions = std.ComptimeStringMap(void, .{
+        const exclusions = std.StaticStringMap(void).initComptime(.{
             .{ "linux", {} },
             .{ "unix", {} },
             .{ "WIN32", {} },
@@ -1232,8 +1232,8 @@ fn getSwitchOrStructInitContext(
                 },
                 else => {},
             },
-            // Exit conditions
-            .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+            // Exit conditions; generic exit, maybe also .keyword_(var/const)
+            .semicolon => if (braces_depth < even) return null, // the braces_depth check handles switch case blocks, ie `.a => {..;}, .`
             else => {},
         }
     }

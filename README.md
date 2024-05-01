@@ -4,7 +4,7 @@
 
 **Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
 
-The Zig Language Server (zls) is a tool that implements Microsoft's Language Server Protocol for Zig in Zig. In simpler terms: it'll provide you with completions, go-to definition, [etc.](#features) when you write Zig code!
+The Zig Language Server (ZLS) is a tool that implements Microsoft's Language Server Protocol for Zig in Zig. In simpler terms: it'll provide you with completions, go-to definition, [etc.](#features) when you write Zig code!
 
 <!-- omit in toc -->
 ## Table Of Contents
@@ -27,7 +27,7 @@ The Zig Language Server (zls) is a tool that implements Microsoft's Language Ser
 
 ### From Source
 
-Building `zls` is very easy. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
+Building ZLS is very easy. You will need [a build of Zig master](https://ziglang.org/download/) to build ZLS.
 
 ```bash
 git clone https://github.com/zigtools/zls
@@ -71,7 +71,7 @@ The following options are currently available.
 | `builtin_path` | `?[]const u8` | `null` | Path to 'builtin;' useful for debugging, automatically set if let null |
 | `zig_lib_path` | `?[]const u8` | `null` | Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports |
 | `zig_exe_path` | `?[]const u8` | `null` | Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided |
-| `build_runner_path` | `?[]const u8` | `null` | Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig` |
+| `build_runner_path` | `?[]const u8` | `null` | Path to the `build_runner.zig` file provided by ZLS. null is equivalent to `${executable_directory}/build_runner.zig` |
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls` |
 | `build_runner_global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env` |
 | `completion_label_details` | `bool` | `true` | When false, the function signature of completion results is hidden. Improves readability in some editors |
@@ -101,7 +101,7 @@ When `value` is present, the option will be passed the same as in `zig build -Dn
 
 ## Features
 
-`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, cImport and others. Support for comptime and semantic analysis is Work-in-Progress.
+ZLS supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, cImport and others. Support for comptime and semantic analysis is Work-in-Progress.
 
 The following LSP features are supported:
 - Completions
@@ -127,15 +127,15 @@ You can use zls as a library! [Check out this demo repo](https://github.com/zigt
   - Supports basic language features
   - Uses data provided by `src/data` to perform builtin autocompletion
 - [`zig-lsp` by @xackus](https://github.com/xackus/zig-lsp)
-  - Inspiration for `zls`
+  - Inspiration for ZLS
 - [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
   - Provides API to access known folders on Linux, Windows and Mac OS
 - [`zls` by @zigtools](https://github.com/zigtools/zls)
-  - Used by many zls developers to more efficiently work on zls
+  - Used by many ZLS developers to more efficiently work on ZLS
 
 ## Quick Thanks :)
 
-We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep zls awesome for everyone!
+We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep ZLS awesome for everyone!
 
 [![OpenCollective Backers](https://opencollective.com/zigtools/backers.svg?width=890&limit=1000)](https://opencollective.com/zigtools#category-CONTRIBUTE)
 

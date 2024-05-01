@@ -65,7 +65,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     const ArgId = enum {
         help,
         version,
-        @"minimum-build-version",
+        @"minimum-runtime-version",
         @"compiler-version",
         @"enable-debug-log",
         @"enable-message-tracing",
@@ -84,7 +84,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         var cmd_infos: InfoMap = InfoMap.init(.{
             .help = "Prints this message.",
             .version = "Prints the version.",
-            .@"minimum-build-version" = "Prints the minimum build version specified in build.zig.",
+            .@"minimum-runtime-version" = "Prints the minimum Zig version that is need to run ZLS.",
             .@"compiler-version" = "Prints the compiler version with which the server was compiled.",
             .@"enable-debug-log" = "Enables debug logs.",
             .@"enable-message-tracing" = "Enables message tracing.",
@@ -134,7 +134,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         switch (id) {
             .help,
             .version,
-            .@"minimum-build-version",
+            .@"minimum-runtime-version",
             .@"compiler-version",
             .@"enable-debug-log",
             .@"enable-message-tracing",
@@ -158,8 +158,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         try stdout.writeAll(zls.build_options.version_string ++ "\n");
         return result;
     }
-    if (specified.get(.@"minimum-build-version")) {
-        try stdout.writeAll(zls.build_options.min_zig_string ++ "\n");
+    if (specified.get(.@"minimum-runtime-version")) {
+        try stdout.writeAll(zls.build_options.minimum_runtime_zig_version_string ++ "\n");
         return result;
     }
     if (specified.get(.@"compiler-version")) {
@@ -244,9 +244,6 @@ pub fn main() !void {
         .proceed => {},
         .exit => return,
     }
-
-    // workaround for https://github.com/ziglang/zig/issues/19485
-    _ = &"Dolorum est necessitatibus dignissimos ea non eum molestias. Dolorem provident veritatis exercitationem qui voluptatem molestiae ea. Ratione illum impedit maxime. Et tempora cumque et maiores doloribus. Ducimus sint illum quae iure ut enim doloremque amet. Accusamus fuga alias et.";
 
     logger.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
 

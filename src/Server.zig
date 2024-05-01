@@ -642,6 +642,10 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
 
     if (server.client_capabilities.supports_configuration)
         try server.requestConfiguration();
+
+    if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
+        server.showMessage(.Warning, "HELP ME, I AM STUCK INSIDE AN LSP!", .{});
+    }
 }
 
 fn shutdownHandler(server: *Server, _: std.mem.Allocator, _: void) Error!?void {
@@ -921,7 +925,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         const zls_version_string = build_options.precise_version_string orelse break :version_check;
 
         const zls_version = comptime std.SemanticVersion.parse(zls_version_string) catch unreachable;
-        const min_zig_string = comptime std.SemanticVersion.parse(build_options.min_zig_string) catch unreachable;
+        const minimum_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
 
         const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
         const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
@@ -948,13 +952,13 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
             break :version_check;
         }
 
-        if (zig_version.order(min_zig_string) == .lt) {
+        if (zig_version.order(minimum_runtime_zig_version) == .lt) {
             // don't report a warning when using a Zig version that has a matching build runner
-            if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.? != .master) break :version_check;
+            if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.?.isTaggedRelease()) break :version_check;
             server.showMessage(
                 .Warning,
-                "ZLS {s} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
-                .{ zls_version_string, build_options.min_zig_string, zig_version },
+                "ZLS {s} requires at least Zig {} but got Zig {}. Update Zig to avoid unexpected behavior.",
+                .{ zls_version_string, minimum_runtime_zig_version, zig_version },
             );
             break :version_check;
         }
@@ -979,13 +983,10 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
         @setEvalBranchQuota(2_000);
         const file_info: FileCheckInfo = comptime if (std.mem.indexOf(u8, field_name, "path") != null) blk: {
             if (std.mem.eql(u8, field_name, "zig_exe_path") or
-                std.mem.eql(u8, field_name, "replay_session_path") or
                 std.mem.eql(u8, field_name, "builtin_path") or
                 std.mem.eql(u8, field_name, "build_runner_path"))
             {
                 break :blk .{ .kind = .file, .is_accessible = true };
-            } else if (std.mem.eql(u8, field_name, "record_session_path")) {
-                break :blk .{ .kind = .file, .is_accessible = false };
             } else if (std.mem.eql(u8, field_name, "zig_lib_path")) {
                 break :blk .{ .kind = .directory, .is_accessible = true };
             } else if (std.mem.eql(u8, field_name, "global_cache_path") or
@@ -2103,13 +2104,13 @@ fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetad
     return null;
 }
 
-const RequestMethodSet = blk: {
+const RequestMethodSet: std.StaticStringMap(void) = blk: {
     @setEvalBranchQuota(5000);
     var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
     for (types.request_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
-    break :blk std.ComptimeStringMap(void, &kvs_list);
+    break :blk std.StaticStringMap(void).initComptime(kvs_list);
 };
 
 const NotificationMethodSet = blk: {
@@ -2118,7 +2119,7 @@ const NotificationMethodSet = blk: {
     for (types.notification_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
-    break :blk std.ComptimeStringMap(void, &kvs_list);
+    break :blk std.StaticStringMap(void).initComptime(&kvs_list);
 };
 
 /// return true if there is a request with the given method name

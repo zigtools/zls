@@ -1093,7 +1093,7 @@ fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle) !?u64
     }
 }
 
-const primitives = std.ComptimeStringMap(InternPool.Index, .{
+const primitives = std.StaticStringMap(InternPool.Index).initComptime(.{
     .{ "anyerror", .anyerror_type },
     .{ "anyframe", .anyframe_type },
     .{ "anyopaque", .anyopaque_type },
@@ -1630,7 +1630,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return try innermostContainer(handle, starts[tree.firstToken(node)]);
             }
 
-            const cast_map = std.ComptimeStringMap(void, .{
+            const cast_map = std.StaticStringMap(void).initComptime(.{
                 .{"@as"},
                 .{"@atomicLoad"},
                 .{"@atomicRmw"},

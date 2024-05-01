@@ -1,8 +1,10 @@
-// whenever this file is updated, run `zon2nix > deps.nix`
 .{
     .name = "zls",
-    .version = "0.11.0",
-
+    // Must match the `zls_version` in `build.zig`
+    .version = "0.13.0-dev",
+    // Must match the `minimum_zig_version` in `build.zig`
+    .minimum_zig_version = "0.12.0",
+    // whenever the dependencies are updated, run `zon2nix > deps.nix`
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/bf79988adcfce166f848e4b11e718c1966365329.tar.gz",
