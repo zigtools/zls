@@ -322,15 +322,14 @@ fn getVersion(b: *Build) struct {
     const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
     const build_root_path = b.build_root.path orelse ".";
 
+    if (zls_version_is_tagged) {
+        return .{ .version_string = version_string, .precise_version_string = version_string };
+    }
+
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
         "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
-    }, &code, .Ignore) catch {
-        return .{
-            .version_string = version_string,
-            .precise_version_string = if (zls_version_is_tagged) version_string else null,
-        };
-    };
+    }, &code, .Ignore) catch return .{ .version_string = version_string, .precise_version_string = null };
 
     const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
 
@@ -338,12 +337,10 @@ fn getVersion(b: *Build) struct {
         0 => {
             // Tagged release version (e.g. 0.10.0).
             std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
-            std.debug.assert(zls_version_is_tagged); // `zls_version_is_tagged` disagrees with git describe
             return .{ .version_string = version_string, .precise_version_string = version_string };
         },
         2 => {
             // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
-            std.debug.assert(!zls_version_is_tagged); // `zls_version_is_tagged` disagrees with git describe
             var it = std.mem.splitScalar(u8, git_describe, '-');
             const tagged_ancestor = it.first();
             const commit_height = it.next().?;
