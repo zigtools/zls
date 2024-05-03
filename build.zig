@@ -245,7 +245,6 @@ pub fn build(b: *Build) !void {
     b.installArtifact(exe);
 
     const test_step = b.step("test", "Run all the tests");
-    test_step.dependOn(b.getInstallStep());
 
     const tests = b.addTest(.{
         .root_source_file = b.path("tests/tests.zig"),
