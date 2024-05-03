@@ -54,7 +54,7 @@ pub const DeclarationLookupMap = std.ArrayHashMapUnmanaged(
 );
 
 pub const DeclarationLookup = struct {
-    pub const Kind = enum { field, other };
+    pub const Kind = enum { field, other, label };
     scope: Scope.Index,
     name: []const u8,
     kind: Kind,
@@ -188,6 +188,7 @@ const ScopeContext = struct {
             declaration: Declaration,
             kind: DeclarationLookup.Kind,
         ) error{OutOfMemory}!void {
+            std.debug.assert((declaration == .label) == (kind == .label));
             if (std.mem.eql(u8, name, "_")) return;
             defer std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
 
@@ -824,7 +825,7 @@ fn walkBlockNodeKeepOpen(
         try scope.pushDeclaration(
             offsets.identifierTokenToNameSlice(tree, first_token),
             .{ .label = .{ .identifier = first_token, .block = node_idx } },
-            .other,
+            .label,
         );
     }
 
@@ -983,7 +984,7 @@ noinline fn walkWhileNode(
             try then_scope.pushDeclaration(
                 label_name.?,
                 .{ .label = .{ .identifier = label, .block = while_node.ast.then_expr } },
-                .other,
+                .label,
             );
         }
         if (payload_declaration) |decl| {
@@ -1004,7 +1005,7 @@ noinline fn walkWhileNode(
                 try else_scope.pushDeclaration(
                     label_name.?,
                     .{ .label = .{ .identifier = label, .block = while_node.ast.then_expr } },
-                    .other,
+                    .label,
                 );
             }
 
@@ -1065,7 +1066,7 @@ noinline fn walkForNode(
         try then_scope.pushDeclaration(
             label_name.?,
             .{ .label = .{ .identifier = label_token, .block = for_node.ast.then_expr } },
-            .other,
+            .label,
         );
     }
 
@@ -1077,7 +1078,7 @@ noinline fn walkForNode(
             try else_scope.pushDeclaration(
                 label_name.?,
                 .{ .label = .{ .identifier = label_token, .block = for_node.ast.else_expr } },
-                .other,
+                .label,
             );
             try else_scope.finalize();
         } else {

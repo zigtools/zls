@@ -145,6 +145,13 @@ test "label" {
         \\    break :<0> 0;
         \\};
     );
+    try testReferences(
+        \\const foo = <0>: {
+        \\    const <1> = 0;
+        \\    _ = <1>;
+        \\    break :<0> 0;
+        \\};
+    );
 }
 
 test "asm" {
