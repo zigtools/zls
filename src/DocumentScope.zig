@@ -188,6 +188,7 @@ const ScopeContext = struct {
             declaration: Declaration,
             kind: DeclarationLookup.Kind,
         ) error{OutOfMemory}!void {
+            std.debug.assert((declaration == .label) == (kind == .label));
             if (std.mem.eql(u8, name, "_")) return;
             defer std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
 
@@ -470,8 +471,8 @@ fn walkNode(
         => walkLhsNode(context, tree, node_idx),
 
         .test_decl,
-        .@"break",
         .@"defer",
+        .@"break",
         .anyframe_type,
         => walkRhsNode(context, tree, node_idx),
 
@@ -854,18 +855,6 @@ fn walkBlockNodeKeepOpen(
                         name,
                         .{ .assign_destructure = .{ .node = idx, .index = @intCast(i) } },
                         .other,
-                    );
-                }
-            },
-            .@"break" => {
-                if (data[node_idx].lhs == 0) continue;
-                const br_first_token = tree.firstToken(idx);
-                if (token_tags[br_first_token + 1] == .colon and token_tags[br_first_token + 2] == .identifier) {
-                    const label_identifier_token = br_first_token + 2;
-                    try scope.pushDeclaration(
-                        offsets.identifierTokenToNameSlice(tree, label_identifier_token),
-                        .{ .label = .{ .identifier = label_identifier_token, .block = idx } },
-                        .label,
                     );
                 }
             },
