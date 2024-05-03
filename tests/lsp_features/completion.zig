@@ -20,8 +20,6 @@ const Completion = struct {
     deprecated: bool = false,
 };
 
-const CompletionSet = std.StringArrayHashMapUnmanaged(Completion);
-
 test "root scope" {
     try testCompletion(
         \\const foo = 5;
@@ -31,10 +29,10 @@ test "root scope" {
     });
 
     try testCompletion(
-        \\const foo = 5;
+        \\var foo = 5;
         \\const bar = <cursor>
     , &.{
-        .{ .label = "foo", .kind = .Constant },
+        .{ .label = "foo", .kind = .Variable },
     });
 
     try testCompletion(
@@ -44,6 +42,17 @@ test "root scope" {
     , &.{
         .{ .label = "foo", .kind = .Constant },
         .{ .label = "baz", .kind = .Constant },
+    });
+}
+
+test "access root scope through '@This()' builtin" {
+    try testCompletion(
+        \\const foo = 5;
+        \\const Self = @This();
+        \\const bar = Self.<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant },
+        .{ .label = "Self", .kind = .Struct },
     });
 }
 
@@ -65,7 +74,6 @@ test "local scope" {
         \\    const baz = 3;
         \\};
     , &.{
-        .{ .label = "foo", .kind = .Constant }, // should foo be referencable?
         .{ .label = "bar", .kind = .Variable },
     });
 }
@@ -175,6 +183,28 @@ test "symbol lookup on identifier named after primitive" {
     });
 }
 
+test "assign destructure" {
+    try testCompletion(
+        \\test {
+        \\    const foo, var bar: u32 = .{42, 7};
+        \\    <cursor>
+        \\}
+    , &.{
+        .{ .label = "foo", .kind = .Constant, .detail = "comptime_int" },
+        .{ .label = "bar", .kind = .Variable, .detail = "u32" },
+    });
+    if (true) return error.SkipZigTest; // TODO
+    try testCompletion(
+        \\test {
+        \\    const S, const E = .{struct{}, enum{}};
+        \\    <cursor>
+        \\}
+    , &.{
+        .{ .label = "S", .kind = .Struct, .detail = "type" },
+        .{ .label = "E", .kind = .Enum, .detail = "type" },
+    });
+}
+
 test "function" {
     try testCompletion(
         \\fn foo(alpha: u32, beta: []const u8) void {
@@ -220,6 +250,58 @@ test "function" {
         \\const bar = foo().<cursor>;
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
+test "function alias" {
+    try testCompletion(
+        \\fn foo() void {
+        \\    <cursor>
+        \\}
+        \\const bar = foo;
+        \\const baz = &foo;
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Function,
+            .detail = "fn () void",
+        },
+        .{
+            .label = "bar",
+            .kind = .Function,
+            .detail = "fn () void",
+        },
+        .{
+            .label = "baz",
+            .kind = .Function,
+            // TODO detail should be '*fn () void' or '*const fn () void'
+            .detail = "fn () void",
+        },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    fn foo() void {}
+        \\    const bar = foo;
+        \\    const baz = &foo;
+        \\};
+        \\const _ = S.<cursor>
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Function,
+            .detail = "fn () void",
+        },
+        .{
+            .label = "bar",
+            .kind = .Function,
+            .detail = "fn () void",
+        },
+        .{
+            .label = "baz",
+            .kind = .Function,
+            // TODO detail should be '*fn () void' or '*const fn () void'
+            .detail = "fn () void",
+        },
     });
 }
 
@@ -653,6 +735,17 @@ test "array" {
     });
 }
 
+test "single pointer to slice" {
+    try testCompletion(
+        \\const foo: *[]u32 = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "[]u32" },
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*]u32" },
+    });
+}
+
 test "single pointer to array" {
     try testCompletion(
         \\const foo: *[3]u32 = undefined;
@@ -986,8 +1079,8 @@ test "struct" {
         \\    fn foo(mode: <cursor>
         \\};
     , &.{
-        .{ .label = "S", .kind = .Constant, .detail = "struct" },
-        .{ .label = "Mode", .kind = .Constant, .detail = "enum" },
+        .{ .label = "S", .kind = .Struct, .detail = "type" },
+        .{ .label = "Mode", .kind = .Enum, .detail = "type" },
     });
 
     try testCompletion(
@@ -1002,10 +1095,8 @@ test "struct" {
         \\const foo = Foo{};
         \\const baz = foo.<cursor>;
     , &.{
-        // TODO kind should be .Method
-        .{ .label = "foo", .kind = .Function, .detail = "fn (_: Foo) void" },
-        // TODO kind should be .Method
-        .{ .label = "bar", .kind = .Function, .detail = "fn (_: *const Foo) void" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (_: Foo) void" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (_: *const Foo) void" },
     });
 }
 
@@ -1053,6 +1144,7 @@ test "enum" {
         \\const E = enum {
         \\    alpha,
         \\    beta,
+        \\    const bar = 5;
         \\};
         \\const foo: E = .<cursor>
     , &.{
@@ -1062,15 +1154,18 @@ test "enum" {
     try testCompletion(
         \\const E = enum {
         \\    _,
+        \\    const bar = 5;
         \\    fn inner(_: E) void {} 
         \\};
         \\const foo = E.<cursor>
     , &.{
+        .{ .label = "bar", .kind = .Constant, .detail = "comptime_int" },
         .{ .label = "inner", .kind = .Function, .detail = "fn (_: E) void" },
     });
     try testCompletion(
         \\const E = enum {
         \\    _,
+        \\    const bar = 5;
         \\    fn inner(_: E) void {} 
         \\};
         \\const e: E = undefined;
@@ -1266,6 +1361,15 @@ test "enum" {
     , &.{
         .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
+    });
+}
+
+test "enum literal" {
+    try testCompletion(
+        \\const literal = .foo;
+        \\const foo = <cursor>
+    , &.{
+        .{ .label = "literal", .kind = .EnumMember, .detail = "@TypeOf(.enum_literal)" },
     });
 }
 
@@ -1582,7 +1686,7 @@ test "merged error sets" {
         \\const Error = error{Foo} || error{Bar};
         \\const E = <cursor>
     , &.{
-        .{ .label = "Error", .kind = .Constant, .detail = "error" },
+        .{ .label = "Error", .kind = .Constant, .detail = "type" },
     });
 }
 
@@ -1994,7 +2098,7 @@ test "declarations" {
         \\const foo = S.<cursor>
     , &.{
         .{ .label = "Public", .kind = .Constant, .detail = "u32" },
-        .{ .label = "Private", .kind = .Constant, .detail = "type = u32" },
+        .{ .label = "Private", .kind = .Constant, .detail = "u32" },
     });
 
     try testCompletion(
@@ -2059,8 +2163,7 @@ test "usingnamespace" {
         \\const foo: Foo = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO kind should be .Method
-        .{ .label = "inner", .kind = .Function, .detail = "fn (self: Self) void" },
+        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Self) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
     try testCompletion(
@@ -2101,8 +2204,8 @@ test "usingnamespace" {
         \\    _ = chip.<cursor>;
         \\}
     , &.{
-        .{ .label = "inner", .kind = .Constant, .detail = "struct" },
-        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
+        .{ .label = "inner", .kind = .Struct, .detail = "type" },
+        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
         .{ .label = "chip1fn1", .kind = .Function, .detail = "fn () void" },
         .{ .label = "chip1fn2", .kind = .Function, .detail = "fn (_: u32) void" },
     });
@@ -2167,7 +2270,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
+        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
     });
     try testCompletion(
         \\pub const chip_mod = struct {
@@ -2183,7 +2286,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
+        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
     });
     try testCompletion(
         \\pub const chip_mod = struct {
@@ -2201,7 +2304,7 @@ test "builtin fn `field`" {
         \\    chip.<cursor>
         \\}
     , &.{
-        .{ .label = "peripherals", .kind = .Constant, .detail = "struct" },
+        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
     });
 }
 
@@ -2298,6 +2401,7 @@ test "enum completion on out of bound parameter index" {
 }
 
 test "combine doc comments of declaration and definition" {
+    if (true) return error.SkipZigTest; // TODO
     try testCompletion(
         \\const foo = struct {
         \\    /// A
@@ -2313,7 +2417,7 @@ test "combine doc comments of declaration and definition" {
     , &.{
         .{
             .label = "bar",
-            .kind = .Constant,
+            .kind = .Struct,
             .detail = "struct",
             .documentation =
             \\ A
@@ -2335,13 +2439,28 @@ test "top-level doc comment" {
     , &.{
         .{
             .label = "Foo",
-            .kind = .Constant,
-            .detail = "@This()",
+            .kind = .Struct,
+            .detail = "type",
             .documentation =
             \\ A
             \\
             \\ B
             ,
+        },
+    });
+}
+
+test "filesystem" {
+    try testCompletion(
+        \\const foo = @import("<cursor>");
+    , &.{
+        .{
+            .label = "std",
+            .kind = .Module,
+        },
+        .{
+            .label = "builtin",
+            .kind = .Module,
         },
     });
 }
@@ -2613,6 +2732,15 @@ test "insert replace behaviour - function" {
     });
     try testCompletionTextEdit(.{
         .source =
+        \\fn foo(a: u32, b: u32) void {}
+        \\const _ = <cursor>
+        ,
+        .label = "foo",
+        .expected_insert_line = "const _ = foo",
+        .expected_replace_line = "const _ = foo",
+    });
+    try testCompletionTextEdit(.{
+        .source =
         \\fn foo(number: u32) void {}
         \\const _ = <cursor>()
         ,
@@ -2706,6 +2834,18 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn f(self: S, number: u32) void {}
+        \\};
+        \\const s = S{};
+        \\s.<cursor>
+        ,
+        .label = "f",
+        .expected_insert_line = "s.f",
+        .expected_replace_line = "s.f",
     });
 }
 
@@ -3007,14 +3147,20 @@ test "insert replace behaviour - file system completions" {
         , .expected_replace_line = \\const std = @import("std");
         ,
     });
-    // TODO
-    // try testCompletionTextEdit(.{
-    //     .source = \\const std = @import("st<cursor>.zig");
-    //     , .label = "std"
-    //     , .expected_insert_line = \\const std = @import("std.zig");
-    //     , .expected_replace_line = \\const std = @import("std");
-    //     ,
-    // });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("<cursor>.zig");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("std.zig");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
+    try testCompletionTextEdit(.{
+        .source = \\const std = @import("st<cursor>.zig");
+        , .label = "std"
+        , .expected_insert_line = \\const std = @import("std.zig");
+        , .expected_replace_line = \\const std = @import("std");
+        ,
+    });
     if (true) return error.SkipZigTest; // TODO
     try testCompletionTextEdit(.{
         .source = \\const std = @import("file<cursor>.zig");

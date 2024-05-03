@@ -53,8 +53,8 @@ pub const Context = struct {
     // helper
     pub fn addDocument(self: *Context, source: []const u8) ![]const u8 {
         const fmt = switch (builtin.os.tag) {
-            .windows => "file:///C:\\test-{d}.zig",
-            else => "file:///test-{d}.zig",
+            .windows => "file:///C:\\nonexistent\\test-{d}.zig",
+            else => "file:///nonexistent/test-{d}.zig",
         };
         const uri = try std.fmt.allocPrint(
             self.arena.allocator(),
