@@ -1169,7 +1169,7 @@ fn resolveConfiguration(
         const build_config_path = try std.fs.path.join(allocator, &[_][]const u8{ global_cache_path, "BuildConfig.zig" });
         defer allocator.free(build_config_path);
 
-        std.fs.cwd().writeFile2(.{
+        std.fs.cwd().writeFile(.{
             .sub_path = build_config_path,
             .data = @embedFile("build_runner/BuildConfig.zig"),
         }) catch |err| {
@@ -1177,7 +1177,7 @@ fn resolveConfiguration(
             break :blk;
         };
 
-        std.fs.cwd().writeFile2(.{
+        std.fs.cwd().writeFile(.{
             .sub_path = build_runner_path,
             .data = switch (result.build_runner_version.?) {
                 inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
@@ -1215,7 +1215,7 @@ fn resolveConfiguration(
 
         const builtin_path = try std.fs.path.join(config_arena, &.{ global_cache_path, "builtin.zig" });
 
-        std.fs.cwd().writeFile2(.{
+        std.fs.cwd().writeFile(.{
             .sub_path = builtin_path,
             .data = run_result.stdout,
         }) catch |err| {
