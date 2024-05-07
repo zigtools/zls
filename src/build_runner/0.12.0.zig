@@ -295,7 +295,17 @@ pub fn main() !void {
         }
         const s = std.fs.path.sep_str;
         const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse fatal("missing -Z arg", .{}));
-        local_cache_directory.handle.writeFile2(.{
+
+        const writeFileFn = comptime blk: {
+            const writeFile2_removed_version =
+                std.SemanticVersion.parse("0.13.0-dev.68+b86c4bde6") catch unreachable;
+            break :blk if (builtin.zig_version.order(writeFile2_removed_version) == .lt)
+                std.fs.Dir.writeFile2
+            else
+                std.fs.Dir.writeFile;
+        };
+
+        writeFileFn(local_cache_directory.handle, .{
             .sub_path = tmp_sub_path,
             .data = buffer.items,
             .flags = .{ .exclusive = true },
@@ -304,6 +314,7 @@ pub fn main() !void {
                 local_cache_directory, tmp_sub_path, @errorName(err),
             });
         };
+
         process.exit(3); // Indicate configure phase failed with meaningful stdout.
     }
 
