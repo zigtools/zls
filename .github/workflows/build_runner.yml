@@ -21,8 +21,10 @@ jobs:
     strategy:
       matrix:
         include:
-          # - zig-version: master
+          - zig-version: master
+            build-runner-file: 0.12.0.zig
           - zig-version: 0.12.0
+            build-runner-file: 0.12.0.zig
     runs-on: ubuntu-latest
 
     steps:
@@ -44,4 +46,4 @@ jobs:
       - name: Check build_runner builds
         run: |
           cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
-          zig build --build-runner $GITHUB_WORKSPACE/src/build_runner/${{ matrix.zig-version }}*.zig
+          zig build --build-runner $GITHUB_WORKSPACE/src/build_runner/${{ matrix.build-runner-file }}
