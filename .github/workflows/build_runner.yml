@@ -8,6 +8,9 @@ on:
     paths:
       - ".github/workflows/build_runner.yml"
       - "src/build_runner/**"
+      # Ensure that the build runner checks get run when the minimum Zig version gets modified
+      - "build.zig"
+      - "build.zig.zon"
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
