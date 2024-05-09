@@ -937,24 +937,29 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
 
         const are_different_tagged_versions = zig_version_is_tagged and zls_version_is_tagged and zig_version_simple.order(zls_version_simple) != .eq;
 
-        if (zig_version_is_tagged != zls_version_is_tagged or are_different_tagged_versions) {
-            if (zig_version_is_tagged) {
-                server.showMessage(
-                    .Warning,
-                    "Zig {} should be used with ZLS {} but ZLS {s} is being used.",
-                    .{ zig_version, zig_version_simple, zls_version_string },
-                );
-            } else if (zls_version_is_tagged) {
-                server.showMessage(
-                    .Warning,
-                    "ZLS {s} should be used with Zig {} but found Zig {}. ",
-                    .{ zls_version_string, zls_version_simple, zig_version },
-                );
-            } else unreachable;
+        const minimum_zig_version_unsatisfied = zig_version.order(minimum_runtime_zig_version) == .lt;
+
+        if (are_different_tagged_versions or
+            (zig_version_is_tagged and !zls_version_is_tagged and minimum_zig_version_unsatisfied))
+        {
+            server.showMessage(
+                .Warning,
+                "Zig {} should be used with ZLS {} but ZLS {s} is being used.",
+                .{ zig_version, zig_version_simple, zls_version_string },
+            );
             break :version_check;
         }
 
-        if (zig_version.order(minimum_runtime_zig_version) == .lt) {
+        if (zls_version_is_tagged and !zig_version_is_tagged) {
+            server.showMessage(
+                .Warning,
+                "ZLS {s} should be used with Zig {} but found Zig {}.",
+                .{ zls_version_string, zls_version_simple, zig_version },
+            );
+            break :version_check;
+        }
+
+        if (minimum_zig_version_unsatisfied) {
             // don't report a warning when using a Zig version that has a matching build runner
             if (resolve_result.build_runner_version != null and resolve_result.build_runner_version.?.isTaggedRelease()) break :version_check;
             server.showMessage(
