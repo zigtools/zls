@@ -3648,6 +3648,25 @@ pub const DeclWithHandle = struct {
         };
     }
 
+    pub fn isCaptureByRef(self: DeclWithHandle) bool {
+        const tree = self.handle.tree;
+        const token_tags = tree.tokens.items(.tag);
+        return switch (self.decl) {
+            .ast_node,
+            .function_parameter,
+            .error_union_error,
+            .assign_destructure,
+            .label,
+            .error_token,
+            => false,
+            inline .optional_payload,
+            .for_loop_payload,
+            .error_union_payload,
+            => |payload| token_tags[payload.identifier - 1] == .asterisk,
+            .switch_payload => |payload| token_tags[payload.getCase(tree).payload_token.?] == .asterisk,
+        };
+    }
+
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         const tree = self.handle.tree;
         return switch (self.decl) {
@@ -3675,13 +3694,11 @@ pub const DeclWithHandle = struct {
         defer tracy_zone.end();
 
         const tree = self.handle.tree;
-        const node_tags = tree.nodes.items(.tag);
-        const main_tokens = tree.nodes.items(.main_token);
-        return switch (self.decl) {
+        const resolved_ty = switch (self.decl) {
             .ast_node => |node| try analyser.resolveTypeOfNodeInternal(
                 .{ .node = node, .handle = self.handle },
             ),
-            .function_parameter => |pay| {
+            .function_parameter => |pay| blk: {
                 // the `get` function never fails on declarations from the DocumentScope but
                 // there may be manually created Declarations with invalid parameter indicies.
                 const param = pay.get(tree) orelse return null;
@@ -3697,7 +3714,7 @@ pub const DeclWithHandle = struct {
 
                     // protection against recursive callsite resolution
                     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
-                    if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
+                    if (gop_resolved.found_existing) break :blk gop_resolved.value_ptr.*;
                     gop_resolved.value_ptr.* = null;
 
                     const func_decl = Declaration{ .ast_node = pay.func };
@@ -3739,13 +3756,13 @@ pub const DeclWithHandle = struct {
 
                         if (real_param_idx >= call.ast.params.len) continue;
 
-                        const ty = blk: {
+                        const ty = resolve_ty: {
                             // don't resolve callsite references while resolving callsite references
                             const old_collect_callsite_references = analyser.collect_callsite_references;
                             defer analyser.collect_callsite_references = old_collect_callsite_references;
                             analyser.collect_callsite_references = false;
 
-                            break :blk try analyser.resolveTypeOfNode(.{
+                            break :resolve_ty try analyser.resolveTypeOfNode(.{
                                 // TODO?: this is a """heuristic based approach"""
                                 // perhaps it would be better to use proper self detection
                                 // maybe it'd be a perf issue and this is fine?
@@ -3755,7 +3772,7 @@ pub const DeclWithHandle = struct {
                             }) orelse continue;
                         };
 
-                        const loc = offsets.tokenToPosition(tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
+                        const loc = offsets.tokenToPosition(tree, tree.nodes.items(.main_token)[call.ast.params[real_param_idx]], .@"utf-8");
                         try possible.append(analyser.arena.allocator(), .{
                             .type = ty,
                             .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
@@ -3764,7 +3781,7 @@ pub const DeclWithHandle = struct {
 
                     const maybe_type = try Type.fromEither(analyser.arena.allocator(), possible.items);
                     if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
-                    return maybe_type;
+                    break :blk maybe_type;
                 }
 
                 const param_type = try analyser.resolveTypeOfNodeInternal(
@@ -3773,18 +3790,18 @@ pub const DeclWithHandle = struct {
 
                 if (param_type.isMetaType()) {
                     if (analyser.bound_type_params.get(.{ .func = pay.func, .param_index = pay.param_index })) |resolved_type| {
-                        return resolved_type;
+                        break :blk resolved_type;
                     }
                 }
 
-                return try param_type.instanceTypeVal(analyser);
+                break :blk try param_type.instanceTypeVal(analyser);
             },
-            .optional_payload => |pay| {
+            .optional_payload => |pay| blk: {
                 const ty = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = pay.condition,
                     .handle = self.handle,
                 })) orelse return null;
-                return try analyser.resolveOptionalUnwrap(ty);
+                break :blk try analyser.resolveOptionalUnwrap(ty);
             },
             .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
                 (try analyser.resolveTypeOfNodeInternal(.{
@@ -3807,19 +3824,19 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 .Single,
             ),
-            .assign_destructure => |pay| {
+            .assign_destructure => |pay| blk: {
                 const type_node = pay.getFullVarDecl(tree).ast.type_node;
                 if (type_node != 0) {
                     if (try analyser.resolveTypeOfNode(.{
                         .node = type_node,
                         .handle = self.handle,
-                    })) |ty| return try ty.instanceTypeVal(analyser);
+                    })) |ty| break :blk try ty.instanceTypeVal(analyser);
                 }
                 const node = try analyser.resolveTypeOfNode(.{
                     .node = tree.nodes.items(.data)[pay.node].rhs,
                     .handle = self.handle,
                 }) orelse return null;
-                return switch (node.data) {
+                break :blk switch (node.data) {
                     .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
                     .other => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
@@ -3829,7 +3846,7 @@ pub const DeclWithHandle = struct {
                 .node = decl.block,
                 .handle = self.handle,
             }),
-            .switch_payload => |payload| {
+            .switch_payload => |payload| blk: {
                 const cond = tree.nodes.items(.data)[payload.node].lhs;
                 const case = payload.getCase(tree);
 
@@ -3837,21 +3854,35 @@ pub const DeclWithHandle = struct {
                     .node = cond,
                     .handle = self.handle,
                 })) orelse return null;
-                if (switch_expr_type.isEnumType()) return switch_expr_type;
+                if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
                 if (!switch_expr_type.isUnionType()) return null;
 
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {
-                    if (node_tags[case_value] != .enum_literal) continue;
+                    if (tree.nodes.items(.tag)[case_value] != .enum_literal) continue;
 
-                    const name = tree.tokenSlice(main_tokens[case_value]);
+                    const name = tree.tokenSlice(tree.nodes.items(.main_token)[case_value]);
                     const decl = try switch_expr_type.lookupSymbol(analyser, name) orelse continue;
-                    return (try decl.resolveType(analyser)) orelse continue;
+                    break :blk (try decl.resolveType(analyser)) orelse continue;
                 }
 
                 return null;
             },
             .error_token => return null,
+        } orelse return null;
+
+        if (!self.isCaptureByRef()) return resolved_ty;
+
+        const resolved_ty_ptr = try analyser.arena.allocator().create(Type);
+        resolved_ty_ptr.* = resolved_ty.typeOf(analyser);
+
+        return Type{
+            .data = .{ .pointer = .{
+                .elem_ty = resolved_ty_ptr,
+                .is_const = false,
+                .size = .One,
+            } },
+            .is_type_val = false,
         };
     }
 };

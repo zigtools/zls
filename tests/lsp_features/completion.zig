@@ -915,6 +915,20 @@ test "if captures" {
     });
 }
 
+test "if capture by ref" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(bar: ?S) void {
+        \\    if (bar) |*baz| {
+        \\        baz.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "for captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -974,6 +988,20 @@ test "for captures" {
     });
 }
 
+test "for capture by ref" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(items: []S) void {
+        \\    for (items, 0..) |*bar, i| {
+        \\        bar.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "while captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -1001,6 +1029,20 @@ test "while captures" {
     });
 }
 
+test "while capture by ref" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(bar: ?S) void {
+        \\    while (bar) |*baz| {
+        \\        baz.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "catch captures" {
     try testCompletion(
         \\const E = error{ X, Y };
@@ -1015,6 +1057,22 @@ test "catch captures" {
         \\}
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
+test "switch capture by ref" {
+    try testCompletion(
+        \\const U = union { alpha: ?u32 };
+        \\fn foo(bar: U) void {
+        \\    switch (bar) {
+        \\        .alpha => |*a| {
+        \\            a.<cursor>
+        \\        }
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "?u32" },
+        .{ .label = "?", .kind = .Operator, .detail = "u32" },
     });
 }
 
@@ -1114,9 +1172,7 @@ test "union" {
     });
 
     try testCompletion(
-        \\const U = union {
-        \\    alpha: ?u32,
-        \\};
+        \\const U = union { alpha: ?u32 };
         \\fn foo(bar: U) void {
         \\    switch (bar) {
         \\        .alpha => |a| {
@@ -1125,7 +1181,7 @@ test "union" {
         \\    }
         \\}
     , &.{
-        .{ .label = "?", .kind = .Operator },
+        .{ .label = "?", .kind = .Operator, .detail = "u32" },
     });
 }
 
