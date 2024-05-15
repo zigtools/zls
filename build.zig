@@ -7,10 +7,10 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0 };
 const zls_version_is_tagged: bool = false;
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Rename Dir.writeFile2 -> Dir.writeFile and update all callsites
+/// Run: add output directory arguments
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_zig_version = "0.13.0-dev.68+b86c4bde6";
+const minimum_zig_version = "0.13.0-dev.79+6bc0cef60";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0
@@ -290,8 +290,8 @@ pub fn build(b: *Build) !void {
         tests_run.has_side_effects = true;
         src_tests_run.has_side_effects = true;
 
-        tests_run.argv.insertSlice(0, args) catch @panic("OOM");
-        src_tests_run.argv.insertSlice(0, args) catch @panic("OOM");
+        tests_run.argv.insertSlice(b.allocator, 0, args) catch @panic("OOM");
+        src_tests_run.argv.insertSlice(b.allocator, 0, args) catch @panic("OOM");
 
         const merge_step = std.Build.Step.Run.create(b, "merge kcov");
         merge_step.has_side_effects = true;

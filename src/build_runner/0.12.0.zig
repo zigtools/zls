@@ -775,10 +775,18 @@ fn extractBuildInformation(
 
     const helper = struct {
         fn addStepDependencies(set: *std.AutoArrayHashMap(*Step, void), lazy_path: std.Build.LazyPath) !void {
-            switch (lazy_path) {
-                .src_path, .path, .cwd_relative, .dependency => {},
-                .generated => |gen| try set.put(gen.step, {}),
-                .generated_dirname => |gen| try set.put(gen.generated.step, {}),
+            const lazy_path_updated_version = comptime std.SemanticVersion.parse("0.13.0-dev.79+6bc0cef60") catch unreachable;
+            if (comptime builtin.zig_version.order(lazy_path_updated_version) == .lt) {
+                switch (lazy_path) {
+                    .src_path, .path, .cwd_relative, .dependency => {},
+                    .generated => |gen| try set.put(gen.step, {}),
+                    .generated_dirname => |gen| try set.put(gen.generated.step, {}),
+                }
+            } else {
+                switch (lazy_path) {
+                    .src_path, .cwd_relative, .dependency => {},
+                    .generated => |gen| try set.put(gen.file.step, {}),
+                }
             }
         }
     };
