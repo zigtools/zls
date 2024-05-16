@@ -1875,13 +1875,29 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 label_token: ?Ast.TokenIndex,
                 then_expr: Ast.Node.Index,
                 else_expr: Ast.Node.Index,
-            } = if (ast.fullWhile(tree, node)) |while_node|
-                .{
+            } = if (ast.fullWhile(tree, node)) |while_node| no_hang: {
+
+                // while (true) {} is a noreturn type
+                if (try analyser.resolveTypeOfNodeInternal(.{ .node = while_node.ast.cond_expr, .handle = handle })) |cond_type| {
+                    switch (cond_type.data) {
+                        .ip_index => |payload| {
+                            switch (payload.index) {
+                                .bool_true => {
+                                    return try Type.typeValFromIP(analyser, .noreturn_type);
+                                },
+                                else => {},
+                            }
+                        },
+                        else => {},
+                    }
+                }
+
+                break :no_hang .{
                     .label_token = while_node.label_token,
                     .then_expr = while_node.ast.then_expr,
                     .else_expr = while_node.ast.else_expr,
-                }
-            else if (ast.fullFor(tree, node)) |for_node|
+                };
+            } else if (ast.fullFor(tree, node)) |for_node|
                 .{
                     .label_token = for_node.label_token,
                     .then_expr = for_node.ast.then_expr,
@@ -2144,10 +2160,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .switch_case,
         .switch_case_inline,
         .switch_range,
+        => {},
         .@"continue",
         .@"break",
         .@"return",
-        => {},
+        => {
+            return try Type.typeValFromIP(analyser, .noreturn_type);
+        },
 
         .@"await",
         .@"suspend",
