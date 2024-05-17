@@ -1471,26 +1471,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .unwrap_optional => try analyser.resolveOptionalUnwrap(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
                 .@"orelse" => {
-                    // If the rhs is noreturn, return the left side unwrapped
-                    // Else return the right side
-                    const base_right = .{ .node = datas[node].rhs, .handle = handle };
-                    const base_type_right = try analyser.resolveTypeOfNodeInternal(base_right) orelse return null;
-                    const idx = switch (base_type_right.data) {
-                        .ip_index => |payload| payload.index,
-                        else => {
-                            return base_type_right;
-                        },
-                    };
-                    const ty = analyser.ip.typeOf(idx);
-                    const simple = switch (analyser.ip.indexToKey(ty)) {
-                        .simple_type => |simple| simple,
-                        else => {
-                            return null;
-                        },
-                    };
-                    return switch (simple) {
-                        .noreturn, .comptime_int, .comptime_float => analyser.resolveOptionalUnwrap(base_type),
-                        else => base_type_right,
+                    const type_right = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return null;
+                    return switch (type_right.data) {
+                        .optional => type_right,
+                        else => try analyser.resolveOptionalUnwrap(base_type),
                     };
                 },
                 .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
