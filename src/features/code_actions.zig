@@ -34,6 +34,7 @@ pub const Builder = struct {
             .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
+                .@"error capture; omit it instead" => {},
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
             },
             // the undeclared identifier may be a discard
@@ -532,7 +533,7 @@ const DiagnosticKind = union(enum) {
     };
 
     const DiscardCat = enum {
-        // "discard of error capture; omit it instead"
+        @"error capture; omit it instead",
         @"error capture",
     };
 
