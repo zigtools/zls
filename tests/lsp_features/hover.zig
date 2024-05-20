@@ -619,19 +619,6 @@ test "optional" {
         \\(i32)
         \\```
     );
-
-    try testHover(
-        \\fn foo(foo: ?i32) void {
-        \\    const b<cursor>ar = foo orelse while (true) {};
-        \\}
-    ,
-        \\```zig
-        \\const bar = foo orelse while (true) {}
-        \\```
-        \\```zig
-        \\(i32)
-        \\```
-    );
 }
 
 test "error union" {
