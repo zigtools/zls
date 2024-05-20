@@ -117,6 +117,7 @@ test "discard captures" {
         \\    if (null) |x| {}
         \\    if (null) |v| {} else |e| {}
         \\    _ = null catch |e| {};
+        \\    _ = null catch |_| {};
         \\}
         \\
     ,
@@ -143,6 +144,7 @@ test "discard captures" {
         \\    _ = null catch |e| {
         \\        _ = e; // autofix
         \\    };
+        \\    _ = null catch |_| {};
         \\}
         \\
     );
