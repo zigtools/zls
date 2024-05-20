@@ -799,6 +799,13 @@ pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Type) error{OutOfMem
     }
 }
 
+pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfMemory}!?Type {
+    return switch (rhs.data) {
+        .optional => rhs,
+        else => try analyser.resolveOptionalUnwrap(lhs),
+    };
+}
+
 /// Resolves the child type of an optional type
 pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{OutOfMemory}!?Type {
     _ = analyser;
@@ -1472,10 +1479,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
                 .@"orelse" => {
                     const type_right = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return null;
-                    return switch (type_right.data) {
-                        .optional => type_right,
-                        else => try analyser.resolveOptionalUnwrap(base_type),
-                    };
+                    return try analyser.resolveOrelseType(base_type, type_right);
                 },
                 .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
                 .@"try" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
