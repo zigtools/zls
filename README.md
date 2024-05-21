@@ -23,7 +23,7 @@ The Zig Language Server (ZLS) is a tool that implements Microsoft's Language Ser
 ## Installation
 
 <!-- omit in toc -->
-### [See the `install zls` tool](https://zigtools.github.io/install-zls/) for editor and binary installation instructions.
+### See the [Installation Guide](https://github.com/zigtools/zls/wiki/Installation) for editor and binary installation instructions.
 
 ### From Source
 
