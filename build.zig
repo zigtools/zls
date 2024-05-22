@@ -261,6 +261,7 @@ pub fn build(b: *Build) !void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     const src_tests = b.addTest(.{
+        .name = "src test",
         .root_source_file = b.path("src/zls.zig"),
         .target = target,
         .optimize = optimize,
@@ -274,42 +275,34 @@ pub fn build(b: *Build) !void {
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
-        const coverage_output_dir = b.makeTempPath();
-        const include_pattern = b.fmt("--include-pattern=/src", .{});
-        const exclude_pattern = b.fmt("--exclude-pattern=/src/stage2", .{});
-        const args = &[_]std.Build.Step.Run.Arg{
-            .{ .bytes = b.dupe("kcov") },
-            .{ .bytes = b.dupe("--collect-only") },
-            .{ .bytes = b.dupe(include_pattern) },
-            .{ .bytes = b.dupe(exclude_pattern) },
-            .{ .bytes = b.dupe(coverage_output_dir) },
-        };
+        const merge_step = std.Build.Step.Run.create(b, "merge coverage");
+        merge_step.addArgs(&.{ "kcov", "--merge" });
+        merge_step.rename_step_with_output_arg = false;
+        const merged_coverage_output = merge_step.addOutputFileArg(".");
 
-        const tests_run = b.addRunArtifact(tests);
-        const src_tests_run = b.addRunArtifact(src_tests);
-        tests_run.has_side_effects = true;
-        src_tests_run.has_side_effects = true;
+        {
+            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(tests.name));
+            kcov_collect.addArtifactArg(tests);
+            kcov_collect.enableTestRunnerMode();
+        }
 
-        tests_run.argv.insertSlice(b.allocator, 0, args) catch @panic("OOM");
-        src_tests_run.argv.insertSlice(b.allocator, 0, args) catch @panic("OOM");
-
-        const merge_step = std.Build.Step.Run.create(b, "merge kcov");
-        merge_step.has_side_effects = true;
-        merge_step.addArgs(&.{
-            "kcov",
-            "--merge",
-            b.pathJoin(&.{ coverage_output_dir, "output" }),
-            b.pathJoin(&.{ coverage_output_dir, "test" }),
-        });
-        merge_step.step.dependOn(&tests_run.step);
-        merge_step.step.dependOn(&src_tests_run.step);
+        {
+            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(src_tests.name));
+            kcov_collect.addArtifactArg(src_tests);
+            kcov_collect.enableTestRunnerMode();
+        }
 
         const install_coverage = b.addInstallDirectory(.{
-            .source_dir = .{ .cwd_relative = b.pathJoin(&.{ coverage_output_dir, "output" }) },
+            .source_dir = merged_coverage_output,
             .install_dir = .{ .custom = "coverage" },
             .install_subdir = "",
         });
-        install_coverage.step.dependOn(&merge_step.step);
         test_step.dependOn(&install_coverage.step);
     }
 }
