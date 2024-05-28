@@ -107,12 +107,12 @@ test "struct field access" {
     );
 }
 
-// test "struct field init" {
-//     try testReferences(
-//         \\const S = struct {<0>: u32};
-//         \\const s = S{.<0> = 0 };
-//     );
-// }
+test "struct field init" {
+    try testReferences(
+        \\const S = struct {<0>: u32};
+        \\const s = S{.<0> = 0 };
+    );
+}
 
 test "struct decl access" {
     try testReferences(
