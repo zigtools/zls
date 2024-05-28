@@ -10,6 +10,7 @@ const DocumentScope = @This();
 
 scopes: std.MultiArrayList(Scope) = .{},
 declarations: std.MultiArrayList(Declaration) = .{},
+trigram_decls_mapping_capacity: u32 = 0,
 declarations_that_should_be_trigram_indexed: std.ArrayListUnmanaged(Declaration.Index) = .{},
 /// Used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap = .{},
@@ -209,6 +210,7 @@ const ScopeContext = struct {
             const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
 
             if (pushed.should_trigrams_be_indexed and name.len >= 3) {
+                doc_scope.trigram_decls_mapping_capacity += @intCast(name.len - 2);
                 try doc_scope.declarations_that_should_be_trigram_indexed.append(allocator, declaration_index);
             }
 

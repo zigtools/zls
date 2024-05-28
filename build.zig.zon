@@ -15,8 +15,8 @@
             .hash = "1220102cb2c669d82184fb1dc5380193d37d68b54e8d75b76b2d155b9af7d7e2e76d",
         },
         .fastfilter = .{
-            .url = "https://github.com/hexops/fastfilter/archive/b504ba1e636fb4847a7978c10ea32c64d457aaeb.tar.gz",
-            .hash = "1220e672d4980c183c6b29cf9b1200c3db23a7987968b0de7e6357f49b6b174c3276",
+            .url = "https://github.com/hexops/fastfilter/archive/b6e46f6d4811da0d8a0f8675ab85407172a207ba.tar.gz",
+            .hash = "1220c2275142456c3eb8152f626092237a7795e93518896581a9358ce857b3ca550e",
         },
     },
     .paths = .{""},

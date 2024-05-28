@@ -28,6 +28,7 @@ const inlay_hints = @import("features/inlay_hints.zig");
 const code_actions = @import("features/code_actions.zig");
 const folding_range = @import("features/folding_range.zig");
 const document_symbol = @import("features/document_symbol.zig");
+const workspace_symbols = @import("features/workspace_symbols.zig");
 const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
@@ -1636,9 +1637,10 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         }
     } else |_| return null;
 
-    var workspace_symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
-    var candidates_decl_map = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
-    var narrowing_decl_map = std.AutoArrayHashMapUnmanaged(Analyser.Declaration.Index, void){};
+    if (trigrams.items.len == 0) return null;
+
+    var symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
+    var candidate_decls_buffer = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
 
     doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
         const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
@@ -1651,40 +1653,35 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
             if (!trigram_store.filter.?.contain(@bitCast(trigram))) continue :doc_loop;
         }
 
-        candidates_decl_map.clearRetainingCapacity();
-        narrowing_decl_map.clearRetainingCapacity();
+        candidate_decls_buffer.clearRetainingCapacity();
 
-        var first_pass = true;
-        for (trigrams.items) |trigram| {
-            if (!first_pass and candidates_decl_map.items.len == 0) break;
+        const first = trigram_store.getDeclarationsForTrigram(trigrams.items[0]) orelse continue;
 
-            var it = trigram_store.iterate(trigram);
-            while (it.next().unwrap()) |decl| {
-                if (first_pass) {
-                    try candidates_decl_map.append(arena, decl);
-                } else {
-                    try narrowing_decl_map.put(arena, decl, {});
-                }
-            }
+        try candidate_decls_buffer.resize(arena, first.len * 2);
 
-            if (!first_pass) {
-                var index: usize = 0;
-                while (index < candidates_decl_map.items.len) {
-                    if (!narrowing_decl_map.contains(candidates_decl_map.items[index])) {
-                        _ = candidates_decl_map.swapRemove(index);
-                    } else index += 1;
-                }
-            }
+        var len = first.len;
 
-            first_pass = false;
+        @memcpy(candidate_decls_buffer.items[0..len], first);
+        @memcpy(candidate_decls_buffer.items[len..], first);
+
+        for (trigrams.items[1..]) |trigram| {
+            len = workspace_symbols.mergeIntersection(
+                trigram_store.getDeclarationsForTrigram(trigram) orelse continue :doc_loop,
+                candidate_decls_buffer.items[len..],
+                candidate_decls_buffer.items[0..len],
+            );
+            candidate_decls_buffer.items.len = len * 2;
+            @memcpy(candidate_decls_buffer.items[len..], candidate_decls_buffer.items[0..len]);
         }
 
-        for (candidates_decl_map.items) |decl_idx| {
+        candidate_decls_buffer.items.len = len;
+
+        for (candidate_decls_buffer.items) |decl_idx| {
             const decl = doc_scope.declarations.get(@intFromEnum(decl_idx));
             const name_token = decl.nameToken(tree);
 
             // TODO: integrate with document_symbol.zig for right kind info
-            try workspace_symbols.append(arena, .{
+            try symbols.append(arena, .{
                 .name = tree.tokenSlice(name_token),
                 .kind = .Variable,
                 .location = .{
@@ -1697,7 +1694,7 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         }
     }
 
-    return .{ .array_of_WorkspaceSymbol = workspace_symbols.items };
+    return .{ .array_of_WorkspaceSymbol = symbols.items };
 }
 
 const HandledRequestMethods = enum {
