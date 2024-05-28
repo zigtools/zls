@@ -11,7 +11,7 @@ const CompactingMultiList = @import("compacting_multi_list.zig").CompactingMulti
 const TrigramStore = @This();
 
 /// Fast lookup with false positives.
-filter: ?fastfilter.BinaryFuse8,
+filter: fastfilter.BinaryFuse8,
 /// Map index is a slice in decls.
 lookup: std.AutoArrayHashMapUnmanaged(Trigram, void),
 decls: CompactingMultiList(Declaration.Index).Compacted,
@@ -114,7 +114,7 @@ pub fn reset(store: *TrigramStore, allocator: std.mem.Allocator) void {
 }
 
 pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
-    if (store.filter) |filter| filter.deinit(allocator);
+    store.filter.deinit(allocator);
     store.lookup.deinit(allocator);
     store.decls.deinit(allocator);
     store.* = undefined;

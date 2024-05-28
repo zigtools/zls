@@ -1644,13 +1644,12 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
     doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
         const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
-        if (trigram_store.filter == null) continue;
 
         const tree = handle.tree;
         const doc_scope = try handle.getDocumentScope();
 
         for (trigrams.items) |trigram| {
-            if (!trigram_store.filter.?.contain(@bitCast(trigram))) continue :doc_loop;
+            if (!trigram_store.filter.contain(@bitCast(trigram))) continue :doc_loop;
         }
 
         candidate_decls_buffer.clearRetainingCapacity();
