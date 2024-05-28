@@ -107,12 +107,6 @@ test "struct field access" {
     );
 }
 
-test "struct field init" {
-    try testReferences(
-        \\const S = struct {<0>: u32};
-        \\const s = S{.<0> = 0 };
-    );
-}
 
 test "struct decl access" {
     try testReferences(
@@ -126,6 +120,20 @@ test "struct decl access" {
         \\    <1>();
         \\}
         \\fn <1>() void {}
+    );
+}
+
+test "struct one field init" {
+    try testReferences(
+        \\const S = struct {<0>: u32};
+        \\const s = S{.<0> = 0 };
+    );
+}
+
+test "struct multi-field init" {
+    try testReferences(
+        \\const S = struct {<0>: u32, a: bool};
+        \\const s = S{.<0> = 0, .a = true};
     );
 }
 
