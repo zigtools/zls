@@ -107,7 +107,6 @@ test "struct field access" {
     );
 }
 
-
 test "struct decl access" {
     try testReferences(
         \\const S = struct {
