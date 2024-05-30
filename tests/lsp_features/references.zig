@@ -122,6 +122,20 @@ test "struct decl access" {
     );
 }
 
+test "struct one field init" {
+    try testReferences(
+        \\const S = struct {<0>: u32};
+        \\const s = S{.<0> = 0 };
+    );
+}
+
+test "struct multi-field init" {
+    try testReferences(
+        \\const S = struct {<0>: u32, a: bool};
+        \\const s = S{.<0> = 0, .a = true};
+    );
+}
+
 test "while continue expression" {
     try testReferences(
         \\ pub fn foo() void {

@@ -129,6 +129,30 @@ const Builder = struct {
                     try builder.add(handle, datas[node].rhs);
                 }
             },
+            .struct_init_one,
+            .struct_init_one_comma,
+            .struct_init,
+            .struct_init_comma,
+            .struct_init_dot,
+            .struct_init_dot_comma,
+            .struct_init_dot_two,
+            .struct_init_dot_two_comma,
+            => {
+                var buffer: [2]Ast.Node.Index = undefined;
+                const struct_init = tree.fullStructInit(&buffer, node).?;
+                for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
+                    const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
+                    const name_loc = offsets.tokenToLoc(tree, name_token);
+                    const name = offsets.locToSlice(tree.source, name_loc);
+
+                    var nodes = [_]Ast.Node.Index{datas[node].lhs};
+                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, &nodes) orelse continue;
+
+                    if (builder.decl_handle.eql(lookup)) {
+                        try builder.add(handle, name_token);
+                    }
+                }
+            },
             else => {},
         }
     }
@@ -425,6 +449,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             break :z null;
         },
         .label => try Analyser.getLabelGlobal(source_index, handle, name),
+        .enum_literal => try analyser.getSymbolEnumLiteral(arena, handle, source_index, name),
         else => null,
     } orelse return null;
 
