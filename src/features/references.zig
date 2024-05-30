@@ -100,7 +100,6 @@ const Builder = struct {
         const datas = tree.nodes.items(.data);
         const token_tags = tree.tokens.items(.tag);
         const starts = tree.tokens.items(.start);
-        const main_tokens = tree.nodes.items(.main_token);
 
         switch (node_tags[node]) {
             .identifier,
@@ -132,21 +131,6 @@ const Builder = struct {
             },
             .struct_init_one,
             .struct_init_one_comma,
-            => {
-                if (datas[node].rhs == 0) {
-                    return;
-                }
-
-                const field_token_idx = main_tokens[node] + 2; // lbrace, '.', *then* the field we're looking for
-                const field_symbol = offsets.tokenToSlice(tree, field_token_idx);
-
-                var nodes = [_]Ast.Node.Index{datas[node].lhs};
-                const lookup = try builder.analyser.lookupSymbolFieldInit(handle, field_symbol, &nodes) orelse return;
-
-                if (builder.decl_handle.eql(lookup)) {
-                    try builder.add(handle, field_token_idx);
-                }
-            },
             .struct_init,
             .struct_init_comma,
             .struct_init_dot,
