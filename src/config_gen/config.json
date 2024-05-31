@@ -160,6 +160,12 @@
             "description": "When false, the function signature of completion results is hidden. Improves readability in some editors",
             "type": "bool",
             "default": true
+        },
+        {
+            "name": "build_config_path",
+            "description": "Path to a JSON file that describes a `BuildConfig`.",
+            "type": "?[]const u8",
+            "default": null
         }
     ]
 }

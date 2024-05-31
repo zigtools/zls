@@ -991,7 +991,8 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
         const file_info: FileCheckInfo = comptime if (std.mem.indexOf(u8, field_name, "path") != null) blk: {
             if (std.mem.eql(u8, field_name, "zig_exe_path") or
                 std.mem.eql(u8, field_name, "builtin_path") or
-                std.mem.eql(u8, field_name, "build_runner_path"))
+                std.mem.eql(u8, field_name, "build_runner_path") or
+                std.mem.eql(u8, field_name, "build_config_path"))
             {
                 break :blk .{ .kind = .file, .is_accessible = true };
             } else if (std.mem.eql(u8, field_name, "zig_lib_path")) {

@@ -47,6 +47,7 @@ pub const Config = struct {
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_path: ?[]const u8,
+    build_config_path: ?[]const u8,
 
     pub fn fromMainConfig(config: @import("Config.zig")) Config {
         return .{
@@ -55,6 +56,7 @@ pub const Config = struct {
             .build_runner_path = config.build_runner_path,
             .builtin_path = config.builtin_path,
             .global_cache_path = config.global_cache_path,
+            .build_config_path = config.build_config_path,
         };
     }
 };
@@ -1024,39 +1026,61 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     const build_file_path = try URI.parse(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
 
-    const args = try self.prepareBuildRunnerArgs(build_file_uri);
-    defer {
-        for (args) |arg| self.allocator.free(arg);
-        self.allocator.free(args);
-    }
+    const raw_json = if (self.config.build_config_path) |bcp| blk: {
+        const build_config_raw = std.fs.cwd().readFileAllocOptions(
+            self.allocator,
+            bcp,
+            max_document_size,
+            null,
+            @alignOf(u8),
+            0,
+        ) catch |err| {
+            log.err("failed to load build config `{s}`: {}", .{ bcp, err });
+            return error.RunFailed;
+        };
 
-    const zig_run_result = blk: {
-        const tracy_zone2 = tracy.trace(@src());
-        defer tracy_zone2.end();
-        break :blk try std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = args,
-            .cwd = std.fs.path.dirname(build_file_path).?,
-            .max_output_bytes = 1024 * 1024,
-        });
+        break :blk build_config_raw;
+    } else blk: {
+        const args = try self.prepareBuildRunnerArgs(build_file_uri);
+        defer {
+            for (args) |arg| self.allocator.free(arg);
+            self.allocator.free(args);
+        }
+
+        const zig_run_result = blk2: {
+            const tracy_zone2 = tracy.trace(@src());
+            defer tracy_zone2.end();
+            break :blk2 try std.process.Child.run(.{
+                .allocator = self.allocator,
+                .argv = args,
+                .cwd = std.fs.path.dirname(build_file_path).?,
+                .max_output_bytes = 1024 * 1024,
+            });
+        };
+
+        const failed = switch (zig_run_result.term) {
+            .Exited => |exit_code| if (exit_code != 0) true else false,
+            else => true,
+        };
+
+        if (failed) {
+            const joined = std.mem.join(self.allocator, " ", args) catch null;
+            defer if (joined) |j| self.allocator.free(j);
+
+            log.err(
+                "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
+                .{ joined orelse "OOM", zig_run_result.stderr },
+            );
+            self.allocator.free(zig_run_result.stderr);
+            return error.RunFailed;
+        }
+
+        self.allocator.free(zig_run_result.stderr);
+
+        break :blk zig_run_result.stdout;
     };
-    defer self.allocator.free(zig_run_result.stdout);
-    defer self.allocator.free(zig_run_result.stderr);
 
-    errdefer blk: {
-        const joined = std.mem.join(self.allocator, " ", args) catch break :blk;
-        defer self.allocator.free(joined);
-
-        log.err(
-            "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
-            .{ joined, zig_run_result.stderr },
-        );
-    }
-
-    switch (zig_run_result.term) {
-        .Exited => |exit_code| if (exit_code != 0) return error.RunFailed,
-        else => return error.RunFailed,
-    }
+    defer self.allocator.free(raw_json);
 
     const parse_options = std.json.ParseOptions{
         // We ignore unknown fields so people can roll
@@ -1069,7 +1093,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     const build_config = std.json.parseFromSlice(
         BuildConfig,
         self.allocator,
-        zig_run_result.stdout,
+        raw_json,
         parse_options,
     ) catch return error.RunFailed;
     errdefer build_config.deinit();

@@ -75,6 +75,7 @@ The following options are currently available.
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls` |
 | `build_runner_global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env` |
 | `completion_label_details` | `bool` | `true` | When false, the function signature of completion results is hidden. Improves readability in some editors |
+| `build_config_path` | `?[]const u8` | `null` | Path to a JSON file that describes a `BuildConfig`. |
 <!-- DO NOT EDIT -->
 
 ### Per-build Configuration Options
