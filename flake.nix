@@ -1,52 +1,65 @@
 {
-  inputs =
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    zig-overlay.url = "github:mitchellh/zig-overlay";
+    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
+    gitignore.url = "github:hercules-ci/gitignore.nix";
+    gitignore.inputs.nixpkgs.follows = "nixpkgs";
+
+    langref.url = "https://raw.githubusercontent.com/ziglang/zig/a685ab1499d6560c523f0dbce2890dc140671e43/doc/langref.html.in";
+    langref.flake = false;
+  };
+
+  outputs =
     {
-      nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
-
-      zig-overlay.url = "github:mitchellh/zig-overlay";
-      zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
-
-      gitignore.url = "github:hercules-ci/gitignore.nix";
-      gitignore.inputs.nixpkgs.follows = "nixpkgs";
-
-      flake-utils.url = "github:numtide/flake-utils";
-
-      langref.url = "https://raw.githubusercontent.com/ziglang/zig/a685ab1499d6560c523f0dbce2890dc140671e43/doc/langref.html.in";
-      langref.flake = false;
-    };
-
-  outputs = inputs:
+      self,
+      nixpkgs,
+      zig-overlay,
+      gitignore,
+      langref,
+    }:
     let
-      inherit (inputs) nixpkgs zig-overlay gitignore flake-utils;
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
+          system:
+          f {
+            inherit system;
+            pkgs = import nixpkgs { inherit system; };
+          }
+        );
       inherit (gitignore.lib) gitignoreSource;
     in
-    flake-utils.lib.eachSystem systems (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}.master;
-      in
-      rec {
-        formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
-        packages.default = packages.zls;
-        packages.zls = pkgs.stdenvNoCC.mkDerivation {
-          name = "zls";
-          version = "master";
-          src = gitignoreSource ./.;
-          nativeBuildInputs = [ zig ];
-          dontConfigure = true;
-          dontInstall = true;
-          doCheck = true;
-          langref = inputs.langref;
-          buildPhase = ''
-            mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { }} .cache/p
-            zig build install --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
-          '';
-          checkPhase = ''
-            zig build test --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline
-          '';
-        };
-      }
-    );
+    {
+      formatter = forAllSystems ({ system, pkgs }: pkgs.nixfmt-rfc-style);
+      packages = forAllSystems (
+        { system, pkgs }:
+        let
+          zig = zig-overlay.packages.${system}.master;
+          zls = pkgs.stdenvNoCC.mkDerivation {
+            name = "zls";
+            version = "master";
+            src = gitignoreSource ./.;
+            nativeBuildInputs = [ zig ];
+            dontConfigure = true;
+            dontInstall = true;
+            doCheck = true;
+            buildPhase = ''
+              mkdir -p .cache
+              ln -s ${pkgs.callPackage ./deps.nix { }} .cache/p
+              zig build install --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=${langref} -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
+            '';
+            checkPhase = ''
+              zig build test --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=${langref} -Dcpu=baseline
+            '';
+          };
+        in
+        {
+          inherit zls;
+          default = zls;
+        }
+      );
+    };
 }
