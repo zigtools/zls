@@ -1,10 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// Must match the `version` in `build.zig.zon`. Add a `-dev` suffix when `zls_version_is_tagged == false`.
-const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0 };
-/// set this to true when tagging a new ZLS release and then unset it on the next development cycle.
-const zls_version_is_tagged: bool = false;
+/// Must match the `version` in `build.zig.zon`.
+/// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
+const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// rework std.Progress
@@ -37,14 +36,14 @@ pub fn build(b: *Build) !void {
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
     const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
 
-    const version_result = getVersion(b);
+    const resolved_zls_version = getVersion(b);
+    const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
 
     const build_options = b.addOptions();
     build_options.step.name = "ZLS build options";
     const build_options_module = build_options.createModule();
-    build_options.addOption([]const u8, "version_string", version_result.version_string);
-    build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_result.version_string));
-    build_options.addOption(?[]const u8, "precise_version_string", version_result.precise_version_string);
+    build_options.addOption(std.SemanticVersion, "version", resolved_zls_version);
+    build_options.addOption([]const u8, "version_string", resolved_zls_version_string);
     build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
 
     const exe_options = b.addOptions();
@@ -98,7 +97,7 @@ pub fn build(b: *Build) !void {
     gen_step.dependOn(&gen_cmd.step);
 
     const gen_version_data_cmd = b.addRunArtifact(gen_exe);
-    const resolved_data_version = data_version orelse if (zls_version_is_tagged) b.fmt("{}", .{zls_version}) else "master";
+    const resolved_data_version = data_version orelse if (zls_version.pre == null and zls_version.build == null) zls_version else "master";
     gen_version_data_cmd.addArgs(&.{ "--generate-version-data", resolved_data_version });
     if (data_version_path) |path| {
         gen_version_data_cmd.addArg("--langref_path");
@@ -307,29 +306,24 @@ pub fn build(b: *Build) !void {
     }
 }
 
-fn getVersion(b: *Build) struct {
-    version_string: []const u8,
-    precise_version_string: ?[]const u8,
-} {
-    const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
-    const build_root_path = b.build_root.path orelse ".";
-
-    if (zls_version_is_tagged) {
-        return .{ .version_string = version_string, .precise_version_string = version_string };
-    }
+/// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
+fn getVersion(b: *Build) std.SemanticVersion {
+    if (zls_version.pre == null and zls_version.build == null) return zls_version;
 
     var code: u8 = undefined;
-    const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
-        "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
-    }, &code, .Ignore) catch return .{ .version_string = version_string, .precise_version_string = null };
+    const git_describe_untrimmed = b.runAllowFail(
+        &.{ "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags" },
+        &code,
+        .Ignore,
+    ) catch return zls_version;
 
     const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
 
     switch (std.mem.count(u8, git_describe, "-")) {
         0 => {
             // Tagged release version (e.g. 0.10.0).
-            std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
-            return .{ .version_string = version_string, .precise_version_string = version_string };
+            std.debug.assert(std.mem.eql(u8, git_describe, b.fmt("{}", .{zls_version}))); // tagged release must match version string
+            return zls_version;
         },
         2 => {
             // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
@@ -342,8 +336,13 @@ fn getVersion(b: *Build) struct {
             std.debug.assert(zls_version.order(ancestor_ver) == .gt); // ZLS version must be greater than its previous version
             std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
 
-            const precise_version_string = b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
-            return .{ .version_string = precise_version_string, .precise_version_string = precise_version_string };
+            return std.SemanticVersion{
+                .major = zls_version.major,
+                .minor = zls_version.minor,
+                .patch = zls_version.patch,
+                .pre = b.fmt("dev.{s}", .{commit_height}),
+                .build = commit_id[1..],
+            };
         },
         else => {
             std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
@@ -401,6 +400,10 @@ fn getTracyModule(
 const Build = blk: {
     const min_zig = std.SemanticVersion.parse(minimum_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
+
+    std.debug.assert(zls_version.pre == null or std.mem.eql(u8, zls_version.pre.?, "dev"));
+    std.debug.assert(zls_version.build == null);
+    const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
 
     if (min_runtime_zig.order(min_zig) == .gt) {
         const message = std.fmt.comptimePrint(

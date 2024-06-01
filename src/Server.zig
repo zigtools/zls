@@ -923,10 +923,9 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     if (resolve_result.zig_runtime_version) |zig_version| version_check: {
-        // the ZLS version may not be available because it is being resolved with `git` which may fail.
-        const zls_version_string = build_options.precise_version_string orelse break :version_check;
-
-        const zls_version = comptime std.SemanticVersion.parse(zls_version_string) catch unreachable;
+        // keep in mind that the ZLS version is `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
+        const zls_version = build_options.version;
+        const zls_version_string = build_options.version_string;
         const minimum_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
 
         const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
