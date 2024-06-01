@@ -42,7 +42,7 @@ fn fnProtoToSignatureInfo(
             null;
 
         try params.append(arena, .{
-            .label = .{ .string = ast.paramSlice(tree, param) },
+            .label = .{ .string = ast.paramSlice(tree, param, false) },
             .documentation = if (param_comments) |comment| .{ .MarkupContent = .{
                 .kind = markup_kind,
                 .value = comment,

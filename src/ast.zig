@@ -1122,8 +1122,8 @@ pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
     return token_tags[tree.firstToken(fn_proto.ast.return_type) - 1] == .bang;
 }
 
-pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
-    return param.first_doc_comment orelse
+pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) Ast.TokenIndex {
+    return (if (include_doc_comment) param.first_doc_comment else null) orelse
         param.comptime_noalias orelse
         param.name_token orelse
         tree.firstToken(param.type_expr);
@@ -1133,13 +1133,14 @@ pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
     return param.anytype_ellipsis3 orelse lastToken(tree, param.type_expr);
 }
 
-pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param) []const u8 {
-    const first_token = paramFirstToken(tree, param);
+pub fn paramLoc(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) offsets.Loc {
+    const first_token = paramFirstToken(tree, param, include_doc_comment);
     const last_token = paramLastToken(tree, param);
+    return offsets.tokensToLoc(tree, first_token, last_token);
+}
 
-    const start = offsets.tokenToIndex(tree, first_token);
-    const end = offsets.tokenToLoc(tree, last_token).end;
-    return tree.source[start..end];
+pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) []const u8 {
+    return offsets.locToSlice(tree.source, paramLoc(tree, param, include_doc_comment));
 }
 
 pub fn isTaggedUnion(tree: Ast, node: Ast.Node.Index) bool {

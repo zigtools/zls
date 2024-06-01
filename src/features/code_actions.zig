@@ -477,15 +477,14 @@ fn createDiscardText(
 }
 
 fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
-    var param_start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, param));
-    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, param)).end;
+    var loc = ast.paramLoc(tree, param, true);
 
     var trim_end = false;
-    while (param_start != 0) : (param_start -= 1) {
-        switch (tree.source[param_start - 1]) {
+    while (loc.start != 0) : (loc.start -= 1) {
+        switch (tree.source[loc.start - 1]) {
             ' ', '\n' => continue,
             ',' => {
-                param_start -= 1;
+                loc.start -= 1;
                 break;
             },
             '(' => {
@@ -497,14 +496,14 @@ fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
     }
 
     var found_comma = false;
-    while (trim_end and param_end < tree.source.len) : (param_end += 1) {
-        switch (tree.source[param_end]) {
+    while (trim_end and loc.end < tree.source.len) : (loc.end += 1) {
+        switch (tree.source[loc.end]) {
             ' ', '\n' => continue,
             ',' => if (!found_comma) {
                 found_comma = true;
                 continue;
             } else {
-                param_end += 1;
+                loc.end += 1;
                 break;
             },
             ')' => break,
@@ -512,7 +511,7 @@ fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
         }
     }
 
-    return .{ .start = param_start, .end = param_end };
+    return loc;
 }
 
 const DiagnosticKind = union(enum) {
