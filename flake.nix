@@ -16,19 +16,15 @@
       langref.flake = false;
     };
 
-  outputs = inputs:
-    let
-      inherit (inputs) nixpkgs zig-overlay gitignore flake-utils;
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      inherit (gitignore.lib) gitignoreSource;
-    in
-    flake-utils.lib.eachSystem systems (system:
+  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, langref }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         zig = zig-overlay.packages.${system}.master;
+        gitignoreSource = gitignore.lib.gitignoreSource;
       in
       rec {
-        formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
+        formatter = pkgs.nixpkgs-fmt;
         packages.default = packages.zls;
         packages.zls = pkgs.stdenvNoCC.mkDerivation {
           name = "zls";
@@ -38,7 +34,7 @@
           dontConfigure = true;
           dontInstall = true;
           doCheck = true;
-          langref = inputs.langref;
+          langref = langref;
           buildPhase = ''
             mkdir -p .cache
             ln -s ${pkgs.callPackage ./deps.nix { zig = zig; }} .cache/p
