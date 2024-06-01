@@ -540,6 +540,26 @@ test "function" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "function parameter" {
+    try testHover(
+        \\fn foo(
+        \\    /// hello world
+        \\    <cursor>a: u32,
+        \\) u32 {
+        \\    return a;
+        \\}
+    ,
+        \\```zig
+        \\a: u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+        \\
+        \\ hello world
+    );
+}
+
 test "optional" {
     try testHover(
         \\const S = struct { a: i32 };

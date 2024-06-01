@@ -41,11 +41,7 @@ pub fn generateSelectionRanges(
                     var it = fn_proto.iterate(&handle.tree);
 
                     while (ast.nextFnParam(&it)) |param| {
-                        const param_loc = offsets.tokensToLoc(
-                            handle.tree,
-                            ast.paramFirstToken(handle.tree, param),
-                            ast.paramLastToken(handle.tree, param),
-                        );
+                        const param_loc = ast.paramLoc(handle.tree, param, true);
                         if (param_loc.start <= index and index <= param_loc.end) {
                             try locs.append(arena, param_loc);
                         }

@@ -95,7 +95,7 @@ fn hoverSymbolRecursive(
                     &reference_collector,
                 );
 
-            break :def ast.paramSlice(tree, param);
+            break :def ast.paramSlice(tree, param, false);
         },
         .optional_payload,
         .error_union_payload,
