@@ -40,7 +40,7 @@
           langref = inputs.langref;
           buildPhase = ''
             mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { }} .cache/p
+            ln -s ${pkgs.callPackage ./deps.nix { zig = zig; }} .cache/p
             zig build install --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dversion_data_path=$langref -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
           '';
           checkPhase = ''
