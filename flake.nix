@@ -11,7 +11,8 @@
 
       flake-utils.url = "github:numtide/flake-utils";
 
-      langref.url = "https://raw.githubusercontent.com/ziglang/zig/a685ab1499d6560c523f0dbce2890dc140671e43/doc/langref.html.in";
+      # llvm: fix @wasmMemory{Size,Grow} for wasm64
+      langref.url = "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in";
       langref.flake = false;
     };
 
