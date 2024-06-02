@@ -77,7 +77,6 @@ pub const generic = [_]Snipped{
     .{ .label = "catch switch", .kind = .Snippet, .text = "catch |${1:err}| switch (${1:err}) {$0};" },
 
     // snippets
-    .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
     .{ .label = "print", .kind = .Snippet, .text = "std.debug.print(\"$1\", .{$0});" },
     .{ .label = "log err", .kind = .Snippet, .text = "std.log.err(\"$1\", .{$0});" },
     .{ .label = "log warn", .kind = .Snippet, .text = "std.log.warn(\"$1\", .{$0});" },
