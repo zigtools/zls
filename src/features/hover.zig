@@ -10,6 +10,7 @@ const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
+const ParseError = @import("../Server.zig").Error.ParseError;
 
 const data = @import("version_data");
 
@@ -345,6 +346,77 @@ fn hoverDefinitionFieldAccess(
     };
 }
 
+fn hoverNumberLiteral(
+    handle: *DocumentStore.Handle,
+    token_index: Ast.TokenIndex,
+    arena: std.mem.Allocator,
+    markup_kind: types.MarkupKind,
+) error{ OutOfMemory, ParseError }!?[]const u8 {
+    const tree = handle.tree;
+    // number literals get tokenized separately from their minus sign
+    const is_negative = tree.tokens.items(.tag)[token_index -| 1] == .minus;
+    const num_slice = tree.tokenSlice(token_index);
+    const parsed = std.zig.parseNumberLiteral(num_slice);
+    // fmt doesn't allow floats to be formatted with binary or hex specifiers
+    if (parsed == .float or parsed == .failure) {
+        return null;
+    }
+
+    var hover_text = std.ArrayList(u8).init(arena);
+    const writer = hover_text.writer();
+
+    var parsed_int: i256 = undefined;
+    switch (parsed) {
+        .int => {
+            parsed_int = @as(i256, @intCast(parsed.int));
+        },
+        .big_int => {
+            const base = @intFromEnum(parsed.big_int);
+            parsed_int = std.fmt.parseInt(i256, num_slice, base) catch return ParseError;
+        },
+        .float, .failure => unreachable,
+    }
+
+    if (markup_kind == .markdown) {
+        try writer.print("```zig\n", .{});
+    }
+    if (is_negative) {
+        try writer.print("-0b{b} | -{} | -0x{X}", .{ parsed_int, parsed_int, parsed_int });
+    } else {
+        try writer.print("0b{b} | {} | 0x{X}", .{ parsed_int, parsed_int, parsed_int });
+    }
+    if (markup_kind == .markdown) {
+        try writer.print("\n```", .{});
+    }
+
+    return hover_text.items;
+}
+
+fn hoverDefinitionNumberLiteral(
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    markup_kind: types.MarkupKind,
+    offset_encoding: offsets.Encoding,
+) !?types.Hover {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = handle.tree;
+    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index);
+    const loc = tree.tokenLocation(@as(Ast.ByteOffset, @intCast(source_index)), token_index);
+    const num_loc: std.zig.Token.Loc = .{ .start = loc.line_start, .end = loc.line_end };
+    const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
+
+    return .{
+        .contents = .{ .MarkupContent = .{
+            .kind = markup_kind,
+            .value = hover_text,
+        } },
+        .range = offsets.locToRange(handle.tree.source, num_loc, offset_encoding),
+    };
+}
+
 pub fn hover(
     analyser: *Analyser,
     arena: std.mem.Allocator,
@@ -361,6 +433,7 @@ pub fn hover(
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind, offset_encoding),
+        .number_literal => try hoverDefinitionNumberLiteral(arena, handle, source_index, markup_kind, offset_encoding),
         else => null,
     };
 

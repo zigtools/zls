@@ -3118,6 +3118,7 @@ pub const PositionContext = union(enum) {
     var_access: offsets.Loc,
     global_error_set,
     enum_literal: offsets.Loc,
+    number_literal: offsets.Loc,
     pre_label,
     label: bool,
     other,
@@ -3134,6 +3135,7 @@ pub const PositionContext = union(enum) {
             .field_access => |r| r,
             .var_access => |r| r,
             .enum_literal => |r| r,
+            .number_literal => |r| r,
             .pre_label => null,
             .label => null,
             .other => null,
@@ -3351,6 +3353,11 @@ pub fn getPositionContext(
                     }
                 },
                 .keyword_error => curr_ctx.ctx = .global_error_set,
+                .number_literal => {
+                    if (tok.loc.start <= doc_index and tok.loc.end >= doc_index) {
+                        return PositionContext{ .number_literal = tok.loc };
+                    }
+                },
                 else => curr_ctx.ctx = .empty,
             }
 

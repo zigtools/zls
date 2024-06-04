@@ -92,6 +92,51 @@ test "literal" {
     );
 }
 
+test "integer literal" {
+    try testHover(
+        \\const foo = 4<cursor>2;
+    ,
+        \\```zig
+        \\0b101010 | 42 | 0x2A
+        \\```
+    );
+    try testHover(
+        \\const foo = -4<cursor>2;
+    ,
+        \\```zig
+        \\-0b101010 | -42 | -0x2A
+        \\```
+    );
+    try testHover(
+        \\const foo = 0b101<cursor>010;
+    ,
+        \\```zig
+        \\0b101010 | 42 | 0x2A
+        \\```
+    );
+    try testHover(
+        \\const foo = -0b101<cursor>010;
+    ,
+        \\```zig
+        \\-0b101010 | -42 | -0x2A
+        \\```
+    );
+    try testHover(
+        \\const foo = 0x2<cursor>A;
+    ,
+        \\```zig
+        \\0b101010 | 42 | 0x2A
+        \\```
+    );
+    try testHover(
+        \\const foo = -0x2<cursor>A;
+    ,
+        \\```zig
+        \\-0b101010 | -42 | -0x2A
+        \\```
+    );
+}
+
 test "string literal" {
     try testHover(
         \\const f<cursor>oo = "ipsum lorem";
