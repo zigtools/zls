@@ -96,44 +96,62 @@ test "integer literal" {
     try testHover(
         \\const foo = 4<cursor>2;
     ,
-        \\```zig
-        \\0b101010 | 42 | 0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|0b101010|
+        \\|OCT|0o52|
+        \\|DEC|42|
+        \\|HEX|0x2A|
     );
     try testHover(
         \\const foo = -4<cursor>2;
     ,
-        \\```zig
-        \\-0b101010 | -42 | -0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|-0b101010|
+        \\|OCT|-0o52|
+        \\|DEC|-42|
+        \\|HEX|-0x2A|
     );
     try testHover(
         \\const foo = 0b101<cursor>010;
     ,
-        \\```zig
-        \\0b101010 | 42 | 0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|0b101010|
+        \\|OCT|0o52|
+        \\|DEC|42|
+        \\|HEX|0x2A|
     );
     try testHover(
         \\const foo = -0b101<cursor>010;
     ,
-        \\```zig
-        \\-0b101010 | -42 | -0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|-0b101010|
+        \\|OCT|-0o52|
+        \\|DEC|-42|
+        \\|HEX|-0x2A|
     );
     try testHover(
         \\const foo = 0x2<cursor>A;
     ,
-        \\```zig
-        \\0b101010 | 42 | 0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|0b101010|
+        \\|OCT|0o52|
+        \\|DEC|42|
+        \\|HEX|0x2A|
     );
     try testHover(
         \\const foo = -0x2<cursor>A;
     ,
-        \\```zig
-        \\-0b101010 | -42 | -0x2A
-        \\```
+        \\|||
+        \\|-|-|
+        \\|BIN|-0b101010|
+        \\|OCT|-0o52|
+        \\|DEC|-42|
+        \\|HEX|-0x2A|
     );
 }
 

@@ -357,36 +357,27 @@ fn hoverNumberLiteral(
     const is_negative = tree.tokens.items(.tag)[token_index -| 1] == .minus;
     const num_slice = tree.tokenSlice(token_index);
     const parsed = std.zig.parseNumberLiteral(num_slice);
-    // fmt doesn't allow floats to be formatted with binary or hex specifiers
-    if (parsed == .float or parsed == .failure) {
-        return null;
-    }
-
     var hover_text = std.ArrayList(u8).init(arena);
     const writer = hover_text.writer();
 
-    var parsed_int: i256 = undefined;
     switch (parsed) {
         .int => {
-            parsed_int = @as(i256, @intCast(parsed.int));
+            const val = parsed.int;
+            if (markup_kind == .markdown) {
+                if (is_negative) {
+                    try writer.print("|||\n|-|-|\n|BIN|-0b{b}|\n|OCT|-0o{o}|\n|DEC|-{}|\n|HEX|-0x{X}|", .{ val, val, val, val });
+                } else {
+                    try writer.print("|||\n|-|-|\n|BIN|0b{b}|\n|OCT|0o{o}|\n|DEC|{}|\n|HEX|0x{X}|", .{ val, val, val, val });
+                }
+            } else {
+                if (is_negative) {
+                    try writer.print("BIN: -0b{b}\nOCT: -0o{o}\nDEC: -{}\nHEX: -0x{X}", .{ val, val, val, val });
+                } else {
+                    try writer.print("BIN: 0b{b}\nOCT: 0o{o}\nDEC: {}\nHEX: 0x{X}", .{ val, val, val, val });
+                }
+            }
         },
-        .big_int => {
-            const base = @intFromEnum(parsed.big_int);
-            parsed_int = std.fmt.parseInt(i256, num_slice, base) catch return ParseError;
-        },
-        .float, .failure => unreachable,
-    }
-
-    if (markup_kind == .markdown) {
-        try writer.print("```zig\n", .{});
-    }
-    if (is_negative) {
-        try writer.print("-0b{b} | -{} | -0x{X}", .{ parsed_int, parsed_int, parsed_int });
-    } else {
-        try writer.print("0b{b} | {} | 0x{X}", .{ parsed_int, parsed_int, parsed_int });
-    }
-    if (markup_kind == .markdown) {
-        try writer.print("\n```", .{});
+        .big_int, .float, .failure => return null,
     }
 
     return hover_text.items;
@@ -404,8 +395,7 @@ fn hoverDefinitionNumberLiteral(
 
     const tree = handle.tree;
     const token_index = offsets.sourceIndexToTokenIndex(tree, source_index);
-    const loc = tree.tokenLocation(@as(Ast.ByteOffset, @intCast(source_index)), token_index);
-    const num_loc: std.zig.Token.Loc = .{ .start = loc.line_start, .end = loc.line_end };
+    const num_loc = offsets.tokenToLoc(tree, token_index);
     const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
 
     return .{
