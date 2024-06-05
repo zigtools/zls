@@ -96,63 +96,79 @@ test "integer literal" {
     try testHover(
         \\const foo = 4<cursor>2;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|0b101010|
-        \\|OCT|0o52|
-        \\|DEC|42|
-        \\|HEX|0x2A|
+        \\| Base | Value    |
+        \\| ---- | -------- |
+        \\| BIN  | 0b101010 |
+        \\| OCT  | 0o52     |
+        \\| DEC  | 42       |
+        \\| HEX  | 0x2A     |
     );
     try testHover(
         \\const foo = -4<cursor>2;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|-0b101010|
-        \\|OCT|-0o52|
-        \\|DEC|-42|
-        \\|HEX|-0x2A|
+        \\| Base | Value     |
+        \\| ---- | --------- |
+        \\| BIN  | -0b101010 |
+        \\| OCT  | -0o52     |
+        \\| DEC  | -42       |
+        \\| HEX  | -0x2A     |
     );
     try testHover(
         \\const foo = 0b101<cursor>010;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|0b101010|
-        \\|OCT|0o52|
-        \\|DEC|42|
-        \\|HEX|0x2A|
+        \\| Base | Value    |
+        \\| ---- | -------- |
+        \\| BIN  | 0b101010 |
+        \\| OCT  | 0o52     |
+        \\| DEC  | 42       |
+        \\| HEX  | 0x2A     |
     );
     try testHover(
         \\const foo = -0b101<cursor>010;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|-0b101010|
-        \\|OCT|-0o52|
-        \\|DEC|-42|
-        \\|HEX|-0x2A|
+        \\| Base | Value     |
+        \\| ---- | --------- |
+        \\| BIN  | -0b101010 |
+        \\| OCT  | -0o52     |
+        \\| DEC  | -42       |
+        \\| HEX  | -0x2A     |
     );
     try testHover(
         \\const foo = 0x2<cursor>A;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|0b101010|
-        \\|OCT|0o52|
-        \\|DEC|42|
-        \\|HEX|0x2A|
+        \\| Base | Value    |
+        \\| ---- | -------- |
+        \\| BIN  | 0b101010 |
+        \\| OCT  | 0o52     |
+        \\| DEC  | 42       |
+        \\| HEX  | 0x2A     |
     );
     try testHover(
         \\const foo = -0x2<cursor>A;
     ,
-        \\|||
-        \\|-|-|
-        \\|BIN|-0b101010|
-        \\|OCT|-0o52|
-        \\|DEC|-42|
-        \\|HEX|-0x2A|
+        \\| Base | Value     |
+        \\| ---- | --------- |
+        \\| BIN  | -0b101010 |
+        \\| OCT  | -0o52     |
+        \\| DEC  | -42       |
+        \\| HEX  | -0x2A     |
     );
+    try testHoverWithOptions(
+        \\const foo = 4<cursor>2;
+    ,
+        \\BIN: 0b101010
+        \\OCT: 0o52
+        \\DEC: 42
+        \\HEX: 0x2A
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo = -4<cursor>2;
+    ,
+        \\BIN: -0b101010
+        \\OCT: -0o52
+        \\DEC: -42
+        \\HEX: -0x2A
+    , .{ .markup_kind = .plaintext });
 }
 
 test "string literal" {

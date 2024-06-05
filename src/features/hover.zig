@@ -10,7 +10,6 @@ const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
-const ParseError = @import("../Server.zig").Error.ParseError;
 
 const data = @import("version_data");
 
@@ -351,36 +350,42 @@ fn hoverNumberLiteral(
     token_index: Ast.TokenIndex,
     arena: std.mem.Allocator,
     markup_kind: types.MarkupKind,
-) error{ OutOfMemory, ParseError }!?[]const u8 {
+) error{OutOfMemory}!?[]const u8 {
     const tree = handle.tree;
     // number literals get tokenized separately from their minus sign
     const is_negative = tree.tokens.items(.tag)[token_index -| 1] == .minus;
     const num_slice = tree.tokenSlice(token_index);
     const parsed = std.zig.parseNumberLiteral(num_slice);
-    var hover_text = std.ArrayList(u8).init(arena);
-    const writer = hover_text.writer();
 
     switch (parsed) {
-        .int => {
-            const val = parsed.int;
-            if (markup_kind == .markdown) {
-                if (is_negative) {
-                    try writer.print("|||\n|-|-|\n|BIN|-0b{b}|\n|OCT|-0o{o}|\n|DEC|-{}|\n|HEX|-0x{X}|", .{ val, val, val, val });
-                } else {
-                    try writer.print("|||\n|-|-|\n|BIN|0b{b}|\n|OCT|0o{o}|\n|DEC|{}|\n|HEX|0x{X}|", .{ val, val, val, val });
-                }
-            } else {
-                if (is_negative) {
-                    try writer.print("BIN: -0b{b}\nOCT: -0o{o}\nDEC: -{}\nHEX: -0x{X}", .{ val, val, val, val });
-                } else {
-                    try writer.print("BIN: 0b{b}\nOCT: 0o{o}\nDEC: {}\nHEX: 0x{X}", .{ val, val, val, val });
-                }
-            }
+        .int => |number| switch (markup_kind) {
+            .markdown => return try std.fmt.allocPrint(arena,
+                \\| Base | {[value]s:<[count]} |
+                \\| ---- | {[dash]s:-<[count]} |
+                \\| BIN  | {[sign]s}0b{[number]b:<[len]} |
+                \\| OCT  | {[sign]s}0o{[number]o:<[len]} |
+                \\| DEC  | {[sign]s}{[number]d:<[len]}   |
+                \\| HEX  | {[sign]s}0x{[number]X:<[len]} |
+            , .{
+                .sign = if (is_negative) "-" else "",
+                .dash = "-",
+                .value = "Value",
+                .number = number,
+                .count = @bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative),
+                .len = @bitSizeOf(@TypeOf(number)) - @clz(number),
+            }),
+            .plaintext => return try std.fmt.allocPrint(
+                arena,
+                \\BIN: {[sign]s}0b{[number]b}
+                \\OCT: {[sign]s}0o{[number]o}
+                \\DEC: {[sign]s}{[number]d}
+                \\HEX: {[sign]s}0x{[number]X}
+            ,
+                .{ .sign = if (is_negative) "-" else "", .number = number },
+            ),
         },
         .big_int, .float, .failure => return null,
     }
-
-    return hover_text.items;
 }
 
 fn hoverDefinitionNumberLiteral(
