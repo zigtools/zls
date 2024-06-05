@@ -345,6 +345,73 @@ fn hoverDefinitionFieldAccess(
     };
 }
 
+fn hoverNumberLiteral(
+    handle: *DocumentStore.Handle,
+    token_index: Ast.TokenIndex,
+    arena: std.mem.Allocator,
+    markup_kind: types.MarkupKind,
+) error{OutOfMemory}!?[]const u8 {
+    const tree = handle.tree;
+    // number literals get tokenized separately from their minus sign
+    const is_negative = tree.tokens.items(.tag)[token_index -| 1] == .minus;
+    const num_slice = tree.tokenSlice(token_index);
+    const parsed = std.zig.parseNumberLiteral(num_slice);
+
+    switch (parsed) {
+        .int => |number| switch (markup_kind) {
+            .markdown => return try std.fmt.allocPrint(arena,
+                \\| Base | {[value]s:<[count]} |
+                \\| ---- | {[dash]s:-<[count]} |
+                \\| BIN  | {[sign]s}0b{[number]b:<[len]} |
+                \\| OCT  | {[sign]s}0o{[number]o:<[len]} |
+                \\| DEC  | {[sign]s}{[number]d:<[len]}   |
+                \\| HEX  | {[sign]s}0x{[number]X:<[len]} |
+            , .{
+                .sign = if (is_negative) "-" else "",
+                .dash = "-",
+                .value = "Value",
+                .number = number,
+                .count = @bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative),
+                .len = @bitSizeOf(@TypeOf(number)) - @clz(number),
+            }),
+            .plaintext => return try std.fmt.allocPrint(
+                arena,
+                \\BIN: {[sign]s}0b{[number]b}
+                \\OCT: {[sign]s}0o{[number]o}
+                \\DEC: {[sign]s}{[number]d}
+                \\HEX: {[sign]s}0x{[number]X}
+            ,
+                .{ .sign = if (is_negative) "-" else "", .number = number },
+            ),
+        },
+        .big_int, .float, .failure => return null,
+    }
+}
+
+fn hoverDefinitionNumberLiteral(
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    markup_kind: types.MarkupKind,
+    offset_encoding: offsets.Encoding,
+) !?types.Hover {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = handle.tree;
+    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index);
+    const num_loc = offsets.tokenToLoc(tree, token_index);
+    const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
+
+    return .{
+        .contents = .{ .MarkupContent = .{
+            .kind = markup_kind,
+            .value = hover_text,
+        } },
+        .range = offsets.locToRange(handle.tree.source, num_loc, offset_encoding),
+    };
+}
+
 pub fn hover(
     analyser: *Analyser,
     arena: std.mem.Allocator,
@@ -361,6 +428,7 @@ pub fn hover(
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind, offset_encoding),
+        .number_literal => try hoverDefinitionNumberLiteral(arena, handle, source_index, markup_kind, offset_encoding),
         else => null,
     };
 
