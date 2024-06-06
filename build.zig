@@ -161,6 +161,7 @@ pub fn build(b: *Build) !void {
         exe.pie = pie;
         exe.root_module.addImport("exe_options", exe_options_module);
         exe.root_module.addImport("tracy", tracy_module);
+        exe.root_module.addImport("diffz", diffz_module);
         exe.root_module.addImport("known-folders", known_folders_module);
         exe.root_module.addImport("zls", zls_module);
 
@@ -238,6 +239,7 @@ pub fn build(b: *Build) !void {
     exe.pie = pie;
     exe.root_module.addImport("exe_options", exe_options_module);
     exe.root_module.addImport("tracy", tracy_module);
+    exe.root_module.addImport("diffz", diffz_module);
     exe.root_module.addImport("known-folders", known_folders_module);
     exe.root_module.addImport("zls", zls_module);
     b.installArtifact(exe);
