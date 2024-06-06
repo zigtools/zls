@@ -83,7 +83,7 @@ fn gotoDefinitionLabel(
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try Analyser.getLabelGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try Analyser.lookupLabel(handle, name, pos_index)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
@@ -101,7 +101,7 @@ fn gotoDefinitionGlobal(
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 

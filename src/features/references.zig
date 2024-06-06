@@ -452,7 +452,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
     // TODO: Make this work with branching types
     const decl = switch (pos_context) {
-        .var_access => try analyser.getSymbolGlobal(source_index, handle, name),
+        .var_access => try analyser.lookupSymbolGlobal(handle, name, source_index),
         .field_access => |loc| z: {
             const held_loc = offsets.locMerge(loc, name_loc);
             const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
@@ -462,7 +462,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
             break :z null;
         },
-        .label => try Analyser.getLabelGlobal(source_index, handle, name),
+        .label => try Analyser.lookupLabel(handle, name, source_index),
         .enum_literal => try analyser.getSymbolEnumLiteral(arena, handle, source_index, name),
         else => null,
     } orelse return null;

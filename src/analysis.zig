@@ -4943,29 +4943,6 @@ pub fn identifierLocFromPosition(pos_index: usize, handle: *DocumentStore.Handle
     return .{ .start = start_idx, .end = end_idx };
 }
 
-pub fn getLabelGlobal(
-    pos_index: usize,
-    handle: *DocumentStore.Handle,
-    name: []const u8,
-) error{OutOfMemory}!?DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    return try lookupLabel(handle, name, pos_index);
-}
-
-pub fn getSymbolGlobal(
-    analyser: *Analyser,
-    pos_index: usize,
-    handle: *DocumentStore.Handle,
-    name: []const u8,
-) error{OutOfMemory}!?DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    return try analyser.lookupSymbolGlobal(handle, name, pos_index);
-}
-
 pub fn getSymbolEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,

@@ -167,7 +167,7 @@ fn hoverDefinitionLabel(
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try Analyser.getLabelGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try Analyser.lookupLabel(handle, name, pos_index)) orelse return null;
 
     return .{
         .contents = .{
@@ -272,7 +272,7 @@ fn hoverDefinitionGlobal(
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
 
     return .{
         .contents = .{
