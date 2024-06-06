@@ -416,7 +416,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 .is_type_val = true,
             };
 
-            const func_name_tok_type: TokenType = if (Analyser.isTypeFunction(tree, fn_proto))
+            const func_name_tok_type: TokenType = if (func_ty.isTypeFunc())
                 .type
             else if (try builder.analyser.hasSelfParam(func_ty))
                 .method
@@ -425,7 +425,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             const tok_mod = TokenModifiers{
                 .declaration = true,
-                .generic = Analyser.isGenericFunction(tree, fn_proto),
+                .generic = func_ty.isGenericFunc(),
             };
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);

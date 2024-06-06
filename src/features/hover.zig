@@ -51,41 +51,65 @@ fn hoverSymbolRecursive(
                 return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 
-            var buf: [1]Ast.Node.Index = undefined;
+            switch (tree.nodes.items(.tag)[node]) {
+                .global_var_decl,
+                .local_var_decl,
+                .aligned_var_decl,
+                .simple_var_decl,
+                => {
+                    const var_decl = tree.fullVarDecl(node).?;
+                    var struct_init_buf: [2]Ast.Node.Index = undefined;
+                    var type_node: Ast.Node.Index = 0;
 
-            if (tree.fullVarDecl(node)) |var_decl| {
-                var struct_init_buf: [2]Ast.Node.Index = undefined;
-                var type_node: Ast.Node.Index = 0;
+                    if (var_decl.ast.type_node != 0) {
+                        type_node = var_decl.ast.type_node;
+                    } else if (tree.fullStructInit(&struct_init_buf, var_decl.ast.init_node)) |struct_init| {
+                        if (struct_init.ast.type_expr != 0)
+                            type_node = struct_init.ast.type_expr;
+                    }
 
-                if (var_decl.ast.type_node != 0) {
-                    type_node = var_decl.ast.type_node;
-                } else if (tree.fullStructInit(&struct_init_buf, var_decl.ast.init_node)) |struct_init| {
-                    if (struct_init.ast.type_expr != 0)
-                        type_node = struct_init.ast.type_expr;
-                }
+                    if (type_node != 0)
+                        try analyser.referencedTypesFromNode(
+                            .{ .node = type_node, .handle = handle },
+                            &reference_collector,
+                        );
 
-                if (type_node != 0)
-                    try analyser.referencedTypesFromNode(
-                        .{ .node = type_node, .handle = handle },
-                        &reference_collector,
-                    );
+                    break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
+                },
+                .container_field,
+                .container_field_init,
+                .container_field_align,
+                => {
+                    const field = tree.fullContainerField(node).?;
+                    var converted = field;
+                    converted.convertToNonTupleLike(tree.nodes);
+                    if (converted.ast.type_expr != 0)
+                        try analyser.referencedTypesFromNode(
+                            .{ .node = converted.ast.type_expr, .handle = handle },
+                            &reference_collector,
+                        );
 
-                break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
-            } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
-                is_fn = true;
-                break :def Analyser.getFunctionSignature(tree, fn_proto);
-            } else if (tree.fullContainerField(node)) |field| {
-                var converted = field;
-                converted.convertToNonTupleLike(tree.nodes);
-                if (converted.ast.type_expr != 0)
-                    try analyser.referencedTypesFromNode(
-                        .{ .node = converted.ast.type_expr, .handle = handle },
-                        &reference_collector,
-                    );
-
-                break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
-            } else {
-                break :def Analyser.nodeToString(tree, node) orelse return null;
+                    break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
+                },
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => {
+                    is_fn = true;
+                    var buf: [1]Ast.Node.Index = undefined;
+                    const fn_proto = tree.fullFnProto(&buf, node).?;
+                    break :def Analyser.getFunctionSignature(tree, fn_proto);
+                },
+                .test_decl => {
+                    const test_name_token, const test_name = ast.testDeclNameAndToken(tree, node) orelse return null;
+                    _ = test_name_token;
+                    break :def test_name;
+                },
+                else => {
+                    return null;
+                },
             }
         },
         .function_parameter => |pay| def: {

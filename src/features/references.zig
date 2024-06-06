@@ -102,32 +102,38 @@ const Builder = struct {
 
         const node_tags = tree.nodes.items(.tag);
         const datas = tree.nodes.items(.data);
-        const token_tags = tree.tokens.items(.tag);
+        const main_tokens = tree.nodes.items(.main_token);
         const starts = tree.tokens.items(.start);
 
         switch (node_tags[node]) {
             .identifier,
             .test_decl,
-            => {
-                const identifier_token = Analyser.getDeclNameToken(tree, node) orelse return;
-                if (token_tags[identifier_token] != .identifier) return;
+            => |tag| {
+                const name_token, const name = switch (tag) {
+                    .identifier => .{
+                        main_tokens[node],
+                        offsets.identifierTokenToNameSlice(tree, main_tokens[node]),
+                    },
+                    .test_decl => ast.testDeclNameAndToken(tree, node) orelse return,
+                    else => unreachable,
+                };
 
-                const child = (try builder.analyser.lookupSymbolGlobal(
+                const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
-                    offsets.tokenToSlice(tree, identifier_token),
-                    starts[identifier_token],
-                )) orelse return;
+                    name,
+                    starts[name_token],
+                ) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
-                    try builder.add(handle, identifier_token);
+                    try builder.add(handle, name_token);
                 }
             },
             .field_access => {
                 const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle }) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.tokenToSlice(tree, datas[node].rhs);
-                const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
+                const symbol = offsets.identifierTokenToNameSlice(tree, datas[node].rhs);
+                const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, datas[node].rhs);

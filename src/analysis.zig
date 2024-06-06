@@ -18,8 +18,9 @@ const tracy = @import("tracy");
 const InternPool = @import("analyser/InternPool.zig");
 const references = @import("features/references.zig");
 
-const DocumentScope = @import("DocumentScope.zig");
-const Scope = DocumentScope.Scope;
+pub const DocumentScope = @import("DocumentScope.zig");
+pub const Declaration = DocumentScope.Declaration;
+pub const Scope = DocumentScope.Scope;
 
 const Analyser = @This();
 
@@ -468,8 +469,6 @@ pub fn getVariableSignature(
             for (container_decl.ast.members) |member| {
                 const member_line_start = offsets.lineLocUntilIndex(tree.source, offsets.tokenToIndex(tree, tree.firstToken(member))).start;
 
-                if (!isNodePublic(tree, member)) continue;
-
                 const member_source_indented = switch (tree.nodes.items(.tag)[member]) {
                     .container_field_init,
                     .container_field_align,
@@ -608,90 +607,6 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
-    return getContainerDeclNameToken(tree, null, node);
-}
-
-pub fn getContainerDeclNameToken(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?Ast.TokenIndex {
-    const tags = tree.nodes.items(.tag);
-    const datas = tree.nodes.items(.data);
-    const main_tokens = tree.nodes.items(.main_token);
-    const main_token = main_tokens[node];
-    const token_tags = tree.tokens.items(.tag);
-
-    return switch (tags[node]) {
-        // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
-        .local_var_decl,
-        .global_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        => {
-            const tok = tree.fullVarDecl(node).?.ast.mut_token + 1;
-            return if (tok >= tree.tokens.len)
-                null
-            else
-                tok;
-        },
-        // function declaration names
-        .fn_proto,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_decl,
-        => blk: {
-            var params: [1]Ast.Node.Index = undefined;
-            break :blk tree.fullFnProto(&params, node).?.name_token;
-        },
-
-        // containers
-        .container_field,
-        .container_field_init,
-        .container_field_align,
-        => {
-            if (container) |container_node| {
-                if (token_tags[main_tokens[container_node]] == .keyword_struct and
-                    tree.fullContainerField(node).?.ast.tuple_like)
-                {
-                    return null;
-                }
-            }
-            return main_token;
-        },
-        .identifier => main_token,
-        .error_value => {
-            const tok = main_token + 2;
-            return if (tok >= tree.tokens.len)
-                null
-            else
-                tok;
-        }, // 'error'.<main_token +2>
-
-        .test_decl => if (datas[node].lhs != 0) datas[node].lhs else null,
-
-        else => null,
-    };
-}
-
-pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
-    return getContainerDeclName(tree, null, node);
-}
-
-pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?[]const u8 {
-    const name_token = getContainerDeclNameToken(tree, container, node) orelse return null;
-    return declNameTokenToSlice(tree, name_token);
-}
-
-pub fn declNameTokenToSlice(tree: Ast, name_token: Ast.TokenIndex) ?[]const u8 {
-    switch (tree.tokens.items(.tag)[name_token]) {
-        .string_literal => {
-            const name = offsets.tokenToSlice(tree, name_token);
-            return name[1 .. name.len - 1];
-        },
-        .identifier => return offsets.identifierTokenToNameSlice(tree, name_token),
-        else => return null,
-    }
-}
-
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
 /// Examples:
 ///```zig
@@ -811,9 +726,9 @@ fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.N
                 const lhs = datas[child_idx].lhs;
                 var buf: [1]Ast.Node.Index = undefined;
                 if (tree.fullCall(&buf, lhs)) |call| {
-                    const call_name = getDeclName(tree, call.ast.fn_expr);
+                    const call_name = DocumentScope.getDeclNameToken(tree, call.ast.fn_expr);
                     if (call_name) |name| {
-                        if (std.mem.eql(u8, name, tree.tokenSlice(fn_decl.name_token.?))) {
+                        if (std.mem.eql(u8, offsets.tokenToSlice(tree, name), offsets.tokenToSlice(tree, fn_decl.name_token.?))) {
                             continue;
                         }
                     }
@@ -2725,12 +2640,20 @@ pub const Type = struct {
         };
     }
 
+    /// Returns whether the given function has a `anytype` parameter.
     pub fn isGenericFunc(self: Type) bool {
-        var buf: [1]Ast.Node.Index = undefined;
         return switch (self.data) {
-            .other => |node_handle| if (node_handle.handle.tree.fullFnProto(&buf, node_handle.node)) |fn_proto| blk: {
-                break :blk isGenericFunction(node_handle.handle.tree, fn_proto);
-            } else false,
+            .other => |node_handle| {
+                var buf: [1]Ast.Node.Index = undefined;
+                const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node) orelse return false;
+                var it = fn_proto.iterate(&node_handle.handle.tree);
+                while (ast.nextFnParam(&it)) |param| {
+                    if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
+                        return true;
+                    }
+                }
+                return false;
+            },
             else => false,
         };
     }
@@ -3309,66 +3232,6 @@ pub fn getFieldAccessType(
     return current_type;
 }
 
-pub fn isNodePublic(tree: Ast, node: Ast.Node.Index) bool {
-    var buf: [1]Ast.Node.Index = undefined;
-    return switch (tree.nodes.items(.tag)[node]) {
-        .global_var_decl,
-        .local_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        => tree.fullVarDecl(node).?.visib_token != null,
-        .fn_proto,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_decl,
-        => tree.fullFnProto(&buf, node).?.visib_token != null,
-        else => true,
-    };
-}
-
-pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
-    const data = tree.nodes.items(.data);
-    const main_token = tree.nodes.items(.main_token)[node];
-    var buf: [1]Ast.Node.Index = undefined;
-    return switch (tree.nodes.items(.tag)[node]) {
-        .container_field,
-        .container_field_init,
-        .container_field_align,
-        => {
-            const field = tree.fullContainerField(node).?.ast;
-            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
-        },
-        .error_value => tree.tokenSlice(data[node].rhs),
-        .identifier => {
-            if (tree.tokens.items(.tag)[main_token] != .identifier) return null;
-            return offsets.identifierTokenToNameSlice(tree, main_token);
-        },
-        .fn_proto,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_decl,
-        => if (tree.fullFnProto(&buf, node).?.name_token) |name| tree.tokenSlice(name) else null,
-        .field_access => tree.tokenSlice(data[node].rhs),
-        .call,
-        .call_comma,
-        .async_call,
-        .async_call_comma,
-        => tree.tokenSlice(tree.callFull(node).ast.lparen - 1),
-        .call_one,
-        .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
-        => tree.tokenSlice(tree.callOne(&buf, node).ast.lparen - 1),
-        .test_decl => if (data[node].lhs != 0) tree.tokenSlice(data[node].lhs) else null,
-        else => |tag| {
-            log.debug("INVALID: {}", .{tag});
-            return null;
-        },
-    };
-}
-
 pub const PositionContext = union(enum) {
     builtin: offsets.Loc,
     comment,
@@ -3687,146 +3550,6 @@ pub const TokenWithHandle = struct {
     handle: *DocumentStore.Handle,
 };
 
-pub const Declaration = union(enum) {
-    /// Index of the ast node.
-    /// Can have one of the following tags:
-    ///   - `.root`
-    ///   - `.container_decl`
-    ///   - `.tagged_union`
-    ///   - `.error_set_decl`
-    ///   - `.container_field`
-    ///   - `.fn_proto`
-    ///   - `.fn_decl`
-    ///   - `.var_decl`
-    ///   - `.block`
-    ast_node: Ast.Node.Index,
-    /// Function parameter
-    function_parameter: Param,
-    /// - `if (condition) |identifier| {}`
-    /// - `while (condition) |identifier| {}`
-    optional_payload: struct {
-        identifier: Ast.TokenIndex,
-        condition: Ast.Node.Index,
-    },
-    /// - `for (condition) |identifier| {}`
-    /// - `for (..., condition, ...) |..., identifier, ...| {}`
-    for_loop_payload: struct {
-        identifier: Ast.TokenIndex,
-        condition: Ast.Node.Index,
-    },
-    /// - `if (condition) |identifier| {} else |_| {}`
-    /// - `while (condition) |identifier| {} else |_| {}`
-    error_union_payload: struct {
-        identifier: Ast.TokenIndex,
-        condition: Ast.Node.Index,
-    },
-    /// - `if (condition) |_| {} else |identifier| {}`
-    /// - `while (condition) |_| {} else |identifier| {}`
-    /// - `condition catch |identifier| {}`
-    /// - `errdefer |identifier| {}` (condition is 0)
-    error_union_error: struct {
-        identifier: Ast.TokenIndex,
-        /// may be 0
-        condition: Ast.Node.Index,
-    },
-    assign_destructure: AssignDestructure,
-    // a switch case capture
-    switch_payload: Switch,
-    label: struct {
-        identifier: Ast.TokenIndex,
-        block: Ast.Node.Index,
-    },
-    /// always an identifier
-    /// used as child declarations of an error set declaration
-    error_token: Ast.TokenIndex,
-
-    pub const Param = struct {
-        param_index: u16,
-        func: Ast.Node.Index,
-
-        pub fn get(self: Param, tree: Ast) ?Ast.full.FnProto.Param {
-            var buffer: [1]Ast.Node.Index = undefined;
-            const func = tree.fullFnProto(&buffer, self.func).?;
-            var param_index: u16 = 0;
-            var it = func.iterate(&tree);
-            while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
-                if (self.param_index == param_index) return param;
-            }
-            return null;
-        }
-    };
-
-    pub const AssignDestructure = struct {
-        /// tag is .assign_destructure
-        node: Ast.Node.Index,
-        index: u32,
-
-        pub fn getVarDeclNode(self: AssignDestructure, tree: Ast) Ast.Node.Index {
-            const data = tree.nodes.items(.data);
-            return tree.extra_data[data[self.node].lhs + 1 ..][self.index];
-        }
-
-        pub fn getFullVarDecl(self: AssignDestructure, tree: Ast) Ast.full.VarDecl {
-            return tree.fullVarDecl(self.getVarDeclNode(tree)).?;
-        }
-    };
-
-    pub const Switch = struct {
-        /// tag is `.@"switch"` or `.switch_comma`
-        node: Ast.Node.Index,
-        /// is guaranteed to have a payload_token
-        case_index: u32,
-
-        pub fn getCase(self: Switch, tree: Ast) Ast.full.SwitchCase {
-            const node_datas = tree.nodes.items(.data);
-            const extra = tree.extraData(node_datas[self.node].rhs, Ast.Node.SubRange);
-            const cases = tree.extra_data[extra.start..extra.end];
-            return tree.fullSwitchCase(cases[self.case_index]).?;
-        }
-    };
-
-    pub const Index = enum(u32) {
-        _,
-
-        pub fn toOptional(index: Index) OptionalIndex {
-            return @enumFromInt(@intFromEnum(index));
-        }
-    };
-
-    pub const OptionalIndex = enum(u32) {
-        none = std.math.maxInt(u32),
-        _,
-
-        pub fn unwrap(index: OptionalIndex) ?Index {
-            if (index == .none) return null;
-            return @enumFromInt(@intFromEnum(index));
-        }
-    };
-
-    pub fn eql(a: Declaration, b: Declaration) bool {
-        return std.meta.eql(a, b);
-    }
-
-    pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
-        return switch (decl) {
-            .ast_node => |n| getDeclNameToken(tree, n).?,
-            .function_parameter => |payload| payload.get(tree).?.name_token.?,
-            .optional_payload => |payload| payload.identifier,
-            .error_union_payload => |payload| payload.identifier,
-            .error_union_error => |payload| payload.identifier,
-            .for_loop_payload => |payload| payload.identifier,
-            .label => |payload| payload.identifier,
-            .error_token => |error_token| error_token,
-            .assign_destructure => |payload| getDeclNameToken(tree, payload.getVarDeclNode(tree)).?,
-            .switch_payload => |payload| {
-                const case = payload.getCase(tree);
-                const payload_token = case.payload_token.?;
-                return payload_token + @intFromBool(tree.tokens.items(.tag)[payload_token] == .asterisk);
-            },
-        };
-    }
-};
-
 pub const DeclWithHandle = struct {
     decl: Declaration,
     handle: *DocumentStore.Handle,
@@ -3984,8 +3707,23 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn isPublic(self: DeclWithHandle) bool {
+        const tree = self.handle.tree;
+        var buf: [1]Ast.Node.Index = undefined;
         return switch (self.decl) {
-            .ast_node => |node| isNodePublic(self.handle.tree, node),
+            .ast_node => |node| switch (tree.nodes.items(.tag)[node]) {
+                .global_var_decl,
+                .local_var_decl,
+                .simple_var_decl,
+                .aligned_var_decl,
+                => tree.fullVarDecl(node).?.visib_token != null,
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => tree.fullFnProto(&buf, node).?.visib_token != null,
+                else => true,
+            },
             else => true,
         };
     }

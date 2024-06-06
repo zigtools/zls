@@ -361,7 +361,7 @@ fn functionTypeCompletion(
         },
     };
 
-    const kind: types.CompletionItemKind = if (Analyser.isTypeFunction(tree, func))
+    const kind: types.CompletionItemKind = if (func_ty.isTypeFunc())
         .Struct
     else if (has_self_param)
         .Method

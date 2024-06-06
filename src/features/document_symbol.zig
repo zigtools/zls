@@ -35,9 +35,6 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
     const main_tokens = tree.nodes.items(.main_token);
     const token_tags = tree.tokens.items(.tag);
 
-    const decl_name_token = analysis.getContainerDeclNameToken(tree, ctx.parent_container, node);
-    const decl_name = if (decl_name_token) |name_token| analysis.declNameTokenToSlice(tree, name_token) else null;
-
     var new_ctx = ctx.*;
     const maybe_symbol: ?Symbol = switch (node_tags[node]) {
         .global_var_decl,
@@ -45,8 +42,14 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
         .simple_var_decl,
         .aligned_var_decl,
         => blk: {
-            new_ctx.last_var_decl_name = decl_name;
             if (!ast.isContainer(tree, ctx.parent_node)) break :blk null;
+
+            const var_decl = tree.fullVarDecl(node).?;
+            const var_decl_name_token = var_decl.ast.mut_token + 1;
+            if (tree.tokens.items(.tag)[var_decl_name_token] != .identifier) break :blk null;
+            const var_decl_name = offsets.identifierTokenToNameSlice(tree, var_decl_name_token);
+
+            new_ctx.last_var_decl_name = var_decl_name;
 
             const kind: types.SymbolKind = switch (token_tags[main_tokens[node]]) {
                 .keyword_var => .Variable,
@@ -55,33 +58,38 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
             };
 
             break :blk .{
-                .name = decl_name orelse break :blk null,
+                .name = var_decl_name,
                 .detail = null,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
-                .selection_loc = offsets.tokenToLoc(tree, decl_name_token.?),
+                .selection_loc = offsets.tokenToLoc(tree, var_decl_name_token),
                 .children = .{},
             };
         },
 
-        .test_decl,
-        .fn_decl,
-        => |tag| blk: {
-            const kind: types.SymbolKind = switch (tag) {
-                .test_decl => .Method, // there is no SymbolKind that represents a tests
-                .fn_decl => .Function,
-                else => unreachable,
-            };
-
-            var buffer: [1]Ast.Node.Index = undefined;
-            const detail = if (tree.fullFnProto(&buffer, node)) |fn_info| analysis.getFunctionSignature(tree, fn_info) else null;
+        .test_decl => blk: {
+            const test_name_token, const test_name = ast.testDeclNameAndToken(tree, node) orelse break :blk null;
 
             break :blk .{
-                .name = decl_name orelse break :blk null,
-                .detail = detail,
-                .kind = kind,
+                .name = test_name,
+                .kind = .Method, // there is no SymbolKind that represents a tests
                 .loc = offsets.nodeToLoc(tree, node),
-                .selection_loc = offsets.tokenToLoc(tree, decl_name_token.?),
+                .selection_loc = offsets.tokenToLoc(tree, test_name_token),
+                .children = .{},
+            };
+        },
+
+        .fn_decl => blk: {
+            var buffer: [1]Ast.Node.Index = undefined;
+            const fn_info = tree.fullFnProto(&buffer, node).?;
+            const name_token = fn_info.name_token orelse break :blk null;
+
+            break :blk .{
+                .name = offsets.identifierTokenToNameSlice(tree, name_token),
+                .detail = analysis.getFunctionSignature(tree, fn_info),
+                .kind = .Function,
+                .loc = offsets.nodeToLoc(tree, node),
+                .selection_loc = offsets.tokenToLoc(tree, name_token),
                 .children = .{},
             };
         },
@@ -115,12 +123,15 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 else => unreachable,
             };
 
+            const decl_name_token = analysis.DocumentScope.getDeclNameToken(tree, node) orelse break :blk null;
+            const decl_name = offsets.tokenToSlice(tree, decl_name_token);
+
             break :blk .{
-                .name = decl_name orelse break :blk null,
+                .name = decl_name,
                 .detail = ctx.last_var_decl_name,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
-                .selection_loc = offsets.tokenToLoc(tree, decl_name_token.?),
+                .selection_loc = offsets.tokenToLoc(tree, decl_name_token),
                 .children = .{},
             };
         },
