@@ -29,7 +29,6 @@ pub fn build(b: *Build) !void {
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
     const enable_tracy_allocation = b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
-    const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
     const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.");
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
@@ -273,37 +272,37 @@ pub fn build(b: *Build) !void {
     src_tests.root_module.addImport("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
-    if (coverage) {
-        const merge_step = std.Build.Step.Run.create(b, "merge coverage");
-        merge_step.addArgs(&.{ "kcov", "--merge" });
-        merge_step.rename_step_with_output_arg = false;
-        const merged_coverage_output = merge_step.addOutputFileArg(".");
+    const coverage_step = b.step("coverage", "Generate a coverage report with kcov");
 
-        {
-            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
-            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(tests.name));
-            kcov_collect.addArtifactArg(tests);
-            kcov_collect.enableTestRunnerMode();
-        }
+    const merge_step = std.Build.Step.Run.create(b, "merge coverage");
+    merge_step.addArgs(&.{ "kcov", "--merge" });
+    merge_step.rename_step_with_output_arg = false;
+    const merged_coverage_output = merge_step.addOutputFileArg(".");
 
-        {
-            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
-            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(src_tests.name));
-            kcov_collect.addArtifactArg(src_tests);
-            kcov_collect.enableTestRunnerMode();
-        }
-
-        const install_coverage = b.addInstallDirectory(.{
-            .source_dir = merged_coverage_output,
-            .install_dir = .{ .custom = "coverage" },
-            .install_subdir = "",
-        });
-        test_step.dependOn(&install_coverage.step);
+    {
+        const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+        kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+        kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+        merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(tests.name));
+        kcov_collect.addArtifactArg(tests);
+        kcov_collect.enableTestRunnerMode();
     }
+
+    {
+        const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+        kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+        kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+        merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(src_tests.name));
+        kcov_collect.addArtifactArg(src_tests);
+        kcov_collect.enableTestRunnerMode();
+    }
+
+    const install_coverage = b.addInstallDirectory(.{
+        .source_dir = merged_coverage_output,
+        .install_dir = .{ .custom = "coverage" },
+        .install_subdir = "",
+    });
+    coverage_step.dependOn(&install_coverage.step);
 }
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.

@@ -27,7 +27,7 @@ jobs:
       - name: Run Tests with kcov
         run: |
           kcov --version
-          zig build test -Dgenerate_coverage --summary all
+          zig build coverage --summary all
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
