@@ -4205,13 +4205,14 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-fn iterateSymbolsGlobalInternal(
+pub fn iterateSymbolsGlobal(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     source_index: usize,
     comptime callback: anytype,
     context: anytype,
 ) error{OutOfMemory}!void {
+    analyser.use_trail.clearRetainingCapacity();
     const document_scope = try handle.getDocumentScope();
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
@@ -4231,17 +4232,6 @@ fn iterateSymbolsGlobalInternal(
             false,
         );
     }
-}
-
-pub fn iterateSymbolsGlobal(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
-    analyser.use_trail.clearRetainingCapacity();
-    return try analyser.iterateSymbolsGlobalInternal(handle, source_index, callback, context);
 }
 
 pub fn innermostScopeAtIndex(document_scope: DocumentScope, source_index: usize) Scope.Index {
