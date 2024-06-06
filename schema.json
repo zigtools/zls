@@ -129,11 +129,6 @@
             "type": "string",
             "default": null
         },
-        "build_runner_global_cache_path": {
-            "description": "Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`",
-            "type": "string",
-            "default": null
-        },
         "completion_label_details": {
             "description": "When false, the function signature of completion results is hidden. Improves readability in some editors",
             "type": "boolean",

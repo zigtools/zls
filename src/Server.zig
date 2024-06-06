@@ -995,9 +995,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                 break :blk .{ .kind = .file, .is_accessible = true };
             } else if (std.mem.eql(u8, field_name, "zig_lib_path")) {
                 break :blk .{ .kind = .directory, .is_accessible = true };
-            } else if (std.mem.eql(u8, field_name, "global_cache_path") or
-                std.mem.eql(u8, field_name, "build_runner_global_cache_path"))
-            {
+            } else if (std.mem.eql(u8, field_name, "global_cache_path")) {
                 break :blk .{ .kind = .directory, .is_accessible = false };
             } else {
                 @compileError(std.fmt.comptimePrint(
@@ -1130,10 +1128,6 @@ fn resolveConfiguration(
                     config.zig_lib_path = try std.fs.path.join(config_arena, &.{ cwd, lib_dir });
                 }
             }
-        }
-
-        if (config.build_runner_global_cache_path == null) {
-            config.build_runner_global_cache_path = try config_arena.dupe(u8, env.value.global_cache_dir);
         }
 
         result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
