@@ -828,7 +828,7 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, ty: Type, symbol: []const u8
         .container => |s| s,
         else => return null,
     };
-    const node = try scope_handle.toNode();
+    const node = scope_handle.toNode();
     const handle = scope_handle.handle;
 
     if (node == 0)
@@ -961,7 +961,7 @@ fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{O
         .container => |s| s,
         else => return null,
     };
-    const node = try scope_handle.toNode();
+    const node = scope_handle.toNode();
     const handle = scope_handle.handle;
     const tree = handle.tree;
     const main_tokens = tree.nodes.items(.main_token);
@@ -1028,7 +1028,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .container => |scope_handle| switch (scope_handle.handle.tree.nodes.items(.tag)[try scope_handle.toNode()]) {
+        .container => |scope_handle| switch (scope_handle.handle.tree.nodes.items(.tag)[scope_handle.toNode()]) {
             .container_decl,
             .container_decl_trailing,
             .container_decl_arg,
@@ -1407,10 +1407,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .container_field_align,
         => {
             const container_type = try innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
-            if (try container_type.isEnumType())
+            if (container_type.isEnumType())
                 return try container_type.instanceTypeVal(analyser);
 
-            if (try container_type.isTaggedUnion()) {
+            if (container_type.isTaggedUnion()) {
                 var field = tree.fullContainerField(node).?;
                 field.convertToNonTupleLike(tree.nodes);
                 if (field.ast.type_expr == 0)
@@ -1597,10 +1597,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         },
 
         // TODO represent through InternPool
-        .merge_error_sets,
-        .error_set_decl,
-        => return Type.typeVal(node_handle),
+        .merge_error_sets => return Type.typeVal(node_handle),
 
+        .error_set_decl, // TODO represent through InternPool
         .container_decl,
         .container_decl_arg,
         .container_decl_arg_trailing,
@@ -1685,21 +1684,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     else => return null,
                 };
 
-                const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
-                const new_handle_document_scope = try new_handle.getDocumentScope();
+                const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
+                const builtin_root_struct_type: Type = .{
+                    .data = .{ .container = .{ .handle = builtin_handle, .scope = Scope.Index.root } },
+                    .is_type_val = true,
+                };
 
-                const decl_index = new_handle_document_scope.getScopeDeclaration(.{
-                    .scope = @enumFromInt(0),
-                    .name = "Type",
-                    .kind = .other,
-                }).unwrap() orelse return null;
-
-                const decl = new_handle_document_scope.declarations.get(@intFromEnum(decl_index));
-                if (decl != .ast_node) return null;
-
-                const var_decl = new_handle.tree.fullVarDecl(decl.ast_node) orelse return null;
-
-                return Type{ .data = .{ .other = .{ .node = var_decl.ast.init_node, .handle = new_handle } }, .is_type_val = false };
+                const builtin_type_decl = try builtin_root_struct_type.lookupSymbol(analyser, "Type") orelse return null;
+                const builtin_type = try builtin_type_decl.resolveType(analyser) orelse return null;
+                return try builtin_type.instanceTypeVal(analyser);
             }
 
             if (std.mem.eql(u8, call_name, "@import")) {
@@ -1720,12 +1713,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
 
-                // reference to node '0' which is root
                 return .{
                     .data = .{
                         .container = .{
                             .handle = new_handle,
-                            .scope = @enumFromInt(0),
+                            .scope = Scope.Index.root,
                         },
                     },
                     .is_type_val = true,
@@ -1735,12 +1727,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
 
-                // reference to node '0' which is root
                 return .{
                     .data = .{
                         .container = .{
                             .handle = new_handle,
-                            .scope = @enumFromInt(0),
+                            .scope = Scope.Index.root,
                         },
                     },
                     .is_type_val = true,
@@ -2492,19 +2483,18 @@ pub const Type = struct {
 
     fn isRoot(self: Type) bool {
         switch (self.data) {
-            // root is always index 0
-            .container => |container_scope_handle| return @intFromEnum(container_scope_handle.scope) == 0,
+            .container => |container_scope_handle| return container_scope_handle.scope == Scope.Index.root,
             else => return false,
         }
     }
 
-    fn isContainerKind(self: Type, container_kind_tok: std.zig.Token.Tag) !bool {
+    fn isContainerKind(self: Type, container_kind_tok: std.zig.Token.Tag) bool {
         const scope_handle = switch (self.data) {
             .container => |s| s,
             else => return false,
         };
 
-        const node = try scope_handle.toNode();
+        const node = scope_handle.toNode();
 
         const tree = scope_handle.handle.tree;
         const main_tokens = tree.nodes.items(.main_token);
@@ -2512,14 +2502,14 @@ pub const Type = struct {
         return tags[main_tokens[node]] == container_kind_tok;
     }
 
-    pub fn isStructType(self: Type) !bool {
-        return try self.isContainerKind(.keyword_struct) or self.isRoot();
+    pub fn isStructType(self: Type) bool {
+        return self.isContainerKind(.keyword_struct) or self.isRoot();
     }
 
-    pub fn isNamespace(self: Type) !bool {
-        if (!try self.isStructType()) return false;
+    pub fn isNamespace(self: Type) bool {
+        if (!self.isStructType()) return false;
         const scope_handle = self.data.container;
-        const node = try scope_handle.toNode();
+        const node = scope_handle.toNode();
         const tree = scope_handle.handle.tree;
         const tags = tree.nodes.items(.tag);
         var buf: [2]Ast.Node.Index = undefined;
@@ -2530,21 +2520,21 @@ pub const Type = struct {
         return true;
     }
 
-    pub fn isEnumType(self: Type) !bool {
+    pub fn isEnumType(self: Type) bool {
         return self.isContainerKind(.keyword_enum);
     }
 
-    pub fn isUnionType(self: Type) !bool {
+    pub fn isUnionType(self: Type) bool {
         return self.isContainerKind(.keyword_union);
     }
 
-    pub fn isOpaqueType(self: Type) !bool {
+    pub fn isOpaqueType(self: Type) bool {
         return self.isContainerKind(.keyword_opaque);
     }
 
-    pub fn isTaggedUnion(self: Type) !bool {
+    pub fn isTaggedUnion(self: Type) bool {
         return switch (self.data) {
-            .container => |scope_handle| ast.isTaggedUnion(scope_handle.handle.tree, try scope_handle.toNode()),
+            .container => |scope_handle| ast.isTaggedUnion(scope_handle.handle.tree, scope_handle.toNode()),
             else => false,
         };
     }
@@ -2604,7 +2594,7 @@ pub const Type = struct {
     pub fn typeDefinitionToken(self: Type) !?TokenWithHandle {
         return switch (self.data) {
             .container => |scope_handle| .{
-                .token = scope_handle.handle.tree.firstToken(try scope_handle.toNode()),
+                .token = scope_handle.handle.tree.firstToken(scope_handle.toNode()),
                 .handle = scope_handle.handle,
             },
             .other => |node_handle| .{
@@ -2618,7 +2608,7 @@ pub const Type = struct {
     pub fn docComments(self: Type, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         if (self.is_type_val) {
             switch (self.data) {
-                .container => |scope_handle| return try getDocComments(allocator, scope_handle.handle.tree, try scope_handle.toNode()),
+                .container => |scope_handle| return try getDocComments(allocator, scope_handle.handle.tree, scope_handle.toNode()),
                 .other => |node_handle| return try getDocComments(allocator, node_handle.handle.tree, node_handle.node),
                 else => {},
             }
@@ -2648,11 +2638,11 @@ pub const Type = struct {
         if (self.is_type_val) {
             if (try analyser.lookupSymbolContainer(scope_handle, symbol, .other)) |decl|
                 return decl;
-            if (try self.isEnumType() or try self.isTaggedUnion())
+            if (self.isEnumType() or self.isTaggedUnion())
                 return analyser.lookupSymbolContainer(scope_handle, symbol, .field);
             return null;
         }
-        if (try self.isEnumType())
+        if (self.isEnumType())
             return analyser.lookupSymbolContainer(scope_handle, symbol, .other);
         if (try analyser.lookupSymbolContainer(scope_handle, symbol, .field)) |decl|
             return decl;
@@ -2724,12 +2714,11 @@ pub const Type = struct {
             },
             .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
             .container => |scope_handle| {
-                const scope = scope_handle.scope;
                 const handle = scope_handle.handle;
                 const tree = handle.tree;
 
                 const doc_scope = try handle.getDocumentScope();
-                const node = doc_scope.getScopeAstNode(scope).?;
+                const node = scope_handle.toNode();
 
                 switch (handle.tree.nodes.items(.tag)[node]) {
                     .root => {
@@ -2744,7 +2733,6 @@ pub const Type = struct {
                     .container_decl_two,
                     .container_decl_two_trailing,
                     .error_set_decl,
-                    .merge_error_sets,
                     .tagged_union,
                     .tagged_union_trailing,
                     .tagged_union_two,
@@ -2861,8 +2849,9 @@ pub const ScopeWithHandle = struct {
     handle: *DocumentStore.Handle,
     scope: Scope.Index,
 
-    pub fn toNode(scope_handle: ScopeWithHandle) !Ast.Node.Index {
-        var doc_scope = try scope_handle.handle.getDocumentScope();
+    pub fn toNode(scope_handle: ScopeWithHandle) Ast.Node.Index {
+        if (scope_handle.scope == Scope.Index.root) return 0;
+        var doc_scope = scope_handle.handle.getDocumentScopeCached();
         return doc_scope.getScopeAstNode(scope_handle.scope).?;
     }
 };
@@ -3942,8 +3931,8 @@ pub const DeclWithHandle = struct {
                     .node = cond,
                     .handle = self.handle,
                 })) orelse return null;
-                if (try switch_expr_type.isEnumType()) break :blk switch_expr_type;
-                if (!try switch_expr_type.isUnionType()) return null;
+                if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
+                if (!switch_expr_type.isUnionType()) return null;
 
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {
@@ -3975,25 +3964,6 @@ pub const DeclWithHandle = struct {
     }
 };
 
-fn findContainerScopeIndex(container_handle: NodeWithHandle) !?Scope.Index {
-    const container = container_handle.node;
-    const handle = container_handle.handle;
-
-    const tree = handle.tree;
-    const document_scope = try handle.getDocumentScope();
-
-    if (!ast.isContainer(tree, container)) return null;
-
-    return for (0..document_scope.scopes.len) |scope_index| {
-        switch (document_scope.getScopeTag(@enumFromInt(scope_index))) {
-            .container, .container_usingnamespace => if (document_scope.getScopeAstNode(@enumFromInt(scope_index)).? == container) {
-                break @enumFromInt(scope_index);
-            },
-            else => {},
-        }
-    } else null;
-}
-
 /// Collects all symbols/declarations that can be a acccessed on the given container type.
 pub fn collectDeclarationsOfContainer(
     analyser: *Analyser,
@@ -4014,7 +3984,7 @@ pub fn collectDeclarationsOfContainer(
 
     const tree = handle.tree;
     const document_scope = try handle.getDocumentScope();
-    const container_node = document_scope.getScopeAstNode(scope).?;
+    const container_node = container_scope.toNode();
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const main_token = tree.nodes.items(.main_token)[container_node];
@@ -4090,6 +4060,10 @@ fn collectUsingnamespaceDeclarationsOfContainer(
     instance_access: bool,
     decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
 ) !void {
+    const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
+    if (gop.found_existing) return;
+    defer std.debug.assert(analyser.use_trail.remove(.{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri }));
+
     const handle = usingnamespace_node.handle;
     const tree = handle.tree;
 
@@ -4103,9 +4077,9 @@ fn collectUsingnamespaceDeclarationsOfContainer(
     })) orelse return;
 
     switch (use_expr.data) {
-        .other => |expr| {
-            try analyser.collectUsingnamespaceDeclarationsOfContainer(
-                expr,
+        .container => |container_scope| {
+            try analyser.collectDeclarationsOfContainer(
+                container_scope,
                 original_handle,
                 instance_access,
                 decl_collection,
@@ -4114,9 +4088,9 @@ fn collectUsingnamespaceDeclarationsOfContainer(
         .either => |entries| {
             for (entries) |entry| {
                 switch (entry.type_data) {
-                    .other => |expr| {
-                        try analyser.collectUsingnamespaceDeclarationsOfContainer(
-                            expr,
+                    .container => |container_scope| {
+                        try analyser.collectDeclarationsOfContainer(
+                            container_scope,
                             original_handle,
                             instance_access,
                             decl_collection,
@@ -4201,35 +4175,6 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
             if (decl != .label) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
-    }
-}
-
-pub fn iterateSymbolsGlobal(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
-    analyser.use_trail.clearRetainingCapacity();
-    const document_scope = try handle.getDocumentScope();
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
-    while (scope_iterator.next().unwrap()) |scope_index| {
-        const scope_decls = document_scope.getScopeDeclarationsConst(scope_index);
-        for (scope_decls) |decl_index| {
-            const decl = document_scope.declarations.get(@intFromEnum(decl_index));
-            if (decl == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
-            if (decl == .label) continue;
-            try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
-        }
-
-        try analyser.iterateUsingnamespaceContainerSymbols(
-            .{ .handle = handle, .scope = scope_index },
-            handle,
-            callback,
-            context,
-            false,
-        );
     }
 }
 
@@ -4942,14 +4887,13 @@ fn addReferencedTypes(
         .union_tag => |t| try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types)),
 
         .container => |scope_handle| {
-            const scope = scope_handle.scope;
             const handle = scope_handle.handle;
             const tree = handle.tree;
 
             const doc_scope = try handle.getDocumentScope();
-            const node = doc_scope.getScopeAstNode(scope).?;
+            const node = scope_handle.toNode();
 
-            switch (handle.tree.nodes.items(.tag)[node]) {
+            switch (tree.nodes.items(.tag)[node]) {
                 .root => {
                     const path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
                         error.OutOfMemory => |e| return e,
@@ -4969,7 +4913,6 @@ fn addReferencedTypes(
                 .container_decl_two,
                 .container_decl_two_trailing,
                 .error_set_decl,
-                .merge_error_sets,
                 .tagged_union,
                 .tagged_union_trailing,
                 .tagged_union_two,
@@ -4991,9 +4934,8 @@ fn addReferencedTypes(
                         }, {});
                     }
                     if (token >= 1 and token_tags[token - 1] == .keyword_return) blk: {
-                        const document_scope = try handle.getDocumentScope();
-                        const function_scope = innermostFunctionScopeAtIndex(document_scope, token_starts[token - 1]).unwrap() orelse break :blk;
-                        const function_node = document_scope.getScopeAstNode(function_scope).?;
+                        const function_scope = innermostFunctionScopeAtIndex(doc_scope, token_starts[token - 1]).unwrap() orelse break :blk;
+                        const function_node = doc_scope.getScopeAstNode(function_scope).?;
                         var buf: [1]Ast.Node.Index = undefined;
                         const func = tree.fullFnProto(&buf, function_node).?;
                         const func_name_token = func.name_token orelse break :blk;

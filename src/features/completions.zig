@@ -120,7 +120,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
-            .error_set_decl => {}, // TODO
 
             .fn_proto,
             .fn_proto_multi,
@@ -238,13 +237,13 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                     item.documentation = documentation;
                     builder.completions.appendAssumeCapacity(item);
                     return;
-                } else if (try ty.isEnumType()) {
+                } else if (ty.isEnumType()) {
                     if (ty.is_type_val) {
                         kind = .Enum;
                     } else {
                         kind = .EnumMember;
                     }
-                } else if (try ty.isStructType() or try ty.isUnionType()) {
+                } else if (ty.isStructType() or ty.isUnionType()) {
                     kind = .Struct;
                 } else if (decl_handle.decl == .function_parameter and ty.isMetaType()) {
                     kind = .TypeParameter;
@@ -1176,7 +1175,7 @@ fn collectContainerFields(
         .container => |s| s,
         else => return,
     };
-    const node = try scope_handle.toNode();
+    const node = scope_handle.toNode();
     const handle = scope_handle.handle;
     var buffer: [2]Ast.Node.Index = undefined;
     const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
@@ -1287,7 +1286,7 @@ fn collectFieldAccessContainerNodes(
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
-            if (try unwrapped.isEnumType() or try unwrapped.isUnionType()) {
+            if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
                 try types_with_handles.append(arena, unwrapped);
                 return;
             }
