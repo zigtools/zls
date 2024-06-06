@@ -2075,24 +2075,28 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
     return null;
 }
 
-// TODO Reorganize this file, perhaps split into a couple as well
-// TODO Make this better, nested levels of type vals
 pub const Type = struct {
-    pub const EitherEntry = struct {
-        /// the `is_type_val` property is inherited from the containing `Type`
-        type_data: Data,
-        descriptor: []const u8,
-    };
+    data: Data,
+    /// If true, the type `type`, the attached data is the value of the type value.
+    /// ```zig
+    /// const foo = u32; // is_type_val == true
+    /// const bar = @as(u32, ...); // is_type_val == false
+    /// ```
+    /// if `data == .ip_index` then this field is equivalent to `typeOf(index) == .type_type`
+    is_type_val: bool,
 
     pub const Data = union(enum) {
-        /// *T, [*]T, [T], [*c]T
+        /// - `*const T`
+        /// - `[*]T`
+        /// - `[]const T`
+        /// - `[*c]T`
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
             is_const: bool,
             elem_ty: *Type,
         },
 
-        /// [elem_count :sentinel]elem_ty
+        /// `[elem_count :sentinel]elem_ty`
         array: struct {
             elem_count: ?u64,
             /// `.none` means no sentinel
@@ -2100,7 +2104,7 @@ pub const Type = struct {
             elem_ty: *Type,
         },
 
-        /// ?T
+        /// `?T`
         optional: *Type,
 
         /// `error_set!payload`
@@ -2113,7 +2117,11 @@ pub const Type = struct {
         /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
         union_tag: *Type,
 
-        /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
+        /// - `struct {}`
+        /// - `enum {}`
+        /// - `union {}`
+        /// - `opaque {}`
+        /// - `error {}`
         container: ScopeWithHandle,
 
         /// - Error type: `Foo || Bar`, `Foo!Bar`
@@ -2133,16 +2141,13 @@ pub const Type = struct {
             /// this stores both the type and the value
             index: InternPool.Index,
         },
-    };
 
-    data: Data,
-    /// If true, the type `type`, the attached data is the value of the type value.
-    /// ```zig
-    /// const foo = u32; // is_type_val == true
-    /// const bar = @as(u32, ...); // is_type_val == false
-    /// ```
-    /// if `data == .ip_index` then this field is equivalent to `typeOf(index) == .type_type`
-    is_type_val: bool,
+        pub const EitherEntry = struct {
+            /// the `is_type_val` property is inherited from the containing `Type`
+            type_data: Data,
+            descriptor: []const u8,
+        };
+    };
 
     pub fn hash32(self: Type) u32 {
         return @truncate(self.hash64());
@@ -2287,13 +2292,13 @@ pub const Type = struct {
         // duplicates
 
         const DeduplicatorContext = struct {
-            pub fn hash(self: @This(), item: Type.EitherEntry) u32 {
+            pub fn hash(self: @This(), item: Type.Data.EitherEntry) u32 {
                 _ = self;
                 const ty = Type{ .data = item.type_data, .is_type_val = true };
                 return ty.hash32();
             }
 
-            pub fn eql(self: @This(), a: Type.EitherEntry, b: Type.EitherEntry, b_index: usize) bool {
+            pub fn eql(self: @This(), a: Type.Data.EitherEntry, b: Type.Data.EitherEntry, b_index: usize) bool {
                 _ = b_index;
                 _ = self;
                 const a_ty = Type{ .data = a.type_data, .is_type_val = true };
@@ -2301,7 +2306,7 @@ pub const Type = struct {
                 return a_ty.eql(b_ty);
             }
         };
-        const Deduplicator = std.ArrayHashMapUnmanaged(Type.EitherEntry, void, DeduplicatorContext, true);
+        const Deduplicator = std.ArrayHashMapUnmanaged(Type.Data.EitherEntry, void, DeduplicatorContext, true);
 
         var deduplicator = Deduplicator{};
         defer deduplicator.deinit(arena);
@@ -2323,7 +2328,7 @@ pub const Type = struct {
             return entries[0].type;
 
         return .{
-            .data = .{ .either = try arena.dupe(Type.EitherEntry, deduplicator.keys()) },
+            .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
             .is_type_val = has_type_val,
         };
     }
