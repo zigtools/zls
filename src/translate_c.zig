@@ -39,30 +39,14 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
 
     var buffer: [2]Ast.Node.Index = undefined;
     for (ast.builtinCallParams(tree, node, &buffer).?) |child| {
-        var stack_allocator = std.heap.stackFallback(512, allocator);
-        try convertCIncludeInternal(allocator, stack_allocator.get(), tree, child, &output);
+        try convertCIncludeInternal(allocator, tree, child, &output);
     }
 
     return output.toOwnedSlice(allocator);
 }
 
-/// HACK self-hosted has not implemented async yet
-fn callConvertCIncludeInternal(allocator: std.mem.Allocator, args: anytype) error{ OutOfMemory, Unsupported }!void {
-    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
-        const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
-        const child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-        defer allocator.free(child_frame);
-
-        return await @asyncCall(child_frame, {}, convertCIncludeInternal, args);
-    } else {
-        // TODO find a non recursive solution
-        return @call(.auto, convertCIncludeInternal, args);
-    }
-}
-
 fn convertCIncludeInternal(
     allocator: std.mem.Allocator,
-    stack_allocator: std.mem.Allocator,
     tree: Ast,
     node: Ast.Node.Index,
     output: *std.ArrayListUnmanaged(u8),
@@ -75,7 +59,7 @@ fn convertCIncludeInternal(
     var buffer: [2]Ast.Node.Index = undefined;
     if (ast.blockStatements(tree, node, &buffer)) |statements| {
         for (statements) |statement| {
-            try callConvertCIncludeInternal(stack_allocator, .{ allocator, stack_allocator, tree, statement, output });
+            try convertCIncludeInternal(allocator, tree, statement, output);
         }
     } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
         if (params.len < 1) return;
