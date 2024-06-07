@@ -9,7 +9,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0, .p
 /// rework std.Progress
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_zig_version = "0.13.0-dev.336+963ffe9d5";
+const minimum_build_zig_version = "0.13.0-dev.336+963ffe9d5";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0
@@ -399,14 +399,14 @@ fn getTracyModule(
 }
 
 const Build = blk: {
-    const min_zig = std.SemanticVersion.parse(minimum_zig_version) catch unreachable;
+    const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
 
     std.debug.assert(zls_version.pre == null or std.mem.eql(u8, zls_version.pre.?, "dev"));
     std.debug.assert(zls_version.build == null);
     const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
 
-    if (min_runtime_zig.order(min_zig) == .gt) {
+    if (min_runtime_zig.order(min_build_zig) == .gt) {
         const message = std.fmt.comptimePrint(
             \\A Zig version that is able to build ZLS must be compatible with ZLS at runtime.
             \\
@@ -415,27 +415,27 @@ const Build = blk: {
             \\  minimum runtime Zig version: {[min_runtime_zig]}
             \\
             \\This is a developer error.
-        , .{ .min_build_zig = min_zig, .min_runtime_zig = min_runtime_zig });
+        , .{ .min_build_zig = min_build_zig, .min_runtime_zig = min_runtime_zig });
         @compileError(message);
     }
 
     // check that the ZLS version and minimum build version make sense
     if (zls_version_is_tagged) {
-        if (zls_version.order(min_zig) != .eq) {
+        if (zls_version.order(min_build_zig) != .eq) {
             const message = std.fmt.comptimePrint(
                 \\A tagged release of ZLS should have the same tagged release of Zig as the minimum build requirement:
                 \\          ZLS version: {[current_version]}
                 \\  minimum Zig version: {[minimum_version]}
                 \\
-                \\This is a developer error. Set `minimum_zig_version` in `build.zig` and `minimum_zig_version` in `build.zig.zon` to {[current_version]}.
-            , .{ .current_version = zls_version, .minimum_version = min_zig });
+                \\This is a developer error. Set `minimum_build_zig_version` in `build.zig` and `minimum_zig_version` in `build.zig.zon` to {[current_version]}.
+            , .{ .current_version = zls_version, .minimum_version = min_build_zig });
             @compileError(message);
         }
     } else {
-        const min_zig_simple = std.SemanticVersion{ .major = min_zig.major, .minor = min_zig.minor, .patch = 0 };
+        const min_build_zig_simple = std.SemanticVersion{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
         const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
-        const min_zig_is_tagged = min_zig.build == null and min_zig.pre == null;
-        if (!min_zig_is_tagged and zls_version_simple.order(min_zig_simple) != .eq) {
+        const min_zig_is_tagged = min_build_zig.build == null and min_build_zig.pre == null;
+        if (!min_zig_is_tagged and zls_version_simple.order(min_build_zig_simple) != .eq) {
             const message = std.fmt.comptimePrint(
                 \\A development build of ZLS should have a tagged release of Zig as the minimum build requirement or
                 \\have a development build of Zig as the minimum build requirement with the same major and minor version.
@@ -444,21 +444,21 @@ const Build = blk: {
                 \\
                 \\
                 \\This is a developer error.
-            , .{ zls_version.major, zls_version.minor, min_zig });
+            , .{ zls_version.major, zls_version.minor, min_build_zig });
             @compileError(message);
         }
     }
 
     // check minimum build version
     const is_current_zig_tagged_release = builtin.zig_version.pre == null and builtin.zig_version.build == null;
-    const is_min_zig_tagged_release = min_zig.pre == null and min_zig.build == null;
-    const min_zig_simple = std.SemanticVersion{ .major = min_zig.major, .minor = min_zig.minor, .patch = 0 };
+    const is_min_build_zig_tagged_release = min_build_zig.pre == null and min_build_zig.build == null;
+    const min_build_zig_simple = std.SemanticVersion{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
     const current_zig_simple = std.SemanticVersion{ .major = builtin.zig_version.major, .minor = builtin.zig_version.minor, .patch = 0 };
-    if (switch (builtin.zig_version.order(min_zig)) {
+    if (switch (builtin.zig_version.order(min_build_zig)) {
         .lt => true,
         .eq => false,
         // a tagged release of ZLS must be build with a tagged release of Zig that has the same major and minor version.
-        .gt => zls_version_is_tagged and (min_zig_simple.order(current_zig_simple) != .eq),
+        .gt => zls_version_is_tagged and (min_build_zig_simple.order(current_zig_simple) != .eq),
     }) {
         const message = std.fmt.comptimePrint(
             \\Your Zig version does not meet the minimum build requirement:
@@ -466,7 +466,7 @@ const Build = blk: {
             \\  actual   Zig version: {[current_version]}
             \\
             \\
-        ++ if (is_min_zig_tagged_release)
+        ++ if (is_min_build_zig_tagged_release)
             std.fmt.comptimePrint(
                 \\Please download the {[minimum_version]} release of Zig. (https://ziglang.org/download/)
                 \\
@@ -474,8 +474,8 @@ const Build = blk: {
                 \\  -> https://github.com/zigtools/zls/releases
                 \\  -> https://github.com/zigtools/zls/releases/tag/{[minimum_version_simple]} (may not exist yet)
             , .{
-                .minimum_version = min_zig,
-                .minimum_version_simple = min_zig_simple,
+                .minimum_version = min_build_zig,
+                .minimum_version_simple = min_build_zig_simple,
             })
         else if (is_current_zig_tagged_release)
             \\Please download or compile a tagged release of ZLS.
@@ -487,7 +487,7 @@ const Build = blk: {
             \\  - Compile an older version of ZLS that is compatible with your Zig version
         , .{
             .current_version = builtin.zig_version,
-            .minimum_version = min_zig,
+            .minimum_version = min_build_zig,
             .required_zig_version_note = if (!zls_version_is_tagged) "(or greater)" else "",
         });
         @compileError(message);
