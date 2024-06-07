@@ -1157,35 +1157,38 @@ fn resolveConfiguration(
         const global_cache_path = config.global_cache_path orelse break :blk;
         const zig_version = result.zig_runtime_version orelse break :blk;
 
-        result.build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version) orelse break :blk;
+        const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version) orelse break :blk;
+        const build_runner_source = build_runner_version.getBuildRunnerFile();
+        const build_runner_hash = build_runner_version.getBuildRunnerFileHash();
 
-        const build_runner_file_name = try std.fmt.allocPrint(allocator, "build_runner_{s}.zig", .{@tagName(result.build_runner_version.?)});
-        defer allocator.free(build_runner_file_name);
+        const cache_path = try std.fs.path.join(allocator, &.{ global_cache_path, "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
+        defer allocator.free(cache_path);
 
-        const build_runner_path = try std.fs.path.join(config_arena, &[_][]const u8{ global_cache_path, build_runner_file_name });
+        std.debug.assert(std.fs.path.isAbsolute(cache_path));
+        var cache_dir = std.fs.cwd().makeOpenPath(cache_path, .{}) catch |err| {
+            log.err("failed to open directory '{s}': {}", .{ cache_path, err });
+            break :blk;
+        };
+        defer cache_dir.close();
 
-        const build_config_path = try std.fs.path.join(allocator, &[_][]const u8{ global_cache_path, "BuildConfig.zig" });
-        defer allocator.free(build_config_path);
-
-        std.fs.cwd().writeFile(.{
-            .sub_path = build_config_path,
+        cache_dir.writeFile(.{
+            .sub_path = "BuildConfig.zig",
             .data = @embedFile("build_runner/BuildConfig.zig"),
         }) catch |err| {
-            log.err("failed to write file '{s}': {}", .{ build_config_path, err });
+            log.err("failed to write file '{s}/BuildConfig.zig': {}", .{ cache_path, err });
             break :blk;
         };
 
-        std.fs.cwd().writeFile(.{
-            .sub_path = build_runner_path,
-            .data = switch (result.build_runner_version.?) {
-                inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
-            },
+        cache_dir.writeFile(.{
+            .sub_path = "build_runner.zig",
+            .data = build_runner_source,
         }) catch |err| {
-            log.err("failed to write file '{s}': {}", .{ build_config_path, err });
+            log.err("failed to write file '{s}/build_runner.zig': {}", .{ cache_path, err });
             break :blk;
         };
 
-        config.build_runner_path = build_runner_path;
+        config.build_runner_path = try std.fs.path.join(config_arena, &.{ cache_path, "build_runner.zig" });
+        result.build_runner_version = build_runner_version;
     }
 
     if (config.builtin_path == null) blk: {
