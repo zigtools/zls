@@ -5,6 +5,7 @@ const build_options = @import("build_options");
 // There should be no need to have a build runner for minor patches (e.g. 0.10.1)
 pub const BuildRunnerVersion = enum {
     // master,
+    @"0.13.0",
     @"0.12.0",
 
     pub fn isTaggedRelease(version: BuildRunnerVersion) bool {
@@ -19,6 +20,7 @@ pub const BuildRunnerVersion = enum {
     pub fn getBuildRunnerFile(version: BuildRunnerVersion) [:0]const u8 {
         return switch (version) {
             // .master => @embedFile("master.zig"),
+            .@"0.13.0" => @embedFile("0.12.0.zig"), // The Zig 0.12.0 build runner is also compatible with Zig 0.13.0
             .@"0.12.0" => @embedFile("0.12.0.zig"),
         };
     }

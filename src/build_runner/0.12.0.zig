@@ -7,6 +7,8 @@
 //! You can also test the build runner on any other `build.zig` with the following command:
 //! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/0.12.0.zig`
 //! `zig build --build-runner /path/to/zls/src/build_runner/0.12.0.zig` (if the cwd contains build.zig)
+//!
+//! This build runner is also compatible with Zig 0.13.0
 
 const root = @import("@build");
 const std = @import("std");
