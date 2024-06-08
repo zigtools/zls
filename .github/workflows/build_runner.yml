@@ -21,10 +21,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - zig-version: 0.13.0
+          - zig-version: master
             build-runner-file: 0.12.0.zig
           - zig-version: 0.13.0
-            build-runner-file: 0.13.0.zig # The Zig 0.12.0 build runner is also compatible with Zig 0.13.0
+            build-runner-file: 0.12.0.zig # The Zig 0.12.0 build runner is also compatible with Zig 0.13.0
           - zig-version: 0.12.0
             build-runner-file: 0.12.0.zig
     runs-on: ubuntu-latest
