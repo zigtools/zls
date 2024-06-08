@@ -20,7 +20,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}.master;
+        zig = zig-overlay.packages.${system}."0.13.0";
         gitignoreSource = gitignore.lib.gitignoreSource;
       in
       rec {
