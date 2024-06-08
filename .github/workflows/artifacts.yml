@@ -5,14 +5,11 @@ on:
     branches:
       - master
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+  # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/publish`.
 
 jobs:
   deploy:
-    if: github.repository_owner == 'zigtools'
+    if: github.repository_owner == 'zigtools' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,44 +23,24 @@ jobs:
 
       - run: zig env
 
-      - name: Build artifacts
+      - name: Install APT packages
         run: |
-          mkdir -p artifacts/master
+          sudo apt-get update
+          sudo apt-get install tar 7zip
 
-          zig build release -Dcpu=baseline -Doptimize=ReleaseSafe --prefix artifacts/master --summary all
+      - name: Install minisign
+        run: |
+          wget https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz
+          tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
+          echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
-          zls_version=$(artifacts/master/x86_64-linux/zls --version)
-          mkdir -p "artifacts/$zls_version/"
-          cp -r artifacts/master/* "artifacts/$zls_version/"
-
-          wget https://zigtools-releases.nyc3.digitaloceanspaces.com/zls/index.json
-
-          cp index.json artifacts/old-index.json
-
-          for file in artifacts/master/*; do
-            targets+=("${file#artifacts/master/}")
-          done
-
-          jq \
-          --arg targets                   "${targets[*]}"                                       \
-          --arg zig_version               "$(zig version)"                                      \
-          --arg zls_version               "$(artifacts/master/x86_64-linux/zls --version)"               \
-          --arg zls_minimum_build_version "$(artifacts/master/x86_64-linux/zls --minimum-runtime-version)" \
-          '.latest = $zls_version | .versions[$zls_version] = {
-          "date": now | todateiso8601,
-          "builtWithZigVersion": $zig_version,
-          "zlsVersion": $zls_version,
-          "zlsMinimumBuildVersion": $zls_minimum_build_version,
-          "commit": "${{ github.sha }}",
-          "targets": ($targets / " "),
-          }' index.json > artifacts/index.json
-
-      - uses: BetaHuhn/do-spaces-action@v2
-        if: github.ref == 'refs/heads/master' # don't deploy when dispatching workflow on non-master branch
-        with:
-          access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
-          secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
-          space_name: zigtools-releases
-          space_region: nyc3
-          source: artifacts/
-          out_dir: zls/
+      - name: Build and Publish artifacts
+        run: |
+          trap "rm -f minisign.key" EXIT
+          set +x
+          echo "${{ secrets.MINISIGN_SECRET_FILE }}" > minisign.key
+          set -x
+          zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary all
+          rm -f minisign.key
+        env:
+          ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
