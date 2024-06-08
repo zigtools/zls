@@ -457,8 +457,9 @@ const Build = blk: {
     if (switch (builtin.zig_version.order(min_build_zig)) {
         .lt => true,
         .eq => false,
-        // a tagged release of ZLS must be build with a tagged release of Zig that has the same major and minor version.
-        .gt => zls_version_is_tagged and (min_build_zig_simple.order(current_zig_simple) != .eq),
+        .gt => (is_current_zig_tagged_release and !is_min_build_zig_tagged_release) or
+            // a tagged release of ZLS must be build with a tagged release of Zig that has the same major and minor version.
+            (zls_version_is_tagged and (min_build_zig_simple.order(current_zig_simple) != .eq)),
     }) {
         const message = std.fmt.comptimePrint(
             \\Your Zig version does not meet the minimum build requirement:
