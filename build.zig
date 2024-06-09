@@ -107,7 +107,7 @@ pub fn build(b: *Build) !void {
     gen_step.dependOn(&gen_cmd.step);
 
     const gen_version_data_cmd = b.addRunArtifact(gen_exe);
-    const resolved_data_version = data_version orelse if (zls_version.pre == null and zls_version.build == null) zls_version else "master";
+    const resolved_data_version = data_version orelse if (zls_version.pre == null and zls_version.build == null) b.fmt("{}", .{zls_version}) else "master";
     gen_version_data_cmd.addArgs(&.{ "--generate-version-data", resolved_data_version });
     if (data_version_path) |path| {
         gen_version_data_cmd.addArg("--langref_path");
