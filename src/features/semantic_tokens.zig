@@ -418,7 +418,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 .is_type_val = true,
             };
 
-            const func_name_tok_type: TokenType = if (Analyser.isTypeFunction(tree, fn_proto))
+            const func_name_tok_type: TokenType = if (func_ty.isTypeFunc())
                 .type
             else if (try builder.analyser.hasSelfParam(func_ty))
                 .method
@@ -427,7 +427,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             const tok_mod = TokenModifiers{
                 .declaration = true,
-                .generic = Analyser.isGenericFunction(tree, fn_proto),
+                .generic = func_ty.isGenericFunc(),
             };
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
@@ -607,7 +607,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
                 )) |struct_type| switch (struct_type.data) {
-                    .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, false),
+                    .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, false),
                     else => null,
                 } else null;
             }
@@ -873,7 +873,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
                             const tok_type = switch (lhs_type.data) {
-                                .other => |node_handle| fieldTokenType(node_handle.node, node_handle.handle, lhs_type.is_type_val),
+                                .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
                                 else => null,
                             };
 

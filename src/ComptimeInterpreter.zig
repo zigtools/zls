@@ -268,7 +268,9 @@ pub fn interpret(
         => {
             var decls: *std.StringArrayHashMapUnmanaged(InternPool.Decl.Index) = &interpreter.namespaces.items(.decls)[@intFromEnum(namespace)];
 
-            const name = analysis.getDeclName(tree, node_idx).?;
+            const name_token = analysis.DocumentScope.getDeclNameToken(tree, node_idx).?;
+            const name = offsets.tokenToSlice(tree, name_token);
+
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = try interpreter.ip.string_pool.getOrPutString(interpreter.allocator, name),
                 .node_idx = node_idx,
