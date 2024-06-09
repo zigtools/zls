@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 /// Must match the `version` in `build.zig.zon`.
 /// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
-const zls_version = std.SemanticVersion{ .major = 0, .minor = 13, .patch = 0 };
+const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// Release 0.13.0

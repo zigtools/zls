@@ -20,7 +20,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}."0.13.0";
+        zig = zig-overlay.packages.${system}.master;
         gitignoreSource = gitignore.lib.gitignoreSource;
       in
       rec {
@@ -28,7 +28,7 @@
         packages.default = packages.zls;
         packages.zls = pkgs.stdenvNoCC.mkDerivation {
           name = "zls";
-          version = "0.13.0";
+          version = "master";
           src = gitignoreSource ./.;
           nativeBuildInputs = [ zig ];
           dontConfigure = true;
