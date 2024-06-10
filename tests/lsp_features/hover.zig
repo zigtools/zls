@@ -303,6 +303,154 @@ test "struct" {
         \\(type)
         \\```
     );
+    try testHover(
+        \\const <cursor>S = struct {
+        \\	fn foo() void {
+        \\		// many lines here
+        \\    }
+        \\
+        \\	fld: u8,
+        \\};
+    ,
+        \\```zig
+        \\const S = struct {
+        \\	fld: u8,
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\/// Foo doc comment
+        \\const Foo<cursor>Struct = struct {
+        \\    bar: u32,
+        \\    baz: bool,
+        \\    boo: MyInner,
+        \\
+        \\    pub const MyInner = struct {
+        \\        another_field: bool,
+        \\    };
+        \\};
+    ,
+        \\ Foo doc comment
+        \\
+        \\```zig
+        \\const FooStruct = struct {
+        \\	bar: u32,
+        \\	baz: bool,
+        \\	boo: MyInner,
+        \\
+        \\	pub const MyInner = struct {
+        \\		another_field: bool,
+        \\	};
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const Edge<cursor>Cases = struct {
+        \\    const str = "something";
+        \\    const s = S{
+        \\        .fld = 0,
+        \\    };
+        \\    pub fn myEdgeCase() void {}
+        \\};
+    ,
+        \\```zig
+        \\const EdgeCases = struct {
+        \\	pub fn myEdgeCase() void
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const Edge<cursor>Cases = struct {
+        \\    const str = "something";
+        \\    pub const s = S{
+        \\                .fld = 0,
+        \\        };
+        \\};
+    ,
+        \\```zig
+        \\const EdgeCases = struct {
+        \\	pub const s = S{
+        \\	    .fld = 0,
+        \\	};
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+}
+
+test "enum" {
+    try testHover(
+        \\const My<cursor>Enum = enum {
+        \\    foo,
+        \\    bar,
+        \\    baz,
+        \\
+        \\    fn enum_method() !void {
+        \\        return .{};
+        \\    }
+        \\};
+    ,
+        \\```zig
+        \\const MyEnum = enum {
+        \\	foo,
+        \\	bar,
+        \\	baz,
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+}
+
+test "union" {
+    try testHover(
+        \\const Comptime<cursor>Reason = union(enum) {
+        \\  c_import: struct {
+        \\      block: *Block,
+        \\      src: LazySrcLoc,
+        \\  },
+        \\  comptime_ret_ty: struct {
+        \\      block: *Block,
+        \\      func: Air.Inst.Ref,
+        \\      func_src: LazySrcLoc,
+        \\      return_ty: Type,
+        \\  },
+        \\
+        \\  fn explain(cr: ComptimeReason, sema: *Sema, msg: ?*Module.ErrorMsg) !void {
+        \\      // many lines here
+        \\  }
+        \\};
+    ,
+        \\```zig
+        \\const ComptimeReason = union(enum) {
+        \\	c_import: struct {
+        \\		block: *Block,
+        \\		src: LazySrcLoc,
+        \\	},
+        \\	comptime_ret_ty: struct {
+        \\		block: *Block,
+        \\		func: Air.Inst.Ref,
+        \\		func_src: LazySrcLoc,
+        \\		return_ty: Type,
+        \\	},
+        \\};
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
 }
 
 test "sentinel values" {
@@ -733,14 +881,14 @@ test "function parameter" {
         \\    return a;
         \\}
     ,
+        \\ hello world
+        \\
         \\```zig
         \\a: u32
         \\```
         \\```zig
         \\(u32)
         \\```
-        \\
-        \\ hello world
     );
 }
 
@@ -855,6 +1003,8 @@ test "either types" {
         \\const either = if (undefined) A else B;
         \\const bar = either.<cursor>T;
     ,
+        \\small type
+        \\
         \\```zig
         \\const T = u32
         \\```
@@ -862,7 +1012,7 @@ test "either types" {
         \\(type)
         \\```
         \\
-        \\small type
+        \\large type
         \\
         \\```zig
         \\const T = u64
@@ -870,8 +1020,6 @@ test "either types" {
         \\```zig
         \\(type)
         \\```
-        \\
-        \\large type
     );
     try testHoverWithOptions(
         \\const A = struct {
@@ -885,15 +1033,15 @@ test "either types" {
         \\const either = if (undefined) A else B;
         \\const bar = either.<cursor>T;
     ,
+        \\small type
+        \\
         \\const T = u32
         \\(type)
         \\
-        \\small type
+        \\large type
         \\
         \\const T = u64
         \\(type)
-        \\
-        \\large type
     , .{ .markup_kind = .plaintext });
 }
 
@@ -902,14 +1050,14 @@ test "var decl comments" {
         \\///this is a comment
         \\const f<cursor>oo = 0 + 0;
     ,
+        \\this is a comment
+        \\
         \\```zig
         \\const foo = 0 + 0
         \\```
         \\```zig
         \\(unknown)
         \\```
-        \\
-        \\this is a comment
     );
 }
 
@@ -1043,16 +1191,16 @@ test "combine doc comments of declaration and definition" {
         \\    const baz = struct {};
         \\};
     ,
+        \\ Foo
+        \\
+        \\ Bar
+        \\
         \\```zig
         \\const baz = struct
         \\```
         \\```zig
         \\(type)
         \\```
-        \\
-        \\ Foo
-        \\
-        \\ Bar
     );
     try testHoverWithOptions(
         \\/// Foo
@@ -1062,12 +1210,12 @@ test "combine doc comments of declaration and definition" {
         \\    const baz = struct {};
         \\};
     ,
-        \\const baz = struct
-        \\(type)
-        \\
         \\ Foo
         \\
         \\ Bar
+        \\
+        \\const baz = struct
+        \\(type)
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1078,16 +1226,16 @@ test "top-level doc comment" {
         \\/// A
         \\const S<cursor>elf = @This();
     ,
+        \\ A
+        \\
+        \\ B
+        \\
         \\```zig
         \\const Self = @This()
         \\```
         \\```zig
         \\(type)
         \\```
-        \\
-        \\ A
-        \\
-        \\ B
     );
 }
 

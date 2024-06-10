@@ -125,13 +125,13 @@ fn hoverSymbolRecursive(
     var hover_text = std.ArrayList(u8).init(arena);
     const writer = hover_text.writer();
     if (markup_kind == .markdown) {
+        for (doc_strings.items) |doc|
+            try writer.print("{s}\n\n", .{doc});
         if (is_fn) {
             try writer.print("```zig\n{s}\n```", .{def_str});
         } else {
             try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         }
-        for (doc_strings.items) |doc|
-            try writer.print("\n\n{s}", .{doc});
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -142,13 +142,13 @@ fn hoverSymbolRecursive(
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
+        for (doc_strings.items) |doc|
+            try writer.print("{s}\n\n", .{doc});
         if (is_fn) {
             try writer.print("{s}", .{def_str});
         } else {
             try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
         }
-        for (doc_strings.items) |doc|
-            try writer.print("\n\n{s}", .{doc});
     }
 
     return hover_text.items;

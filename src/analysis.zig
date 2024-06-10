@@ -459,12 +459,140 @@ pub fn getVariableSignature(
                 offset += 1;
             }
 
-            break :blk token + offset;
+            var desc = std.ArrayListUnmanaged(u8){};
+            try getContainerFieldMembers(allocator, &desc, tree, container_decl, start_token, true, 0);
+            if (desc.items.len > 0) {
+                return desc.toOwnedSlice(allocator);
+            } else {
+                break :blk token + offset;
+            }
         },
         else => ast.lastToken(tree, init_node),
     };
 
     return offsets.tokensToSlice(tree, start_token, end_token);
+}
+
+fn getContainerFieldMembers(allocator: std.mem.Allocator, desc: *std.ArrayListUnmanaged(u8), tree: Ast, container_decl: Ast.full.ContainerDecl, start_token: Ast.TokenIndex, is_var_decl: bool, depth: u8) !void {
+    const token_tags = tree.tokens.items(.tag);
+    var token = container_decl.ast.main_token;
+    var offset: Ast.TokenIndex = 0;
+
+    // Tagged union: union(enum)
+    if (container_decl.ast.enum_token) |enum_token| {
+        token = enum_token;
+        offset += 1;
+    }
+
+    // Backing integer: struct(u32), union(enum(u32))
+    // Tagged union: union(ComplexTypeTag)
+    if (container_decl.ast.arg != 0) {
+        token = ast.lastToken(tree, container_decl.ast.arg);
+        offset += 1;
+    }
+
+    if (container_decl.ast.members.len != 0) {
+        if (is_var_decl) {
+            try desc.appendNTimes(allocator, '\t', depth);
+        } else {
+            try desc.append(allocator, ' ');
+        }
+        try desc.appendSlice(allocator, offsets.tokensToSlice(tree, start_token, token + offset + 1)); // i.e. `const T = type {`
+        try desc.append(allocator, '\n');
+        for (container_decl.ast.members) |member| {
+            var buf: [2]Ast.Node.Index = undefined;
+            if (Ast.fullContainerField(tree, member)) |field| {
+                if (tree.fullContainerDecl(&buf, field.ast.type_expr)) |field_container_decl| {
+                    const first_tok = field.firstToken();
+                    try desc.appendNTimes(allocator, '\t', depth + 1);
+                    try desc.appendSlice(allocator, offsets.tokensToSlice(tree, first_tok, first_tok + 1)); // e.g. 'field:'
+
+                    try getContainerFieldMembers(allocator, desc, tree, field_container_decl, field_container_decl.ast.main_token, false, depth + 1);
+                    try desc.appendNTimes(allocator, '\t', depth + 1);
+                    try desc.appendSlice(allocator, "},\n");
+                } else {
+                    const end_token = field_last_token: {
+                        if (field.ast.value_expr == 0 and field.ast.type_expr == 0 and field.ast.align_expr == 0) break :field_last_token field.ast.main_token;
+                        const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
+                        break :field_last_token ast.lastToken(tree, end_node);
+                    };
+
+                    try desc.appendNTimes(allocator, '\t', depth + 1);
+                    try desc.appendSlice(allocator, offsets.tokensToSlice(tree, field.firstToken(), end_token));
+                    try desc.appendSlice(allocator, ",\n");
+                }
+            } else if (Ast.fullVarDecl(tree, member)) |inner_decl| {
+                if (inner_decl.visib_token) |visib| {
+                    if (token_tags[visib] != .keyword_pub) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+                if (tree.fullContainerDecl(&buf, inner_decl.ast.init_node)) |field_container_decl| {
+                    const prev = desc.items[desc.items.len -| 2];
+                    if (prev == ',') {
+                        try desc.append(allocator, '\n');
+                    }
+                    try getContainerFieldMembers(allocator, desc, tree, field_container_decl, inner_decl.firstToken(), true, depth + 1);
+                    try desc.appendNTimes(allocator, '\t', depth + 1);
+                    try desc.appendSlice(allocator, "};\n");
+                } else if (inner_decl.ast.init_node != 0) { // catch-all case for default values
+                    const start = offsets.tokenToLoc(tree, inner_decl.firstToken()).start;
+                    const end = offsets.tokenToLoc(tree, tree.lastToken(inner_decl.ast.init_node)).end;
+                    const source = try allocator.dupeZ(u8, tree.source[start..@min(end + 1, tree.source.len)]);
+                    defer allocator.free(source);
+
+                    var local_tree = try std.zig.Ast.parse(allocator, source, .zig);
+                    defer local_tree.deinit(allocator);
+
+                    const rendered = try Ast.render(local_tree, allocator);
+                    defer allocator.free(rendered);
+
+                    const prev = desc.items[desc.items.len -| 2];
+                    if (prev == ',') {
+                        try desc.append(allocator, '\n');
+                    }
+
+                    var iter = std.mem.splitScalar(u8, rendered, '\n');
+                    while (iter.next()) |line| {
+                        if (line.len == 0) {
+                            continue;
+                        }
+                        try desc.appendNTimes(allocator, '\t', depth + 1);
+                        try desc.appendSlice(allocator, line);
+                        try desc.append(allocator, '\n');
+                    }
+                }
+            } else if (Ast.fullFnProto(tree, @as(*[1]Ast.Node.Index, @ptrCast(&buf)), member)) |func| {
+                if (func.visib_token) |visib| {
+                    if (token_tags[visib] != .keyword_pub) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+                const prev = desc.items[desc.items.len -| 2];
+                if (prev == ',') {
+                    try desc.append(allocator, '\n');
+                }
+
+                try desc.appendNTimes(allocator, '\t', depth + 1);
+                try desc.appendSlice(allocator, offsets.tokensToSlice(tree, func.firstToken(), tree.lastToken(func.ast.return_type)));
+                try desc.append(allocator, '\n');
+            }
+        }
+
+        if (depth == 0) {
+            const prev = desc.items[desc.items.len -| 2];
+            if (prev == '{') {
+                desc.items[desc.items.len - 1] = '}';
+                try desc.append(allocator, ';');
+            } else {
+                try desc.appendSlice(allocator, "};");
+            }
+        }
+    }
 }
 
 pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]const u8 {
