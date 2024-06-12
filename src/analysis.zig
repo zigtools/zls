@@ -822,7 +822,17 @@ pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{
 pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     const base_type_ptr = try analyser.arena.allocator().create(Type);
     base_type_ptr.* = ty.typeOf(analyser);
-    return Type{ .data = .{ .pointer = .{ .size = .One, .is_const = false, .elem_ty = base_type_ptr } }, .is_type_val = false };
+    return Type{
+        .data = .{
+            .pointer = .{
+                .size = .One,
+                .sentinel = .none,
+                .is_const = false,
+                .elem_ty = base_type_ptr,
+            },
+        },
+        .is_type_val = false,
+    };
 }
 
 pub const ErrorUnionSide = enum { error_set, payload };
@@ -938,8 +948,31 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
         },
         .array => |info| switch (rhs) {
             .Single => return try info.elem_ty.instanceTypeVal(analyser),
-            .Open, .Range => {
-                return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = info.elem_ty } }, .is_type_val = false };
+            .Open => {
+                return Type{
+                    .data = .{
+                        .pointer = .{
+                            .size = .Slice,
+                            .sentinel = info.sentinel,
+                            .is_const = false,
+                            .elem_ty = info.elem_ty,
+                        },
+                    },
+                    .is_type_val = false,
+                };
+            },
+            .Range => {
+                return Type{
+                    .data = .{
+                        .pointer = .{
+                            .size = .Slice,
+                            .sentinel = .none,
+                            .is_const = false,
+                            .elem_ty = info.elem_ty,
+                        },
+                    },
+                    .is_type_val = false,
+                };
             },
         },
         .pointer => |info| return switch (info.size) {
@@ -947,8 +980,31 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
                 .array => |array_info| {
                     switch (rhs) {
                         .Single => return try array_info.elem_ty.instanceTypeVal(analyser),
-                        .Open, .Range => {
-                            return Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = false, .elem_ty = array_info.elem_ty } }, .is_type_val = false };
+                        .Open => {
+                            return Type{
+                                .data = .{
+                                    .pointer = .{
+                                        .size = .Slice,
+                                        .sentinel = array_info.sentinel,
+                                        .is_const = false,
+                                        .elem_ty = array_info.elem_ty,
+                                    },
+                                },
+                                .is_type_val = false,
+                            };
+                        },
+                        .Range => {
+                            return Type{
+                                .data = .{
+                                    .pointer = .{
+                                        .size = .Slice,
+                                        .sentinel = .none,
+                                        .is_const = false,
+                                        .elem_ty = array_info.elem_ty,
+                                    },
+                                },
+                                .is_type_val = false,
+                            };
                         },
                     }
                 },
@@ -957,7 +1013,19 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
             .Many => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Open => lhs,
-                .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
+                .Range => {
+                    return Type{
+                        .data = .{
+                            .pointer = .{
+                                .size = .Slice,
+                                .sentinel = .none,
+                                .is_const = info.is_const,
+                                .elem_ty = info.elem_ty,
+                            },
+                        },
+                        .is_type_val = false,
+                    };
+                },
             },
             .Slice => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
@@ -966,7 +1034,17 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
             .C => switch (rhs) {
                 .Single => try info.elem_ty.instanceTypeVal(analyser),
                 .Open => lhs,
-                .Range => Type{ .data = .{ .pointer = .{ .size = .Slice, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false },
+                .Range => Type{
+                    .data = .{
+                        .pointer = .{
+                            .size = .Slice,
+                            .sentinel = .none,
+                            .is_const = info.is_const,
+                            .elem_ty = info.elem_ty,
+                        },
+                    },
+                    .is_type_val = false,
+                },
             },
         },
         else => return null,
@@ -1027,7 +1105,17 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
                 }
 
                 if (std.mem.eql(u8, "ptr", name)) {
-                    return Type{ .data = .{ .pointer = .{ .size = .Many, .is_const = info.is_const, .elem_ty = info.elem_ty } }, .is_type_val = false };
+                    return Type{
+                        .data = .{
+                            .pointer = .{
+                                .size = .Many,
+                                .sentinel = info.sentinel,
+                                .is_const = info.is_const,
+                                .elem_ty = info.elem_ty,
+                            },
+                        },
+                        .is_type_val = false,
+                    };
                 }
             },
             .Many, .C => {},
@@ -1515,12 +1603,34 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const ptr_info = ast.fullPtrType(tree, node).?;
 
+            const sentinel: InternPool.Index = if (ptr_info.ast.sentinel != 0) blk: {
+                // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
+                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+                analyser.resolve_number_literal_values = true;
+                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+                const sentinel = try analyser.resolveTypeOfNode(.{ .node = ptr_info.ast.sentinel, .handle = handle }) orelse break :blk .none;
+                break :blk switch (sentinel.data) {
+                    .ip_index => |payload| payload.index,
+                    else => .none,
+                };
+            } else .none;
+
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
             const elem_ty_ptr = try analyser.arena.allocator().create(Type);
             elem_ty_ptr.* = elem_ty;
-            return Type{ .data = .{ .pointer = .{ .size = ptr_info.size, .is_const = ptr_info.const_token != null, .elem_ty = elem_ty_ptr } }, .is_type_val = true };
+            return Type{
+                .data = .{
+                    .pointer = .{
+                        .size = ptr_info.size,
+                        .sentinel = sentinel,
+                        .is_const = ptr_info.const_token != null,
+                        .elem_ty = elem_ty_ptr,
+                    },
+                },
+                .is_type_val = true,
+            };
         },
         .array_type,
         .array_type_sentinel,
@@ -1531,6 +1641,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             const sentinel: InternPool.Index = if (array_info.ast.sentinel != 0) blk: {
                 // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
+                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+                analyser.resolve_number_literal_values = true;
+                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
                 const sentinel = try analyser.resolveTypeOfNode(.{ .node = array_info.ast.sentinel, .handle = handle }) orelse break :blk .none;
                 break :blk switch (sentinel.data) {
                     .ip_index => |payload| payload.index,
@@ -2164,9 +2277,11 @@ pub const Type = struct {
     };
 
     pub const Data = union(enum) {
-        /// *T, [*]T, [T], [*c]T
+        /// *T, [*]T, [*:x]T, [T], [*c]T
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
+            /// `.none` means no sentinel
+            sentinel: InternPool.Index,
             is_const: bool,
             elem_ty: *Type,
         },
@@ -2237,6 +2352,7 @@ pub const Type = struct {
         switch (self.data) {
             .pointer => |info| {
                 std.hash.autoHash(hasher, info.size);
+                std.hash.autoHash(hasher, info.sentinel);
                 std.hash.autoHash(hasher, info.is_const);
                 info.elem_ty.hashWithHasher(hasher);
             },
@@ -2278,6 +2394,7 @@ pub const Type = struct {
             .pointer => |a_type| {
                 const b_type = b.data.pointer;
                 if (a_type.size != b_type.size) return false;
+                if (a_type.sentinel != b_type.sentinel) return false;
                 if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
             },
             .array => |a_type| {
@@ -2651,15 +2768,26 @@ pub const Type = struct {
 
         switch (ty.data) {
             .pointer => |info| {
-                const size_prefix = switch (info.size) {
-                    .One => "*",
-                    .Many => "[*]",
-                    .Slice => "[]",
-                    .C => "[*c]",
-                };
-                const const_prefix = if (info.is_const) "const " else "";
-
-                return try writer.print("{s}{s}{}", .{ size_prefix, const_prefix, info.elem_ty.fmtTypeVal(analyser, ctx.options) });
+                switch (info.size) {
+                    .One => try writer.writeByte('*'),
+                    .Many => {
+                        try writer.writeAll("[*");
+                        if (info.sentinel != .none) {
+                            try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                        }
+                        try writer.writeByte(']');
+                    },
+                    .Slice => {
+                        try writer.writeAll("[");
+                        if (info.sentinel != .none) {
+                            try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                        }
+                        try writer.writeByte(']');
+                    },
+                    .C => try writer.writeAll("[*c]"),
+                }
+                if (info.is_const) try writer.writeAll("const ");
+                return try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
             },
             .array => |info| {
                 try writer.writeByte('[');
@@ -3899,6 +4027,7 @@ pub const DeclWithHandle = struct {
         return Type{
             .data = .{ .pointer = .{
                 .elem_ty = resolved_ty_ptr,
+                .sentinel = .none,
                 .is_const = false,
                 .size = .One,
             } },
