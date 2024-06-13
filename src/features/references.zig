@@ -3,6 +3,7 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_references);
 
 const Server = @import("../Server.zig");
+const DocumentScope = @import("../DocumentScope.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const types = @import("../lsp.zig");
@@ -458,6 +459,21 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         else => true,
     };
 
+    // highlight requests only pertain to the current document, otherwise we can try to narrow things down
+    const workspace = if (request == .highlight) false else blk: {
+        const scope_index = Analyser.innermostBlockScopeIndex(try handle.getDocumentScope(), source_index);
+        if (scope_index.unwrap()) |idx| {
+            const scope_tag = DocumentScope.getScopeTag(try handle.getDocumentScope(), idx);
+            switch (scope_tag) {
+                .function, .block => {
+                    break :blk false; // scan only the current document
+                },
+                else => {},
+            }
+        }
+        break :blk true;
+    };
+
     const locations = if (decl.decl == .label)
         try labelReferences(arena, decl, server.offset_encoding, include_decl)
     else
@@ -468,7 +484,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             server.offset_encoding,
             include_decl,
             server.config.skip_std_references,
-            request != .highlight, // scan the entire workspace except for highlight
+            workspace,
         );
 
     switch (request) {
