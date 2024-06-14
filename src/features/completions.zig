@@ -1041,6 +1041,11 @@ fn getEnumLiteralContext(
         .l_brace, .comma, .l_paren => {
             dot_context = getSwitchOrStructInitContext(tree, dot_token_index) orelse return null;
         },
+        .r_paren => { // i.e. `(try foo()).`
+            dot_context.likely = .enum_assignment;
+            dot_context.identifier_token_index = token_index - 3;
+            dot_context.need_ret_type = true;
+        },
         else => return null,
     }
     return dot_context;

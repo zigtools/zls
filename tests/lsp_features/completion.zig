@@ -1769,15 +1769,15 @@ test "error union" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
 
-    // try testCompletion(
-    //     \\const S = struct { alpha: u32 };
-    //     \\fn foo() error{Foo}!S {}
-    //     \\fn bar() error{Foo}!void {
-    //     \\    (try foo()).<cursor>
-    //     \\}
-    // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-    // });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() error{Foo}!S {}
+        \\fn bar() error{Foo}!void {
+        \\    (try foo()).<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
 
     try testCompletion(
         \\const S = struct { alpha: u32 };
