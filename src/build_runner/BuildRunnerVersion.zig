@@ -1,8 +1,12 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
-// These versions must be ordered from newest to oldest.
-// There should be no need to have a build runner for minor patches (e.g. 0.10.1)
+/// These versions must be ordered from newest to oldest.
+/// There should be no need to have a build runner for minor patches (e.g. 0.10.1)
+///
+/// A "master" build runner should only be added if it is infeasible to make the latest build runner compatible with Zig master.
+///
+/// The GitHub matrix in `.github\workflows\build_runner.yml` should be updated to check Zig master with the latest build runner file.
 pub const BuildRunnerVersion = enum {
     // master,
     @"0.13.0",

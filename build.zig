@@ -17,7 +17,8 @@ const minimum_build_zig_version = "0.13.0";
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
-///   - breaking change to the build system (see `src/build_runner`)
+///
+/// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
 const minimum_runtime_zig_version = "0.12.0";
 
 const release_targets = [_]std.Target.Query{
