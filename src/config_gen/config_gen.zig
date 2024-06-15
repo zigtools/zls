@@ -655,7 +655,7 @@ fn writeMarkdownCode(content: []const u8, source_type: []const u8, writer: anyty
     const trimmed_content = std.mem.trim(u8, content, " \n");
     const is_multiline = std.mem.indexOfScalar(u8, trimmed_content, '\n') != null;
     if (is_multiline) {
-        var line_it = std.mem.tokenize(u8, trimmed_content, "\n");
+        var line_it = std.mem.tokenizeScalar(u8, trimmed_content, '\n');
         try writer.print("\n```{s}", .{source_type});
         while (line_it.next()) |line| {
             try writer.print("\n{s}", .{line});

@@ -76,7 +76,7 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
 
 pub const FailingAllocator = struct {
     internal_allocator: std.mem.Allocator,
-    random: std.rand.DefaultPrng,
+    random: std.Random.DefaultPrng,
     likelihood: u32,
 
     /// the chance that an allocation will fail is `1/likelihood`
@@ -88,7 +88,7 @@ pub const FailingAllocator = struct {
 
         return FailingAllocator{
             .internal_allocator = internal_allocator,
-            .random = std.rand.DefaultPrng.init(@bitCast(seed)),
+            .random = std.Random.DefaultPrng.init(@bitCast(seed)),
             .likelihood = likelihood,
         };
     }
