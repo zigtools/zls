@@ -1,5 +1,12 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
-//! Update the `minimum_runtime_zig_version` field in `build.zig` a breaking change occured.
+//!
+//! This build runner is targeting compatibility with the following Zig versions:
+//!   - Zig 0.12.0
+//!   - Zig 0.13.0
+//!   - master
+//!
+//! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
+//! As an example, see how `writeFile2_removed_version` or `std_progress_rework_version` are used to deal with breaking changes.
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
 //! `zig build --build-runner src/build_runner/0.12.0.zig`
@@ -8,7 +15,6 @@
 //! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/0.12.0.zig`
 //! `zig build --build-runner /path/to/zls/src/build_runner/0.12.0.zig` (if the cwd contains build.zig)
 //!
-//! This build runner is also compatible with Zig 0.13.0
 
 const root = @import("@build");
 const std = @import("std");
@@ -21,10 +27,14 @@ const Step = std.Build.Step;
 
 pub const dependencies = @import("@dependencies");
 
+// ----------- List of Zig versions that introduced breaking changes -----------
+
 const writeFile2_removed_version =
     std.SemanticVersion.parse("0.13.0-dev.68+b86c4bde6") catch unreachable;
 const std_progress_rework_version =
     std.SemanticVersion.parse("0.13.0-dev.336+963ffe9d5") catch unreachable;
+
+// -----------------------------------------------------------------------------
 
 const ProgressNode = if (builtin.zig_version.order(std_progress_rework_version) == .lt)
     *std.Progress.Node
