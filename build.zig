@@ -9,7 +9,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 /// std: Convert deprecated aliases to compile errors and fix usages
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.33+76fb2b685";
+const minimum_build_zig_version = "0.13.0";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0
