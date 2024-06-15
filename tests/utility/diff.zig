@@ -1,7 +1,7 @@
 const std = @import("std");
 const zls = @import("zls");
 
-fn gen(alloc: std.mem.Allocator, rand: std.rand.Random) ![]const u8 {
+fn gen(alloc: std.mem.Allocator, rand: std.Random) ![]const u8 {
     const buffer = try alloc.alloc(u8, rand.intRangeAtMost(usize, 0, 256));
     for (buffer) |*b| b.* = rand.intRangeAtMost(u8, ' ', '~');
     return buffer;
@@ -18,7 +18,7 @@ test "diff - random" {
 }
 
 fn testDiff(allocator: std.mem.Allocator, seed: u64, encoding: zls.offsets.Encoding) !void {
-    var rand = std.rand.DefaultPrng.init(seed);
+    var rand = std.Random.DefaultPrng.init(seed);
     const before = try gen(allocator, rand.random());
     defer allocator.free(before);
     const after = try gen(allocator, rand.random());

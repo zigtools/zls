@@ -6,19 +6,17 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Release 0.13.0
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.13.0";
+const minimum_build_zig_version = "0.14.0-dev.36+82a934bb9";
 
 /// Specify the minimum Zig version that is required to run ZLS:
-/// Release 0.12.0
 ///
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///   - breaking change to the build system (see `src/build_runner`)
-const minimum_runtime_zig_version = "0.12.0";
+const minimum_runtime_zig_version = "0.14.0-dev.36+82a934bb9";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },

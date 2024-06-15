@@ -75,7 +75,7 @@ pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const
 
     result.appendSliceAssumeCapacity(base);
 
-    var it = std.mem.tokenize(u8, rel, "/");
+    var it = std.mem.tokenizeScalar(u8, rel, '/');
     while (it.next()) |component| {
         if (std.mem.eql(u8, component, ".")) {
             continue;
