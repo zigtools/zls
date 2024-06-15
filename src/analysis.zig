@@ -1173,7 +1173,12 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle) !?u64 {
+const ResolveIntegerLiteralKind = enum {
+    length,
+    sentinel,
+};
+
+fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle, kind: ResolveIntegerLiteralKind) !?u64 {
     // When resolve_number_literal_values is set then resolveTypeOfNode will also resolve the value of number literals.
     // So we can use it to resolve integer values.
 
@@ -1183,7 +1188,12 @@ fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle) !?u64
 
     const resolved_length = try analyser.resolveTypeOfNode(node_handle) orelse return null;
     switch (resolved_length.data) {
-        .ip_index => |payload| return analyser.ip.toInt(payload.index, u64),
+        .ip_index => |payload| {
+            return switch (kind) {
+                .length => analyser.ip.toInt(payload.index, u64),
+                .sentinel => @intFromEnum(payload.index),
+            };
+        },
         else => return null,
     }
 }
@@ -1603,17 +1613,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const ptr_info = ast.fullPtrType(tree, node).?;
 
-            const sentinel: InternPool.Index = if (ptr_info.ast.sentinel != 0) blk: {
-                // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
-                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
-                analyser.resolve_number_literal_values = true;
-                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
-                const sentinel = try analyser.resolveTypeOfNode(.{ .node = ptr_info.ast.sentinel, .handle = handle }) orelse break :blk .none;
-                break :blk switch (sentinel.data) {
-                    .ip_index => |payload| payload.index,
-                    else => .none,
-                };
-            } else .none;
+            const sentinel: InternPool.Index = blk: {
+                if (try analyser.resolveIntegerLiteral(.{ .node = ptr_info.ast.sentinel, .handle = handle }, .sentinel)) |sent| {
+                    break :blk @enumFromInt(sent);
+                }
+                break :blk .none;
+            };
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -1637,19 +1642,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const array_info = tree.fullArrayType(node).?;
 
-            const elem_count: ?u64 = try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.elem_count, .handle = handle });
+            const elem_count: ?u64 = try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.elem_count, .handle = handle }, .length);
 
-            const sentinel: InternPool.Index = if (array_info.ast.sentinel != 0) blk: {
-                // resolveTypeOfNode can also resolve values that returned as indices into the InternPool.
-                const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
-                analyser.resolve_number_literal_values = true;
-                defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
-                const sentinel = try analyser.resolveTypeOfNode(.{ .node = array_info.ast.sentinel, .handle = handle }) orelse break :blk .none;
-                break :blk switch (sentinel.data) {
-                    .ip_index => |payload| payload.index,
-                    else => .none,
-                };
-            } else .none;
+            const sentinel: InternPool.Index = blk: {
+                if (try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.sentinel, .handle = handle }, .sentinel)) |s| {
+                    break :blk @enumFromInt(s);
+                }
+                break :blk .none;
+            };
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_info.ast.elem_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -1888,7 +1888,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     else => return null,
                 };
 
-                const len: u64 = try analyser.resolveIntegerLiteral(.{ .node = params[0], .handle = handle }) orelse
+                const len: u64 = try analyser.resolveIntegerLiteral(.{ .node = params[0], .handle = handle }, .length) orelse
                     return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
 
                 const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
