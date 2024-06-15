@@ -12,7 +12,7 @@
     // ```
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/kcbanner/known-folders/archive/0b27b394eeb0549fef7f7140295b18780c32a26e.tar.gz",
+            .url = "https://github.com/ziglibs/known-folders/archive/cdcc6137ed2e92096b27d394db917d1861f156b3.tar.gz",
             .hash = "1220863f0fc3e97cfd47a8edb28c7a3d109c42143235042fb513207b5c5a032fb93f",
         },
         .diffz = .{
