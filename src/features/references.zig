@@ -209,14 +209,13 @@ fn gatherReferences(
 fn symbolReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
+    request: GeneralReferencesRequest,
     decl_handle: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
     /// add `decl_handle` as a references
     include_decl: bool,
     /// exclude references from the std library
     skip_std_references: bool,
-    /// search other files for references
-    workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -237,6 +236,18 @@ fn symbolReferences(
     switch (decl_handle.decl) {
         .ast_node => {
             try builder.collectReferences(curr_handle, 0);
+
+            const source_index = offsets.positionToIndex(curr_handle.tree.source, request.position(), encoding);
+            // highlight requests only pertain to the current document, otherwise we can try to narrow things down
+            const workspace = if (request == .highlight) false else blk: {
+                const doc_scope = try curr_handle.getDocumentScope();
+                const scope_index = Analyser.innermostBlockScopeIndex(doc_scope, source_index).unwrap() orelse break :blk true;
+                break :blk switch (doc_scope.getScopeTag(scope_index)) {
+                    .function, .block => false,
+                    .container, .container_usingnamespace => decl_handle.isPublic(),
+                    .other => true,
+                };
+            };
             if (workspace) {
                 try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
             }
@@ -459,42 +470,17 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         else => true,
     };
 
-    // highlight requests only pertain to the current document, otherwise we can try to narrow things down
-    const workspace = if (request == .highlight) false else blk: {
-        const scope_index = Analyser.innermostBlockScopeIndex(try handle.getDocumentScope(), source_index);
-        if (scope_index.unwrap()) |idx| {
-            const scope_tag = DocumentScope.getScopeTag(try handle.getDocumentScope(), idx);
-            switch (scope_tag) {
-                .function, .block => {
-                    break :blk false;
-                },
-                .container => {
-                    switch (decl.decl) {
-                        .ast_node => |node_idx| {
-                            if (!Analyser.isNodePublic(decl.handle.tree, node_idx)) {
-                                break :blk false;
-                            }
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            }
-        }
-        break :blk true;
-    };
-
     const locations = if (decl.decl == .label)
         try labelReferences(arena, decl, server.offset_encoding, include_decl)
     else
         try symbolReferences(
             arena,
             &analyser,
+            request,
             decl,
             server.offset_encoding,
             include_decl,
             server.config.skip_std_references,
-            workspace,
         );
 
     switch (request) {
