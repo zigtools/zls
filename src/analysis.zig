@@ -1173,29 +1173,21 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-const ResolveIntegerLiteralKind = enum {
-    length,
-    sentinel,
-};
-
-fn resolveIntegerLiteral(analyser: *Analyser, node_handle: NodeWithHandle, kind: ResolveIntegerLiteralKind) !?u64 {
-    // When resolve_number_literal_values is set then resolveTypeOfNode will also resolve the value of number literals.
-    // So we can use it to resolve integer values.
-
+fn resolveInternPoolValue(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?InternPool.Index {
     const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
     analyser.resolve_number_literal_values = true;
     defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
 
     const resolved_length = try analyser.resolveTypeOfNode(node_handle) orelse return null;
     switch (resolved_length.data) {
-        .ip_index => |payload| {
-            return switch (kind) {
-                .length => analyser.ip.toInt(payload.index, u64),
-                .sentinel => @intFromEnum(payload.index),
-            };
-        },
+        .ip_index => |payload| return payload.index,
         else => return null,
     }
+}
+
+fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, node_handle: NodeWithHandle) error{OutOfMemory}!?T {
+    const ip_index = try analyser.resolveInternPoolValue(node_handle) orelse return null;
+    return analyser.ip.toInt(ip_index, T);
 }
 
 const primitives = std.StaticStringMap(InternPool.Index).initComptime(.{
@@ -1613,12 +1605,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const ptr_info = ast.fullPtrType(tree, node).?;
 
-            const sentinel: InternPool.Index = blk: {
-                if (try analyser.resolveIntegerLiteral(.{ .node = ptr_info.ast.sentinel, .handle = handle }, .sentinel)) |sent| {
-                    break :blk @enumFromInt(sent);
-                }
-                break :blk .none;
-            };
+            const sentinel = try analyser.resolveInternPoolValue(.{ .node = ptr_info.ast.sentinel, .handle = handle }) orelse .none;
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -1642,14 +1629,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const array_info = tree.fullArrayType(node).?;
 
-            const elem_count: ?u64 = try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.elem_count, .handle = handle }, .length);
-
-            const sentinel: InternPool.Index = blk: {
-                if (try analyser.resolveIntegerLiteral(.{ .node = array_info.ast.sentinel, .handle = handle }, .sentinel)) |s| {
-                    break :blk @enumFromInt(s);
-                }
-                break :blk .none;
-            };
+            const elem_count = try analyser.resolveIntegerLiteral(u64, .{ .node = array_info.ast.elem_count, .handle = handle });
+            const sentinel = try analyser.resolveInternPoolValue(.{ .node = array_info.ast.sentinel, .handle = handle }) orelse .none;
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_info.ast.elem_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -1888,12 +1869,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     else => return null,
                 };
 
-                const len: u64 = try analyser.resolveIntegerLiteral(.{ .node = params[0], .handle = handle }, .length) orelse
+                const len = try analyser.resolveIntegerLiteral(u32, .{ .node = params[0], .handle = handle }) orelse
                     return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
 
                 const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
                     .vector_type = .{
-                        .len = std.math.cast(u32, len) orelse return null,
+                        .len = len,
                         .child = child_ty_ip_index,
                     },
                 });
