@@ -42,11 +42,11 @@ let
   in fetcher.${proto};
 in linkFarm name [
   {
-    name = "1220863f0fc3e97cfd47a8edb28c7a3d109c42143235042fb513207b5c5a032fb93f";
+    name = "12209d2738a2e1dbd3781c2e5f01a2ea877dcfeea53efdfa1913247297d328e6b207";
     path = fetchZigArtifact {
       name = "known_folders";
-      url = "https://github.com/ziglibs/known-folders/archive/cdcc6137ed2e92096b27d394db917d1861f156b3.tar.gz";
-      hash = "sha256-Y00sV0pF3fDhwyLS/xoqXzv/1RWy0gXK+JegEuptwCc=";
+      url = "https://github.com/ziglibs/known-folders/archive/47076c6b11214a218e9244471d8762310820911a.tar.gz";
+      hash = "sha256-M5BAjnlfdHtpZFVXOUPfxjY+JUMtkLBs97dudQkIeto=";
     };
   }
   {
