@@ -305,6 +305,104 @@ test "struct" {
     );
 }
 
+test "sentinel values" {
+    try testHover(
+        \\const <cursor>a: [:0] i1 = undefined;
+    ,
+        \\```zig
+        \\const a: [:0] i1 = undefined
+        \\```
+        \\```zig
+        \\([:0]i1)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a: [:42] u8 = null;
+    ,
+        \\```zig
+        \\const a: [:42] u8 = null
+        \\```
+        \\```zig
+        \\([:42]u8)
+        \\```
+    );
+    try testHover(
+        \\const test<cursor>_str = "Hello, World!";
+    ,
+        \\```zig
+        \\const test_str = "Hello, World!"
+        \\```
+        \\```zig
+        \\(*const [13:0]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>array = [_:0]u8{ 1, 2, 3, 4 };
+    ,
+        \\```zig
+        \\const array = [_:0]u8{ 1, 2, 3, 4 }
+        \\```
+        \\```zig
+        \\([?:0]u8)
+        \\```
+    );
+    try testHover(
+        \\const a: [4:0]u8 = undefined;
+        \\const <cursor>b = a;
+    ,
+        \\```zig
+        \\const a: [4:0]u8 = undefined
+        \\```
+        \\```zig
+        \\([4:0]u8)
+        \\```
+    );
+    try testHover(
+        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\const <cursor>range = array[0..2];
+    ,
+        \\```zig
+        \\const range = array[0..2]
+        \\```
+        \\```zig
+        \\([]u8)
+        \\```
+    );
+    try testHover(
+        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\const <cursor>open = array[1..];
+    ,
+        \\```zig
+        \\const open = array[1..]
+        \\```
+        \\```zig
+        \\([:0]u8)
+        \\```
+    );
+    // try testHover(
+    //     \\const hw = "Hello, World!";
+    //     \\const <cursor>h = hw[0..5];
+    // ,
+    //     \\```zig
+    //     \\const h = hw[0..5]
+    //     \\```
+    //     \\```zig
+    //     \\([5]u8)
+    //     \\```
+    // );
+    // try testHover(
+    //     \\const hw = "Hello, World!";
+    //     \\const <cursor>w = hw[7..];
+    // ,
+    //     \\```zig
+    //     \\const h = hw[7..]
+    //     \\```
+    //     \\```zig
+    //     \\([6:0]u8)
+    //     \\```
+    // );
+}
+
 test "enum member" {
     try testHover(
         \\const Enum = enum { foo, bar };
