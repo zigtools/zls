@@ -466,7 +466,17 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             const scope_tag = DocumentScope.getScopeTag(try handle.getDocumentScope(), idx);
             switch (scope_tag) {
                 .function, .block => {
-                    break :blk false; // scan only the current document
+                    break :blk false;
+                },
+                .container => {
+                    switch (decl.decl) {
+                        .ast_node => |node_idx| {
+                            if (!Analyser.isNodePublic(decl.handle.tree, node_idx)) {
+                                break :blk false;
+                            }
+                        },
+                        else => {},
+                    }
                 },
                 else => {},
             }
