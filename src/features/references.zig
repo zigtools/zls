@@ -237,7 +237,7 @@ fn symbolReferences(
         .ast_node => {
             try builder.collectReferences(curr_handle, 0);
 
-            const source_index = offsets.positionToIndex(curr_handle.tree.source, request.position(), encoding);
+            const source_index = offsets.tokenToIndex(decl_handle.handle.tree, decl_handle.nameToken());
             // highlight requests only pertain to the current document, otherwise we can try to narrow things down
             const workspace = if (request == .highlight) false else blk: {
                 const doc_scope = try curr_handle.getDocumentScope();
