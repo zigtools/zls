@@ -3,6 +3,7 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_references);
 
 const Server = @import("../Server.zig");
+const DocumentScope = @import("../DocumentScope.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const types = @import("../lsp.zig");
@@ -208,14 +209,13 @@ fn gatherReferences(
 fn symbolReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
+    request: GeneralReferencesRequest,
     decl_handle: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
     /// add `decl_handle` as a references
     include_decl: bool,
     /// exclude references from the std library
     skip_std_references: bool,
-    /// search other files for references
-    workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -236,6 +236,18 @@ fn symbolReferences(
     switch (decl_handle.decl) {
         .ast_node => {
             try builder.collectReferences(curr_handle, 0);
+
+            const source_index = offsets.tokenToIndex(decl_handle.handle.tree, decl_handle.nameToken());
+            // highlight requests only pertain to the current document, otherwise we can try to narrow things down
+            const workspace = if (request == .highlight) false else blk: {
+                const doc_scope = try curr_handle.getDocumentScope();
+                const scope_index = Analyser.innermostBlockScopeIndex(doc_scope, source_index).unwrap() orelse break :blk true;
+                break :blk switch (doc_scope.getScopeTag(scope_index)) {
+                    .function, .block => false,
+                    .container, .container_usingnamespace => decl_handle.isPublic(),
+                    .other => true,
+                };
+            };
             if (workspace) {
                 try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
             }
@@ -464,11 +476,11 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         try symbolReferences(
             arena,
             &analyser,
+            request,
             decl,
             server.offset_encoding,
             include_decl,
             server.config.skip_std_references,
-            request != .highlight, // scan the entire workspace except for highlight
         );
 
     switch (request) {

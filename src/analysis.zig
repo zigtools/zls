@@ -3811,7 +3811,7 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    fn isPublic(self: DeclWithHandle) bool {
+    pub fn isPublic(self: DeclWithHandle) bool {
         return switch (self.decl) {
             .ast_node => |node| isNodePublic(self.handle.tree, node),
             else => true,
