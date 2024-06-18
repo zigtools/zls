@@ -1,3 +1,6 @@
+//! Completions based on a `InternPool.Index`.
+//! This is not the main implementation of code completions of ZLS!
+
 const std = @import("std");
 const InternPool = @import("InternPool.zig");
 const types = @import("../lsp.zig");

@@ -1,5 +1,6 @@
-/// Based on src/InternPool.zig from the zig codebase
-/// https://github.com/ziglang/zig/blob/master/src/InternPool.zig
+//! Based on src/InternPool.zig from the zig codebase
+//! https://github.com/ziglang/zig/blob/master/src/InternPool.zig
+
 map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},

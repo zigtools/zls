@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/foldingRange`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_foldingRange)
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 

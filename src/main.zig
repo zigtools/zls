@@ -10,7 +10,7 @@ const logger = std.log.scoped(.zls_main);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => @enumFromInt(@intFromEnum(exe_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
+    else => @enumFromInt(@intFromEnum(exe_options.log_level)), // The type of `log_level` is not `std.log.Level`.
 };
 
 fn logFn(

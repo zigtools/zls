@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/semanticTokens/*`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_semanticTokens)
+
 const std = @import("std");
 const zig_builtin = @import("builtin");
 const Ast = std.zig.Ast;

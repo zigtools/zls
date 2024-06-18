@@ -1,7 +1,7 @@
 //! Hacky comptime interpreter, courtesy of midnight code run fuelled by spite;
 //! hope that one day this can use async... <33
-
-// TODO: DODify
+//!
+//! Can be enabled by setting the `dangerous_comptime_experiments_do_not_enable` config option to `true`.
 
 const std = @import("std");
 const builtin = @import("builtin");

@@ -1,3 +1,5 @@
+//! A thread-safe container for all document related state like zig source files including `build.zig`.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const URI = @import("uri.zig");
@@ -59,6 +61,7 @@ pub const Config = struct {
     }
 };
 
+/// Represents a `build.zig`
 pub const BuildFile = struct {
     uri: Uri,
     /// this build file may have an explicitly specified path to builtin.zig
@@ -170,6 +173,7 @@ pub const BuildFile = struct {
     }
 };
 
+/// Represents a Zig source file.
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,

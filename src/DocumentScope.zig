@@ -1,3 +1,5 @@
+//! Stores all Scopes and Declarations/Symbols inside a Zig source file.
+
 const std = @import("std");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;

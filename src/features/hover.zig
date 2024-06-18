@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/hover`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_hover);

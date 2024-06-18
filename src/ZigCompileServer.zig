@@ -1,6 +1,8 @@
-//! modified version of https://github.com/ziglang/zig/blob/master/lib/std/zig/Server.zig
-//! I don't know why but this code seems to work
-//! zig binary serialization library in stdlib, when?
+//! Client side for interfacing with the Zig Compile Server (made up name)
+//! [Server.zig](https://github.com/ziglang/zig/blob/master/lib/std/zig/Server.zig) specifies the Message format for "Server" to "Client".
+//! [Client.zig](https://github.com/ziglang/zig/blob/master/lib/std/zig/Client.zig) specifies the Message format for "Client" to "Server".
+//!
+//! The "Server" is Zig and the "Client" is ZLS.
 
 in: std.fs.File,
 out: std.fs.File,
