@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/documentSymbol`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol)
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_document_symbol);

@@ -1,3 +1,5 @@
+//! read and resolve configuration options.
+
 const std = @import("std");
 const builtin = @import("builtin");
 

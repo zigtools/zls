@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/completion`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_completions);

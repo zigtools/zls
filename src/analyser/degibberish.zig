@@ -1,3 +1,8 @@
+//! Converts a Zig type into a english description of the type.
+//!
+//! Example:
+//! `[*:0]const u8` -> 0 terminated many-item pointer to to const u8
+
 const std = @import("std");
 const InternPool = @import("InternPool.zig");
 

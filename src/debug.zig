@@ -1,3 +1,5 @@
+//! A set of helper functions that assist in debugging.
+
 const std = @import("std");
 
 const analysis = @import("analysis.zig");

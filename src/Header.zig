@@ -1,3 +1,7 @@
+//! Defines the LSP Base Protocol Header.
+//!
+//! https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#headerPart
+
 const std = @import("std");
 
 const Header = @This();

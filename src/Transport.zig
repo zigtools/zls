@@ -1,3 +1,7 @@
+//! Implementation of the LSP Base Protocol.
+//!
+//! https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#baseProtocol
+
 const std = @import("std");
 const Header = @import("Header.zig");
 

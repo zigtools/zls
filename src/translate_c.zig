@@ -1,3 +1,5 @@
+//! Implementation of the `translate-c` i.e `@cImport`.
+
 const std = @import("std");
 const zig_builtin = @import("builtin");
 const builtin = @import("builtin");

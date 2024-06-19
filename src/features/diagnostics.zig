@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/publishDiagnostics`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics)
+
 const std = @import("std");
 const builtin = @import("builtin");
 const Ast = std.zig.Ast;

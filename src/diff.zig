@@ -1,3 +1,5 @@
+//! Text diffing between source files.
+
 const std = @import("std");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");

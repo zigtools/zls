@@ -1,8 +1,18 @@
+//! Conversion functions between the following Units:
+//! - A "index" or "source index" is a offset into a utf-8 encoding source file.
+//! - `Loc`
+//! - `types.Position`
+//! - `types.Range`
+//! - `std.zig.Ast.TokenIndex`
+//! - `std.zig.Ast.Node.Index`
+
 const std = @import("std");
 const types = @import("lsp.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 
+/// Specificies how the `character` field in `types.Position` is defined.
+/// The Character encoding is negotiated during initialization with the Client/Editor.
 pub const Encoding = enum {
     /// Character offsets count UTF-8 code units (e.g. bytes).
     @"utf-8",
@@ -19,6 +29,8 @@ pub const Encoding = enum {
     @"utf-32",
 };
 
+/// A pair of two source indexes into a document.
+/// Asserts that `start <= end`.
 pub const Loc = std.zig.Token.Loc;
 
 pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types.Position {
@@ -356,6 +368,7 @@ pub fn tokenToSlice(tree: Ast, token_index: Ast.TokenIndex) []const u8 {
 }
 
 pub fn tokensToSlice(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) []const u8 {
+    std.debug.assert(first_token <= last_token);
     return locToSlice(tree.source, tokensToLoc(tree, first_token, last_token));
 }
 

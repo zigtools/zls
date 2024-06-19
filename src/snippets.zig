@@ -1,3 +1,5 @@
+//! Collection of all snippets and keywords.
+
 const types = @import("lsp.zig");
 
 pub const Snipped = struct {

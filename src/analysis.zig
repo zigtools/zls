@@ -1,3 +1,12 @@
+//! The ZLS analysis backend.
+//!
+//! The most frequently used functions are:
+//! - `resolveTypeOfNode`
+//! - `getPositionContext`
+//! - `lookupSymbolGlobal`
+//! - `lookupSymbolContainer`
+//!
+
 const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
@@ -466,7 +475,7 @@ pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]
     return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
-/// The node is the meta-type `type`
+/// Returns whether the given `node` is the identifier `type`.
 pub fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
     if (tree.nodes.items(.tag)[node] == .identifier) {
         return std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[node]), "type");
@@ -474,10 +483,12 @@ pub fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
     return false;
 }
 
+/// Returns whether the given function returns a `type`.
 pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
     return isMetaType(tree, func.ast.return_type);
 }
 
+/// Returns whether the given function has a `anytype` parameter.
 pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
     var it = func.iterate(&tree);
     while (ast.nextFnParam(&it)) |param| {
@@ -1309,7 +1320,8 @@ const FindBreaks = struct {
     }
 };
 
-/// Resolves the type of a node
+/// Resolves the type of an Ast Node.
+/// Returns `null` if the type could not be resolved.
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -2248,8 +2260,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
     return null;
 }
 
-// TODO Reorganize this file, perhaps split into a couple as well
-// TODO Make this better, nested levels of type vals
+/// Represents a resolved Zig type.
+/// This is the return type of `resolveTypeOfNode`.
 pub const Type = struct {
     pub const EitherEntry = struct {
         /// the `is_type_val` property is inherited from the containing `Type`

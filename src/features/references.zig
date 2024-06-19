@@ -1,3 +1,5 @@
+//! Implementation of [`textDocument/references`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references)
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_references);

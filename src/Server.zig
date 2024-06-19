@@ -1,3 +1,8 @@
+//! - Store global state
+//! - The main loop
+//! - Job/Request scheduling
+//! - many Request handlers defined here. Except for the major ones which are in `src/features`
+
 const Server = @This();
 
 const std = @import("std");
@@ -1725,6 +1730,7 @@ pub fn waitAndWork(server: *Server) void {
     server.wait_group.reset();
 }
 
+/// The main loop of ZLS
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
     while (server.keepRunning()) {
