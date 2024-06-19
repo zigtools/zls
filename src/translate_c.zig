@@ -121,30 +121,43 @@ pub fn translate(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ config.global_cache_path.?, "cimport.h" });
+    const zig_exe_path = config.zig_exe_path.?;
+    const zig_lib_path = config.zig_lib_path.?;
+    const global_cache_path = config.global_cache_path.?;
+
+    var random_bytes: [16]u8 = undefined;
+    std.crypto.random.bytes(&random_bytes);
+    var sub_path: [std.fs.base64_encoder.calcSize(16)]u8 = undefined;
+    _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
+
+    var global_cache_dir = try std.fs.openDirAbsolute(global_cache_path, .{});
+    defer global_cache_dir.close();
+
+    var sub_dir = try global_cache_dir.makeOpenPath(&sub_path, .{});
+    defer sub_dir.close();
+
+    sub_dir.writeFile(.{
+        .sub_path = "cimport.h",
+        .data = source,
+    }) catch |err| {
+        log.warn("failed to write to '{s}/{s}/cimport.h': {}", .{ global_cache_path, sub_path, err });
+        return null;
+    };
+
+    defer global_cache_dir.deleteTree(&sub_path) catch |err| {
+        log.warn("failed to delete '{s}/{s}': {}", .{ global_cache_path, sub_path, err });
+    };
+
+    const file_path = try std.fs.path.join(allocator, &.{ global_cache_path, &sub_path, "cimport.h" });
     defer allocator.free(file_path);
 
-    var file = std.fs.createFileAbsolute(file_path, .{}) catch |err| {
-        log.warn("failed to create file '{s}': {}", .{ file_path, err });
-        return null;
-    };
-    defer file.close();
-    defer std.fs.deleteFileAbsolute(file_path) catch |err| {
-        log.warn("failed to delete file '{s}': {}", .{ file_path, err });
-    };
-
-    file.writeAll(source) catch |err| {
-        log.warn("failed to write to '{s}': {}", .{ file_path, err });
-        return null;
-    };
-
     const base_args = &[_][]const u8{
-        config.zig_exe_path.?,
+        zig_exe_path,
         "translate-c",
         "--zig-lib-dir",
-        config.zig_lib_path.?,
+        zig_lib_path,
         "--global-cache-dir",
-        config.global_cache_path.?,
+        global_cache_path,
         "-lc",
         "--listen=-",
     };
