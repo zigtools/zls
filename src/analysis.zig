@@ -1753,7 +1753,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .{"@atomicRmw"},
                 .{"@atomicStore"},
                 .{"@mulAdd"},
-                .{"@fieldParentPtr"}, // the return type is actually a pointer
                 .{"@unionInit"},
             });
             if (cast_map.has(call_name)) {
