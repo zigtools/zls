@@ -4747,7 +4747,7 @@ pub fn identifierLocFromPosition(pos_index: usize, handle: *DocumentStore.Handle
     const tree = handle.tree;
     const token_index = offsets.sourceIndexToTokenIndex(tree, start_idx);
     if (tree.tokens.items(.tag)[token_index] == .identifier)
-        return offsets.tokenToLoc(tree, token_index);
+        return offsets.identifierTokenToNameLoc(tree, token_index);
 
     var end_idx = pos_index;
     while (end_idx < handle.tree.source.len and Analyser.isSymbolChar(handle.tree.source[end_idx])) {

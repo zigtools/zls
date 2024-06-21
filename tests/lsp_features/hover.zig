@@ -982,6 +982,19 @@ test "hover - destructuring" {
     );
 }
 
+test "escaped identifier" {
+    try testHover(
+        \\const @"f<cursor>oo" = 42;
+    ,
+        \\```zig
+        \\const @"foo" = 42
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+}
+
 // https://github.com/zigtools/zls/issues/1378
 test "type reference cycle" {
     try testHover(
