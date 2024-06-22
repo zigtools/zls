@@ -34,13 +34,14 @@ pub const TokenType = enum(u32) {
     regexp,
     operator,
     decorator,
-    // non standard token types
+    /// non standard token type
     errorTag,
+    /// non standard token type
     builtin,
+    /// non standard token type
     label,
+    /// non standard token type
     keywordLiteral,
-    @"union",
-    @"opaque",
 };
 
 pub const TokenModifiers = packed struct(u16) {
@@ -128,12 +129,11 @@ const Builder = struct {
         }
     }
 
-    fn addDirect(self: *Builder, param_token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
+    fn addDirect(self: *Builder, token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
         std.debug.assert(loc.start <= loc.end);
         std.debug.assert(self.previous_source_index <= self.source_index);
         if (loc.start < self.previous_source_index) return;
         if (loc.start < self.source_index) return;
-        var token_type = param_token_type;
         switch (token_type) {
             .namespace,
             .type,
@@ -142,6 +142,7 @@ const Builder = struct {
             .interface,
             .@"struct",
             .typeParameter,
+            .parameter,
             .variable,
             .property,
             .enumMember,
@@ -155,11 +156,6 @@ const Builder = struct {
             .errorTag,
             => {},
 
-            .@"union",
-            .@"opaque",
-            => token_type = .type,
-
-            .parameter,
             .keyword,
             .comment,
             .string,
@@ -238,9 +234,9 @@ fn colorIdentifierBasedOnType(
         else if (type_node.isEnumType())
             .@"enum"
         else if (type_node.isUnionType())
-            .@"union"
+            .type // There is no token type for a union type
         else if (type_node.isOpaqueType())
-            .@"opaque"
+            .type // There is no token type for an opaque
         else if (is_parameter)
             .typeParameter
         else
