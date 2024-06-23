@@ -363,6 +363,93 @@ test "ignore autofix comment whitespace" {
     );
 }
 
+test "string literal to multiline string literal" {
+    try testUserCodeAction(
+        \\const foo = <cursor>"line one\nline two\nline three";
+    ,
+        \\const foo = 
+        \\\\line one
+        \\\\line two
+        \\\\line three
+        \\;
+    );
+    try testUserCodeAction(
+        \\const foo = "Hello, <cursor>World!\n";
+    ,
+        \\const foo = 
+        \\\\Hello, World!
+        \\\\
+        \\;
+    );
+    try testUserCodeAction(
+        \\std.debug.print(<cursor>"Hi\nHey\nHello\n", .{});
+    ,
+        \\std.debug.print(
+        \\\\Hi
+        \\\\Hey
+        \\\\Hello
+        \\\\
+        \\, .{});
+    );
+    try testUserCodeAction(
+        \\const blank = <cursor>""
+        \\;
+    ,
+        \\const blank = 
+        \\\\
+        \\;
+    );
+}
+
+test "multiline string literal to string literal" {
+    try testUserCodeAction(
+        \\const bleh =
+        \\    \\hello
+        \\    \\world<cursor>
+        \\    ++
+        \\    \\oh?
+        \\;
+    ,
+        \\const bleh = "hello\nworld"
+        \\    ++
+        \\    \\oh?
+        \\;
+    );
+    try testUserCodeAction(
+        \\std.debug.print(
+        \\\\Hi<cursor>
+        \\\\Hey
+        \\\\Hello
+        \\\\
+        \\, .{});
+    ,
+        \\std.debug.print(
+        \\"Hi\nHey\nHello\n"
+        \\, .{});
+    );
+    try testUserCodeAction(
+        \\const nums =
+        \\    \\123
+        \\    \\456<cursor>
+        \\    \\789
+        \\    ;
+    ,
+        \\const nums = "123\n456\n789";
+    );
+    try testUserCodeAction(
+        \\for (0..42) |idx| {
+        \\    std.debug.print("{}: {}\n<cursor>", .{ idx, my_foos[idx] });
+        \\}
+    ,
+        \\for (0..42) |idx| {
+        \\    std.debug.print(
+        \\\\{}: {}
+        \\\\
+        \\, .{ idx, my_foos[idx] });
+        \\}
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testAutofixOptions(before, after, true); // diagnostics come from our AstGen fork
     try testAutofixOptions(before, after, false); // diagnostics come from calling zig ast-check
@@ -414,4 +501,52 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
 
     try std.testing.expectEqualStrings(after, handle.tree.source);
+}
+
+fn testUserCodeAction(source: []const u8, expected: []const u8) !void {
+    var ctx = try Context.init();
+    defer ctx.deinit();
+
+    const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
+    const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
+    defer allocator.free(text);
+
+    const uri = try ctx.addDocument(text);
+    const handle = ctx.server.document_store.getHandle(uri).?;
+    const pos = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding);
+
+    const params = types.CodeActionParams{
+        .textDocument = .{ .uri = uri },
+        .range = .{
+            .start = pos,
+            .end = pos,
+        },
+        .context = .{ .diagnostics = &[_]zls.types.Diagnostic{} },
+    };
+
+    @setEvalBranchQuota(5000);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
+
+    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
+    defer text_edits.deinit(allocator);
+
+    for (response) |action| {
+        const code_action = action.CodeAction;
+        if (code_action.kind.? == .@"source.fixAll") continue;
+        const workspace_edit = code_action.edit.?;
+        const changes = workspace_edit.changes.?.map;
+        try std.testing.expectEqual(@as(usize, 1), changes.count());
+        try std.testing.expect(changes.contains(uri));
+
+        try text_edits.appendSlice(allocator, changes.get(uri).?);
+    }
+
+    const actual = try zls.diff.applyTextEdits(allocator, text, text_edits.items, ctx.server.offset_encoding);
+    defer allocator.free(actual);
+    try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
+
+    try std.testing.expectEqualStrings(expected, handle.tree.source);
 }
