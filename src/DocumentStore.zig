@@ -1471,7 +1471,17 @@ pub fn collectIncludeDirs(
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
 
-    const target_info = try std.zig.system.resolveTargetQuery(.{});
+    const target_info: std.Target = .{
+        .cpu = .{
+            .arch = builtin.cpu.arch,
+            .model = undefined,
+            .features = undefined,
+        },
+        .os = builtin.target.os,
+        .abi = .none,
+        .ofmt = comptime std.Target.ObjectFormat.default(builtin.os.tag, builtin.cpu.arch),
+        .dynamic_linker = std.Target.DynamicLinker.none,
+    };
     const native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
