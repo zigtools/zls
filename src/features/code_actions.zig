@@ -50,6 +50,22 @@ pub const Builder = struct {
         }
     }
 
+    pub fn addCodeAction(
+        builder: *Builder,
+        kind: UserActionKind,
+        params: types.CodeActionParams,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+    ) error{OutOfMemory}!void {
+        const loc = offsets.rangeToLoc(builder.handle.tree.source, params.range, builder.offset_encoding);
+
+        switch (kind) {
+            .str_kind_conv => |conv_kind| switch (conv_kind) {
+                .@"string literal to multiline string" => try handleStringLiteralToMultiline(builder, actions, loc),
+                .@"multiline string to string literal" => try handleMultilineStringToLiteral(builder, actions, loc),
+            },
+        }
+    }
+
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
@@ -366,6 +382,120 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
     });
 }
 
+fn handleStringLiteralToMultiline(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tokens = builder.handle.tree.tokens;
+
+    const str_tok_idx = offsets.sourceIndexToTokenIndex(builder.handle.tree, loc.start);
+    if (tokens.items(.tag)[str_tok_idx] != .string_literal) return;
+    const token_src = builder.handle.tree.tokenSlice(str_tok_idx);
+    const str_conts = token_src[1 .. token_src.len - 1]; // Omit leading and trailing '"'
+    const edit_loc_start = builder.handle.tree.tokenLocation(tokens.items(.start)[str_tok_idx], str_tok_idx).line_start;
+
+    var multiline = std.ArrayList(u8).init(builder.arena);
+    const writer = multiline.writer();
+
+    if (builder.handle.tree.tokensOnSameLine(str_tok_idx -| 1, str_tok_idx)) {
+        try writer.writeByte('\n');
+    }
+
+    var iter = std.mem.splitSequence(u8, str_conts, "\\n");
+    while (iter.next()) |line| {
+        try writer.print("\\\\{s}\n", .{line});
+    }
+
+    // remove trailing newline in cases where it's not needed
+    if (str_tok_idx + 1 < tokens.len and !builder.handle.tree.tokensOnSameLine(str_tok_idx, str_tok_idx + 1)) {
+        _ = multiline.pop();
+    }
+
+    try actions.append(builder.arena, .{
+        .title = "string literal to multiline string",
+        .kind = .@"refactor.rewrite",
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditLoc(
+                .{
+                    .start = edit_loc_start,
+                    .end = edit_loc_start + token_src.len,
+                },
+                multiline.items,
+            ),
+        }),
+    });
+}
+
+fn handleMultilineStringToLiteral(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const token_tags = builder.handle.tree.tokens.items(.tag);
+    const token_starts = builder.handle.tree.tokens.items(.start);
+
+    var multiline_tok_idx = offsets.sourceIndexToTokenIndex(builder.handle.tree, loc.start);
+    if (token_tags[multiline_tok_idx] != .multiline_string_literal_line) return;
+
+    // walk up to the first multiline string literal
+    const start_tok_idx = blk: {
+        while (multiline_tok_idx > 0) : (multiline_tok_idx -= 1) {
+            if (token_tags[multiline_tok_idx] != .multiline_string_literal_line) {
+                break :blk multiline_tok_idx + 1;
+            }
+        }
+        break :blk multiline_tok_idx;
+    };
+
+    var str_literal = std.ArrayList(u8).init(builder.arena);
+    const writer = str_literal.writer();
+
+    // place string literal on same line as the left adjacent equals sign, if it's there
+    const prev_tok_idx = start_tok_idx -| 1;
+    const edit_loc_start = blk: {
+        if (token_tags[prev_tok_idx] == .equal and !builder.handle.tree.tokensOnSameLine(prev_tok_idx, start_tok_idx)) {
+            try writer.writeAll(" \"");
+            break :blk builder.handle.tree.tokenLocation(token_starts[prev_tok_idx], prev_tok_idx).line_end;
+        } else {
+            try writer.writeByte('\"');
+            break :blk builder.handle.tree.tokenLocation(token_starts[start_tok_idx], start_tok_idx).line_start;
+        }
+    };
+
+    // construct string literal out of multiline string literals
+    var curr_tok_idx = start_tok_idx;
+    var edit_loc_end: usize = undefined;
+    while (curr_tok_idx < token_tags.len and token_tags[curr_tok_idx] == .multiline_string_literal_line) : (curr_tok_idx += 1) {
+        if (curr_tok_idx > start_tok_idx) {
+            try writer.writeAll("\\n");
+        }
+        const line = builder.handle.tree.tokenSlice(curr_tok_idx);
+        const end = if (line[line.len - 1] == '\n')
+            line.len - 1
+        else
+            line.len;
+        try writer.writeAll(line[2..end]); // Omit the leading '\\', trailing '\n' (if it's there)
+        edit_loc_end = builder.handle.tree.tokenLocation(token_starts[curr_tok_idx], curr_tok_idx).line_end;
+    }
+
+    try writer.writeByte('\"');
+
+    // bring up the semicolon from the next line, if it's there
+    if (curr_tok_idx < token_tags.len and token_tags[curr_tok_idx] == .semicolon) {
+        try writer.writeByte(';');
+        edit_loc_end = builder.handle.tree.tokenLocation(token_starts[curr_tok_idx], curr_tok_idx).line_start + 1;
+    }
+
+    try actions.append(builder.arena, .{
+        .title = "multiline string to string literal",
+        .kind = .@"refactor.rewrite",
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditLoc(
+                .{
+                    .start = edit_loc_start,
+                    .end = edit_loc_end,
+                },
+                str_literal.items,
+            ),
+        }),
+    });
+}
+
 fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
@@ -573,6 +703,15 @@ const DiagnosticKind = union(enum) {
 
         return null;
     }
+};
+
+const UserActionKind = union(enum) {
+    str_kind_conv: StrCat,
+
+    const StrCat = enum {
+        @"string literal to multiline string",
+        @"multiline string to string literal",
+    };
 };
 
 /// takes the location of an identifier which is part of a discard `_ = location_here;`

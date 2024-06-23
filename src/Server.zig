@@ -1579,6 +1579,8 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     }
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
+    try builder.addCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" }, request, &actions);
+    try builder.addCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" }, request, &actions);
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
     for (actions.items, result) |action, *out| {
         out.* = .{ .CodeAction = action };
