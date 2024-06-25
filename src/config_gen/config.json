@@ -42,6 +42,17 @@
             "default": "full"
         },
         {
+            "name": "semantic_tokens_readonly_behaviour",
+            "description": "`never` means that nothing will get the \"readonly\" modifier. `mutable_is_readonly` means that non-const variables with get the \"readonly\" modifier. `constant_is_readonly` means that all constants including function parameters and capture values will get the \"readonly\" modifier.",
+            "type": "enum",
+            "enum": [
+                "never",
+                "mutable_is_readonly",
+                "constant_is_readonly"
+            ],
+            "default": "never"
+        },
+        {
             "name": "enable_inlay_hints",
             "description": "Enables inlay hint support when the client also supports it",
             "type": "bool",

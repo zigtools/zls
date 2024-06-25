@@ -69,6 +69,7 @@ const Builder = struct {
     token_buffer: std.ArrayListUnmanaged(u32) = .{},
     encoding: offsets.Encoding,
     limited: bool,
+    readonly_behaviour: std.meta.FieldType(@import("../Config.zig"), .semantic_tokens_readonly_behaviour),
 
     fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
         const tree = self.handle.tree;
@@ -185,6 +186,14 @@ const Builder = struct {
         self.previous_source_index = loc.start;
         self.source_index = loc.end;
     }
+
+    fn mapReadonlyModifier(self: *Builder, is_readonly: bool) bool {
+        return switch (self.readonly_behaviour) {
+            .never => false,
+            .mutable_is_readonly => !is_readonly,
+            .constant_is_readonly => is_readonly,
+        };
+    }
 };
 
 inline fn writeToken(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType) !void {
@@ -286,7 +295,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, main_token, .keyword);
 
             if (node_data[node].lhs != 0) {
-                try writeTokenMod(builder, node_data[node].lhs, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, node_data[node].lhs, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
 
             try writeNodeTokens(builder, node_data[node].rhs);
@@ -319,10 +328,12 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, var_decl.comptime_token, .keyword);
             try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
+            const is_const = tree.tokens.items(.tag)[var_decl.ast.mut_token] == .keyword_const;
+
             if (try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle })) |decl_type| {
-                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
+                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(is_const) });
             } else {
-                try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(is_const) });
             }
 
             try writeNodeTokens(builder, var_decl.ast.type_node);
@@ -435,7 +446,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
 
                 const token_type: TokenType = if (Analyser.isMetaType(tree, param_decl.type_expr)) .typeParameter else .parameter;
-                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true });
+                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
 
                 if (param_decl.anytype_ellipsis3) |any_token| {
                     try writeToken(builder, any_token, .type);
@@ -487,7 +498,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
             if (switch_case.payload_token) |payload_token| {
                 const actual_payload = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
             try writeNodeTokens(builder, switch_case.ast.target_expr);
         },
@@ -503,7 +514,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (while_node.payload_token) |payload| {
                 const capture_is_ref = token_tags[payload] == .asterisk;
                 const name_token = payload + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
             try writeNodeTokens(builder, while_node.ast.cont_expr);
 
@@ -513,7 +524,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, while_node.else_token, .keyword);
 
                 if (while_node.error_token) |err_token| {
-                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true });
+                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
                 }
                 try writeNodeTokens(builder, while_node.ast.else_expr);
             }
@@ -538,7 +549,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 capture_token = name_token + 2;
 
                 if (token_tags[name_token] != .identifier) continue;
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
             try writeNodeTokens(builder, for_node.ast.then_expr);
 
@@ -558,14 +569,14 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (if_node.payload_token) |payload_token| {
                 const capture_is_ref = token_tags[payload_token] == .asterisk;
                 const actual_payload = payload_token + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
             try writeNodeTokens(builder, if_node.ast.then_expr);
 
             if (if_node.ast.else_expr != 0) {
                 try writeToken(builder, if_node.else_token, .keyword);
                 if (if_node.error_token) |err_token| {
-                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true });
+                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
                 }
                 try writeNodeTokens(builder, if_node.ast.else_expr);
             }
@@ -766,7 +777,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeNodeTokens(builder, node_data[node].lhs);
             try writeToken(builder, main_token, .keyword);
             if (token_tags[main_token + 1] == .pipe) {
-                try writeTokenMod(builder, main_token + 2, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, main_token + 2, .variable, .{ .declaration = true, .readonly = builder.mapReadonlyModifier(true) });
             }
             try writeNodeTokens(builder, node_data[node].rhs);
         },
@@ -889,7 +900,9 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 }
 
                 if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
-                    try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, false, .{});
+                    try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, false, .{
+                        .readonly = builder.mapReadonlyModifier(decl_type.isConst()),
+                    });
                     return;
                 }
             }
@@ -1013,9 +1026,13 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
         const is_param = child.decl == .function_parameter;
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
-            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});
+            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{
+                .readonly = builder.mapReadonlyModifier(child.isConst()),
+            });
         } else {
-            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, .{});
+            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, .{
+                .readonly = builder.mapReadonlyModifier(child.isConst()),
+            });
         }
     } else {
         try writeTokenMod(builder, name_token, .variable, .{});
@@ -1032,6 +1049,7 @@ pub fn writeSemanticTokens(
     loc: ?offsets.Loc,
     encoding: offsets.Encoding,
     limited: bool,
+    readonly_behaviour: std.meta.FieldType(@import("../Config.zig"), .semantic_tokens_readonly_behaviour),
 ) error{OutOfMemory}!types.SemanticTokens {
     var builder = Builder{
         .arena = arena,
@@ -1039,6 +1057,7 @@ pub fn writeSemanticTokens(
         .handle = handle,
         .encoding = encoding,
         .limited = limited,
+        .readonly_behaviour = readonly_behaviour,
     };
 
     const nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();

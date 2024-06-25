@@ -1348,6 +1348,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
         null,
         server.offset_encoding,
         server.config.semantic_tokens == .partial,
+        server.config.semantic_tokens_readonly_behaviour,
     );
 }
 
@@ -1367,6 +1368,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
         loc,
         server.offset_encoding,
         server.config.semantic_tokens == .partial,
+        server.config.semantic_tokens_readonly_behaviour,
     );
 }
 

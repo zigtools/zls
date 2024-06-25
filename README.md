@@ -55,6 +55,7 @@ The following options are currently available.
 | `build_on_save_step` | `[]const u8` | `"install"` | Select which step should be executed on build-on-save |
 | `enable_autofix` | `bool` | `false` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
+| `semantic_tokens_readonly_behaviour` | `enum` | `.never` | `never` means that nothing will get the "readonly" modifier. `mutable_is_readonly` means that non-const variables with get the "readonly" modifier. `constant_is_readonly` means that all constants including function parameters and capture values will get the "readonly" modifier. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_variable_type_hints` | `bool` | `true` | Enable inlay hints for variable types |
 | `inlay_hints_show_struct_literal_field_type` | `bool` | `true` | Enable inlay hints for fields in struct and union literals |
