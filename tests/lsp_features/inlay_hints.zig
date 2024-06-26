@@ -38,6 +38,13 @@ test "function call" {
     , .{ .kind = .Parameter });
 }
 
+test "extern function call" {
+    try testInlayHints(
+        \\extern fn foo(u32, beta: bool, []const u8) void;
+        \\const _ = foo(5, <beta>true, "");
+    , .{ .kind = .Parameter });
+}
+
 test "function self parameter" {
     try testInlayHints(
         \\const Foo = struct { pub fn bar(self: *Foo, alpha: u32) void {} };

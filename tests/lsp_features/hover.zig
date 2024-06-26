@@ -710,6 +710,13 @@ test "function" {
         \\fn foo() !i32
         \\```
     );
+    try testHover(
+        \\extern fn f<cursor>oo(u32) void;
+    ,
+        \\```zig
+        \\fn foo(u32) void
+        \\```
+    );
     try testHoverWithOptions(
         \\fn f<cursor>oo() i32 {}
     ,

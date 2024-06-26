@@ -1254,6 +1254,28 @@ test "method" {
     });
 }
 
+test "extern function" {
+    try testSemanticTokens(
+        \\extern fn foo(alpha: u32) u32;
+    , &.{
+        .{ "extern", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "alpha", .parameter, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "u32", .type, .{} },
+    });
+    try testSemanticTokens(
+        \\extern fn foo(u32) void;
+    , &.{
+        .{ "extern", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "void", .type, .{} },
+    });
+}
+
 test "builtin fuctions" {
     try testSemanticTokens(
         \\const foo = @as(type, u32);
