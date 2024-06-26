@@ -268,7 +268,8 @@ pub fn formatFunction(
                 }
 
                 if (parameter_options.include_types) {
-                    try writer.writeAll(": ");
+                    const has_parameter_name = parameter_options.include_names and param.name_token != null;
+                    if (has_parameter_name) try writer.writeAll(": ");
 
                     if (param.type_expr != 0) {
                         if (data.snippet_placeholders) {
