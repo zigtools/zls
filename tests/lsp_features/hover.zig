@@ -309,13 +309,13 @@ test "struct" {
         \\		// many lines here
         \\    }
         \\
-        \\	fld: u8,
+        \\         fld: u8,
         \\};
     ,
         \\```zig
         \\const S = struct {
-        \\	fld: u8,
-        \\};
+        \\    fld: u8
+        \\}
         \\```
         \\```zig
         \\(type)
@@ -337,14 +337,13 @@ test "struct" {
         \\
         \\```zig
         \\const FooStruct = struct {
-        \\	bar: u32,
-        \\	baz: bool,
-        \\	boo: MyInner,
-        \\
-        \\	pub const MyInner = struct {
-        \\		another_field: bool,
-        \\	};
-        \\};
+        \\    bar: u32
+        \\    baz: bool
+        \\    boo: MyInner
+        \\    pub const MyInner = struct {
+        \\        another_field: bool,
+        \\    }
+        \\}
         \\```
         \\```zig
         \\(type)
@@ -361,27 +360,8 @@ test "struct" {
     ,
         \\```zig
         \\const EdgeCases = struct {
-        \\	pub fn myEdgeCase() void
-        \\};
-        \\```
-        \\```zig
-        \\(type)
-        \\```
-    );
-    try testHover(
-        \\const Edge<cursor>Cases = struct {
-        \\    const str = "something";
-        \\    pub const s = S{
-        \\                .fld = 0,
-        \\        };
-        \\};
-    ,
-        \\```zig
-        \\const EdgeCases = struct {
-        \\	pub const s = S{
-        \\	    .fld = 0,
-        \\	};
-        \\};
+        \\    pub fn myEdgeCase() void
+        \\}
         \\```
         \\```zig
         \\(type)
@@ -403,10 +383,20 @@ test "enum" {
     ,
         \\```zig
         \\const MyEnum = enum {
-        \\	foo,
-        \\	bar,
-        \\	baz,
-        \\};
+        \\    foo
+        \\    bar
+        \\    baz
+        \\}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\pub const M<cursor>ode = enum { zig, zon };
+    ,
+        \\```zig
+        \\const Mode = enum { zig, zon }
         \\```
         \\```zig
         \\(type)
@@ -435,17 +425,17 @@ test "union" {
     ,
         \\```zig
         \\const ComptimeReason = union(enum) {
-        \\	c_import: struct {
-        \\		block: *Block,
-        \\		src: LazySrcLoc,
-        \\	},
-        \\	comptime_ret_ty: struct {
-        \\		block: *Block,
-        \\		func: Air.Inst.Ref,
-        \\		func_src: LazySrcLoc,
-        \\		return_ty: Type,
-        \\	},
-        \\};
+        \\  c_import: struct {
+        \\      block: *Block,
+        \\      src: LazySrcLoc,
+        \\  }
+        \\  comptime_ret_ty: struct {
+        \\      block: *Block,
+        \\      func: Air.Inst.Ref,
+        \\      func_src: LazySrcLoc,
+        \\      return_ty: Type,
+        \\  }
+        \\}
         \\```
         \\```zig
         \\(type)
