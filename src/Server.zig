@@ -538,6 +538,16 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
 
     server.status = .initializing;
 
+    var cfg: configuration.Configuration = .{};
+
+    if (request.initializationOptions) |initialization_options| {
+        if (std.json.parseFromValue(configuration.Configuration, server.allocator, initialization_options, .{})) |parsed| {
+            cfg = parsed.value;
+        } else |err| {
+            log.err("failed to read initialization_options: {}", .{err});
+        }
+    }
+
     if (!zig_builtin.is_test) {
         var maybe_config_result = if (server.config_path) |config_path|
             configuration.loadFromFile(server.allocator, config_path)
@@ -549,21 +559,21 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             switch (config_result.*) {
                 .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value),
                 .failure => |payload| blk: {
-                    try server.updateConfiguration(.{});
+                    try server.updateConfiguration(cfg);
                     const message = try payload.toMessage(server.allocator) orelse break :blk;
                     defer server.allocator.free(message);
                     server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
                 },
                 .not_found => {
                     log.info("No config file zls.json found. This is not an error.", .{});
-                    try server.updateConfiguration(.{});
+                    try server.updateConfiguration(cfg);
                 },
             }
         } else |err| {
             log.err("failed to load configuration: {}", .{err});
         }
     } else {
-        server.updateConfiguration(.{}) catch |err| {
+        server.updateConfiguration(cfg) catch |err| {
             log.err("failed to load configuration: {}", .{err});
         };
     }
