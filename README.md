@@ -37,10 +37,10 @@ zig build -Doptimize=ReleaseSafe
 
 ### Configuration Options
 
-You can configure zls by editing your `zls.json` configuration file.
+You can configure ZLS by editing your `zls.json` configuration file.
 Running `zls --show-config-path` will show a path to an already existing `zls.json` or a path to the local configuration folder instead.
 
-zls will look for a `zls.json` configuration file in multiple locations with the following priority:
+ZLS will look for a `zls.json` configuration file in multiple locations with the following priority:
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
 - In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
 
@@ -118,7 +118,7 @@ The following LSP features are supported:
 
 ## Using as a library
 
-You can use zls as a library! [Check out this demo repo](https://github.com/zigtools/zls-as-lib-demo) for a good reference.
+You can use ZLS as a library! [Check out this demo repo](https://github.com/zigtools/zls-as-lib-demo) for a good reference.
 
 ## Related Projects
 
