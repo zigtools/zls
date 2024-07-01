@@ -1568,6 +1568,9 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
+    try builder.addCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" }, request, &actions);
+    try builder.addCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" }, request, &actions);
+
     const Result = getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
     for (actions.items, result) |action, *out| {
