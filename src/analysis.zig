@@ -1777,12 +1777,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             if (std.mem.eql(u8, call_name, "@typeInfo")) {
-                const zig_lib_path = try URI.fromPath(analyser.arena.allocator(), analyser.store.config.zig_lib_path orelse return null);
-
-                const builtin_uri = URI.pathRelative(analyser.arena.allocator(), zig_lib_path, "/std/builtin.zig") catch |err| switch (err) {
-                    error.OutOfMemory => |e| return e,
-                    else => return null,
-                };
+                const zig_lib_path = analyser.store.config.zig_lib_path orelse return null;
+                const builtin_path = try std.fs.path.join(analyser.arena.allocator(), &.{ zig_lib_path, "std", "builtin.zig" });
+                const builtin_uri = try URI.fromPath(analyser.arena.allocator(), builtin_path);
 
                 const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
                 const new_handle_document_scope = try new_handle.getDocumentScope();

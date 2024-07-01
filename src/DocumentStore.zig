@@ -968,7 +968,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
 
     const build_file_path = try URI.parse(allocator, build_file.uri);
     defer allocator.free(build_file_path);
-    const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "../zls.build.json" });
+    const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
 
     var config_file = try std.fs.cwd().openFile(config_file_path, .{});
@@ -1177,7 +1177,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 
         if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
             const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
-            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
+            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path }) catch break :blk;
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
         }
@@ -1597,12 +1597,9 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     if (std.mem.eql(u8, import_str, "std")) {
         const zig_lib_path = self.config.zig_lib_path orelse return null;
 
-        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{ zig_lib_path, "./std/std.zig" }) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => return null,
-        };
-
+        const std_path = try std.fs.path.join(allocator, &.{ zig_lib_path, "std", "std.zig" });
         defer allocator.free(std_path);
+
         return try URI.fromPath(allocator, std_path);
     } else if (std.mem.eql(u8, import_str, "builtin")) {
         if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| {
@@ -1639,15 +1636,18 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        var separator_index = handle.uri.len;
-        while (separator_index > 0) : (separator_index -= 1) {
-            if (std.fs.path.isSep(handle.uri[separator_index - 1])) break;
-        }
-        const base = handle.uri[0 .. separator_index - 1];
-
-        return URI.pathRelative(allocator, base, import_str) catch |err| switch (err) {
+        const base_path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.UriBadScheme => return null,
+            else => return null,
         };
+        defer allocator.free(base_path);
+
+        const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return null,
+        };
+        defer allocator.free(joined_path);
+
+        return try URI.fromPath(allocator, joined_path);
     }
 }
