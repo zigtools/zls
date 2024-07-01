@@ -17,10 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - uses: mlugg/setup-zig@v1
         with:
           version: master
-          cache: false
 
       - run: zig env
 
