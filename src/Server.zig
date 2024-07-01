@@ -11,6 +11,8 @@ const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
+const DocumentScope = @import("DocumentScope.zig");
+const TrigramStore = @import("TrigramStore.zig");
 const types = @import("lsp.zig");
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
@@ -31,12 +33,13 @@ const inlay_hints = @import("features/inlay_hints.zig");
 const code_actions = @import("features/code_actions.zig");
 const folding_range = @import("features/folding_range.zig");
 const document_symbol = @import("features/document_symbol.zig");
+const workspace_symbols = @import("features/workspace_symbols.zig");
 const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
-
+const URI = @import("uri.zig");
 const log = std.log.scoped(.zls_server);
 
 // public fields
@@ -523,6 +526,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         for (server.client_capabilities.workspace_folders, workspace_folders) |*dest, src| {
             dest.* = try server.allocator.dupe(u8, src.uri);
         }
+        server.document_store.config.workspace_folders = server.client_capabilities.workspace_folders;
     }
 
     if (request.trace) |trace| {
@@ -612,7 +616,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -783,6 +787,8 @@ fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, n
     }
 
     server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
+
+    server.document_store.config.workspace_folders = server.client_capabilities.workspace_folders;
 }
 
 fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
@@ -885,7 +891,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         }
     }
 
-    server.document_store.config = DocumentStore.Config.fromMainConfig(server.config);
+    server.document_store.config = DocumentStore.Config.fromMainConfig(server.config, server.client_capabilities.workspace_folders);
 
     if (new_zig_exe_path or new_build_runner_path) blk: {
         if (!std.process.can_spawn) break :blk;
@@ -1589,6 +1595,101 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!ResultType("workspace/symbol") {
+    if (request.query.len < 3) return null;
+
+    var trigrams = std.ArrayListUnmanaged(TrigramStore.Trigram){};
+
+    for (server.client_capabilities.workspace_folders) |workspace_folder| {
+        const path = URI.parse(arena, workspace_folder) catch return error.InternalError;
+        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return error.InternalError;
+        defer dir.close();
+
+        var walker = try dir.walk(arena);
+        defer walker.deinit();
+
+        while (walker.next() catch return error.InternalError) |entry| {
+            if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
+                const uri = URI.pathRelative(arena, workspace_folder, entry.path) catch return error.InternalError;
+                _ = try server.document_store.getOrConstructTrigramStore(uri);
+            }
+        }
+    }
+
+    if (std.unicode.Utf8View.init(request.query)) |view| {
+        var iterator = view.iterator();
+        while (iterator.nextCodepoint()) |codepoint_0| {
+            const next_idx = iterator.i;
+            const codepoint_1 = iterator.nextCodepoint() orelse break;
+            const codepoint_2 = iterator.nextCodepoint() orelse break;
+            try trigrams.append(arena, .{
+                .codepoint_0 = codepoint_0,
+                .codepoint_1 = codepoint_1,
+                .codepoint_2 = codepoint_2,
+            });
+            iterator.i = next_idx;
+        }
+    } else |_| return null;
+
+    if (trigrams.items.len == 0) return null;
+
+    var symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
+    var candidate_decls_buffer = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
+
+    doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
+        const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
+
+        const tree = handle.tree;
+        const doc_scope = try handle.getDocumentScope();
+
+        for (trigrams.items) |trigram| {
+            if (!trigram_store.filter.contain(@bitCast(trigram))) continue :doc_loop;
+        }
+
+        candidate_decls_buffer.clearRetainingCapacity();
+
+        const first = trigram_store.getDeclarationsForTrigram(trigrams.items[0]) orelse continue;
+
+        try candidate_decls_buffer.resize(arena, first.len * 2);
+
+        var len = first.len;
+
+        @memcpy(candidate_decls_buffer.items[0..len], first);
+        @memcpy(candidate_decls_buffer.items[len..], first);
+
+        for (trigrams.items[1..]) |trigram| {
+            len = workspace_symbols.mergeIntersection(
+                trigram_store.getDeclarationsForTrigram(trigram) orelse continue :doc_loop,
+                candidate_decls_buffer.items[len..],
+                candidate_decls_buffer.items[0..len],
+            );
+            candidate_decls_buffer.items.len = len * 2;
+            @memcpy(candidate_decls_buffer.items[len..], candidate_decls_buffer.items[0..len]);
+        }
+
+        candidate_decls_buffer.items.len = len;
+
+        for (candidate_decls_buffer.items) |decl_idx| {
+            const decl = doc_scope.declarations.get(@intFromEnum(decl_idx));
+            const name_token = decl.nameToken(tree);
+
+            // TODO: integrate with document_symbol.zig for right kind info
+            try symbols.append(arena, .{
+                .name = tree.tokenSlice(name_token),
+                .kind = .Variable,
+                .location = .{
+                    .Location = .{
+                        .uri = handle.uri,
+                        .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
+                    },
+                },
+            });
+        }
+    }
+
+    return .{ .array_of_WorkspaceSymbol = symbols.items };
+}
+
 const HandledRequestMethods = enum {
     initialize,
     shutdown,
@@ -1611,6 +1712,7 @@ const HandledRequestMethods = enum {
     @"textDocument/codeAction",
     @"textDocument/foldingRange",
     @"textDocument/selectionRange",
+    @"workspace/symbol",
 };
 
 const HandledNotificationMethods = enum {
@@ -1651,6 +1753,7 @@ fn isBlockingMessage(msg: types.Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
         },
         .notification => |notification| switch (std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return false) {
@@ -1679,7 +1782,7 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
         .config = .{},
         .document_store = .{
             .allocator = allocator,
-            .config = DocumentStore.Config.fromMainConfig(Config{}),
+            .config = DocumentStore.Config.fromMainConfig(Config{}, &.{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
         },
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
@@ -1815,6 +1918,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
     };
 }
 

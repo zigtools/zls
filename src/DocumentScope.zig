@@ -12,7 +12,9 @@ const DocumentScope = @This();
 
 scopes: std.MultiArrayList(Scope) = .{},
 declarations: std.MultiArrayList(Declaration) = .{},
-/// used for looking up a child declaration in a given scope
+trigram_decls_mapping_capacity: u32 = 0,
+declarations_that_should_be_trigram_indexed: std.ArrayListUnmanaged(Declaration.Index) = .{},
+/// Used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap = .{},
 extra: std.ArrayListUnmanaged(u32) = .{},
 /// All identifier token that are in error sets.
@@ -183,6 +185,7 @@ const ScopeContext = struct {
 
         scopes_start: u32,
         declarations_start: u32,
+        should_trigrams_be_indexed: bool,
 
         fn pushDeclaration(
             pushed: PushedScope,
@@ -207,6 +210,11 @@ const ScopeContext = struct {
 
             try doc_scope.declarations.append(allocator, declaration);
             const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
+
+            if (pushed.should_trigrams_be_indexed and name.len >= 3) {
+                doc_scope.trigram_decls_mapping_capacity += @intCast(name.len - 2);
+                try doc_scope.declarations_that_should_be_trigram_indexed.append(allocator, declaration_index);
+            }
 
             const data = &doc_scope.scopes.items(.data)[@intFromEnum(pushed.scope)];
             const child_declarations = &doc_scope.scopes.items(.child_declarations)[@intFromEnum(pushed.scope)];
@@ -300,6 +308,10 @@ const ScopeContext = struct {
             .scope = context.current_scope.unwrap().?,
             .scopes_start = @intCast(context.child_scopes_scratch.items.len),
             .declarations_start = @intCast(context.child_declarations_scratch.items.len),
+            .should_trigrams_be_indexed = switch (tag) {
+                .container, .container_usingnamespace => true,
+                else => false,
+            },
         };
     }
 
@@ -355,6 +367,7 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
 pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
     scope.scopes.deinit(allocator);
     scope.declarations.deinit(allocator);
+    scope.declarations_that_should_be_trigram_indexed.deinit(allocator);
     scope.declaration_lookup_map.deinit(allocator);
     scope.extra.deinit(allocator);
 

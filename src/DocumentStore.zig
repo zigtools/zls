@@ -16,6 +16,7 @@ const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
 const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -25,6 +26,15 @@ config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
+/// All `Handle`s in the current workspace folders
+/// have a `TrigramStore`, but there will be some
+/// `TrigramStore`s with no associated `Handle`.
+///
+/// This is an optimization that allows closed
+/// or seldom accessed documents to return results
+/// during Workspace Symbol searches without
+/// maintaining an otherwise useless `Handle`.
+trigram_stores: std.StringArrayHashMapUnmanaged(*TrigramStore) = .{},
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
@@ -49,14 +59,16 @@ pub const Config = struct {
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_path: ?[]const u8,
+    workspace_folders: []const Uri = &.{},
 
-    pub fn fromMainConfig(config: @import("Config.zig")) Config {
+    pub fn fromMainConfig(config: @import("Config.zig"), workspace_folders: []const Uri) Config {
         return .{
             .zig_exe_path = config.zig_exe_path,
             .zig_lib_path = config.zig_lib_path,
             .build_runner_path = config.build_runner_path,
             .builtin_path = config.builtin_path,
             .global_cache_path = config.global_cache_path,
+            .workspace_folders = workspace_folders,
         };
     }
 };
@@ -646,6 +658,14 @@ pub fn deinit(self: *DocumentStore) void {
         result.deinit(self.allocator);
     }
     self.cimports.deinit(self.allocator);
+
+    for (self.trigram_stores.keys()) |uri| self.allocator.free(uri);
+    for (self.trigram_stores.values()) |trigram_store| {
+        trigram_store.deinit(self.allocator);
+        self.allocator.destroy(trigram_store);
+    }
+    self.trigram_stores.deinit(self.allocator);
+
     self.* = undefined;
 }
 
@@ -691,6 +711,41 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     };
 
     return self.createAndStoreDocument(uri, file_contents, false) catch return null;
+}
+
+/// Returns a handle to the given document
+/// **Thread safe** takes a shared lock
+/// This function does not protect against data races from modifying the Handle
+pub fn getTrigramStore(store: *DocumentStore, uri: Uri) error{OutOfMemory}!?*TrigramStore {
+    store.lock.lockShared();
+    defer store.lock.unlockShared();
+    return store.trigram_stores.get(uri);
+}
+
+pub fn getOrConstructTrigramStore(store: *DocumentStore, uri: Uri) error{OutOfMemory}!?*TrigramStore {
+    if (try store.getTrigramStore(uri)) |trigram_store| return trigram_store;
+
+    if (store.getOrLoadHandle(uri)) |handle| {
+        const duped_uri = try store.allocator.dupe(u8, uri);
+        errdefer store.allocator.free(duped_uri);
+
+        var trigram_store = try store.allocator.create(TrigramStore);
+        errdefer store.allocator.destroy(trigram_store);
+
+        trigram_store.* = TrigramStore.init(store.allocator, handle) catch |err| switch (err) {
+            error.InvalidUtf8 => {
+                store.allocator.free(duped_uri);
+                store.allocator.destroy(trigram_store);
+                return null;
+            },
+            else => |e| return e,
+        };
+        errdefer trigram_store.deinit(store.allocator);
+
+        try store.trigram_stores.put(store.allocator, duped_uri, trigram_store);
+    }
+
+    return null;
 }
 
 /// **Thread safe** takes a shared lock
@@ -958,6 +1013,14 @@ pub fn isBuiltinFile(uri: Uri) bool {
 pub fn isInStd(uri: Uri) bool {
     // TODO: Better logic for detecting std or subdirectories?
     return std.mem.indexOf(u8, uri, "/std/") != null;
+}
+
+pub fn isInWorkspaceFolders(store: DocumentStore, uri: Uri) bool {
+    // TODO: Better logic for detecting workspace folders?
+    return for (store.config.workspace_folders) |wf| {
+        // NOTE: terrible but it should work
+        if (std.mem.startsWith(u8, uri, wf)) break true;
+    } else false;
 }
 
 /// looks for a `zls.build.json` file in the build file directory
@@ -1321,7 +1384,9 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, op
         self.allocator.destroy(handle_ptr);
     }
 
-    if (isBuildFile(gop.value_ptr.*.uri)) {
+    const is_build_file = isBuildFile(gop.value_ptr.*.uri);
+
+    if (is_build_file) {
         log.debug("Opened document `{s}` (build file)", .{gop.value_ptr.*.uri});
     } else {
         log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
