@@ -399,11 +399,12 @@ pub fn firstParamIs(
 }
 
 pub fn getVariableSignature(
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
     tree: Ast,
     var_decl: Ast.full.VarDecl,
     include_name: bool,
 ) error{OutOfMemory}![]const u8 {
+    const token_tags = tree.tokens.items(.tag);
     const node_tags = tree.nodes.items(.tag);
 
     const start_token = if (include_name)
@@ -422,7 +423,7 @@ pub fn getVariableSignature(
     const end_token = switch (node_tags[init_node]) {
         .merge_error_sets => {
             if (!include_name) return "error";
-            return try std.fmt.allocPrint(allocator, "{s} error", .{
+            return try std.fmt.allocPrint(arena, "{s} error", .{
                 offsets.tokensToSlice(tree, start_token, tree.firstToken(init_node) - 1),
             });
         },
@@ -459,12 +460,124 @@ pub fn getVariableSignature(
                 offset += 1;
             }
 
+            if (container_decl.ast.members.len != 0) container_fields: {
+                var members_source = std.ArrayList(u8).init(arena);
+
+                // e.g. 'pub const Mode = enum { zig, zon };'
+                if (tree.tokensOnSameLine(tree.firstToken(init_node), tree.lastToken(init_node))) {
+                    const members = container_decl.ast.members;
+                    try members_source.appendSlice(
+                        offsets.tokensToSlice(
+                            tree,
+                            tree.firstToken(members[0]),
+                            tree.lastToken(members[members.len - 1]),
+                        ),
+                    );
+                    return try std.mem.concat(arena, u8, &.{
+                        offsets.tokensToSlice(tree, start_token, token + offset),
+                        " { ",
+                        members_source.items,
+                        " }",
+                    });
+                }
+                for (container_decl.ast.members) |member| {
+                    const member_line_start = offsets.lineLocUntilIndex(tree.source, offsets.tokenToIndex(tree, tree.firstToken(member))).start;
+                    var member_source_indented = tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, member)).end];
+                    switch (tree.nodes.items(.tag)[member]) {
+                        .container_field_init, .container_field_align, .container_field => {},
+                        else => {
+                            if (Ast.fullVarDecl(tree, member)) |inner_decl| {
+                                if (inner_decl.visib_token) |visib| {
+                                    if (token_tags[visib] != .keyword_pub) continue;
+                                } else continue;
+                            } else if (Ast.fullFnProto(tree, @as(*[1]Ast.Node.Index, @ptrCast(&buf)), member)) |func| {
+                                if (func.visib_token) |visib| {
+                                    if (token_tags[visib] != .keyword_pub) continue;
+                                    member_source_indented = tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, func.ast.return_type)).end];
+                                } else continue;
+                            } else continue;
+                        },
+                    }
+                    try members_source.append('\n');
+                    try members_source.appendSlice(try trimCommonIndentation(arena, member_source_indented, 4));
+                }
+                if (members_source.items.len == 0) break :container_fields;
+
+                return try std.mem.concat(arena, u8, &.{
+                    offsets.tokensToSlice(tree, start_token, token + offset),
+                    " {",
+                    members_source.items,
+                    "\n}",
+                });
+            }
             break :blk token + offset;
         },
         else => ast.lastToken(tree, init_node),
     };
 
     return offsets.tokensToSlice(tree, start_token, end_token);
+}
+
+fn trimCommonIndentation(allocator: std.mem.Allocator, str: []const u8, preserved_indentation_amount: usize) error{OutOfMemory}![]u8 {
+    var line_it = std.mem.splitScalar(u8, str, '\n');
+
+    var non_empty_lines: usize = 0;
+    var min_indentation: ?usize = null;
+    while (line_it.next()) |line| {
+        if (line.len == 0) continue;
+        const indentation = for (line, 0..) |c, count| {
+            if (!std.ascii.isWhitespace(c)) break count;
+        } else line.len;
+        min_indentation = if (min_indentation) |old| @min(old, indentation) else indentation;
+        non_empty_lines += 1;
+    }
+
+    var common_indent = min_indentation orelse return try allocator.dupe(u8, str);
+    common_indent -|= preserved_indentation_amount;
+    if (common_indent == 0) return try allocator.dupe(u8, str);
+
+    const capacity = str.len - non_empty_lines * common_indent;
+    var output = try std.ArrayListUnmanaged(u8).initCapacity(allocator, capacity);
+    std.debug.assert(capacity == output.capacity);
+    errdefer @compileError("error would leak here");
+
+    line_it = std.mem.splitScalar(u8, str, '\n');
+    var is_first_line = true;
+    while (line_it.next()) |line| {
+        if (!is_first_line) output.appendAssumeCapacity('\n');
+        if (line.len != 0) {
+            output.appendSliceAssumeCapacity(line[common_indent..]);
+        }
+        is_first_line = false;
+    }
+
+    std.debug.assert(output.items.len == output.capacity);
+    return output.items;
+}
+
+test trimCommonIndentation {
+    const cases = [_]struct { []const u8, []const u8, usize }{
+        .{ "", "", 0 },
+        .{ "\n", "\n", 0 },
+        .{ "foo", "foo", 0 },
+        .{ "foo", "  foo", 0 },
+        .{ "foo  ", "    foo  ", 0 },
+        .{ "foo\nbar", "    foo\n    bar", 0 },
+        .{ "foo\nbar\n", "  foo\n  bar\n", 0 },
+        .{ "  foo\nbar", "    foo\n  bar", 0 },
+        .{ "foo\n  bar", "    foo\n      bar", 0 },
+        .{ "  foo\n\nbar", "    foo\n\n  bar", 0 },
+
+        .{ "  foo\n  bar", "    foo\n    bar", 2 },
+        .{ "    foo\n    bar", "    foo\n    bar", 4 },
+        .{ "    foo\n    bar", "    foo\n    bar", 8 },
+    };
+
+    for (cases) |case| {
+        const actual = try trimCommonIndentation(std.testing.allocator, case[1], case[2]);
+        defer std.testing.allocator.free(actual);
+        try std.testing.expectEqualStrings(case[0], actual);
+    }
 }
 
 pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]const u8 {
