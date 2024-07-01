@@ -16,10 +16,9 @@ jobs:
         with:
           fetch-depth: 0 # required to resolve the version string
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - uses: mlugg/setup-zig@v1
         with:
           version: master
-          cache: false
 
       - run: zig env
 
