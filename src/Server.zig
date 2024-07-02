@@ -385,7 +385,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     return text_edits;
 }
 
-fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
+fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
@@ -538,11 +538,9 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
 
     server.status = .initializing;
 
-    var cfg: configuration.Configuration = .{};
-
     if (request.initializationOptions) |initialization_options| {
-        if (std.json.parseFromValue(configuration.Configuration, server.allocator, initialization_options, .{})) |parsed| {
-            cfg = parsed.value;
+        if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{})) |new_cfg| {
+            try server.updateConfiguration2(new_cfg);
         } else |err| {
             log.err("failed to read initialization_options: {}", .{err});
         }
@@ -559,21 +557,21 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             switch (config_result.*) {
                 .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value),
                 .failure => |payload| blk: {
-                    try server.updateConfiguration(cfg);
+                    try server.updateConfiguration(.{});
                     const message = try payload.toMessage(server.allocator) orelse break :blk;
                     defer server.allocator.free(message);
                     server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
                 },
                 .not_found => {
                     log.info("No config file zls.json found. This is not an error.", .{});
-                    try server.updateConfiguration(cfg);
+                    try server.updateConfiguration(.{});
                 },
             }
         } else |err| {
             log.err("failed to load configuration: {}", .{err});
         }
     } else {
-        server.updateConfiguration(cfg) catch |err| {
+        server.updateConfiguration(.{}) catch |err| {
             log.err("failed to load configuration: {}", .{err});
         };
     }
