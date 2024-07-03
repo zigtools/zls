@@ -385,7 +385,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     return text_edits;
 }
 
-fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
+fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
@@ -537,6 +537,14 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     log.debug("Offset Encoding: {s}", .{@tagName(server.offset_encoding)});
 
     server.status = .initializing;
+
+    if (request.initializationOptions) |initialization_options| {
+        if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{})) |new_cfg| {
+            try server.updateConfiguration2(new_cfg);
+        } else |err| {
+            log.err("failed to read initialization_options: {}", .{err});
+        }
+    }
 
     if (!zig_builtin.is_test) {
         var maybe_config_result = if (server.config_path) |config_path|
