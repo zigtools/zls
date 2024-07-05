@@ -152,7 +152,7 @@ pub const Status = enum {
 };
 
 const Job = union(enum) {
-    incoming_message: std.json.Parsed(lsp.JsonRPCMessage),
+    incoming_message: std.json.Parsed(Message),
     generate_diagnostics: DocumentStore.Uri,
     run_build_on_save,
 
@@ -1600,46 +1600,53 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-const HandledRequestMethods = enum {
-    initialize,
+const HandledRequestParams = union(enum) {
+    initialize: types.InitializeParams,
     shutdown,
-    @"textDocument/willSaveWaitUntil",
-    @"textDocument/semanticTokens/full",
-    @"textDocument/semanticTokens/range",
-    @"textDocument/inlayHint",
-    @"textDocument/completion",
-    @"textDocument/signatureHelp",
-    @"textDocument/definition",
-    @"textDocument/typeDefinition",
-    @"textDocument/implementation",
-    @"textDocument/declaration",
-    @"textDocument/hover",
-    @"textDocument/documentSymbol",
-    @"textDocument/formatting",
-    @"textDocument/rename",
-    @"textDocument/references",
-    @"textDocument/documentHighlight",
-    @"textDocument/codeAction",
-    @"textDocument/foldingRange",
-    @"textDocument/selectionRange",
+    @"textDocument/willSaveWaitUntil": types.WillSaveTextDocumentParams,
+    @"textDocument/semanticTokens/full": types.SemanticTokensParams,
+    @"textDocument/semanticTokens/range": types.SemanticTokensRangeParams,
+    @"textDocument/inlayHint": types.InlayHintParams,
+    @"textDocument/completion": types.CompletionParams,
+    @"textDocument/signatureHelp": types.SignatureHelpParams,
+    @"textDocument/definition": types.DefinitionParams,
+    @"textDocument/typeDefinition": types.TypeDefinitionParams,
+    @"textDocument/implementation": types.ImplementationParams,
+    @"textDocument/declaration": types.DeclarationParams,
+    @"textDocument/hover": types.HoverParams,
+    @"textDocument/documentSymbol": types.DocumentSymbolParams,
+    @"textDocument/formatting": types.DocumentFormattingParams,
+    @"textDocument/rename": types.RenameParams,
+    @"textDocument/references": types.ReferenceParams,
+    @"textDocument/documentHighlight": types.DocumentHighlightParams,
+    @"textDocument/codeAction": types.CodeActionParams,
+    @"textDocument/foldingRange": types.FoldingRangeParams,
+    @"textDocument/selectionRange": types.SelectionRangeParams,
+    other: lsp.MethodWithParams,
 };
 
-const HandledNotificationMethods = enum {
-    initialized,
+const HandledNotificationParams = union(enum) {
+    initialized: types.InitializedParams,
     exit,
-    @"$/cancelRequest",
-    @"$/setTrace",
-    @"textDocument/didOpen",
-    @"textDocument/didChange",
-    @"textDocument/didSave",
-    @"textDocument/didClose",
-    @"workspace/didChangeWorkspaceFolders",
-    @"workspace/didChangeConfiguration",
+    @"$/cancelRequest": types.CancelParams,
+    @"$/setTrace": types.SetTraceParams,
+    @"textDocument/didOpen": types.DidOpenTextDocumentParams,
+    @"textDocument/didChange": types.DidChangeTextDocumentParams,
+    @"textDocument/didSave": types.DidSaveTextDocumentParams,
+    @"textDocument/didClose": types.DidCloseTextDocumentParams,
+    @"workspace/didChangeWorkspaceFolders": types.DidChangeWorkspaceFoldersParams,
+    @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
+    other: lsp.MethodWithParams,
 };
 
-fn isBlockingMessage(msg: lsp.JsonRPCMessage) bool {
+const Message = lsp.Message(.{
+    .RequestParams = HandledRequestParams,
+    .NotificationParams = HandledNotificationParams,
+});
+
+fn isBlockingMessage(msg: Message) bool {
     switch (msg) {
-        .request => |request| switch (std.meta.stringToEnum(HandledRequestMethods, request.method) orelse return false) {
+        .request => |request| switch (request.params) {
             .initialize,
             .shutdown,
             => return true,
@@ -1663,8 +1670,9 @@ fn isBlockingMessage(msg: lsp.JsonRPCMessage) bool {
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
             => return false,
+            .other => return false,
         },
-        .notification => |notification| switch (std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return false) {
+        .notification => |notification| switch (notification.params) {
             .@"$/cancelRequest" => return false,
             .initialized,
             .exit,
@@ -1676,6 +1684,7 @@ fn isBlockingMessage(msg: lsp.JsonRPCMessage) bool {
             .@"workspace/didChangeWorkspaceFolders",
             .@"workspace/didChangeConfiguration",
             => return true,
+            .other => return false,
         },
         .response => return true,
     }
@@ -1778,8 +1787,7 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const parsed_message = std.json.parseFromSlice(
-        lsp.JsonRPCMessage,
+    const parsed_message = Message.parseFromSlice(
         server.allocator,
         json_message,
         .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
@@ -1788,8 +1796,7 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
 }
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
-    const parsed_message = std.json.parseFromSlice(
-        lsp.JsonRPCMessage,
+    const parsed_message = Message.parseFromSlice(
         server.allocator,
         json_message,
         .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
@@ -1804,7 +1811,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    return switch (comptime std.meta.stringToEnum(HandledRequestMethods, method) orelse return null) {
+    return switch (comptime std.meta.stringToEnum(std.meta.Tag(HandledRequestParams), method) orelse return null) {
         .initialize => try server.initializeHandler(arena, params),
         .shutdown => try server.shutdownHandler(arena, params),
         .@"textDocument/willSaveWaitUntil" => try server.willSaveWaitUntilHandler(arena, params),
@@ -1826,6 +1833,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .other => return null,
     };
 }
 
@@ -1835,7 +1843,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    return switch (comptime std.meta.stringToEnum(HandledNotificationMethods, method) orelse return) {
+    return switch (comptime std.meta.stringToEnum(std.meta.Tag(HandledNotificationParams), method) orelse return) {
         .initialized => try server.initializedHandler(arena, params),
         .exit => try server.exitHandler(arena, params),
         .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
@@ -1846,6 +1854,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
         .@"workspace/didChangeWorkspaceFolders" => try server.didChangeWorkspaceFoldersHandler(arena, params),
         .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
+        .other => {},
     };
 }
 
@@ -1859,7 +1868,7 @@ pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime metho
     } else unreachable;
 }
 
-fn processMessage(server: *Server, message: lsp.JsonRPCMessage) Error!?[]u8 {
+fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1879,49 +1888,24 @@ fn processMessage(server: *Server, message: lsp.JsonRPCMessage) Error!?[]u8 {
     var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
     defer arena_allocator.deinit();
 
-    @setEvalBranchQuota(5_000);
     switch (message) {
-        .request => |request| {
-            const handled_method = std.meta.stringToEnum(HandledRequestMethods, request.method) orelse {
-                return try server.sendToClientResponse(request.id, null);
-            };
-            switch (handled_method) {
-                inline else => |method| {
-                    const Params = lsp.ParamsType(@tagName(method));
-                    const params = if (Params == void) {} else std.json.parseFromValueLeaky(
-                        Params,
-                        arena_allocator.allocator(),
-                        request.params orelse .null,
-                        .{ .ignore_unknown_fields = true },
-                    ) catch return error.ParseError;
-
-                    const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
-                    return try server.sendToClientResponse(request.id, result);
-                },
-            }
+        .request => |request| switch (request.params) {
+            .other => return try server.sendToClientResponse(request.id, null),
+            inline else => |params, method| {
+                const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
+                return try server.sendToClientResponse(request.id, result);
+            },
         },
-        .notification => |notification| {
-            const handled_method = std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return null;
-            switch (handled_method) {
-                inline else => |method| {
-                    const Params = lsp.ParamsType(@tagName(method));
-                    const params = if (Params == void) {} else std.json.parseFromValueLeaky(
-                        Params,
-                        arena_allocator.allocator(),
-                        notification.params orelse .null,
-                        .{ .ignore_unknown_fields = true },
-                    ) catch return error.ParseError;
-
-                    try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params);
-                },
-            }
+        .notification => |notification| switch (notification.params) {
+            .other => {},
+            inline else => |params, method| try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params),
         },
         .response => |response| try server.handleResponse(response),
     }
     return null;
 }
 
-fn processMessageReportError(server: *Server, message: lsp.JsonRPCMessage) ?[]const u8 {
+fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
     return server.processMessage(message) catch |err| {
         log.err("failed to process {}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
@@ -2000,21 +1984,24 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
     }
 }
 
-fn validateMessage(server: *const Server, message: lsp.JsonRPCMessage) Error!void {
+fn validateMessage(server: *const Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const method = switch (message) {
-        .request => |request| blk: {
-            if (!lsp.isRequestMethod(request.method)) return error.MethodNotFound;
-            break :blk request.method;
+        .request => |request| switch (request.params) {
+            .other => |info| info.method,
+            else => @tagName(request.params),
         },
-        .notification => |notification| blk: {
-            if (!lsp.isNotificationMethod(notification.method)) return error.MethodNotFound;
-            break :blk notification.method;
+        .notification => |notification| switch (notification.params) {
+            .other => |info| info.method,
+            else => @tagName(notification.params),
         },
         .response => return, // validation happens in `handleResponse`
     };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#dollarRequests
+    if (message == .request and std.mem.startsWith(u8, method, "$/")) return error.MethodNotFound;
 
     switch (server.status) {
         .uninitialized => blk: {
@@ -2090,7 +2077,7 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
 }
 
 pub fn formatMessage(
-    message: lsp.JsonRPCMessage,
+    message: Message,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
@@ -2098,12 +2085,12 @@ pub fn formatMessage(
     _ = options;
     if (fmt.len != 0) std.fmt.invalidFmtError(fmt, message);
     switch (message) {
-        .request => |request| try writer.print("request-{}-{s}", .{ std.json.fmt(request.id, .{}), request.method }),
-        .notification => |notification| try writer.print("notification-{s}", .{notification.method}),
+        .request => |request| try writer.print("request-{}-{s}", .{ std.json.fmt(request.id, .{}), @tagName(request.params) }),
+        .notification => |notification| try writer.print("notification-{s}", .{@tagName(notification.params)}),
         .response => |response| try writer.print("response-{?}", .{std.json.fmt(response.id, .{})}),
     }
 }
 
-fn fmtMessage(message: lsp.JsonRPCMessage) std.fmt.Formatter(formatMessage) {
+fn fmtMessage(message: Message) std.fmt.Formatter(formatMessage) {
     return .{ .data = message };
 }
