@@ -1085,46 +1085,41 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     return build_config;
 }
 
-// walks the build.zig files above "uri"
+/// walks the build.zig files above "uri"
 const BuildDotZigIterator = struct {
     allocator: std.mem.Allocator,
-    uri_path: []const u8,
     dir_path: []const u8,
     i: usize,
 
-    fn init(allocator: std.mem.Allocator, uri_path: []const u8) !BuildDotZigIterator {
-        const dir_path = std.fs.path.dirname(uri_path) orelse uri_path;
+    fn init(allocator: std.mem.Allocator, file_path: []const u8) !BuildDotZigIterator {
+        const dir_path = std.fs.path.dirname(file_path) orelse file_path;
 
         return BuildDotZigIterator{
             .allocator = allocator,
-            .uri_path = uri_path,
             .dir_path = dir_path,
-            .i = std.fs.path.diskDesignator(uri_path).len + 1,
+            .i = std.fs.path.diskDesignator(file_path).len + 1,
         };
     }
 
-    // the iterator allocates this memory so you gotta free it
+    /// Caller owns returned memory.
     fn next(self: *BuildDotZigIterator) !?[]const u8 {
         while (true) {
-            if (self.i > self.dir_path.len)
+            if (self.i >= self.dir_path.len)
                 return null;
 
-            const potential_build_path = try std.fs.path.join(self.allocator, &.{
-                self.dir_path[0..self.i], "build.zig",
-            });
+            const potential_root_path = self.dir_path[0..self.i];
 
             self.i += 1;
-            while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
+            while (self.i < self.dir_path.len and !std.fs.path.isSep(self.dir_path[self.i])) : (self.i += 1) {}
 
-            if (std.fs.path.isAbsolute(potential_build_path)) {
-                if (std.fs.accessAbsolute(potential_build_path, .{})) {
-                    // found a build.zig file
-                    return potential_build_path;
-                } else |_| {}
-            }
-            // nope it failed for whatever reason, free it and move the
-            // machinery forward
-            self.allocator.free(potential_build_path);
+            if (!std.fs.path.isAbsolute(potential_root_path)) continue;
+
+            var dir = try std.fs.openDirAbsolute(potential_root_path, .{});
+            defer dir.close();
+            if (dir.access("build.zig", .{})) {
+                // found a build.zig file
+                return try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
+            } else |_| continue;
         }
     }
 };
