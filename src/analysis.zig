@@ -404,7 +404,6 @@ pub fn getVariableSignature(
     var_decl: Ast.full.VarDecl,
     include_name: bool,
 ) error{OutOfMemory}![]const u8 {
-    const token_tags = tree.tokens.items(.tag);
     const node_tags = tree.nodes.items(.tag);
 
     const start_token = if (include_name)
@@ -440,7 +439,7 @@ pub fn getVariableSignature(
         .tagged_union_enum_tag_trailing,
         .tagged_union_two,
         .tagged_union_two_trailing,
-        => blk: {
+        => end_token: {
             var buf: [2]Ast.Node.Index = undefined;
             const container_decl = tree.fullContainerDecl(&buf, init_node).?;
 
@@ -460,57 +459,53 @@ pub fn getVariableSignature(
                 offset += 1;
             }
 
-            if (container_decl.ast.members.len != 0) container_fields: {
-                var members_source = std.ArrayList(u8).init(arena);
+            if (container_decl.ast.members.len == 0) break :end_token token + offset;
 
-                // e.g. 'pub const Mode = enum { zig, zon };'
-                if (tree.tokensOnSameLine(tree.firstToken(init_node), tree.lastToken(init_node))) {
-                    const members = container_decl.ast.members;
-                    try members_source.appendSlice(
-                        offsets.tokensToSlice(
-                            tree,
-                            tree.firstToken(members[0]),
-                            tree.lastToken(members[members.len - 1]),
-                        ),
-                    );
-                    return try std.mem.concat(arena, u8, &.{
-                        offsets.tokensToSlice(tree, start_token, token + offset),
-                        " { ",
-                        members_source.items,
-                        " }",
-                    });
-                }
-                for (container_decl.ast.members) |member| {
-                    const member_line_start = offsets.lineLocUntilIndex(tree.source, offsets.tokenToIndex(tree, tree.firstToken(member))).start;
-                    var member_source_indented = tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, member)).end];
-                    switch (tree.nodes.items(.tag)[member]) {
-                        .container_field_init, .container_field_align, .container_field => {},
-                        else => {
-                            if (Ast.fullVarDecl(tree, member)) |inner_decl| {
-                                if (inner_decl.visib_token) |visib| {
-                                    if (token_tags[visib] != .keyword_pub) continue;
-                                } else continue;
-                            } else if (Ast.fullFnProto(tree, @as(*[1]Ast.Node.Index, @ptrCast(&buf)), member)) |func| {
-                                if (func.visib_token) |visib| {
-                                    if (token_tags[visib] != .keyword_pub) continue;
-                                    member_source_indented = tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, func.ast.return_type)).end];
-                                } else continue;
-                            } else continue;
-                        },
-                    }
-                    try members_source.append('\n');
-                    try members_source.appendSlice(try trimCommonIndentation(arena, member_source_indented, 4));
-                }
-                if (members_source.items.len == 0) break :container_fields;
-
-                return try std.mem.concat(arena, u8, &.{
-                    offsets.tokensToSlice(tree, start_token, token + offset),
-                    " {",
-                    members_source.items,
-                    "\n}",
-                });
+            // e.g. 'pub const Mode = enum { zig, zon };'
+            if (tree.tokensOnSameLine(tree.firstToken(init_node), tree.lastToken(init_node))) {
+                break :end_token ast.lastToken(tree, init_node);
             }
-            break :blk token + offset;
+
+            var members_source = std.ArrayList(u8).init(arena);
+
+            for (container_decl.ast.members) |member| {
+                const member_line_start = offsets.lineLocUntilIndex(tree.source, offsets.tokenToIndex(tree, tree.firstToken(member))).start;
+
+                if (!isNodePublic(tree, member)) continue;
+
+                const member_source_indented = switch (tree.nodes.items(.tag)[member]) {
+                    .fn_proto,
+                    .fn_proto_multi,
+                    .fn_proto_one,
+                    .fn_proto_simple,
+                    .fn_decl,
+                    => blk: {
+                        var inner_buffer: [1]Ast.Node.Index = undefined;
+                        const fn_proto = Ast.fullFnProto(tree, &inner_buffer, member).?;
+                        break :blk tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, fn_proto.ast.return_type)).end];
+                    },
+                    .container_field_init,
+                    .container_field_align,
+                    .container_field,
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, member)).end],
+                    else => continue,
+                };
+                try members_source.append('\n');
+                try members_source.appendSlice(try trimCommonIndentation(arena, member_source_indented, 4));
+            }
+
+            if (members_source.items.len == 0) break :end_token token + offset;
+
+            return try std.mem.concat(arena, u8, &.{
+                offsets.tokensToSlice(tree, start_token, token + offset),
+                " {",
+                members_source.items,
+                "\n}",
+            });
         },
         else => ast.lastToken(tree, init_node),
     };

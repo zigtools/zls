@@ -304,6 +304,18 @@ test "struct" {
         \\```
     );
     try testHover(
+        \\const Str<cursor>uct = struct {
+        \\    fn foo() void {}
+        \\};
+    ,
+        \\```zig
+        \\const Struct = struct
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
         \\const <cursor>S = struct {
         \\	fn foo() void {
         \\		// many lines here
