@@ -543,7 +543,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
         },
         .@"defer" => {
-            // rhs is the defered expr
+            // rhs is the deferred expr
             if (datas[n].rhs != 0) {
                 n = datas[n].rhs;
             } else {

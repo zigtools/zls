@@ -388,7 +388,7 @@ fn parseTaggedLoc(old_source: []const u8, phr: helper.CollectPlaceholdersResult,
 
     if (start.? > end.?) {
         std.debug.print("opening tag of '{s}' is after the closing tag", .{offsets.locToSlice(old_source, old_start_loc.?)});
-        return error.MissmatchedTags;
+        return error.MismatchedTags;
     }
 
     return .{ .start = start.?, .end = end.? };

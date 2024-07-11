@@ -1276,7 +1276,7 @@ test "extern function" {
     });
 }
 
-test "builtin fuctions" {
+test "builtin functions" {
     try testSemanticTokens(
         \\const foo = @as(type, u32);
     , &.{

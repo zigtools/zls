@@ -3838,7 +3838,7 @@ pub const DeclWithHandle = struct {
             ),
             .function_parameter => |pay| blk: {
                 // the `get` function never fails on declarations from the DocumentScope but
-                // there may be manually created Declarations with invalid parameter indicies.
+                // there may be manually created Declarations with invalid parameter indices.
                 const param = pay.get(tree) orelse return null;
 
                 // handle anytype
@@ -4045,7 +4045,7 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) !?Scope.Index {
     } else null;
 }
 
-/// Collects all symbols/declarations that can be a acccessed on the given container type.
+/// Collects all symbols/declarations that can be a accessed on the given container type.
 pub fn collectDeclarationsOfContainer(
     analyser: *Analyser,
     /// a ast-node to a container type (i.e. `struct`, `union`, `enum`, `opaque`)

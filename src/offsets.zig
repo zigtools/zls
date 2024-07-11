@@ -11,7 +11,7 @@ const types = @import("lsp.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 
-/// Specificies how the `character` field in `types.Position` is defined.
+/// Specifies how the `character` field in `types.Position` is defined.
 /// The Character encoding is negotiated during initialization with the Client/Editor.
 pub const Encoding = enum {
     /// Character offsets count UTF-8 code units (e.g. bytes).

@@ -424,7 +424,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 /// indentation so that a discard is on a new line after the `insert_token`.
 ///
 /// `add_block_indentation` is used to add one level of indentation to the discard.
-/// `add_suffix_newline` is used to add a traling newline with indentation.
+/// `add_suffix_newline` is used to add a trailing newline with indentation.
 fn createDiscardText(
     builder: *Builder,
     identifier_name: []const u8,

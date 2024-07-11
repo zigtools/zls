@@ -3761,7 +3761,7 @@ const FormatContext = struct {
     ip: *InternPool,
 };
 
-// TODO add options for controling how types show be formatted
+// TODO add options for controlling how types show be formatted
 pub const FormatOptions = struct {
     debug: bool = false,
 };

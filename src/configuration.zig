@@ -214,7 +214,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         error.EnvironmentVariableNotFound => return null,
         error.OutOfMemory => |e| return e,
         error.InvalidWtf8 => |e| {
-            logger.err("failed to load 'PATH' enviorment variable: {}", .{e});
+            logger.err("failed to load 'PATH' environment variable: {}", .{e});
             return null;
         },
     };
