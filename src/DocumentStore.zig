@@ -1065,7 +1065,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     const parse_options = std.json.ParseOptions{
         // We ignore unknown fields so people can roll
         // their own build runners in libraries with
-        // the only requirement being general adherance
+        // the only requirement being general adherence
         // to the BuildConfig type
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,

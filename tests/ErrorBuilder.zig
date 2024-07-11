@@ -384,11 +384,11 @@ test "ErrorBuilder - write" {
     {
         eb.clearMessages();
         eb.unified = 0;
-        try eb.msgAtLoc("what about equallity?", "", .{ .start = 175, .end = 195 }, .warn, .{});
+        try eb.msgAtLoc("what about equality?", "", .{ .start = 175, .end = 195 }, .warn, .{});
 
         try std.testing.expectFmt(
             \\(whichever is greater), it obtains a difference, or deviation.
-            \\ ^^^^^^^^^^^^^^^^^^^^ warning: what about equallity?
+            \\ ^^^^^^^^^^^^^^^^^^^^ warning: what about equality?
         , "{}", .{eb});
     }
 

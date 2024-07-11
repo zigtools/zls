@@ -663,18 +663,18 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
     if (builder.source_index < string_content_loc.start or string_content_loc.end < builder.source_index) return;
 
-    const previous_seperator_index: ?usize = blk: {
+    const previous_separator_index: ?usize = blk: {
         var index: usize = builder.source_index;
         break :blk while (index > string_content_loc.start) : (index -= 1) {
             if (std.fs.path.isSep(source[index - 1])) break index - 1;
         } else null;
     };
 
-    const next_seperator_index: ?usize = for (builder.source_index..string_content_loc.end) |index| {
+    const next_separator_index: ?usize = for (builder.source_index..string_content_loc.end) |index| {
         if (std.fs.path.isSep(source[index])) break index;
     } else null;
 
-    const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_seperator_index orelse string_content_loc.start });
+    const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_separator_index orelse string_content_loc.start });
 
     var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
@@ -689,9 +689,9 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
     }
 
-    const after_seperator_index = if (previous_seperator_index) |index| index + 1 else string_content_loc.start;
-    const insert_loc: offsets.Loc = .{ .start = after_seperator_index, .end = builder.source_index };
-    const replace_loc: offsets.Loc = .{ .start = after_seperator_index, .end = next_seperator_index orelse string_content_loc.end };
+    const after_separator_index = if (previous_separator_index) |index| index + 1 else string_content_loc.start;
+    const insert_loc: offsets.Loc = .{ .start = after_separator_index, .end = builder.source_index };
+    const replace_loc: offsets.Loc = .{ .start = after_separator_index, .end = next_separator_index orelse string_content_loc.end };
 
     const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
     const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
@@ -1049,7 +1049,7 @@ fn getEnumLiteralContext(
 }
 
 /// Looks for an identifier that can be passed to `collectContainerNodes()`
-/// Returns the token index of the identifer
+/// Returns the token index of the identifier
 /// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
 fn getSwitchOrStructInitContext(
     tree: Ast,

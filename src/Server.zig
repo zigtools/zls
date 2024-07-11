@@ -736,11 +736,11 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     const fields = std.meta.fields(configuration.Configuration);
     const result = switch (json) {
         .array => |arr| if (arr.items.len == fields.len) arr.items else {
-            log.err("workspace/configuration expectes an array of size {d} but received {d}", .{ fields.len, arr.items.len });
+            log.err("workspace/configuration expects an array of size {d} but received {d}", .{ fields.len, arr.items.len });
             return;
         },
         else => {
-            log.err("workspace/configuration expectes an array but received {s}", .{@tagName(json)});
+            log.err("workspace/configuration expects an array but received {s}", .{@tagName(json)});
             return;
         },
     };
@@ -931,7 +931,7 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     // <---------------------------------------------------------->
 
     if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
-        // TODO there should a way to supress this message
+        // TODO there should a way to suppress this message
         server.showMessage(.Warning, "zig executable could not be found", .{});
     }
 

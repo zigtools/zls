@@ -3343,7 +3343,7 @@ fn testCompletionWithOptions(
             return error.InvalidCompletionDoc;
         }
 
-        try std.testing.expect(actual_completion.insertText == null); // 'insertText' is subject to interpretation on the client so 'textEdit' should be prefered
+        try std.testing.expect(actual_completion.insertText == null); // 'insertText' is subject to interpretation on the client so 'textEdit' should be preferred
 
         if (!ctx.server.client_capabilities.supports_snippets) {
             try std.testing.expectEqual(types.InsertTextFormat.PlainText, actual_completion.insertTextFormat orelse .PlainText);

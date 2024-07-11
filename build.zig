@@ -484,7 +484,7 @@ const PostMultiPartForm = struct {
                 .owner = owner,
                 .makeFn = make,
             }),
-            .uri = std.Uri.parse(owner.fmt("{}", .{uri})) catch unreachable, // super efficent dupe
+            .uri = std.Uri.parse(owner.fmt("{}", .{uri})) catch unreachable, // super efficient dupe
             .headers = headers,
         };
         return self;

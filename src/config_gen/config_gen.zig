@@ -425,7 +425,7 @@ const Builtin = struct {
 };
 
 /// parses a `langref.html.in` file and extracts builtins from this section: `https://ziglang.org/documentation/master/#Builtin-Functions`
-/// the documentation field contains poorly formated html
+/// the documentation field contains poorly formatted html
 fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref_file: []const u8) error{OutOfMemory}![]Builtin {
     var tokenizer = Tokenizer{ .buffer = langref_file };
 
