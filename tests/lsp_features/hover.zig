@@ -352,9 +352,6 @@ test "struct" {
         \\    bar: u32,
         \\    baz: bool,
         \\    boo: MyInner,
-        \\    pub const MyInner = struct {
-        \\        another_field: bool,
-        \\    }
         \\}
         \\```
         \\```zig
@@ -371,9 +368,7 @@ test "struct" {
         \\};
     ,
         \\```zig
-        \\const EdgeCases = struct {
-        \\    pub fn myEdgeCase() void
-        \\}
+        \\const EdgeCases = struct
         \\```
         \\```zig
         \\(type)

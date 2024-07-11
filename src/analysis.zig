@@ -474,35 +474,15 @@ pub fn getVariableSignature(
                 if (!isNodePublic(tree, member)) continue;
 
                 const member_source_indented = switch (tree.nodes.items(.tag)[member]) {
-                    .fn_proto,
-                    .fn_proto_multi,
-                    .fn_proto_one,
-                    .fn_proto_simple,
-                    .fn_decl,
-                    => blk: {
-                        var inner_buffer: [1]Ast.Node.Index = undefined;
-                        const fn_proto = Ast.fullFnProto(tree, &inner_buffer, member).?;
-                        break :blk tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, fn_proto.ast.return_type)).end];
-                    },
                     .container_field_init,
                     .container_field_align,
                     .container_field,
-                    .global_var_decl,
-                    .local_var_decl,
-                    .aligned_var_decl,
-                    .simple_var_decl,
                     => tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, member)).end],
                     else => continue,
                 };
                 try members_source.append('\n');
                 try members_source.appendSlice(try trimCommonIndentation(arena, member_source_indented, 4));
-                switch (tree.nodes.items(.tag)[member]) {
-                    .container_field_init,
-                    .container_field_align,
-                    .container_field,
-                    => try members_source.append(','),
-                    else => {},
-                }
+                try members_source.append(',');
             }
 
             if (members_source.items.len == 0) break :end_token token + offset;
