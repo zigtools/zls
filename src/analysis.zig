@@ -496,6 +496,13 @@ pub fn getVariableSignature(
                 };
                 try members_source.append('\n');
                 try members_source.appendSlice(try trimCommonIndentation(arena, member_source_indented, 4));
+                switch (tree.nodes.items(.tag)[member]) {
+                    .container_field_init,
+                    .container_field_align,
+                    .container_field,
+                    => try members_source.append(','),
+                    else => {},
+                }
             }
 
             if (members_source.items.len == 0) break :end_token token + offset;

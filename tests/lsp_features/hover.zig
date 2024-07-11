@@ -326,7 +326,7 @@ test "struct" {
     ,
         \\```zig
         \\const S = struct {
-        \\    fld: u8
+        \\    fld: u8,
         \\}
         \\```
         \\```zig
@@ -349,9 +349,9 @@ test "struct" {
         \\
         \\```zig
         \\const FooStruct = struct {
-        \\    bar: u32
-        \\    baz: bool
-        \\    boo: MyInner
+        \\    bar: u32,
+        \\    baz: bool,
+        \\    boo: MyInner,
         \\    pub const MyInner = struct {
         \\        another_field: bool,
         \\    }
@@ -395,9 +395,9 @@ test "enum" {
     ,
         \\```zig
         \\const MyEnum = enum {
-        \\    foo
-        \\    bar
-        \\    baz
+        \\    foo,
+        \\    bar,
+        \\    baz,
         \\}
         \\```
         \\```zig
@@ -440,13 +440,13 @@ test "union" {
         \\  c_import: struct {
         \\      block: *Block,
         \\      src: LazySrcLoc,
-        \\  }
+        \\  },
         \\  comptime_ret_ty: struct {
         \\      block: *Block,
         \\      func: Air.Inst.Ref,
         \\      func_src: LazySrcLoc,
         \\      return_ty: Type,
-        \\  }
+        \\  },
         \\}
         \\```
         \\```zig
