@@ -34,8 +34,6 @@ jobs:
         with:
           version: ${{ matrix.zig-version }}
 
-      - run: zig env
-
       - name: Create temp zig project
         run: |
           mkdir $RUNNER_TEMP/TEMP_ZIG_PROJECT

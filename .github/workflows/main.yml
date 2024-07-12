@@ -21,8 +21,6 @@ jobs:
         with:
           version: master
 
-      - run: zig env
-
       - name: Run zig fmt
         if: matrix.os == 'ubuntu-latest'
         run: zig fmt --check .

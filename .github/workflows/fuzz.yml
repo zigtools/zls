@@ -51,9 +51,6 @@ jobs:
         with:
           version: master
 
-      - run: zig version
-      - run: zig env
-
       - name: Checkout zig
         uses: actions/checkout@v4
         with:

@@ -20,8 +20,6 @@ jobs:
         with:
           version: master
 
-      - run: zig env
-
       - name: Install APT packages
         run: |
           sudo apt-get update
