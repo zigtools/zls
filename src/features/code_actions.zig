@@ -179,7 +179,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const insert_token = node_tokens[block];
     const add_suffix_newline = is_last_param and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, true, add_suffix_newline);
 
     const action1 = types.CodeAction{
         .title = "discard function parameter",
@@ -199,10 +199,12 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     try actions.insertSlice(builder.arena, 0, &.{ action1, action2 });
 }
 
-fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
+fn discardVariableOrConstant(
+    builder: *Builder,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+    loc: offsets.Loc,
+    discard_ref: bool,
+) !void {
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
@@ -225,14 +227,32 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     if (insert_token >= tree.tokens.len) return;
     if (token_tags[insert_token] != .semicolon) return;
 
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, false);
+    const insert_index, const new_text = try createDiscardText(
+        builder,
+        identifier_name,
+        insert_token,
+        discard_ref,
+        false,
+        false,
+    );
 
     try actions.append(builder.arena, .{
         .title = "discard value",
         .kind = .@"source.fixAll",
-        .isPreferred = true,
+        .isPreferred = !discard_ref,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     });
+}
+
+fn handleUnusedVariableOrConstant(
+    builder: *Builder,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+    loc: offsets.Loc,
+) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    try discardVariableOrConstant(builder, actions, loc, false);
 }
 
 fn handleUnusedCapture(
@@ -297,7 +317,7 @@ fn handleUnusedCapture(
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
     const add_suffix_newline = is_last_capture and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
 
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, true, add_suffix_newline);
     const action1 = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
@@ -364,6 +384,8 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
             builder.createTextEditLoc(var_keyword_loc, "const"),
         }),
     });
+
+    try discardVariableOrConstant(builder, actions, loc, true);
 }
 
 fn detectIndentation(source: []const u8) []const u8 {
@@ -420,15 +442,17 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
     return new_text.toOwnedSlice(allocator);
 }
 
-/// returns a discard string `_ = identifier_name; // autofix` with appropriate newlines and
-/// indentation so that a discard is on a new line after the `insert_token`.
+/// returns a discard string `_ = identifier_name; // autofix` or `_ = &identifier_name;`
+/// with appropriate newlines and indentation so that a discard is on a new line after the `insert_token`.
 ///
+/// 'discard_ref' is used to add a '&' before `identifier_name` and remove ` // autofix`
 /// `add_block_indentation` is used to add one level of indentation to the discard.
 /// `add_suffix_newline` is used to add a trailing newline with indentation.
 fn createDiscardText(
     builder: *Builder,
     identifier_name: []const u8,
     insert_token: Ast.TokenIndex,
+    discard_ref: bool,
     add_block_indentation: bool,
     add_suffix_newline: bool,
 ) !struct {
@@ -459,8 +483,21 @@ fn createDiscardText(
         indent.len +
         additional_indent.len +
         "_ = ".len +
+        blk: {
+        if (discard_ref) {
+            break :blk "&".len;
+        } else {
+            break :blk 0;
+        }
+    } +
         identifier_name.len +
-        "; // autofix".len +
+        blk: {
+        if (discard_ref) {
+            break :blk ";".len;
+        } else {
+            break :blk "; // autofix".len;
+        }
+    } +
         if (add_suffix_newline) 1 + indent.len else 0;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
@@ -468,8 +505,9 @@ fn createDiscardText(
     new_text.appendSliceAssumeCapacity(indent);
     new_text.appendSliceAssumeCapacity(additional_indent);
     new_text.appendSliceAssumeCapacity("_ = ");
+    if (discard_ref) new_text.appendAssumeCapacity('&');
     new_text.appendSliceAssumeCapacity(identifier_name);
-    new_text.appendSliceAssumeCapacity("; // autofix");
+    if (discard_ref) new_text.appendAssumeCapacity(';') else new_text.appendSliceAssumeCapacity("; // autofix");
     if (add_suffix_newline) {
         new_text.appendAssumeCapacity('\n');
         new_text.appendSliceAssumeCapacity(indent);
