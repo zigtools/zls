@@ -229,8 +229,6 @@ pub fn generateBuildOnSaveDiagnostics(
         server.config.build_on_save_step,
         "--zig-lib-dir",
         server.config.zig_lib_path orelse return,
-        "--cache-dir",
-        server.config.global_cache_path.?,
         "-fno-reference-trace",
         "--summary",
         "none",
