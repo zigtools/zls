@@ -2914,7 +2914,21 @@ pub const Type = struct {
                         .snippet_placeholders = false,
                     })});
                 },
-               .merge_error_sets => if (ctx.options.truncate_container_decls) try writer.writeAll("error{...}") else try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+                .merge_error_sets => {
+                    const handle = node_handle.handle;
+                    const tree = handle.tree;
+                    const tags = tree.tokens.items(.tag);
+                    var token = tree.firstToken(node_handle.node);
+                    if (tags[token - 2] == std.zig.Token.Tag.identifier) {
+                        if (tags[token - 3] == std.zig.Token.Tag.colon) {
+                            token -= 4;
+                        } else {
+                            token -= 2;
+                        }
+                    }
+                    const error_set_name = offsets.tokenToSlice(tree, token);
+                    try writer.writeAll(error_set_name);
+                },
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
             .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),
