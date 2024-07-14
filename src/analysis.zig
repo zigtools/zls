@@ -968,21 +968,17 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, ty: Type, symbol: []const u8
     if (node == 0)
         return null;
 
-    const tree = handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-    const token_tags = tree.tokens.items(.tag);
-
     var buf: [2]Ast.Node.Index = undefined;
-    const container_decl = tree.fullContainerDecl(&buf, node) orelse
+    const container_decl = handle.tree.fullContainerDecl(&buf, node) orelse
         return null;
 
-    if (token_tags[container_decl.ast.main_token] != .keyword_union)
+    if (handle.tree.tokens.items(.tag)[container_decl.ast.main_token] != .keyword_union)
         return null;
 
     const child = try ty.lookupSymbol(analyser, symbol) orelse
         return null;
 
-    if (child.decl != .ast_node or !node_tags[child.decl.ast_node].isContainerField())
+    if (child.decl != .ast_node or !child.handle.tree.nodes.items(.tag)[child.decl.ast_node].isContainerField())
         return try child.resolveType(analyser);
 
     if (container_decl.ast.enum_token != null) {
