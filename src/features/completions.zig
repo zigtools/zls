@@ -578,32 +578,27 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!v
     try typeToCompletion(builder, ty);
 }
 
-fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
+fn kindToSortScore(kind: types.CompletionItemKind) []const u8 {
     return switch (kind) {
-        .Module => "1_", // use for packages
-        .Folder => "2_",
-        .File => "3_",
+        .Module => "1", // used for packages
+        .Folder => "2",
+        .File => "3",
 
-        .Constant => "1_",
-
-        .Variable => "2_",
-        .Field => "3_",
-        .Function, .Method => "4_",
-
-        .Keyword, .Snippet, .EnumMember => "5_",
-
-        .Class,
-        .Interface,
+        .Operator => "1",
+        .Field, .EnumMember => "2",
+        .Method => "3",
+        .Function => "4",
+        .Text, // used for labels
+        .Constant,
+        .Variable,
         .Struct,
         .Enum,
-        // Union?
         .TypeParameter,
-        => "6_",
+        => "5",
+        .Snippet => "6",
+        .Keyword => "7",
 
-        else => {
-            log.debug(@typeName(types.CompletionItemKind) ++ ".{s} has no sort score specified!", .{@tagName(kind)});
-            return null;
-        },
+        else => unreachable,
     };
 }
 
@@ -879,10 +874,8 @@ pub fn completionAtIndex(
             }
         }
 
-        // TODO: config for sorting rule?
-        const prefix = kindToSortScore(item.kind.?) orelse continue;
-
-        item.sortText = try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, item.label });
+        const score = kindToSortScore(item.kind.?);
+        item.sortText = try std.fmt.allocPrint(arena, "{s}_{s}", .{ score, item.label });
     }
 
     return .{ .isIncomplete = false, .items = completions };
