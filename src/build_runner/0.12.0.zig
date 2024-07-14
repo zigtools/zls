@@ -33,6 +33,8 @@ const writeFile2_removed_version =
     std.SemanticVersion.parse("0.13.0-dev.68+b86c4bde6") catch unreachable;
 const std_progress_rework_version =
     std.SemanticVersion.parse("0.13.0-dev.336+963ffe9d5") catch unreachable;
+const file_watch_version =
+    std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -64,6 +66,19 @@ pub fn main() !void {
         std.debug.print("Expected path to zig compiler\n", .{});
         return error.InvalidArgs;
     };
+    const zig_lib_directory = if (comptime builtin.zig_version.order(file_watch_version).compare(.gte)) blk: {
+        const zig_lib_dir = nextArg(args, &arg_idx) orelse {
+            std.debug.print("Expected zig lib directory path\n", .{});
+            return error.InvalidArgs;
+        };
+
+        const zig_lib_directory: std.Build.Cache.Directory = .{
+            .path = zig_lib_dir,
+            .handle = try std.fs.cwd().openDir(zig_lib_dir, .{}),
+        };
+
+        break :blk zig_lib_directory;
+    } else {};
     const build_root = nextArg(args, &arg_idx) orelse {
         std.debug.print("Expected build root directory path\n", .{});
         return error.InvalidArgs;
@@ -92,7 +107,21 @@ pub fn main() !void {
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var graph: std.Build.Graph = .{
+    var graph: std.Build.Graph = if (comptime builtin.zig_version.order(file_watch_version).compare(.gte)) .{
+        .arena = arena,
+        .cache = .{
+            .gpa = arena,
+            .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+        },
+        .zig_exe = zig_exe,
+        .env_map = try process.getEnvMap(arena),
+        .global_cache_root = global_cache_directory,
+        .zig_lib_directory = zig_lib_directory,
+        .host = .{
+            .query = .{},
+            .result = try std.zig.system.resolveTargetQuery(.{}),
+        },
+    } else .{
         .arena = arena,
         .cache = .{
             .gpa = arena,
@@ -202,7 +231,7 @@ pub fn main() !void {
                 const next_arg = nextArg(args, &arg_idx) orelse
                     fatal("expected [all|failures|none] after '{s}'", .{arg});
                 _ = next_arg;
-            } else if (mem.eql(u8, arg, "--zig-lib-dir")) {
+            } else if ((comptime builtin.zig_version.order(file_watch_version) == .lt) and mem.eql(u8, arg, "--zig-lib-dir")) {
                 builder.zig_lib_dir = .{ .cwd_relative = nextArgOrFatal(args, &arg_idx) };
             } else if (mem.eql(u8, arg, "--seed")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
