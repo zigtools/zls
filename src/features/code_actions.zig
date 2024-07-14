@@ -238,7 +238,7 @@ fn discardVariableOrConstant(
 
     try actions.append(builder.arena, .{
         .title = "discard value",
-        .kind = .@"source.fixAll",
+        .kind = if (discard_ref) .quickfix else .@"source.fixAll",
         .isPreferred = !discard_ref,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     });
