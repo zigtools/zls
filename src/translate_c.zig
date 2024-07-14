@@ -248,8 +248,7 @@ pub fn translate(
                 return Result{ .failure = error_bundle };
             },
             else => {
-                log.warn("received unexpected message {} from zig compile server", .{header.tag});
-                return null;
+                zcs.pooler.fifo(.in).discard(header.bytes_len);
             },
         }
     }
