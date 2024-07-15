@@ -240,16 +240,18 @@ pub fn main() !void {
 
     logger.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
 
-    var transport = zls.Transport.init(
-        std.io.getStdIn().reader(),
-        std.io.getStdOut().writer(),
-    );
-    transport.message_tracing = result.message_tracing_enabled;
+    var transport: zls.lsp.ThreadSafeTransport(.{
+        .ChildTransport = zls.lsp.TransportOverStdio,
+        .thread_safe_read = false,
+        .thread_safe_write = true,
+        .MutexType = null,
+    }) = .{ .child_transport = zls.lsp.TransportOverStdio.init(std.io.getStdIn(), std.io.getStdOut()) };
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();
-    server.transport = &transport;
+    server.transport = transport.any();
     server.config_path = result.config_path;
+    server.message_tracing = result.message_tracing_enabled;
 
     try server.loop();
 
