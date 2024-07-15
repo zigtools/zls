@@ -5,7 +5,7 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_hover);
 
 const ast = @import("../ast.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
 const tracy = @import("tracy");
@@ -214,7 +214,7 @@ fn hoverDefinitionBuiltin(
         const source = handle.cimports.items(.source)[index];
 
         switch (markup_kind) {
-            .plaintext => {
+            .plaintext, .unknown_value => {
                 try writer.print(
                     \\{s}
                     \\
@@ -232,7 +232,7 @@ fn hoverDefinitionBuiltin(
     }
 
     switch (markup_kind) {
-        .plaintext => {
+        .plaintext, .unknown_value => {
             try writer.print(
                 \\{s}
                 \\{s}
@@ -376,7 +376,7 @@ fn hoverNumberLiteral(
                 .count = @bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative),
                 .len = @bitSizeOf(@TypeOf(number)) - @clz(number),
             }),
-            .plaintext => return try std.fmt.allocPrint(
+            .plaintext, .unknown_value => return try std.fmt.allocPrint(
                 arena,
                 \\BIN: {[sign]s}0b{[number]b}
                 \\OCT: {[sign]s}0o{[number]o}

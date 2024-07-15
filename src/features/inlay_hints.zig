@@ -7,7 +7,7 @@ const log = std.log.scoped(.zls_inlay_hint);
 
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const tracy = @import("tracy");
 const ast = @import("../ast.zig");

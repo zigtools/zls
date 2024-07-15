@@ -7,7 +7,7 @@
 //! - `std.zig.Ast.Node.Index`
 
 const std = @import("std");
-const types = @import("lsp.zig");
+const types = @import("lsp").types;
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 

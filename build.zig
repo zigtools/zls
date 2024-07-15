@@ -78,6 +78,7 @@ pub fn build(b: *Build) !void {
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
+    const lsp_module = b.dependency("lsp-codegen", .{}).module("lsp");
     const tracy_module = getTracyModule(b, .{
         .target = target,
         .optimize = optimize,
@@ -134,6 +135,7 @@ pub fn build(b: *Build) !void {
         .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "lsp", .module = lsp_module },
             .{ .name = "tracy", .module = tracy_module },
             .{ .name = "build_options", .module = build_options_module },
             .{ .name = "version_data", .module = version_data_module },
@@ -158,6 +160,7 @@ pub fn build(b: *Build) !void {
         exe.root_module.addImport("exe_options", exe_options_module);
         exe.root_module.addImport("tracy", tracy_module);
         exe.root_module.addImport("diffz", diffz_module);
+        exe.root_module.addImport("lsp", lsp_module);
         exe.root_module.addImport("known-folders", known_folders_module);
         exe.root_module.addImport("zls", zls_module);
 
@@ -180,6 +183,7 @@ pub fn build(b: *Build) !void {
     exe.root_module.addImport("exe_options", exe_options_module);
     exe.root_module.addImport("tracy", tracy_module);
     exe.root_module.addImport("diffz", diffz_module);
+    exe.root_module.addImport("lsp", lsp_module);
     exe.root_module.addImport("known-folders", known_folders_module);
     exe.root_module.addImport("zls", zls_module);
     b.installArtifact(exe);
@@ -214,6 +218,7 @@ pub fn build(b: *Build) !void {
     });
     src_tests.root_module.addImport("build_options", build_options_module);
     src_tests.root_module.addImport("test_options", test_options_module);
+    src_tests.root_module.addImport("lsp", lsp_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     const coverage_step = b.step("coverage", "Generate a coverage report with kcov");

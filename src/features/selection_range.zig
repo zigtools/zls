@@ -5,7 +5,7 @@ const Ast = std.zig.Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const ast = @import("../ast.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 
 pub fn generateSelectionRanges(

@@ -57,4 +57,12 @@ in linkFarm name [
       hash = "sha256-Hdj0Z4Fxv9JHaqdHQ+SLzhCq0rkMLfA406xrDvN/w7o=";
     };
   }
+  {
+    name = "1220518fd5cefa481497bb3484ffab48a42e69c31088e37f52ea361f9ce884d2131c";
+    path = fetchZigArtifact {
+      name = "lsp-codegen";
+      url = "https://github.com/zigtools/zig-lsp-codegen/archive/13d1d9e44e1c602953437438b163950298ff8d85.tar.gz";
+      hash = "sha256-13twCDbxhnF7Zb2tLsBUySc8nOOQXzC0XbV4RAE5HCc=";
+    };
+  }
 ]

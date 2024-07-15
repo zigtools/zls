@@ -544,6 +544,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
                     }
                     break :blk hint.label.string[2..hint.label.string.len];
                 },
+                _ => unreachable,
             };
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {

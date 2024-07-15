@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const InternPool = @import("InternPool.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 
 const Ast = std.zig.Ast;
 

@@ -1124,7 +1124,7 @@ fn testHoverWithOptions(
 
     const test_uri = "file:///test.zig";
     try ctx.server.sendNotificationSync(ctx.arena.allocator(), "textDocument/didOpen", .{
-        .textDocument = .{ .uri = test_uri, .languageId = .{ .custom_value = "zig" }, .version = 420, .text = text },
+        .textDocument = .{ .uri = test_uri, .languageId = "zig", .version = 420, .text = text },
     });
 
     const params = types.HoverParams{

@@ -10,7 +10,8 @@ const log = std.log.scoped(.zls_goto);
 
 const Server = @import("../Server.zig");
 const ast = @import("../ast.zig");
-const types = @import("../lsp.zig");
+const lsp = @import("lsp");
+const types = lsp.types;
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
 const tracy = @import("tracy");
@@ -248,7 +249,7 @@ pub fn gotoHandler(
     arena: std.mem.Allocator,
     kind: GotoKind,
     request: types.DefinitionParams,
-) Server.Error!Server.ResultType("textDocument/definition") {
+) Server.Error!lsp.ResultType("textDocument/definition") {
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
