@@ -8,7 +8,8 @@ const Server = @import("../Server.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
-const types = @import("../lsp.zig");
+const lsp = @import("lsp");
+const types = lsp.types;
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const tracy = @import("tracy");
@@ -498,7 +499,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             }
 
             // TODO can we avoid having to move map from `changes` to `new_changes`?
-            var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
+            var new_changes: lsp.parser.Map(types.DocumentUri, []const types.TextEdit) = .{};
             try new_changes.map.ensureTotalCapacity(arena, @intCast(changes.count()));
 
             var changes_it = changes.iterator();

@@ -6,7 +6,7 @@ const Ast = std.zig.Ast;
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const tracy = @import("tracy");
 

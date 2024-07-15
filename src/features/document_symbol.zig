@@ -4,7 +4,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_document_symbol);
 
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const analysis = @import("../analysis.zig");

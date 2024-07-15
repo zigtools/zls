@@ -1,6 +1,6 @@
 //! Collection of all snippets and keywords.
 
-const types = @import("lsp.zig");
+const types = @import("lsp").types;
 
 pub const Snipped = struct {
     label: []const u8,

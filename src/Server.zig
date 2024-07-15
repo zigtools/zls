@@ -11,7 +11,8 @@ const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
-const types = @import("lsp.zig");
+const lsp = @import("lsp");
+const types = lsp.types;
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
 const offsets = @import("offsets.zig");
@@ -151,7 +152,7 @@ pub const Status = enum {
 };
 
 const Job = union(enum) {
-    incoming_message: std.json.Parsed(types.Message),
+    incoming_message: std.json.Parsed(lsp.JsonRPCMessage),
     generate_diagnostics: DocumentStore.Uri,
     run_build_on_save,
 
@@ -183,7 +184,7 @@ const Job = union(enum) {
     }
 };
 
-fn sendToClientResponse(server: *Server, id: types.Message.ID, result: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anytype) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientResponse(" ++ @typeName(@TypeOf(result)) ++ ")");
     defer tracy_zone.end();
 
@@ -194,7 +195,7 @@ fn sendToClientResponse(server: *Server, id: types.Message.ID, result: anytype) 
     return try server.sendToClientInternal(id, null, null, "result", result);
 }
 
-fn sendToClientRequest(server: *Server, id: types.Message.ID, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
     defer tracy_zone.end();
 
@@ -216,7 +217,7 @@ fn sendToClientNotification(server: *Server, method: []const u8, params: anytype
     return try server.sendToClientInternal(null, method, null, "params", params);
 }
 
-fn sendToClientResponseError(server: *Server, id: types.Message.ID, err: ?types.Message.Response.Error) error{OutOfMemory}![]u8 {
+fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ?lsp.JsonRPCMessage.Response.Error) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -225,9 +226,9 @@ fn sendToClientResponseError(server: *Server, id: types.Message.ID, err: ?types.
 
 fn sendToClientInternal(
     server: *Server,
-    maybe_id: ?types.Message.ID,
+    maybe_id: ?lsp.JsonRPCMessage.ID,
     maybe_method: ?[]const u8,
-    maybe_err: ?types.Message.Response.Error,
+    maybe_err: ?lsp.JsonRPCMessage.Response.Error,
     extra_name: []const u8,
     extra: anytype,
 ) error{OutOfMemory}![]u8 {
@@ -295,6 +296,7 @@ fn showMessage(
         .Warning => log.warn("{s}", .{message}),
         .Info => log.info("{s}", .{message}),
         .Log, .Debug => log.debug("{s}", .{message}),
+        _ => log.debug("{s}", .{message}),
     }
     switch (server.status) {
         .initializing,
@@ -454,7 +456,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                                 server.client_capabilities.supports_completion_deprecated_tag = true;
                                 break;
                             },
-                            .placeholder__ => {},
+                            _ => {},
                         }
                     }
                 }
@@ -1329,6 +1331,7 @@ fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: 
         .AfterDelay,
         .FocusOut,
         => return null,
+        _ => return null,
     }
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1378,7 +1381,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     );
 }
 
-fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!ResultType("textDocument/completion") {
+fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!lsp.ResultType("textDocument/completion") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
@@ -1425,11 +1428,11 @@ fn gotoDefinitionHandler(
     server: *Server,
     arena: std.mem.Allocator,
     request: types.DefinitionParams,
-) Error!ResultType("textDocument/definition") {
+) Error!lsp.ResultType("textDocument/definition") {
     return goto.gotoHandler(server, arena, .definition, request);
 }
 
-fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
+fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!lsp.ResultType("textDocument/typeDefinition") {
     const response = (try goto.gotoHandler(server, arena, .type_definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
@@ -1442,7 +1445,7 @@ fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request:
     };
 }
 
-fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
+fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!lsp.ResultType("textDocument/implementation") {
     const response = (try goto.gotoHandler(server, arena, .definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
@@ -1455,7 +1458,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
     };
 }
 
-fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
+fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!lsp.ResultType("textDocument/declaration") {
     const response = (try goto.gotoHandler(server, arena, .declaration, .{
         .textDocument = request.textDocument,
         .position = request.position,
@@ -1493,7 +1496,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
     return response;
 }
 
-fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!ResultType("textDocument/documentSymbol") {
+fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!lsp.ResultType("textDocument/documentSymbol") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     return .{
         .array_of_DocumentSymbol = try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding),
@@ -1551,7 +1554,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     );
 }
 
-fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!ResultType("textDocument/codeAction") {
+fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!lsp.ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var analyser = server.initAnalyser(handle);
@@ -1576,7 +1579,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
-    const Result = getRequestMetadata("textDocument/codeAction").?.Result;
+    const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
     for (actions.items, result) |action, *out| {
         out.* = .{ .CodeAction = action };
@@ -1634,7 +1637,7 @@ const HandledNotificationMethods = enum {
     @"workspace/didChangeConfiguration",
 };
 
-fn isBlockingMessage(msg: types.Message) bool {
+fn isBlockingMessage(msg: lsp.JsonRPCMessage) bool {
     switch (msg) {
         .request => |request| switch (std.meta.stringToEnum(HandledRequestMethods, request.method) orelse return false) {
             .initialize,
@@ -1776,7 +1779,7 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     defer tracy_zone.end();
 
     const parsed_message = std.json.parseFromSlice(
-        types.Message,
+        lsp.JsonRPCMessage,
         server.allocator,
         json_message,
         .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
@@ -1786,7 +1789,7 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
     const parsed_message = std.json.parseFromSlice(
-        types.Message,
+        lsp.JsonRPCMessage,
         server.allocator,
         json_message,
         .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
@@ -1795,8 +1798,8 @@ pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u
     return try server.processMessage(parsed_message.value);
 }
 
-pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!ResultType(method) {
-    comptime std.debug.assert(isRequestMethod(method));
+pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!lsp.ResultType(method) {
+    comptime std.debug.assert(lsp.isRequestMethod(method));
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     tracy_zone.setName(method);
@@ -1826,8 +1829,8 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
     };
 }
 
-pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!void {
-    comptime std.debug.assert(isNotificationMethod(method));
+pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!void {
+    comptime std.debug.assert(lsp.isNotificationMethod(method));
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     tracy_zone.setName(method);
@@ -1846,17 +1849,17 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
     };
 }
 
-pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!ResultType(method) {
-    comptime std.debug.assert(isRequestMethod(method) or isNotificationMethod(method));
+pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!lsp.ResultType(method) {
+    comptime std.debug.assert(lsp.isRequestMethod(method) or lsp.isNotificationMethod(method));
 
-    if (comptime isRequestMethod(method)) {
+    if (comptime lsp.isRequestMethod(method)) {
         return try server.sendRequestSync(arena, method, params);
-    } else if (comptime isNotificationMethod(method)) {
+    } else if (comptime lsp.isNotificationMethod(method)) {
         return try server.sendNotificationSync(arena, method, params);
     } else unreachable;
 }
 
-fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
+fn processMessage(server: *Server, message: lsp.JsonRPCMessage) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1864,10 +1867,10 @@ fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
     defer if (timer) |*t| {
         const total_time = @divFloor(t.read(), std.time.ns_per_ms);
         if (zig_builtin.single_threaded) {
-            log.debug("Took {d}ms to process {}", .{ total_time, message });
+            log.debug("Took {d}ms to process {}", .{ total_time, fmtMessage(message) });
         } else {
             const thread_id = std.Thread.getCurrentId();
-            log.debug("Took {d}ms to process {} on Thread {d}", .{ total_time, message, thread_id });
+            log.debug("Took {d}ms to process {} on Thread {d}", .{ total_time, fmtMessage(message), thread_id });
         }
     };
 
@@ -1884,7 +1887,7 @@ fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
             };
             switch (handled_method) {
                 inline else => |method| {
-                    const Params = ParamsType(@tagName(method));
+                    const Params = lsp.ParamsType(@tagName(method));
                     const params = if (Params == void) {} else std.json.parseFromValueLeaky(
                         Params,
                         arena_allocator.allocator(),
@@ -1901,7 +1904,7 @@ fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
             const handled_method = std.meta.stringToEnum(HandledNotificationMethods, notification.method) orelse return null;
             switch (handled_method) {
                 inline else => |method| {
-                    const Params = ParamsType(@tagName(method));
+                    const Params = lsp.ParamsType(@tagName(method));
                     const params = if (Params == void) {} else std.json.parseFromValueLeaky(
                         Params,
                         arena_allocator.allocator(),
@@ -1918,15 +1921,15 @@ fn processMessage(server: *Server, message: types.Message) Error!?[]u8 {
     return null;
 }
 
-fn processMessageReportError(server: *Server, message: types.Message) ?[]const u8 {
+fn processMessageReportError(server: *Server, message: lsp.JsonRPCMessage) ?[]const u8 {
     return server.processMessage(message) catch |err| {
-        log.err("failed to process {}: {}", .{ message, err });
+        log.err("failed to process {}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpStackTrace(trace.*);
         }
 
         switch (message) {
-            .request => |request| return server.sendToClientResponseError(request.id, types.Message.Response.Error{
+            .request => |request| return server.sendToClientResponseError(request.id, lsp.JsonRPCMessage.Response.Error{
                 .code = @enumFromInt(switch (err) {
                     error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
                     error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
@@ -1997,17 +2000,17 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
     }
 }
 
-fn validateMessage(server: *const Server, message: types.Message) Error!void {
+fn validateMessage(server: *const Server, message: lsp.JsonRPCMessage) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const method = switch (message) {
         .request => |request| blk: {
-            if (!isRequestMethod(request.method)) return error.MethodNotFound;
+            if (!lsp.isRequestMethod(request.method)) return error.MethodNotFound;
             break :blk request.method;
         },
         .notification => |notification| blk: {
-            if (!isNotificationMethod(notification.method)) return error.MethodNotFound;
+            if (!lsp.isNotificationMethod(notification.method)) return error.MethodNotFound;
             break :blk notification.method;
         },
         .response => return, // validation happens in `handleResponse`
@@ -2038,7 +2041,7 @@ fn validateMessage(server: *const Server, message: types.Message) Error!void {
     }
 }
 
-fn handleResponse(server: *Server, response: types.Message.Response) Error!void {
+fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2055,10 +2058,13 @@ fn handleResponse(server: *Server, response: types.Message.Response) Error!void 
         },
     };
 
-    if (response.@"error") |err| {
-        log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
-        return;
-    }
+    const result = switch (response.result_or_error) {
+        .result => |result| result,
+        .@"error" => |err| {
+            log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
+            return;
+        },
+    };
 
     if (std.mem.eql(u8, id, "semantic_tokens_refresh")) {
         //
@@ -2067,7 +2073,7 @@ fn handleResponse(server: *Server, response: types.Message.Response) Error!void 
     } else if (std.mem.eql(u8, id, "apply_edit")) {
         //
     } else if (std.mem.eql(u8, id, "i_haz_configuration")) {
-        try server.handleConfiguration(response.result.?); // `response.@"error"` and `response.result` can't both be null
+        try server.handleConfiguration(result orelse .null);
     } else {
         log.warn("received response from client with id '{s}' that has no handler!", .{id});
     }
@@ -2083,64 +2089,21 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     };
 }
 
-//
-// LSP helper functions
-//
-
-pub fn ResultType(comptime method: []const u8) type {
-    if (getRequestMetadata(method)) |meta| return meta.Result;
-    if (isNotificationMethod(method)) return void;
-    @compileError("unknown method '" ++ method ++ "'");
-}
-
-pub fn ParamsType(comptime method: []const u8) type {
-    if (getRequestMetadata(method)) |meta| return meta.Params orelse void;
-    if (getNotificationMetadata(method)) |meta| return meta.Params orelse void;
-    @compileError("unknown method '" ++ method ++ "'");
-}
-
-fn getRequestMetadata(comptime method: []const u8) ?types.RequestMetadata {
-    for (types.request_metadata) |meta| {
-        if (std.mem.eql(u8, method, meta.method)) {
-            return meta;
-        }
+pub fn formatMessage(
+    message: lsp.JsonRPCMessage,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = options;
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, message);
+    switch (message) {
+        .request => |request| try writer.print("request-{}-{s}", .{ std.json.fmt(request.id, .{}), request.method }),
+        .notification => |notification| try writer.print("notification-{s}", .{notification.method}),
+        .response => |response| try writer.print("response-{?}", .{std.json.fmt(response.id, .{})}),
     }
-    return null;
 }
 
-fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetadata {
-    for (types.notification_metadata) |meta| {
-        if (std.mem.eql(u8, method, meta.method)) {
-            return meta;
-        }
-    }
-    return null;
-}
-
-const RequestMethodSet: std.StaticStringMap(void) = blk: {
-    @setEvalBranchQuota(5000);
-    var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
-    for (types.request_metadata, &kvs_list) |meta, *kv| {
-        kv.* = .{meta.method};
-    }
-    break :blk std.StaticStringMap(void).initComptime(kvs_list);
-};
-
-const NotificationMethodSet = blk: {
-    @setEvalBranchQuota(5000);
-    var kvs_list: [types.notification_metadata.len]struct { []const u8 } = undefined;
-    for (types.notification_metadata, &kvs_list) |meta, *kv| {
-        kv.* = .{meta.method};
-    }
-    break :blk std.StaticStringMap(void).initComptime(&kvs_list);
-};
-
-/// return true if there is a request with the given method name
-pub fn isRequestMethod(method: []const u8) bool {
-    return RequestMethodSet.has(method);
-}
-
-/// return true if there is a notification with the given method name
-pub fn isNotificationMethod(method: []const u8) bool {
-    return NotificationMethodSet.has(method);
+fn fmtMessage(message: lsp.JsonRPCMessage) std.fmt.Formatter(formatMessage) {
+    return .{ .data = message };
 }

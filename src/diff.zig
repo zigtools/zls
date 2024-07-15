@@ -1,7 +1,7 @@
 //! Text diffing between source files.
 
 const std = @import("std");
-const types = @import("lsp.zig");
+const types = @import("lsp").types;
 const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const DiffMatchPatch = @import("diffz");
@@ -84,8 +84,8 @@ pub fn applyContentChanges(
         while (i != 0) {
             i -= 1;
             switch (content_changes[i]) {
-                .TextDocumentContentChangeWholeDocument => |content_change| break :blk .{ i, content_change.text },
-                .TextDocumentContentChangePartial => continue,
+                .literal_1 => |content_change| break :blk .{ i, content_change.text }, // TextDocumentContentChangeWholeDocument
+                .literal_0 => continue, // TextDocumentContentChangePartial
             }
         }
         break :blk .{ null, text };
@@ -100,7 +100,7 @@ pub fn applyContentChanges(
     const changes = content_changes[if (last_full_text_index) |index| index + 1 else 0..];
 
     for (changes) |item| {
-        const content_change = item.TextDocumentContentChangePartial;
+        const content_change = item.literal_0; // TextDocumentContentChangePartial
 
         const start = offsets.maybePositionToIndex(text_array.items, content_change.range.start, encoding) orelse return error.InvalidParams;
         const end = offsets.maybePositionToIndex(text_array.items, content_change.range.end, encoding) orelse return error.InvalidParams;

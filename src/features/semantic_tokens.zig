@@ -8,7 +8,7 @@ const offsets = @import("../offsets.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 
 pub const TokenType = enum(u32) {
     namespace,

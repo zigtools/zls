@@ -6,7 +6,7 @@ const Token = std.zig.Token;
 
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
-const types = @import("../lsp.zig");
+const types = @import("lsp").types;
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 
