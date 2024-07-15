@@ -325,7 +325,7 @@ pub const Handle = struct {
         // special case when there is only one potential build file
         if (unresolved.potential_build_files.len == 1) blk: {
             const build_file = document_store.getOrLoadBuildFile(unresolved.potential_build_files[0]) orelse break :blk;
-            log.debug("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
+            log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
             self.impl.associated_build_file = .{ .resolved = build_file.uri };
             return .{ .resolved = build_file.uri };
@@ -351,7 +351,7 @@ pub const Handle = struct {
                 continue;
             }
 
-            log.debug("Resolved build file of `{s}` as `{s}`", .{ self.uri, build_file.uri });
+            log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
             self.impl.associated_build_file = .{ .resolved = build_file.uri };
             return .{ .resolved = build_file.uri };
@@ -669,13 +669,13 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     if (self.getHandle(uri)) |handle| return handle;
 
     const file_path = URI.parse(self.allocator, uri) catch |err| {
-        log.err("failed to parse URI `{s}`: {}", .{ uri, err });
+        log.err("failed to parse URI '{s}': {}", .{ uri, err });
         return null;
     };
     defer self.allocator.free(file_path);
 
     if (!std.fs.path.isAbsolute(file_path)) {
-        log.err("file path is not absolute `{s}`", .{file_path});
+        log.err("file path is not absolute '{s}'", .{file_path});
         return null;
     }
     const file_contents = std.fs.cwd().readFileAllocOptions(
@@ -686,7 +686,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         @alignOf(u8),
         0,
     ) catch |err| {
-        log.err("failed to load document `{s}`: {}", .{ file_path, err });
+        log.err("failed to load document '{s}': {}", .{ file_path, err });
         return null;
     };
 
@@ -740,9 +740,10 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
         defer self.lock.unlockShared();
 
         if (self.handles.get(uri)) |handle| {
-            if (!handle.setOpen(true)) {
-                log.warn("Document already open: {s}", .{uri});
-            }
+            _ = handle;
+            // if (!handle.setOpen(true)) {
+            //     log.warn("Document already open: {s}", .{uri});
+            // }
             return;
         }
     }
@@ -1186,6 +1187,8 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
         try self.invalidateBuildFile(build_file.uri);
     }
 
+    log.info("Loaded build file '{s}'", .{build_file.uri});
+
     return build_file;
 }
 
@@ -1272,7 +1275,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
         _ = self.getOrLoadBuildFile(handle.uri);
     } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         const potential_build_files = self.collectPotentialBuildFiles(uri) catch {
-            log.err("failed to collect potential build files of `{s}`", .{handle.uri});
+            log.err("failed to collect potential build files of '{s}'", .{handle.uri});
             break :blk;
         };
         errdefer {
@@ -1317,9 +1320,9 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, op
     }
 
     if (isBuildFile(gop.value_ptr.*.uri)) {
-        log.debug("Opened document `{s}` (build file)", .{gop.value_ptr.*.uri});
+        log.debug("Opened document '{s}' (build file)", .{gop.value_ptr.*.uri});
     } else {
-        log.debug("Opened document `{s}`", .{gop.value_ptr.*.uri});
+        log.debug("Opened document '{s}'", .{gop.value_ptr.*.uri});
     }
 
     return gop.value_ptr.*;

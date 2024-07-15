@@ -94,7 +94,7 @@ fn createLogFile(allocator: std.mem.Allocator, override_log_file_path: ?[]const 
     const file = std.fs.cwd().createFile(log_file_path, .{ .truncate = false }) catch return null;
     errdefer file.close();
 
-    log.info("Log File:        {s}", .{log_file_path});
+    log.info("Log File:         {s}", .{log_file_path});
 
     return file;
 }
@@ -316,12 +316,12 @@ pub fn main() !u8 {
 
     const resolved_log_level = result.log_level orelse runtime_log_level;
 
-    log.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
-    log.info("Message Tracing: {}", .{result.enable_message_tracing});
-    log.info("Log Level:       {s}", .{@tagName(resolved_log_level)});
+    log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
+    log.info("Message Tracing:  {}", .{result.enable_message_tracing});
+    log.info("Log Level:        {s}", .{@tagName(resolved_log_level)});
 
     const new_log_file = createLogFile(allocator, result.log_file_path) orelse blk: {
-        log.info("Log File:        null", .{});
+        log.info("Log File:         null", .{});
         break :blk null;
     };
     defer if (new_log_file) |file| file.close();
