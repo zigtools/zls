@@ -244,7 +244,7 @@ fn symbolReferences(
             // highlight requests only pertain to the current document, otherwise we can try to narrow things down
             const workspace = if (request == .highlight) false else blk: {
                 const doc_scope = try curr_handle.getDocumentScope();
-                const scope_index = Analyser.innermostBlockScopeIndex(doc_scope, source_index).unwrap() orelse break :blk true;
+                const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
                 break :blk switch (doc_scope.getScopeTag(scope_index)) {
                     .function, .block => false,
                     .container, .container_usingnamespace => decl_handle.isPublic(),

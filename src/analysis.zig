@@ -2886,10 +2886,11 @@ pub const Type = struct {
                         return;
                     }
                     if (token >= 1 and token_tags[token - 1] == .keyword_return) blk: {
-                        const document_scope = handle.getDocumentScope() catch break :blk; // there is no good way to handle this error
-                        const func_node = innermostBlockScopeInternal(document_scope, token_starts[token - 1], true);
+                        const document_scope = try handle.getDocumentScope();
+                        const function_scope = innermostFunctionScopeAtIndex(document_scope, token_starts[token - 1]).unwrap() orelse break :blk;
+                        const function_node = document_scope.getScopeAstNode(function_scope).?;
                         var buf: [1]Ast.Node.Index = undefined;
-                        const func = tree.fullFnProto(&buf, func_node) orelse break :blk;
+                        const func = tree.fullFnProto(&buf, function_node).?;
                         const func_name_token = func.name_token orelse break :blk;
                         const func_name = offsets.tokenToSlice(tree, func_name_token);
                         try writer.print("{s}(...)", .{func_name});
@@ -4357,33 +4358,34 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-pub fn innermostBlockScopeIndex(document_scope: DocumentScope, source_index: usize) Scope.OptionalIndex {
+pub fn innermostScopeAtIndex(document_scope: DocumentScope, source_index: usize) Scope.Index {
+    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_index: Scope.Index = scope_iterator.next().unwrap().?; // the DocumentScope's root scope must exist
+    while (scope_iterator.next().unwrap()) |inner_scope| {
+        scope_index = inner_scope;
+    }
+    return scope_index;
+}
+
+pub fn innermostFunctionScopeAtIndex(document_scope: DocumentScope, source_index: usize) Scope.OptionalIndex {
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     var scope_index: Scope.OptionalIndex = .none;
     while (scope_iterator.next().unwrap()) |inner_scope| {
+        if (document_scope.getScopeTag(inner_scope) != .function) continue;
         scope_index = inner_scope.toOptional();
     }
     return scope_index;
 }
 
 pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) Ast.Node.Index {
-    return innermostBlockScopeInternal(document_scope, source_index, false);
-}
-
-fn innermostBlockScopeInternal(document_scope: DocumentScope, source_index: usize, skip_block: bool) Ast.Node.Index {
-    var scope_index = innermostBlockScopeIndex(document_scope, source_index);
-    while (true) {
-        const scope = scope_index.unwrap().?;
-        defer scope_index = document_scope.getScopeParent(scope);
-        const tag = document_scope.getScopeTag(scope);
-
-        if (tag == .block and skip_block)
-            continue;
-
-        if (document_scope.getScopeAstNode(scope)) |ast_node| {
-            return ast_node;
+    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var ast_node: Ast.Node.Index = undefined; // the DocumentScope's root scope is guaranteed to have an Ast Node
+    while (scope_iterator.next().unwrap()) |inner_scope| {
+        if (document_scope.getScopeAstNode(inner_scope)) |node| {
+            ast_node = node;
         }
     }
+    return ast_node;
 }
 
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
@@ -4454,13 +4456,11 @@ pub fn lookupSymbolGlobal(
 ) error{OutOfMemory}!?DeclWithHandle {
     const tree = handle.tree;
     const document_scope = try handle.getDocumentScope();
-    var current_scope = innermostBlockScopeIndex(document_scope, source_index);
+    var current_scope = innermostScopeAtIndex(document_scope, source_index);
 
-    while (current_scope.unwrap()) |scope_index| {
-        defer current_scope = document_scope.getScopeParent(scope_index);
-
+    while (true) {
         if (document_scope.getScopeDeclaration(.{
-            .scope = current_scope.unwrap().?,
+            .scope = current_scope,
             .name = symbol,
             .kind = .field,
         }).unwrap()) |decl_index| {
@@ -4476,14 +4476,16 @@ pub fn lookupSymbolGlobal(
         }
 
         if (document_scope.getScopeDeclaration(.{
-            .scope = scope_index,
+            .scope = current_scope,
             .name = symbol,
             .kind = .other,
         }).unwrap()) |decl_index| {
             const decl = document_scope.declarations.get(@intFromEnum(decl_index));
             return DeclWithHandle{ .decl = decl, .handle = handle };
         }
-        if (try analyser.resolveUse(document_scope.getScopeUsingnamespaceNodesConst(scope_index), symbol, handle)) |result| return result;
+        if (try analyser.resolveUse(document_scope.getScopeUsingnamespaceNodesConst(current_scope), symbol, handle)) |result| return result;
+
+        current_scope = document_scope.getScopeParent(current_scope).unwrap() orelse break;
     }
 
     return null;
@@ -5102,9 +5104,10 @@ fn addReferencedTypes(
                 }
                 if (token >= 1 and token_tags[token - 1] == .keyword_return) blk: {
                     const document_scope = try handle.getDocumentScope();
-                    const func_node = innermostBlockScopeInternal(document_scope, token_starts[token - 1], true);
+                    const function_scope = innermostFunctionScopeAtIndex(document_scope, token_starts[token - 1]).unwrap() orelse break :blk;
+                    const function_node = document_scope.getScopeAstNode(function_scope).?;
                     var buf: [1]Ast.Node.Index = undefined;
-                    const func = tree.fullFnProto(&buf, func_node) orelse break :blk;
+                    const func = tree.fullFnProto(&buf, function_node).?;
                     const func_name_token = func.name_token orelse break :blk;
                     const func_name = offsets.tokenToSlice(tree, func_name_token);
                     try referenced_types.put(.{
