@@ -95,10 +95,12 @@ const ClientCapabilities = struct {
     /// https://github.com/zigtools/zls/pull/261
     max_detail_length: u32 = 1024 * 1024,
     workspace_folders: []types.URI = &.{},
+    client_name: ?[]const u8 = null,
 
     fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
         for (self.workspace_folders) |uri| allocator.free(uri);
         allocator.free(self.workspace_folders);
+        if (self.client_name) |name| allocator.free(name);
         self.* = undefined;
     }
 };
@@ -397,7 +399,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
-        log.info("Client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+        server.client_capabilities.client_name = try server.allocator.dupe(u8, clientInfo.name);
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
             server.client_capabilities.max_detail_length = 256;
@@ -540,7 +542,14 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
-    log.debug("Offset Encoding: {s}", .{@tagName(server.offset_encoding)});
+    if (request.clientInfo) |clientInfo| {
+        log.info("Client Info:      {s}-{s}", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+    }
+    log.debug("Offset Encoding:  {s}", .{@tagName(server.offset_encoding)});
+
+    for (server.client_capabilities.workspace_folders) |uri| {
+        log.info("Workspace Folder: '{s}'", .{uri});
+    }
 
     server.status = .initializing;
 
@@ -561,17 +570,17 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         if (maybe_config_result) |*config_result| {
             defer config_result.deinit(server.allocator);
             switch (config_result.*) {
-                .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value, .{}),
+                .success => |config_with_path| {
+                    log.info("Loaded config:      {s}", .{config_with_path.path});
+                    try server.updateConfiguration2(config_with_path.config.value, .{});
+                },
                 .failure => |payload| blk: {
                     try server.updateConfiguration(.{}, .{});
                     const message = try payload.toMessage(server.allocator) orelse break :blk;
                     defer server.allocator.free(message);
                     server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
                 },
-                .not_found => {
-                    log.info("No config file zls.json found. This is not an error.", .{});
-                    try server.updateConfiguration(.{}, .{});
-                },
+                .not_found => try server.updateConfiguration(.{}, .{}),
             }
         } else |err| {
             log.err("failed to load configuration: {}", .{err});
@@ -791,6 +800,14 @@ fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, n
     }
 
     server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
+
+    for (notification.event.added) |folder| {
+        log.info("added Workspace Folder: {s}", .{folder.uri});
+    }
+
+    for (notification.event.removed) |folder| {
+        log.info("removed Workspace Folder: {s}", .{folder.uri});
+    }
 }
 
 fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
@@ -991,6 +1008,10 @@ pub fn updateConfiguration(
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
             log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
+    }
+
+    if (server.config.enable_autofix and server.getAutofixMode() == .none) {
+        log.warn("`enable_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
     }
 }
 
@@ -1267,7 +1288,7 @@ fn resolveConfiguration(
 
 fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
     if (notification.textDocument.text.len > DocumentStore.max_document_size) {
-        log.err("open document `{s}` failed: text size ({d}) is above maximum length ({d})", .{
+        log.err("open document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
             notification.textDocument.uri,
             notification.textDocument.text.len,
             DocumentStore.max_document_size,
@@ -1290,7 +1311,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
 
     if (new_text.len > DocumentStore.max_document_size) {
-        log.err("change document `{s}` failed: text size ({d}) is above maximum length ({d})", .{
+        log.err("change document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
             notification.textDocument.uri,
             new_text.len,
             DocumentStore.max_document_size,

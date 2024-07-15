@@ -205,7 +205,7 @@ pub fn generateBuildOnSaveDiagnostics(
     comptime std.debug.assert(std.process.can_spawn);
 
     const workspace_path = URI.parse(server.allocator, workspace_uri) catch |err| {
-        log.err("failed to parse invalid uri `{s}`: {}", .{ workspace_uri, err });
+        log.err("failed to parse invalid uri '{s}': {}", .{ workspace_uri, err });
         return;
     };
     defer server.allocator.free(workspace_path);
@@ -218,7 +218,7 @@ pub fn generateBuildOnSaveDiagnostics(
     std.fs.accessAbsolute(build_zig_path, .{}) catch |err| switch (err) {
         error.FileNotFound => return,
         else => |e| {
-            log.err("failed to load build.zig at `{s}`: {}", .{ build_zig_path, e });
+            log.err("failed to load build.zig at '{s}': {}", .{ build_zig_path, e });
             return e;
         },
     };
