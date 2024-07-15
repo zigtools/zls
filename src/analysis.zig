@@ -3444,7 +3444,6 @@ pub fn getPositionContext(
         var tokenizer: std.zig.Tokenizer = .{
             .buffer = held_line,
             .index = line_loc.start,
-            .pending_invalid_token = null,
         };
 
         while (true) {
