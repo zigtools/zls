@@ -21,7 +21,6 @@ const tracy = @import("tracy");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
-const Transport = @import("Transport.zig");
 const known_folders = @import("known-folders");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
@@ -39,6 +38,7 @@ const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
 const log = std.log.scoped(.zls_server);
+const message_logger = std.log.scoped(.message);
 
 // public fields
 allocator: std.mem.Allocator,
@@ -47,7 +47,8 @@ config: Config = .{},
 /// will default to lookup in the system and user configuration folder provided by known-folders.
 config_path: ?[]const u8 = null,
 document_store: DocumentStore,
-transport: ?*Transport = null,
+transport: ?lsp.AnyTransport = null,
+message_tracing: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
@@ -275,6 +276,8 @@ fn sendToClientInternal(
     if (server.transport) |transport| {
         const tracy_zone_transport = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
         defer tracy_zone_transport.end();
+
+        if (server.message_tracing) message_logger.debug("sent: {s}", .{buffer.items});
 
         transport.writeJsonMessage(buffer.items) catch |err| {
             log.err("failed to write response: {}", .{err});
@@ -530,9 +533,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     if (request.trace) |trace| {
         // To support --enable-message-tracing, only allow turning this on here
         if (trace != .off) {
-            if (server.transport) |transport| {
-                transport.message_tracing = true;
-            }
+            server.message_tracing = true;
         }
     }
 
@@ -685,9 +686,7 @@ fn cancelRequestHandler(server: *Server, _: std.mem.Allocator, request: types.Ca
 }
 
 fn setTraceHandler(server: *Server, _: std.mem.Allocator, request: types.SetTraceParams) Error!void {
-    if (server.transport) |transport| {
-        transport.message_tracing = request.value != .off;
-    }
+    server.message_tracing = request.value != .off;
 }
 
 fn registerCapability(server: *Server, method: []const u8) Error!void {
@@ -1756,6 +1755,8 @@ pub fn loop(server: *Server) !void {
     while (server.keepRunning()) {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
+
+        if (server.message_tracing) message_logger.debug("received: {s}", .{json_message});
         try server.sendJsonMessage(json_message);
 
         while (server.job_queue.readItem()) |job| {
