@@ -67,9 +67,6 @@ pub fn edits(
 }
 
 /// Caller owns returned memory.
-/// NOTE: As far as I know, this implementation is actually incorrect
-/// as we use intermediate state, but at the same time, it works so
-/// I really don't want to touch it right now. TODO: Investigate + fix.
 pub fn applyContentChanges(
     allocator: std.mem.Allocator,
     text: []const u8,

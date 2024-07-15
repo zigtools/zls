@@ -2918,7 +2918,7 @@ pub const Type = struct {
                     const token_tags = tree.tokens.items(.tag);
                     const token_starts = tree.tokens.items(.start);
 
-                    // NOTE: This is a hacky nightmare but it works :P
+                    // This is a hacky nightmare but it works :P
                     const token = tree.firstToken(node);
                     if (token >= 2 and token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
                         try writer.writeAll(tree.tokenSlice(token - 2));
@@ -5114,7 +5114,7 @@ fn addReferencedTypes(
                 const token_tags = tree.tokens.items(.tag);
                 const token_starts = tree.tokens.items(.start);
 
-                // NOTE: This is a hacky nightmare but it works :P
+                // This is a hacky nightmare but it works :P
                 const token = tree.firstToken(node);
                 if (token >= 2 and token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
                     const str = tree.tokenSlice(token - 2);
