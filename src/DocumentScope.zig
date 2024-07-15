@@ -144,6 +144,7 @@ pub const Scope = struct {
     child_declarations: ChildDeclarations,
 
     pub const Index = enum(u32) {
+        root,
         _,
 
         pub fn toOptional(index: Index) OptionalIndex {
