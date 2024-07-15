@@ -1329,7 +1329,7 @@ fn collectFieldAccessContainerNodes(
             // don't have the luxury of referencing an `Ast.full.Call`
             // check if the first symbol is a `T` or an instance_of_T
             const additional_index: usize = blk: {
-                // NOTE: `loc` points to offsets within `handle`, not `node_type.decl.handle`
+                // `loc` points to offsets within `handle`, not `node_type.decl.handle`
                 const field_access_slice = handle.tree.source[loc.start..loc.end];
                 if (field_access_slice[0] == '@') break :blk 1; // assume `@import("..").some.Other{.}`
                 var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');

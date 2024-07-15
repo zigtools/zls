@@ -280,7 +280,7 @@ pub fn generateBuildOnSaveDiagnostics(
     // its stored in last_related_diagnostics because we need an ArrayList
     var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
 
-    // NOTE: I believe that with color off it's one diag per line; is this correct?
+    // I believe that with color off it's one diag per line; is this correct?
     var line_iterator = std.mem.splitScalar(u8, result.stderr, '\n');
 
     while (line_iterator.next()) |line| {
@@ -431,7 +431,7 @@ fn getDiagnosticsFromAstCheck(
     // its stored in last_related_diagnostics because we need an ArrayList
     var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
 
-    // NOTE: I believe that with color off it's one diag per line; is this correct?
+    // I believe that with color off it's one diag per line; is this correct?
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
 
     while (line_iterator.next()) |line| lin: {
