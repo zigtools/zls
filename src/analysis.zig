@@ -580,17 +580,6 @@ pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
     return isMetaType(tree, func.ast.return_type);
 }
 
-/// Returns whether the given function has a `anytype` parameter.
-pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
-    var it = func.iterate(&tree);
-    while (ast.nextFnParam(&it)) |param| {
-        if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // STYLE
 
 pub fn isCamelCase(name: []const u8) bool {
@@ -3933,26 +3922,6 @@ pub const DeclWithHandle = struct {
         };
     }
 };
-
-/// Collects all symbols/declarations that can be a acccessed on the given container type.
-fn findContainerScopeIndex(container_handle: NodeWithHandle) !?Scope.Index {
-    const container = container_handle.node;
-    const handle = container_handle.handle;
-
-    const tree = handle.tree;
-    const document_scope = try handle.getDocumentScope();
-
-    if (!ast.isContainer(tree, container)) return null;
-
-    return for (0..document_scope.scopes.len) |scope_index| {
-        switch (document_scope.getScopeTag(@enumFromInt(scope_index))) {
-            .container, .container_usingnamespace => if (document_scope.getScopeAstNode(@enumFromInt(scope_index)).? == container) {
-                break @enumFromInt(scope_index);
-            },
-            else => {},
-        }
-    } else null;
-}
 
 /// Collects all symbols/declarations that can be a accessed on the given container type.
 pub fn collectDeclarationsOfContainer(
