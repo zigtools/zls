@@ -335,7 +335,6 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     var tokenizer: std.zig.Tokenizer = .{
         .buffer = tree.source,
         .index = start,
-        .pending_invalid_token = null,
     };
 
     // Maybe combine multi-line tokens?
@@ -410,7 +409,6 @@ pub fn tokenIndexToLoc(text: [:0]const u8, index: usize) Loc {
     var tokenizer: std.zig.Tokenizer = .{
         .buffer = text,
         .index = index,
-        .pending_invalid_token = null,
     };
 
     const token = tokenizer.next();
