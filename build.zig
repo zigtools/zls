@@ -514,8 +514,8 @@ const PostMultiPartForm = struct {
         }) catch @panic("OOM");
     }
 
-    fn make(step: *Build.Step, prog_node: std.Progress.Node) !void {
-        _ = prog_node;
+    fn make(step: *Build.Step, options: Build.Step.MakeOptions) !void {
+        _ = options;
         const b = step.owner;
         const self: *const PostMultiPartForm = @fieldParentPtr("step", step);
 
