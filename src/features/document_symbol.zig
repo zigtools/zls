@@ -98,6 +98,9 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
         .container_field_align,
         .container_field,
         => blk: {
+            const container_kind = token_tags[main_tokens[ctx.parent_container]];
+            const is_struct = container_kind == .keyword_struct;
+
             const kind: types.SymbolKind = switch (node_tags[ctx.parent_container]) {
                 .root => .Field,
                 .container_decl,
@@ -106,7 +109,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .container_decl_arg_trailing,
                 .container_decl_two,
                 .container_decl_two_trailing,
-                => switch (token_tags[main_tokens[ctx.parent_container]]) {
+                => switch (container_kind) {
                     .keyword_struct => .Field,
                     .keyword_union => .Field,
                     .keyword_enum => .EnumMember,
@@ -123,7 +126,10 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 else => unreachable,
             };
 
-            const decl_name_token = analysis.DocumentScope.getDeclNameToken(tree, node) orelse break :blk null;
+            const container_field = tree.fullContainerField(node).?;
+            if (is_struct and container_field.ast.tuple_like) break :blk null;
+
+            const decl_name_token = container_field.ast.main_token;
             const decl_name = offsets.tokenToSlice(tree, decl_name_token);
 
             break :blk .{

@@ -27,15 +27,17 @@ test "container decl" {
         \\  Field alpha
         \\  Function f
     );
-    // TODO
-    // try testDocumentSymbol(
-    //     \\const S = struct {
-    //     \\    []const u8,
-    //     \\    u32,
-    //     \\};
-    // ,
-    //     \\Constant S
-    // );
+}
+
+test "tuple" {
+    try testDocumentSymbol(
+        \\const S = struct {
+        \\    []const u8,
+        \\    u32,
+        \\};
+    ,
+        \\Constant S
+    );
 }
 
 test "enum" {
