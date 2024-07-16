@@ -700,45 +700,31 @@ pub fn resolveFieldAccess(analyser: *Analyser, lhs: Type, field_name: []const u8
     return null;
 }
 
-fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+fn findReturnStatementInternal(tree: Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     const node_tags = tree.nodes.items(.tag);
-    const datas = tree.nodes.items(.data);
 
     var buffer: [2]Ast.Node.Index = undefined;
     const statements = ast.blockStatements(tree, body, &buffer) orelse return null;
 
     for (statements) |child_idx| {
         if (node_tags[child_idx] == .@"return") {
-            if (datas[child_idx].lhs != 0) {
-                const lhs = datas[child_idx].lhs;
-                var buf: [1]Ast.Node.Index = undefined;
-                if (tree.fullCall(&buf, lhs)) |call| {
-                    const call_name = DocumentScope.getDeclNameToken(tree, call.ast.fn_expr);
-                    if (call_name) |name| {
-                        if (std.mem.eql(u8, offsets.tokenToSlice(tree, name), offsets.tokenToSlice(tree, fn_decl.name_token.?))) {
-                            continue;
-                        }
-                    }
-                }
-            }
-
             if (already_found.*) return null;
             already_found.* = true;
             result = child_idx;
             continue;
         }
 
-        result = findReturnStatementInternal(tree, fn_decl, child_idx, already_found);
+        result = findReturnStatementInternal(tree, child_idx, already_found);
     }
 
     return result;
 }
 
-fn findReturnStatement(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index) ?Ast.Node.Index {
+fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     var already_found = false;
-    return findReturnStatementInternal(tree, fn_decl, body, &already_found);
+    return findReturnStatementInternal(tree, body, &already_found);
 }
 
 pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, fn_body: ?Ast.Node.Index) error{OutOfMemory}!?Type {
@@ -746,7 +732,7 @@ pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle:
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(tree, fn_decl, fn_body.?) orelse return null;
+        const ret = findReturnStatement(tree, fn_body.?) orelse return null;
         const data = tree.nodes.items(.data)[ret];
         if (data.lhs != 0) {
             return try analyser.resolveTypeOfNodeInternal(.{ .node = data.lhs, .handle = handle });

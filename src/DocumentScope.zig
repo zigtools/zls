@@ -78,7 +78,7 @@ pub const DeclarationLookupContext = struct {
 };
 
 /// Assumes that the `node` is not a container_field of a struct tuple field.
-pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
