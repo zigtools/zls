@@ -35,6 +35,8 @@ const std_progress_rework_version =
     std.SemanticVersion.parse("0.13.0-dev.336+963ffe9d5") catch unreachable;
 const file_watch_version =
     std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
+const live_rebuild_processes =
+    std.SemanticVersion.parse("0.14.0-dev.310+9d38e82b5") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -652,7 +654,18 @@ fn workerMakeOneStep(
     if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) sub_prog_node.activate();
     defer sub_prog_node.end();
 
-    const make_result = s.make(if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) &sub_prog_node else sub_prog_node);
+    const make_result = s.make(
+        if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt)
+            &sub_prog_node
+        else if (comptime builtin.zig_version.order(live_rebuild_processes) == .lt)
+            sub_prog_node
+        else
+            .{
+                .progress_node = sub_prog_node,
+                .thread_pool = thread_pool,
+                .watch = false,
+            },
+    );
 
     handle_result: {
         if (make_result) |_| {
