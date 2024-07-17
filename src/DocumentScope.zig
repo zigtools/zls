@@ -1273,6 +1273,8 @@ noinline fn walkSwitchNode(
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
 
+    try walkNode(context, tree, data[node_idx].lhs);
+
     const extra = tree.extraData(data[node_idx].rhs, Ast.Node.SubRange);
     const cases = tree.extra_data[extra.start..extra.end];
 
