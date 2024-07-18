@@ -65,16 +65,12 @@ pub fn build(b: *Build) !void {
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
 
-    const global_cache_path = try b.cache_root.join(b.allocator, &.{"zls"});
-    b.cache_root.handle.makePath(global_cache_path) catch |err| {
-        std.debug.panic("unable to make tmp path '{s}': {}", .{ global_cache_path, err });
-    };
-
     const test_options = b.addOptions();
     test_options.step.name = "ZLS test options";
     const test_options_module = test_options.createModule();
     test_options.addOption([]const u8, "zig_exe_path", b.graph.zig_exe);
-    test_options.addOption([]const u8, "global_cache_path", global_cache_path);
+    test_options.addOption([]const u8, "zig_lib_path", b.graph.zig_lib_directory.path.?);
+    test_options.addOption([]const u8, "global_cache_path", b.graph.global_cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM"));
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");

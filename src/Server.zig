@@ -42,7 +42,7 @@ const message_logger = std.log.scoped(.message);
 
 // public fields
 allocator: std.mem.Allocator,
-// use updateConfiguration or updateConfiguration2 for setting config options
+/// use updateConfiguration or updateConfiguration2 for setting config options
 config: Config = .{},
 /// will default to lookup in the system and user configuration folder provided by known-folders.
 config_path: ?[]const u8 = null,
@@ -63,6 +63,9 @@ running_build_on_save_processes: std.atomic.Value(usize) = std.atomic.Value(usiz
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
+/// Every changed configuration will increase the amount of memory allocated by the arena,
+/// This is unlikely to cause any big issues since the user is probably not going set settings
+/// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 
@@ -543,7 +546,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
     if (request.initializationOptions) |initialization_options| {
         if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{})) |new_cfg| {
-            try server.updateConfiguration2(new_cfg);
+            try server.updateConfiguration2(new_cfg, .{});
         } else |err| {
             log.err("failed to read initialization_options: {}", .{err});
         }
@@ -558,25 +561,21 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         if (maybe_config_result) |*config_result| {
             defer config_result.deinit(server.allocator);
             switch (config_result.*) {
-                .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value),
+                .success => |config_with_path| try server.updateConfiguration2(config_with_path.config.value, .{}),
                 .failure => |payload| blk: {
-                    try server.updateConfiguration(.{});
+                    try server.updateConfiguration(.{}, .{});
                     const message = try payload.toMessage(server.allocator) orelse break :blk;
                     defer server.allocator.free(message);
                     server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
                 },
                 .not_found => {
                     log.info("No config file zls.json found. This is not an error.", .{});
-                    try server.updateConfiguration(.{});
+                    try server.updateConfiguration(.{}, .{});
                 },
             }
         } else |err| {
             log.err("failed to load configuration: {}", .{err});
         }
-    } else {
-        server.updateConfiguration(.{}) catch |err| {
-            log.err("failed to load configuration: {}", .{err});
-        };
     }
 
     return .{
@@ -762,7 +761,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    server.updateConfiguration(new_config) catch |err| {
+    server.updateConfiguration(new_config, .{}) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
@@ -816,21 +815,33 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    try server.updateConfiguration(new_config);
+    try server.updateConfiguration(new_config, .{});
 }
 
-pub fn updateConfiguration2(server: *Server, new_config: Config) error{OutOfMemory}!void {
+pub const UpdateConfigurationOptions = struct {
+    resolve: bool = true,
+};
+
+pub fn updateConfiguration2(
+    server: *Server,
+    new_config: Config,
+    options: UpdateConfigurationOptions,
+) error{OutOfMemory}!void {
     var cfg: configuration.Configuration = .{};
     inline for (std.meta.fields(Config)) |field| {
         @field(cfg, field.name) = @field(new_config, field.name);
     }
-    try server.updateConfiguration(cfg);
+    try server.updateConfiguration(cfg, options);
 }
 
-pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration) error{OutOfMemory}!void {
-    // NOTE every changed configuration will increase the amount of memory allocated by the arena
-    // This is unlikely to cause any big issues since the user is probably not going set settings
-    // often in one session
+pub fn updateConfiguration(
+    server: *Server,
+    new_config: configuration.Configuration,
+    options: UpdateConfigurationOptions,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var config_arena_allocator = server.config_arena.promote(server.allocator);
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
@@ -841,9 +852,14 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     }
 
     server.validateConfiguration(&new_cfg);
-    const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_cfg);
+
+    const resolve_result: ResolveConfigurationResult = blk: {
+        if (!options.resolve) break :blk ResolveConfigurationResult.unresolved;
+        const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_cfg);
+        server.validateConfiguration(&new_cfg);
+        break :blk resolve_result;
+    };
     defer resolve_result.deinit();
-    server.validateConfiguration(&new_cfg);
 
     // <---------------------------------------------------------->
     //                        apply changes
@@ -979,6 +995,9 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
 }
 
 fn validateConfiguration(server: *Server, config: *configuration.Configuration) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     inline for (comptime std.meta.fieldNames(Config)) |field_name| {
         const FileCheckInfo = struct {
             kind: enum { file, directory },
@@ -1085,6 +1104,12 @@ const ResolveConfigurationResult = struct {
         unresolved_dont_error,
     },
 
+    pub const unresolved: ResolveConfigurationResult = .{
+        .zig_env = null,
+        .zig_runtime_version = null,
+        .build_runner_version = .unresolved_dont_error,
+    };
+
     fn deinit(result: ResolveConfigurationResult) void {
         if (result.zig_env) |parsed| parsed.deinit();
     }
@@ -1096,6 +1121,9 @@ fn resolveConfiguration(
     config_arena: std.mem.Allocator,
     config: *configuration.Configuration,
 ) error{OutOfMemory}!ResolveConfigurationResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var result: ResolveConfigurationResult = .{
         .zig_env = null,
         .zig_runtime_version = null,
