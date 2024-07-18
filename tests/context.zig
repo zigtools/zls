@@ -14,7 +14,7 @@ const default_config: Config = .{
     .inlay_hints_show_builtin = true,
 
     .zig_exe_path = test_options.zig_exe_path,
-    .zig_lib_path = null,
+    .zig_lib_path = test_options.zig_lib_path,
     .global_cache_path = test_options.global_cache_path,
 };
 
@@ -25,11 +25,30 @@ pub const Context = struct {
     arena: std.heap.ArenaAllocator,
     file_id: u32 = 0,
 
+    var resolved_config_arena: std.heap.ArenaAllocator.State = undefined;
+    var resolved_config: ?Config = null;
+
     pub fn init() !Context {
         const server = try Server.create(allocator);
         errdefer server.destroy();
 
-        try server.updateConfiguration2(default_config);
+        if (resolved_config) |config| {
+            // The configuration has previously been resolved an stored in `resolved_config`
+            try server.updateConfiguration2(config, .{ .resolve = false });
+        } else {
+            try server.updateConfiguration2(default_config, .{});
+
+            const config_string = try std.json.stringifyAlloc(allocator, server.config, .{ .whitespace = .indent_2 });
+            defer allocator.free(config_string);
+
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            errdefer arena.deinit();
+
+            const duped_config = try std.json.parseFromSliceLeaky(Config, arena.allocator(), config_string, .{ .allocate = .alloc_always });
+
+            resolved_config_arena = arena.state;
+            resolved_config = duped_config;
+        }
 
         var context: Context = .{
             .server = server,

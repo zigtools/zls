@@ -12,7 +12,7 @@ test "LSP lifecycle" {
         .zig_exe_path = test_options.zig_exe_path,
         .zig_lib_path = null,
         .global_cache_path = test_options.global_cache_path,
-    });
+    }, .{});
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
