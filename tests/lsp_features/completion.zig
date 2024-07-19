@@ -813,7 +813,7 @@ test "if/for/while/catch scopes" {
         \\const S = struct { pub const T = u32; };
         \\test {
         \\    for (undefined) |_| {
-        \\        
+        \\
         \\    } else {
         \\        S.<cursor>
         \\    }
@@ -835,7 +835,7 @@ test "if/for/while/catch scopes" {
         \\const S = struct { pub const T = u32; };
         \\test {
         \\    for (undefined) {
-        \\        
+        \\
         \\    } else {
         \\        S.<cursor>
         \\    }
@@ -1211,7 +1211,7 @@ test "enum" {
         \\const E = enum {
         \\    _,
         \\    const bar = 5;
-        \\    fn inner(_: E) void {} 
+        \\    fn inner(_: E) void {}
         \\};
         \\const foo = E.<cursor>
     , &.{
@@ -1222,7 +1222,7 @@ test "enum" {
         \\const E = enum {
         \\    _,
         \\    const bar = 5;
-        \\    fn inner(_: E) void {} 
+        \\    fn inner(_: E) void {}
         \\};
         \\const e: E = undefined;
         \\const foo = e.<cursor>

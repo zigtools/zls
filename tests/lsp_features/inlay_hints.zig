@@ -267,7 +267,7 @@ test "var decl" {
         \\             .d<usize> = 0,
         \\             .e<[]const u8> = "Testing",
         \\         }
-        \\     }; 
+        \\     };
         \\ }
         \\
         \\ var a<struct {...}> = thing(10, -4);
@@ -287,7 +287,7 @@ test "function alias" {
         \\  // some documentation
         \\  comptime alpha: u32,
         \\) u32 {
-        \\    return alpha; 
+        \\    return alpha;
         \\}
         \\const bar<*fn (comptime alpha: u32) u32> = &foo;
     , .{ .kind = .Type });

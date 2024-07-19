@@ -353,7 +353,7 @@ test "ignore autofix comment whitespace" {
     );
     try testAutofix(
         \\fn foo() void {
-        \\    _ = a;   //   autofix  
+        \\    _ = a;   //   autofix
         \\}
         \\
     ,

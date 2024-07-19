@@ -1363,7 +1363,7 @@ test "if" {
 
 test "if error union with invalid then expression" {
     try testSemanticTokens(
-        \\const foo = 
+        \\const foo =
         \\  if (undefined) |value| {
         \\      switch (value) {} catch |err| {};
         \\  } else |err| {};
