@@ -321,7 +321,7 @@ fn showMessage(
     }
 }
 
-fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
+pub fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
     return Analyser.init(
         server.allocator,
         &server.document_store,

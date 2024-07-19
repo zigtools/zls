@@ -364,7 +364,7 @@ test "ignore autofix comment whitespace" {
 }
 
 test "string literal to multiline string literal" {
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
         \\const foo = <cursor>"line one\nline two\nline three";
     ,
         \\const foo = 
@@ -373,7 +373,7 @@ test "string literal to multiline string literal" {
         \\\\line three
         \\;
     );
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
         \\const foo = "Hello, <cursor>World!\n";
     ,
         \\const foo = 
@@ -381,7 +381,7 @@ test "string literal to multiline string literal" {
         \\\\
         \\;
     );
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
         \\std.debug.print(<cursor>"Hi\nHey\nHello\n", .{});
     ,
         \\std.debug.print(
@@ -391,7 +391,7 @@ test "string literal to multiline string literal" {
         \\\\
         \\, .{});
     );
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
         \\const blank = <cursor>""
         \\;
     ,
@@ -399,10 +399,36 @@ test "string literal to multiline string literal" {
         \\\\
         \\;
     );
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
+        \\for (0..42) |idx| {
+        \\    std.debug.print("{}: {}\n<cursor>", .{ idx, my_foos[idx] });
+        \\}
+    ,
+        \\for (0..42) |idx| {
+        \\    std.debug.print(
+        \\\\{}: {}
+        \\\\
+        \\, .{ idx, my_foos[idx] });
+        \\}
+    );
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
+        \\const s1 = <cursor>"\t";
+    ,
+        \\const s1 = 
+        \\\\	
+        \\;
+    );
+    try testUserCodeAction(.{ .str_kind_conv = .@"string literal to multiline string" },
+        \\const s1 = <cursor>"pre text\tpost text";
+    ,
+        \\const s1 = 
+        \\\\pre text	post text
+        \\;
+    );
 }
 
 test "multiline string literal to string literal" {
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" },
         \\const bleh =
         \\    \\hello
         \\    \\world<cursor>
@@ -415,7 +441,7 @@ test "multiline string literal to string literal" {
         \\    \\oh?
         \\;
     );
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" },
         \\std.debug.print(
         \\\\Hi<cursor>
         \\\\Hey
@@ -427,7 +453,7 @@ test "multiline string literal to string literal" {
         \\"Hi\nHey\nHello\n"
         \\, .{});
     );
-    try testUserCodeAction(
+    try testUserCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" },
         \\const nums =
         \\    \\123
         \\    \\456<cursor>
@@ -436,17 +462,19 @@ test "multiline string literal to string literal" {
     ,
         \\const nums = "123\n456\n789";
     );
-    try testUserCodeAction(
-        \\for (0..42) |idx| {
-        \\    std.debug.print("{}: {}\n<cursor>", .{ idx, my_foos[idx] });
-        \\}
+    try testUserCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" },
+        \\const s3 =
+        \\  <cursor>\\"
+        \\;
     ,
-        \\for (0..42) |idx| {
-        \\    std.debug.print(
-        \\\\{}: {}
-        \\\\
-        \\, .{ idx, my_foos[idx] });
-        \\}
+        \\const s3 = "\"";
+    );
+    try testUserCodeAction(.{ .str_kind_conv = .@"multiline string to string literal" },
+        \\const s3 =
+        \\  <cursor>\\\
+        \\;
+    ,
+        \\const s3 = "\\";
     );
 }
 
@@ -503,7 +531,7 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     try std.testing.expectEqualStrings(after, handle.tree.source);
 }
 
-fn testUserCodeAction(source: []const u8, expected: []const u8) !void {
+fn testUserCodeAction(action_kind: zls.code_actions.UserActionKind, source: []const u8, expected: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
@@ -514,7 +542,6 @@ fn testUserCodeAction(source: []const u8, expected: []const u8) !void {
     const uri = try ctx.addDocument(text);
     const handle = ctx.server.document_store.getHandle(uri).?;
     const pos = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding);
-
     const params = types.CodeActionParams{
         .textDocument = .{ .uri = uri },
         .range = .{
@@ -524,29 +551,26 @@ fn testUserCodeAction(source: []const u8, expected: []const u8) !void {
         .context = .{ .diagnostics = &[_]zls.types.Diagnostic{} },
     };
 
-    @setEvalBranchQuota(5000);
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
+    var analyser = ctx.server.initAnalyser(handle);
+    defer analyser.deinit();
+    var builder = zls.code_actions.Builder{
+        .arena = ctx.arena.allocator(),
+        .analyser = &analyser,
+        .handle = handle,
+        .offset_encoding = ctx.server.offset_encoding,
     };
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
 
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
-    defer text_edits.deinit(allocator);
+    try builder.addCodeAction(action_kind, params, &actions);
+    try std.testing.expect(actions.items.len == 1);
+    const code_action = actions.items[0];
+    const workspace_edit = code_action.edit.?;
+    const changes = workspace_edit.changes.?.map;
+    try std.testing.expectEqual(@as(usize, 1), changes.count());
+    try std.testing.expect(changes.contains(uri));
 
-    for (response) |action| {
-        const code_action = action.CodeAction;
-        if (code_action.kind.? == .@"source.fixAll") continue;
-        const workspace_edit = code_action.edit.?;
-        const changes = workspace_edit.changes.?.map;
-        try std.testing.expectEqual(@as(usize, 1), changes.count());
-        try std.testing.expect(changes.contains(uri));
-
-        try text_edits.appendSlice(allocator, changes.get(uri).?);
-    }
-
-    const actual = try zls.diff.applyTextEdits(allocator, text, text_edits.items, ctx.server.offset_encoding);
+    const actual = try zls.diff.applyTextEdits(allocator, text, changes.get(uri).?, ctx.server.offset_encoding);
     defer allocator.free(actual);
     try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
-
     try std.testing.expectEqualStrings(expected, handle.tree.source);
 }
