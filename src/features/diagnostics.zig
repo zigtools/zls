@@ -288,7 +288,11 @@ pub fn generateBuildOnSaveDiagnostics(
 
         const src_path = pos_and_diag_iterator.next() orelse continue;
         const absolute_src_path = if (std.fs.path.isAbsolute(src_path)) src_path else blk: {
-            const absolute_src_path = std.fs.path.join(arena, &.{ workspace_path, src_path }) catch continue;
+            const absolute_src_path = (if (src_path.len == 1)
+                // it's a drive letter
+                std.fs.path.join(arena, &.{ line[0..2], pos_and_diag_iterator.next() orelse continue })
+            else
+                std.fs.path.join(arena, &.{ workspace_path, src_path })) catch continue;
             if (!std.fs.path.isAbsolute(absolute_src_path)) continue;
             break :blk absolute_src_path;
         };
