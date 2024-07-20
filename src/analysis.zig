@@ -3005,7 +3005,7 @@ pub const Type = struct {
                         .snippet_placeholders = false,
                     })});
                 },
-                .merge_error_sets => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+                .merge_error_sets => if (ctx.options.truncate_container_decls) try writer.writeAll("error{...}") else try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
             .ip_index => |payload| try analyser.ip.print(payload.index, writer, .{}),

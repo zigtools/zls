@@ -463,6 +463,12 @@ test "truncate anonymous error sets" {
     , .{ .kind = .Type });
 }
 
+test "truncate merged error sets" {
+    try testInlayHints(
+        \\const A<error{...}> =  @as(error{ Foo } || error{ Bar }, undefined);
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,
