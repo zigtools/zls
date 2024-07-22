@@ -266,6 +266,24 @@ test "builtin" {
         null,
     );
     try testContext(
+        \\var foo = @<cursor>
+    ,
+        .builtin,
+        "@",
+    );
+    try testContext(
+        \\var foo = @tag<cursor>Name
+    ,
+        .builtin,
+        "@tagName",
+    );
+    try testContext(
+        \\var foo = @tagName<cursor>
+    ,
+        .builtin,
+        "@tagName",
+    );
+    try testContext(
         \\var foo = <cursor>@intC(u32, 5);
     ,
         .builtin,

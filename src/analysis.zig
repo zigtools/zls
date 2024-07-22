@@ -3308,15 +3308,16 @@ pub fn getPositionContext(
         } else if (new_index + 2 < text.len) {
             if (text[new_index] == '@') new_index += 2;
             while (new_index < text.len and isSymbolChar(text[new_index])) : (new_index += 1) {}
-            switch (text[new_index]) {
-                ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
-                    var b_index = new_index + 1;
-                    while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
-                    if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
-                },
-
-                // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
-                else => {},
+            if (new_index < text.len) {
+                switch (text[new_index]) {
+                    ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
+                        var b_index = new_index + 1;
+                        while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
+                        if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
+                    },
+                    // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
+                    else => {},
+                }
             }
         }
     }
