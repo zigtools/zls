@@ -1071,6 +1071,8 @@ noinline fn walkIfNode(
 
     const if_node = ast.fullIf(tree, node_idx).?;
 
+    try walkNode(context, tree, if_node.ast.cond_expr);
+
     if (if_node.payload_token) |payload_token| {
         const name_token = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
 
