@@ -388,17 +388,13 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
     var capture_token = full_for.payload_token;
     for (full_for.ast.inputs) |_| {
         if (capture_token + 1 >= tree.tokens.len) break;
-        const capture_by_ref = token_tags[capture_token] == .asterisk;
-        const name_token = capture_token + @intFromBool(capture_by_ref);
-        if (try typeStrOfToken(builder, name_token)) |type_str| {
-            const prepend = if (capture_by_ref) "*" else "";
-            try appendTypeHintString(
-                builder,
-                name_token,
-                try std.fmt.allocPrint(builder.arena, "{s}{s}", .{ prepend, type_str }),
-            );
-        }
+        const capture_is_ref = token_tags[capture_token] == .asterisk;
+        const name_token = capture_token + @intFromBool(capture_is_ref);
         capture_token = name_token + 2;
+
+        if (try typeStrOfToken(builder, name_token)) |type_str| {
+            try appendTypeHintString(builder, name_token, type_str);
+        }
     }
 }
 
