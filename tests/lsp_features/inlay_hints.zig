@@ -345,15 +345,7 @@ test "generic function parameter" {
     , .{ .kind = .Type });
 }
 
-test "capture values" {
-    try testInlayHints(
-        \\fn a() void {
-        \\  const foo: []const u8 = "abc";
-        \\      for (foo) |bar<u8>| {
-        \\      _ = bar;
-        \\  }
-        \\}
-    , .{ .kind = .Type });
+test "capture values with if" {
     try testInlayHints(
         \\const FooError<type> = error{
         \\  Err1,
@@ -371,39 +363,62 @@ test "capture values" {
         \\    }
         \\}
     , .{ .kind = .Type });
+}
+
+test "capture values with for loop" {
     try testInlayHints(
-        \\const FooError<type> = error{
-        \\  Err1,
-        \\};
-        \\const Foo<type> = struct {
-        \\    counter: usize,
-        \\    pub fn next(self: *Foo) FooError!?usize {
-        \\        if (self.counter == 0) {
-        \\            return null;
-        \\        }
-        \\        self.counter -= 1;
-        \\        return self.counter;
-        \\    }
-        \\};
-        \\fn a() void {
-        \\    var foo<Foo> = Foo {
-        \\        .counter<usize> = 10,
-        \\    };
-        \\    while (foo.next()) |val<?usize>| {
-        \\        if (val) |v<usize>| { _ = v; }
-        \\    } else |e<FooError>| { _ = e; }
+        \\test {
+        \\  const foo: []const u8 = "abc";
+        \\  for (foo) |bar<u8>| {
+        \\      _ = bar;
+        \\  }
         \\}
     , .{ .kind = .Type });
-
     try testInlayHints(
-        \\fn foo() void {
-        \\  const bar: []const u8 = "test";
-        \\  for (bar, 0..3) |_, u<usize>| {
-        \\      _ = u;
+        \\test {
+        \\  var foo: []const u8 = "abc";
+        \\  for (foo) |*bar<*u8>| {
+        \\      _ = bar;
         \\  }
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\  const foo: []const u8 = "abc";
+        \\  for (foo) |bar<u8>| {
+        \\      _ = bar;
+        \\  }
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\  const bar: []const u8 = "test";
         \\  for (bar, 0..3) |ch<u8>, _| {
         \\      _ = ch;
         \\  }
+        \\  for (bar, 0..3) |_, index<usize>| {
+        \\      _ = index;
+        \\  }
+        \\  for (bar, 0..) |_, index<usize>| {
+        \\      _ = index;
+        \\  }
+        \\}
+    , .{ .kind = .Type });
+}
+
+test "capture values with while loop" {
+    try testInlayHints(
+        \\const Error<type> = error{
+        \\  Err1,
+        \\};
+        \\const Iterator<type> = struct {
+        \\    pub fn next(self: *Foo) Error!?usize {}
+        \\};
+        \\test {
+        \\    var it: Iterator = .{};
+        \\    while (it.next()) |val<?usize>| {
+        \\        if (val) |v<usize>| { _ = v; }
+        \\    } else |e<Error>| { _ = e; }
         \\}
     , .{ .kind = .Type });
 }
