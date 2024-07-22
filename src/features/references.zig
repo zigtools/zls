@@ -102,17 +102,18 @@ const Builder = struct {
 
         const node_tags = tree.nodes.items(.tag);
         const datas = tree.nodes.items(.data);
-        const main_tokens = tree.nodes.items(.main_token);
-        const starts = tree.tokens.items(.start);
 
         switch (node_tags[node]) {
             .identifier,
             .test_decl,
             => |tag| {
                 const name_token, const name = switch (tag) {
-                    .identifier => .{
-                        main_tokens[node],
-                        offsets.identifierTokenToNameSlice(tree, main_tokens[node]),
+                    .identifier => blk: {
+                        const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse return;
+                        break :blk .{
+                            name_token,
+                            offsets.identifierTokenToNameSlice(tree, name_token),
+                        };
                     },
                     .test_decl => ast.testDeclNameAndToken(tree, node) orelse return,
                     else => unreachable,
@@ -121,7 +122,7 @@ const Builder = struct {
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
                     name,
-                    starts[name_token],
+                    tree.tokens.items(.start)[name_token],
                 ) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
@@ -320,8 +321,6 @@ const CallBuilder = struct {
 
         const node_tags = tree.nodes.items(.tag);
         const datas = tree.nodes.items(.data);
-        const main_tokens = tree.nodes.items(.main_token);
-        // const token_tags = tree.tokens.items(.tag);
         const starts = tree.tokens.items(.start);
 
         switch (node_tags[node]) {
@@ -341,11 +340,11 @@ const CallBuilder = struct {
 
                 switch (node_tags[called_node]) {
                     .identifier => {
-                        const identifier_token = main_tokens[called_node];
+                        const identifier_token = ast.identifierTokenFromIdentifierNode(tree, called_node) orelse return;
 
                         const child = (try builder.analyser.lookupSymbolGlobal(
                             handle,
-                            offsets.tokenToSlice(tree, identifier_token),
+                            offsets.identifierTokenToNameSlice(tree, identifier_token),
                             starts[identifier_token],
                         )) orelse return;
 

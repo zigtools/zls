@@ -620,14 +620,12 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
     const resolved = switch (node_tags[node_handle.node]) {
         .identifier => blk: {
-            const name_token = main_tokens[node_handle.node];
-            if (tree.tokens.items(.tag)[name_token] != .identifier) break :blk null;
+            const name_token = ast.identifierTokenFromIdentifierNode(tree, node_handle.node) orelse break :blk null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
@@ -1351,8 +1349,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return fallback_type;
         },
         .identifier => {
-            const name_token = main_tokens[node];
-            if (tree.tokens.items(.tag)[name_token] != .identifier) return null;
+            const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse return null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
             const is_escaped_identifier = tree.source[tree.tokens.items(.start)[name_token]] == '@';

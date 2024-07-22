@@ -898,7 +898,6 @@ noinline fn walkContainerDecl(
             .aligned_var_decl,
             => {
                 const name_token = tree.fullVarDecl(decl).?.ast.mut_token + 1;
-                if (name_token >= tree.tokens.len) continue;
                 try scope.pushDeclaration(name_token, .{ .ast_node = decl }, .other);
             },
 

@@ -847,7 +847,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeNodeTokens(builder, node_data[node].rhs);
         },
         .identifier => {
-            if (tree.tokens.items(.tag)[main_token] != .identifier) return; // why parser? why?
+            std.debug.assert(main_token == ast.identifierTokenFromIdentifierNode(tree, node) orelse return);
             try writeIdentifier(builder, main_token);
         },
         .field_access => {

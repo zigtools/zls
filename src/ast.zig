@@ -1142,6 +1142,20 @@ pub fn testDeclNameAndToken(tree: Ast, test_decl_node: Ast.Node.Index) ?struct {
     }
 }
 
+/// The main token of a identifier node may not be a identifier token.
+///
+/// Example:
+/// ```zig
+/// const Foo;
+/// @tagName
+/// ```
+/// TODO investigate the parser to figure out why.
+pub fn identifierTokenFromIdentifierNode(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    const main_token = tree.nodes.items(.main_token)[node];
+    if (tree.tokens.items(.tag)[main_token] != .identifier) return null;
+    return main_token;
+}
+
 pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
     const token_tags = tree.tokens.items(.tag);
     if (fn_proto.ast.return_type == 0) return false;

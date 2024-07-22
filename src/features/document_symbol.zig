@@ -46,7 +46,6 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
 
             const var_decl = tree.fullVarDecl(node).?;
             const var_decl_name_token = var_decl.ast.mut_token + 1;
-            if (tree.tokens.items(.tag)[var_decl_name_token] != .identifier) break :blk null;
             const var_decl_name = offsets.identifierTokenToNameSlice(tree, var_decl_name_token);
 
             new_ctx.last_var_decl_name = var_decl_name;
