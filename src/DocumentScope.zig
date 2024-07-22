@@ -857,9 +857,11 @@ noinline fn walkContainerDecl(
             .container_field_init,
             .container_field_align,
             => {
-                const container_field = tree.fullContainerField(decl).?;
+                var container_field = tree.fullContainerField(decl).?;
                 if (is_struct and container_field.ast.tuple_like) continue;
 
+                container_field.convertToNonTupleLike(tree.nodes);
+                if (container_field.ast.tuple_like) continue;
                 const main_token = container_field.ast.main_token;
                 try scope.pushDeclaration(main_token, .{ .ast_node = decl }, .field);
 
