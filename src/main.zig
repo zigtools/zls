@@ -9,6 +9,27 @@ const binned_allocator = @import("binned_allocator.zig");
 
 const log = std.log.scoped(.zls_main);
 
+const usage =
+    \\ZLS - A non-official Zig Language Server
+    \\
+    \\Commands:
+    \\  help, --help,             Print this help and exit
+    \\  version, --version        Print version number and exit
+    \\  env                       Print config path, log path and version
+    \\
+    \\General Options:
+    \\  --config-path [path]      Set path to the 'zls.json' configuration file
+    \\  --enable-message-tracing  Enable message tracing
+    \\  --log-file [path]         Set path to the 'zls.log' log file
+    \\  --log-level [enum]        The Log Level to be used.
+    \\                              Supported Values:
+    \\                                err
+    \\                                warn
+    \\                                info (default)
+    \\                                debug
+    \\
+;
+
 pub const std_options: std.Options = .{
     // Always set this to debug to make std.log call into our handler, then control the runtime
     // value in logFn itself
@@ -52,27 +73,6 @@ fn logFn(
         file.writer().writeByte('\n') catch break :blk;
     }
 }
-
-const usage =
-    \\ZLS - A non-official Zig Language Server
-    \\
-    \\Commands:
-    \\  help, --help,             Print this help and exit
-    \\  version, --version        Print version number and exit
-    \\  env                       Print config path, log path and version
-    \\
-    \\General Options:
-    \\  --config-path [path]      Set path to the 'zls.json' configuration file
-    \\  --enable-message-tracing  Enable message tracing
-    \\  --log-file [path]         Set path to the 'zls.log' log file
-    \\  --log-level [enum]        The Log Level to be used.
-    \\                              Supported Values:
-    \\                                err
-    \\                                warn
-    \\                                info (default)
-    \\                                debug
-    \\
-;
 
 fn defaultLogFilePath(allocator: std.mem.Allocator) std.mem.Allocator.Error!?[]const u8 {
     const cache_path = known_folders.getPath(allocator, .cache) catch |err| switch (err) {
