@@ -4,206 +4,292 @@ const zls = @import("zls");
 const exe_options = @import("exe_options");
 
 const tracy = @import("tracy");
+const known_folders = @import("known-folders");
 const binned_allocator = @import("binned_allocator.zig");
 
-const logger = std.log.scoped(.zls_main);
+const log = std.log.scoped(.zls_main);
 
-var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
-    .Debug => .debug,
-    else => @enumFromInt(@intFromEnum(exe_options.log_level)), // The type of `log_level` is not `std.log.Level`.
-};
-
-fn logFn(
-    comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (@intFromEnum(level) > @intFromEnum(actual_log_level)) return;
-
-    const level_txt = comptime level.asText();
-    const scope_txt = comptime @tagName(scope);
-
-    const stderr = std.io.getStdErr().writer();
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-
-    stderr.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch return;
-    stderr.print(format, args) catch return;
-    stderr.writeByte('\n') catch return;
-}
-
-pub const std_options = std.Options{
+pub const std_options: std.Options = .{
     // Always set this to debug to make std.log call into our handler, then control the runtime
     // value in logFn itself
     .log_level = .debug,
     .logFn = logFn,
 };
 
-const ParseArgsResult = struct {
-    action: enum { proceed, exit },
-    config_path: ?[]const u8,
-    message_tracing_enabled: bool,
+var runtime_log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
+var log_file: ?std.fs.File = null;
 
-    zls_exe_path: []const u8,
+fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(level) > @intFromEnum(runtime_log_level)) return;
+
+    const level_txt: []const u8 = switch (level) {
+        .err => "error",
+        .warn => "warn ",
+        .info => "info ",
+        .debug => "debug",
+    };
+    const scope_txt: []const u8 = comptime @tagName(scope);
+
+    blk: {
+        std.debug.lockStdErr();
+        defer std.debug.unlockStdErr();
+
+        const writer = std.io.getStdErr().writer();
+
+        writer.print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
+        writer.print(format, args) catch break :blk;
+        writer.writeByte('\n') catch break :blk;
+    }
+
+    if (log_file) |file| blk: {
+        file.writer().print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
+        file.writer().print(format, args) catch break :blk;
+        file.writer().writeByte('\n') catch break :blk;
+    }
+}
+
+const usage =
+    \\ZLS - A non-official Zig Language Server
+    \\
+    \\Commands:
+    \\  help, --help,             Print this help and exit
+    \\  version, --version        Print version number and exit
+    \\  env                       Print config path, log path and version
+    \\
+    \\General Options:
+    \\  --config-path [path]      Set path to the 'zls.json' configuration file
+    \\  --enable-message-tracing  Enable message tracing
+    \\  --log-file [path]         Set path to the 'zls.log' log file
+    \\  --log-level [enum]        The Log Level to be used.
+    \\                              Supported Values:
+    \\                                err
+    \\                                warn
+    \\                                info (default)
+    \\                                debug
+    \\
+;
+
+fn defaultLogFilePath(allocator: std.mem.Allocator) std.mem.Allocator.Error!?[]const u8 {
+    const cache_path = known_folders.getPath(allocator, .cache) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.ParseError => return null,
+    } orelse return null;
+    defer allocator.free(cache_path);
+    return try std.fs.path.join(allocator, &.{ cache_path, "zls", "zls.log" });
+}
+
+fn createLogFile(allocator: std.mem.Allocator, override_log_file_path: ?[]const u8) ?std.fs.File {
+    const log_file_path = override_log_file_path orelse defaultLogFilePath(allocator) catch null orelse return null;
+    defer if (override_log_file_path == null) allocator.free(log_file_path);
+
+    if (std.fs.path.dirname(log_file_path)) |dirname| {
+        std.fs.cwd().makePath(dirname) catch {};
+    }
+
+    const file = std.fs.cwd().createFile(log_file_path, .{ .truncate = false }) catch return null;
+    errdefer file.close();
+
+    log.info("Log File:        {s}", .{log_file_path});
+
+    return file;
+}
+
+/// Output format of `zls env`
+const Env = struct {
+    /// The ZLS version. Guaranteed to be a [semantic version](https://semver.org/).
+    ///
+    /// The semantic version can have one of the following formats:
+    /// - `MAJOR.MINOR.PATCH` is a tagged release of ZLS
+    /// - `MAJOR.MINOR.PATCH-dev.COMMIT_HEIGHT-SHORT_COMMIT_HASH` is a development build of ZLS
+    /// - `MAJOR.MINOR.PATCH-dev` is a development build of ZLS where the exact version could not be resolved.
+    ///
+    version: []const u8,
+    global_cache_dir: ?[]const u8,
+    /// Path to where a global `zls.json` could be located.
+    /// Not `null` unless `known-folders` was unable to find a global configuration directory.
+    global_config_dir: ?[]const u8,
+    /// Path to where a local `zls.json` could be located.
+    /// Not `null` unless `known-folders` was unable to find a local configuration directory.
+    local_config_dir: ?[]const u8,
+    /// Path to a `zls.json` config file. Will be resolved by looking in the local configuration directory and then falling back to global directory.
+    /// Can be null if no `zls.json` was found in the global/local config directory.
+    config_file: ?[]const u8,
+    /// Path to a `zls.log` where ZLS will attempt to append logging output.
+    /// Not `null` unless `known-folders` was unable to find a cache directory.
+    log_file: ?[]const u8,
+};
+
+fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.File.WriteError)!noreturn {
+    const global_cache_dir = known_folders.getPath(allocator, .cache) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.ParseError => null,
+    };
+    defer if (global_cache_dir) |path| allocator.free(path);
+
+    const zls_global_cache_dir = if (global_cache_dir) |cache_dir| try std.fs.path.join(allocator, &.{ cache_dir, "zls" }) else null;
+    defer if (zls_global_cache_dir) |path| allocator.free(path);
+
+    const global_config_dir = known_folders.getPath(allocator, .global_configuration) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.ParseError => null,
+    };
+    defer if (global_config_dir) |path| allocator.free(path);
+
+    const local_config_dir = known_folders.getPath(allocator, .local_configuration) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.ParseError => null,
+    };
+    defer if (local_config_dir) |path| allocator.free(path);
+
+    var config_result = try zls.configuration.load(allocator);
+    defer config_result.deinit(allocator);
+
+    const config_file_path: ?[]const u8 = switch (config_result) {
+        .success => |config_with_path| config_with_path.path,
+        .failure => |payload| blk: {
+            const message = try payload.toMessage(allocator) orelse break :blk null;
+            defer allocator.free(message);
+            log.err("Failed to load configuration options.", .{});
+            log.err("{s}", .{message});
+            break :blk null;
+        },
+        .not_found => null,
+    };
+
+    const log_file_path = try defaultLogFilePath(allocator);
+    defer if (log_file_path) |path| allocator.free(path);
+
+    const env: Env = .{
+        .version = zls.build_options.version_string,
+        .global_cache_dir = zls_global_cache_dir,
+        .global_config_dir = global_config_dir,
+        .local_config_dir = local_config_dir,
+        .config_file = config_file_path,
+        .log_file = log_file_path,
+    };
+    try std.json.stringify(env, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
+    try std.io.getStdOut().writeAll("\n");
+    std.process.exit(0);
+}
+
+const ParseArgsResult = struct {
+    config_path: ?[]const u8 = null,
+    enable_message_tracing: bool = false,
+    log_level: ?std.log.Level = null,
+    log_file_path: ?[]const u8 = null,
+    zls_exe_path: []const u8 = "",
 
     fn deinit(self: ParseArgsResult, allocator: std.mem.Allocator) void {
         defer if (self.config_path) |path| allocator.free(path);
+        defer if (self.log_file_path) |path| allocator.free(path);
         defer allocator.free(self.zls_exe_path);
     }
 };
 
-fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
-    var result = ParseArgsResult{
-        .action = .exit,
-        .config_path = null,
-        .message_tracing_enabled = false,
-        .zls_exe_path = "",
-    };
+const ParseArgsError = std.process.ArgIterator.InitError || std.mem.Allocator.Error || std.fs.File.WriteError;
+
+fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
+    var result: ParseArgsResult = .{};
     errdefer result.deinit(allocator);
 
-    const ArgId = enum {
-        help,
-        version,
-        @"compiler-version",
-        @"enable-debug-log",
-        @"enable-message-tracing",
-        @"show-config-path",
-        @"config-path",
-    };
-    const help_message: []const u8 = comptime help_message: {
-        var help_message: []const u8 =
-            \\Usage: zls [command]
-            \\
-            \\Commands:
-            \\
-            \\
-        ;
-        const InfoMap = std.enums.EnumArray(ArgId, []const u8);
-        var cmd_infos: InfoMap = InfoMap.init(.{
-            .help = "Prints this message.",
-            .version = "Prints the version.",
-            .@"compiler-version" = "Prints the compiler version with which the server was compiled.",
-            .@"enable-debug-log" = "Enables debug logs.",
-            .@"enable-message-tracing" = "Enables message tracing.",
-            .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
-            .@"show-config-path" = "Prints the path to the configuration file to stdout",
-        });
-        var info_it = cmd_infos.iterator();
-        while (info_it.next()) |entry| {
-            help_message = help_message ++ std.fmt.comptimePrint("  --{s}: {s}\n", .{ @tagName(entry.key), entry.value.* });
-        }
-        help_message = help_message ++ "\n";
-        break :help_message help_message;
-    };
+    const stdout = std.io.getStdOut().writer();
 
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
 
-    const zls_exe_path = args_it.next() orelse @panic("");
+    const zls_exe_path = args_it.next() orelse "";
     result.zls_exe_path = try allocator.dupe(u8, zls_exe_path);
 
-    // Makes behavior of enabling debug more logging consistent regardless of argument order.
-    var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
-    const stdout = std.io.getStdOut().writer();
-    const stderr = std.io.getStdErr().writer();
+    var arg_index: usize = 0;
+    while (args_it.next()) |arg| : (arg_index += 1) {
+        if (arg_index == 0) {
+            if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) { // help
+                try std.io.getStdErr().writeAll(usage);
+                std.process.exit(0);
+            } else if (std.mem.eql(u8, arg, "version") or std.mem.eql(u8, arg, "--version")) { // version
+                try stdout.writeAll(zls.build_options.version_string ++ "\n");
+                std.process.exit(0);
+            } else if (std.mem.eql(u8, arg, "env")) { // env
+                try @"zls env"(allocator);
+            } else if (std.mem.eql(u8, arg, "--show-config-path")) { // --show-config-path
+                comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
+                log.warn("--show-config-path has been deprecated. Use 'zls env' instead!", .{});
 
-    while (args_it.next()) |tok| {
-        if (!std.mem.startsWith(u8, tok, "--") or tok.len == 2) {
-            try stderr.print("{s}\n", .{help_message});
-            try stderr.print("Unexpected positional argument '{s}'.\n", .{tok});
-            return result;
-        }
+                var config_result = try zls.configuration.load(allocator);
+                defer config_result.deinit(allocator);
 
-        const argname = tok["--".len..];
-        const id = std.meta.stringToEnum(ArgId, argname) orelse {
-            try stderr.print("{s}\n", .{help_message});
-            try stderr.print("Unrecognized argument '{s}'.\n", .{argname});
-            return result;
-        };
+                switch (config_result) {
+                    .success => |config_with_path| {
+                        try stdout.writeAll(config_with_path.path);
+                        try stdout.writeByte('\n');
+                    },
+                    .failure => |payload| blk: {
+                        const message = try payload.toMessage(allocator) orelse break :blk;
+                        defer allocator.free(message);
+                        log.err("Failed to load configuration options.", .{});
+                        log.err("{s}", .{message});
+                    },
+                    .not_found => log.info("No config file zls.json found.", .{}),
+                }
 
-        if (specified.get(id)) {
-            try stderr.print("{s}\n", .{help_message});
-            try stderr.print("Duplicate argument '{s}'.\n", .{argname});
-            return result;
-        }
-        specified.set(id, true);
-
-        switch (id) {
-            .help,
-            .version,
-            .@"compiler-version",
-            .@"enable-debug-log",
-            .@"enable-message-tracing",
-            .@"show-config-path",
-            => {},
-            .@"config-path" => {
-                const path = args_it.next() orelse {
-                    try stderr.print("Expected configuration file path after --config-path argument.\n", .{});
-                    return result;
+                log.info("A path to the local configuration folder will be printed instead.", .{});
+                const local_config_path = zls.configuration.getLocalConfigPath(allocator) catch null orelse {
+                    log.err("failed to find local zls.json", .{});
+                    std.process.exit(1);
                 };
-                result.config_path = try allocator.dupe(u8, path);
-            },
-        }
-    }
-
-    if (specified.get(.help)) {
-        try stderr.print("{s}\n", .{help_message});
-        return result;
-    }
-    if (specified.get(.version)) {
-        try stdout.writeAll(zls.build_options.version_string ++ "\n");
-        return result;
-    }
-    if (specified.get(.@"compiler-version")) {
-        try stdout.writeAll(zig_builtin.zig_version_string ++ "\n");
-        return result;
-    }
-    if (specified.get(.@"enable-debug-log")) {
-        actual_log_level = .debug;
-        logger.info("Enabled debug logging.", .{});
-    }
-    if (specified.get(.@"enable-message-tracing")) {
-        result.message_tracing_enabled = true;
-        logger.info("Enabled message tracing.", .{});
-    }
-    if (specified.get(.@"config-path")) {
-        std.debug.assert(result.config_path != null);
-    }
-    if (specified.get(.@"show-config-path")) {
-        var config_result = if (result.config_path) |config_path|
-            try zls.configuration.loadFromFile(allocator, config_path)
-        else
-            try zls.configuration.load(allocator);
-        defer config_result.deinit(allocator);
-
-        switch (config_result) {
-            .success => |config_with_path| {
-                try stdout.writeAll(config_with_path.path);
+                defer allocator.free(local_config_path);
+                try stdout.writeAll(local_config_path);
                 try stdout.writeByte('\n');
-                return result;
-            },
-            .failure => |payload| blk: {
-                const message = try payload.toMessage(allocator) orelse break :blk;
-                defer allocator.free(message);
-                logger.err("Failed to load configuration options.", .{});
-                logger.err("{s}", .{message});
-            },
-            .not_found => logger.info("No config file zls.json found.", .{}),
+                std.process.exit(0);
+            }
         }
 
-        logger.info("A path to the local configuration folder will be printed instead.", .{});
-        const local_config_path = zls.configuration.getLocalConfigPath(allocator) catch null orelse {
-            logger.err("failed to find local zls.json", .{});
+        if (std.mem.eql(u8, arg, "--config-path")) { // --config-path
+            const path = args_it.next() orelse {
+                log.err("Expected configuration file path after --config-path argument.", .{});
+                std.process.exit(1);
+            };
+            if (result.config_path) |old_config_path| allocator.free(old_config_path);
+            result.config_path = try allocator.dupe(u8, path);
+        } else if (std.mem.eql(u8, arg, "--enable-message-tracing")) { // --enable-message-tracing
+            result.enable_message_tracing = true;
+        } else if (std.mem.eql(u8, arg, "--log-file")) { // --log-file
+            const path = args_it.next() orelse {
+                log.err("Expected configuration file path after --log-file argument.", .{});
+                std.process.exit(1);
+            };
+            if (result.log_file_path) |old_file_path| allocator.free(old_file_path);
+            result.log_file_path = try allocator.dupe(u8, path);
+        } else if (std.mem.eql(u8, arg, "--log-level")) { // --log-level
+            const log_level_name = args_it.next() orelse {
+                log.err("Expected argument after --log-level", .{});
+                std.process.exit(1);
+            };
+            result.log_level = std.meta.stringToEnum(std.log.Level, log_level_name) orelse {
+                log.err("Invalid --log-level argument. Expected one of {{'debug', 'info', 'warn', 'err'}} but got '{s}'", .{log_level_name});
+                std.process.exit(1);
+            };
+        } else if (std.mem.eql(u8, arg, "--enable-debug-log")) { // --enable-debug-log
+            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
+            log.warn("--enable-debug-log has been deprecated. Use --log-level instead!", .{});
+            result.log_level = .debug;
+        } else {
+            log.err("Unrecognized argument: '{s}'", .{arg});
             std.process.exit(1);
-        };
-        defer allocator.free(local_config_path);
-        try stdout.writeAll(local_config_path);
-        try stdout.writeByte('\n');
-        return result;
+        }
     }
 
-    result.action = .proceed;
+    if (std.io.getStdIn().isTty()) {
+        log.warn("ZLS is not a CLI tool, it communicates over the Language Server Protocol.", .{});
+        log.warn("Did you mean to run 'zls --help'?", .{});
+        log.warn("", .{});
+    }
+
     return result;
 }
 
@@ -212,18 +298,12 @@ const stack_frames = switch (zig_builtin.mode) {
     else => 0,
 };
 
-pub fn main() !void {
+pub fn main() !u8 {
     var allocator_state = if (exe_options.use_gpa)
         std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
     else
         binned_allocator.BinnedAllocator(.{}){};
-
-    defer {
-        if (exe_options.use_gpa)
-            std.debug.assert(allocator_state.deinit() == .ok)
-        else
-            allocator_state.deinit();
-    }
+    defer _ = allocator_state.deinit();
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
@@ -233,34 +313,40 @@ pub fn main() !void {
 
     const result = try parseArgs(allocator);
     defer result.deinit(allocator);
-    switch (result.action) {
-        .proceed => {},
-        .exit => return,
-    }
 
-    logger.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
+    const resolved_log_level = result.log_level orelse runtime_log_level;
+
+    log.info("Starting ZLS {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
+    log.info("Message Tracing: {}", .{result.enable_message_tracing});
+    log.info("Log Level:       {s}", .{@tagName(resolved_log_level)});
+
+    const new_log_file = createLogFile(allocator, result.log_file_path) orelse blk: {
+        log.info("Log File:        null", .{});
+        break :blk null;
+    };
+    defer if (new_log_file) |file| file.close();
+
+    runtime_log_level = resolved_log_level;
+    log_file = new_log_file;
+    defer log_file = null;
 
     var transport: zls.lsp.ThreadSafeTransport(.{
         .ChildTransport = zls.lsp.TransportOverStdio,
         .thread_safe_read = false,
         .thread_safe_write = true,
-        .MutexType = null,
     }) = .{ .child_transport = zls.lsp.TransportOverStdio.init(std.io.getStdIn(), std.io.getStdOut()) };
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();
     server.transport = transport.any();
     server.config_path = result.config_path;
-    server.message_tracing = result.message_tracing_enabled;
+    server.message_tracing = result.enable_message_tracing;
 
     try server.loop();
 
-    if (server.status == .exiting_failure) {
-        if (zig_builtin.mode == .Debug) {
-            // make sure that GeneralPurposeAllocator.deinit gets run to detect leaks
-            return;
-        } else {
-            std.process.exit(1);
-        }
+    switch (server.status) {
+        .exiting_failure => return 1,
+        .exiting_success => return 0,
+        else => unreachable,
     }
 }
