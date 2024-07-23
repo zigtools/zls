@@ -162,48 +162,6 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
     try buff_out.flush();
 }
 
-fn updateREADMEFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    var readme_file = try std.fs.cwd().openFile(path, .{ .mode = .read_write });
-    defer readme_file.close();
-
-    var readme = try readme_file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(readme);
-
-    const start_indicator = "<!-- DO NOT EDIT | THIS SECTION IS AUTO-GENERATED | DO NOT EDIT -->";
-    const end_indicator = "<!-- DO NOT EDIT -->";
-
-    const start = start_indicator.len + (std.mem.indexOf(u8, readme, start_indicator) orelse return error.SectionNotFound);
-    const end = std.mem.indexOfPos(u8, readme, start, end_indicator) orelse return error.SectionNotFound;
-
-    try readme_file.seekTo(0);
-    var writer = readme_file.writer();
-
-    try writer.writeAll(readme[0..start]);
-
-    try writer.writeAll(
-        \\
-        \\| Option | Type | Default value | What it Does |
-        \\| --- | --- | --- | --- |
-        \\
-    );
-
-    for (config.options) |option| {
-        try writer.print(
-            \\| `{s}` | `{s}` | `{}` | {s} |
-            \\
-        , .{
-            std.mem.trim(u8, option.name, &std.ascii.whitespace),
-            std.mem.trim(u8, option.type, &std.ascii.whitespace),
-            option.fmtDefaultValue(),
-            std.mem.trim(u8, option.description, &std.ascii.whitespace),
-        });
-    }
-
-    try writer.writeAll(readme[end..]);
-
-    try readme_file.setEndPos(try readme_file.getPos());
-}
-
 const ConfigurationProperty = struct {
     scope: []const u8 = "resource",
     type: []const u8,
@@ -988,7 +946,6 @@ pub fn main() !void {
 
     _ = args_it.next() orelse @panic("");
 
-    var readme_path: ?[]const u8 = null;
     var config_path: ?[]const u8 = null;
     var schema_path: ?[]const u8 = null;
     var vscode_config_path: ?[]const u8 = null;
@@ -1004,7 +961,6 @@ pub fn main() !void {
                 \\    Commands:
                 \\
                 \\    --help                               Prints this message
-                \\    --readme-path [path]                 Update readme file (see README.md)
                 \\    --vscode-config-path [path]          Output zls-vscode configurations
                 \\    --generate-config-path [path]        Output path to config file (see src/Config.zig)
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
@@ -1013,11 +969,6 @@ pub fn main() !void {
                 \\    --langref_path [path]                Input langref file (default: fetch from https://raw.githubusercontent.com/ziglang/zig/{[default_data_version]s}/doc/langref.html.in)
                 \\
             );
-        } else if (std.mem.eql(u8, argname, "--readme-path")) {
-            readme_path = args_it.next() orelse {
-                try stderr.print("Expected file path after --readme-path argument.\n", .{});
-                return;
-            };
         } else if (std.mem.eql(u8, argname, "--generate-config-path")) {
             config_path = args_it.next() orelse {
                 try stderr.print("Expected output path after --generate-config-path argument.\n", .{});
@@ -1072,9 +1023,6 @@ pub fn main() !void {
     }
     if (schema_path) |output_path| {
         try generateSchemaFile(gpa, config, output_path);
-    }
-    if (readme_path) |output_path| {
-        try updateREADMEFile(gpa, config, output_path);
     }
     if (vscode_config_path) |output_path| {
         try generateVSCodeConfigFile(gpa, config, output_path);
