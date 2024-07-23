@@ -91,8 +91,6 @@ pub fn build(b: *Build) !void {
 
     const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
-        "--readme-path",
-        b.pathFromRoot("README.md"),
         "--generate-config-path",
         b.pathFromRoot("src/Config.zig"),
         "--generate-schema-path",
