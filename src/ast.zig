@@ -18,7 +18,10 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
             .identifier => if (info.main_token != 0 and token_tags[info.main_token - 1] == .l_bracket) .C else .One,
             else => .One,
         },
-        .l_bracket => .Slice,
+        .l_bracket => switch (token_tags[info.main_token + 1]) {
+            .asterisk => if (token_tags[info.main_token + 2] == .identifier) .C else .Many,
+            else => .Slice,
+        },
         else => unreachable,
     };
     var result: full.PtrType = .{
@@ -32,7 +35,10 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
     // here while looking for modifiers as that could result in false
     // positives. Therefore, start after a sentinel if there is one and
     // skip over any align node and bit range nodes.
-    var i = if (info.sentinel != 0) lastToken(tree, info.sentinel) + 1 else info.main_token;
+    var i = if (info.sentinel != 0) tree.lastToken(info.sentinel) + 1 else switch (size) {
+        .Many, .C => info.main_token + 1,
+        else => info.main_token,
+    };
     const end = tree.firstToken(info.child_type);
     while (i < end) : (i += 1) {
         switch (token_tags[i]) {
