@@ -3,7 +3,7 @@
     // Must match the `zls_version` in `build.zig`
     .version = "0.14.0-dev",
     // Must match the `minimum_build_zig_version` in `build.zig`
-    .minimum_zig_version = "0.14.0-dev.310+9d38e82b5",
+    .minimum_zig_version = "0.14.0-dev.470+7e7681813",
     // If you do not use Nix, a ZLS maintainer or Nix user can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
