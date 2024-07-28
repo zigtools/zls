@@ -19,7 +19,6 @@ const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy");
 const diff = @import("diff.zig");
-const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const known_folders = @import("known-folders");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
@@ -332,7 +331,6 @@ fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
         &server.document_store,
         &server.ip,
         handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
     );
 }
 
@@ -1530,18 +1528,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
-    const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
-
-    // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.config.dangerous_comptime_experiments_do_not_enable and
-        server.client_capabilities.supports_publish_diagnostics)
-    {
-        try server.pushJob(.{
-            .generate_diagnostics = try server.allocator.dupe(u8, handle.uri),
-        });
-    }
-
-    return response;
+    return hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
 }
 
 fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!lsp.ResultType("textDocument/documentSymbol") {

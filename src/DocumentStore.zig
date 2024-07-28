@@ -11,7 +11,6 @@ const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/BuildConfig.zig");
 const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
-const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
 const InternPool = @import("analyser/InternPool.zig");
@@ -182,9 +181,6 @@ pub const Handle = struct {
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
-    /// error messages from comptime_interpreter or astgen_analyser
-    analysis_errors: std.ArrayListUnmanaged(ErrorMessage) = .{},
-
     /// private field
     impl: struct {
         /// @bitCast from/to `Status`
@@ -197,7 +193,6 @@ pub const Handle = struct {
 
         document_scope: DocumentScope = undefined,
         zir: Zir = undefined,
-        comptime_interpreter: *ComptimeInterpreter = undefined,
 
         associated_build_file: union(enum) {
             /// The Handle has no associated build file (build.zig).
@@ -239,9 +234,7 @@ pub const Handle = struct {
         /// true if `handle.impl.zir` has been set
         has_zir: bool = false,
         zir_outdated: bool = undefined,
-        /// true if `handle.impl.comptime_interpreter` has been set
-        has_comptime_interpreter: bool = false,
-        _: u25 = undefined,
+        _: u26 = undefined,
     };
 
     pub const ZirStatus = enum {
@@ -281,11 +274,6 @@ pub const Handle = struct {
         const status = self.getStatus();
         if (!status.has_zir) return .none;
         return if (status.zir_outdated) .outdated else .done;
-    }
-
-    pub fn getComptimeInterpreter(self: *Handle, document_store: *DocumentStore, ip: *InternPool) error{OutOfMemory}!*ComptimeInterpreter {
-        if (self.getStatus().has_comptime_interpreter) return self.impl.comptime_interpreter;
-        return try self.getComptimeInterpreterCold(document_store, ip);
     }
 
     /// Returns the associated build file (build.zig) of the handle.
@@ -461,43 +449,6 @@ pub const Handle = struct {
         return self.impl.zir;
     }
 
-    fn getComptimeInterpreterCold(
-        self: *Handle,
-        document_store: *DocumentStore,
-        ip: *InternPool,
-    ) error{OutOfMemory}!*ComptimeInterpreter {
-        @setCold(true);
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const comptime_interpreter = try self.impl.allocator.create(ComptimeInterpreter);
-        errdefer self.impl.allocator.destroy(comptime_interpreter);
-
-        comptime_interpreter.* = ComptimeInterpreter{
-            .allocator = self.impl.allocator,
-            .ip = ip,
-            .document_store = document_store,
-            .uri = self.uri,
-        };
-
-        {
-            self.impl.lock.lock();
-            errdefer @compileError("");
-
-            if (self.getStatus().has_comptime_interpreter) { // another thread outpaced us
-                self.impl.lock.unlock();
-                self.impl.allocator.destroy(comptime_interpreter);
-                return self.impl.comptime_interpreter;
-            }
-            self.impl.comptime_interpreter = comptime_interpreter;
-            const old = self.impl.status.bitSet(@bitOffsetOf(Status, "has_comptime_interpreter"), .release); // atomically set has_imports
-            std.debug.assert(old == 0); // race condition: another thread set the resource even though we hold the lock
-            self.impl.lock.unlock();
-        }
-
-        return self.impl.comptime_interpreter;
-    }
-
     fn getStatus(self: Handle) Status {
         return @bitCast(self.impl.status.load(.acquire));
     }
@@ -552,18 +503,14 @@ pub const Handle = struct {
         var old_tree = self.tree;
         var old_import_uris = self.import_uris;
         var old_cimports = self.cimports;
-        var old_analysis_errors = self.analysis_errors;
         var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
         var old_zir = if (old_status.has_zir) self.impl.zir else null;
-        const old_comptime_interpreter = if (old_status.has_comptime_interpreter) self.impl.comptime_interpreter else null;
 
         self.tree = new_tree;
         self.import_uris = .{};
         self.cimports = .{};
-        self.analysis_errors = .{};
         self.impl.document_scope = undefined;
         self.impl.zir = undefined;
-        self.impl.comptime_interpreter = undefined;
 
         self.impl.lock.unlock();
 
@@ -573,18 +520,11 @@ pub const Handle = struct {
         for (old_import_uris.items) |uri| self.impl.allocator.free(uri);
         old_import_uris.deinit(self.impl.allocator);
 
-        for (old_analysis_errors.items) |err| self.impl.allocator.free(err.message);
-        old_analysis_errors.deinit(self.impl.allocator);
-
         for (old_cimports.items(.source)) |source| self.impl.allocator.free(source);
         old_cimports.deinit(self.impl.allocator);
 
         if (old_document_scope) |*document_scope| document_scope.deinit(self.impl.allocator);
         if (old_zir) |*zir| zir.deinit(self.impl.allocator);
-        if (old_comptime_interpreter) |comptime_interpreter| {
-            comptime_interpreter.deinit();
-            self.impl.allocator.destroy(comptime_interpreter);
-        }
     }
 
     fn deinit(self: *Handle) void {
@@ -595,10 +535,6 @@ pub const Handle = struct {
 
         const allocator = self.impl.allocator;
 
-        if (status.has_comptime_interpreter) {
-            self.impl.comptime_interpreter.deinit();
-            allocator.destroy(self.impl.comptime_interpreter);
-        }
         if (status.has_zir) self.impl.zir.deinit(allocator);
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
         allocator.free(self.tree.source);
@@ -607,9 +543,6 @@ pub const Handle = struct {
 
         for (self.import_uris.items) |uri| allocator.free(uri);
         self.import_uris.deinit(allocator);
-
-        for (self.analysis_errors.items) |err| allocator.free(err.message);
-        self.analysis_errors.deinit(allocator);
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);

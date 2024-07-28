@@ -84,11 +84,6 @@
             "type": "boolean",
             "default": false
         },
-        "dangerous_comptime_experiments_do_not_enable": {
-            "description": "Whether to use the comptime interpreter",
-            "type": "boolean",
-            "default": false
-        },
         "skip_std_references": {
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "boolean",

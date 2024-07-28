@@ -15,8 +15,7 @@ const URI = @import("uri.zig");
 const log = std.log.scoped(.zls_analysis);
 const ast = @import("ast.zig");
 const tracy = @import("tracy");
-const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
-const InternPool = ComptimeInterpreter.InternPool;
+const InternPool = @import("analyser/InternPool.zig");
 const references = @import("features/references.zig");
 
 const DocumentScope = @import("DocumentScope.zig");
@@ -38,7 +37,6 @@ collect_callsite_references: bool,
 resolve_number_literal_values: bool,
 /// handle of the doc where the request originated
 root_handle: ?*DocumentStore.Handle,
-dangerous_comptime_experiments_do_not_enable: bool,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
@@ -47,7 +45,6 @@ pub fn init(
     store: *DocumentStore,
     ip: *InternPool,
     root_handle: ?*DocumentStore.Handle,
-    dangerous_comptime_experiments_do_not_enable: bool,
 ) Analyser {
     return .{
         .gpa = gpa,
@@ -57,7 +54,6 @@ pub fn init(
         .collect_callsite_references = true,
         .resolve_number_literal_values = false,
         .root_handle = root_handle,
-        .dangerous_comptime_experiments_do_not_enable = dangerous_comptime_experiments_do_not_enable,
     };
 }
 
@@ -1550,64 +1546,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const body = func_tree.nodes.items(.data)[func_node].rhs;
             if (try analyser.resolveReturnType(fn_proto, func_handle, if (has_body) body else null)) |ret| {
                 return ret;
-            } else if (analyser.dangerous_comptime_experiments_do_not_enable) {
-                // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
-                // probably better to use it more liberally
-                // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
-                // var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
-
-                // var top_decl = try (try interpreter.interpret(0, null, .{})).getValue();
-                // var top_scope = interpreter.typeToTypeInfo(top_decl.@"type".info_idx).@"struct".scope;
-
-                // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
-
-                log.info("Invoking interpreter!", .{});
-
-                const interpreter = try handle.getComptimeInterpreter(analyser.store, analyser.ip);
-                interpreter.mutex.lock();
-                defer interpreter.mutex.unlock();
-
-                if (!interpreter.has_analyzed_root) {
-                    interpreter.has_analyzed_root = true;
-                    _ = interpreter.interpret(0, .none, .{}) catch |err| {
-                        log.err("Failed to interpret file: {s}", .{@errorName(err)});
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-                        return null;
-                    };
-                }
-
-                const root_namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0);
-
-                // TODO: Start from current/nearest-current scope
-                const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
-                    log.err("Failed to interpret node: {s}", .{@errorName(err)});
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
-                    return null;
-                };
-                const value = result.getValue() catch |err| {
-                    log.err("interpreter return no result: {s}", .{@errorName(err)});
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
-                    return null;
-                };
-
-                return Type{
-                    .data = .{
-                        .ip_index = .{
-                            .node = .{
-                                .node = value.node_idx,
-                                .handle = node_handle.handle,
-                            },
-                            .index = value.index,
-                        },
-                    },
-                    .is_type_val = analyser.ip.typeOf(value.index) == .type_type,
-                };
             }
         },
         .container_field,

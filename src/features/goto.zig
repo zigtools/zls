@@ -260,7 +260,6 @@ pub fn gotoHandler(
         &server.document_store,
         &server.ip,
         handle,
-        server.config.dangerous_comptime_experiments_do_not_enable,
     );
     defer analyser.deinit();
 
