@@ -321,10 +321,11 @@ fn functionTypeCompletion(
 
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
-    const has_self_param = if (parent_container_ty) |container_ty|
-        if (container_ty.is_type_val) false else try builder.analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser))
-    else
-        false;
+    const has_self_param = if (parent_container_ty) |container_ty| blk: {
+        if (container_ty.is_type_val) break :blk false;
+        if (container_ty.isNamespace()) break :blk false;
+        break :blk try builder.analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+    } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 

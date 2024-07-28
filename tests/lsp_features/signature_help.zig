@@ -152,6 +152,7 @@ test "self parameter" {
     // argument: S
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: @This(), a: u32, b: void) bool {}
         \\};
         \\const s: S = undefined;
@@ -159,6 +160,7 @@ test "self parameter" {
     , "fn foo(self: @This(), a: u32, b: void) bool", 2);
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: @This(), a: u32, b: void) bool {}
         \\};
         \\const foo = S.foo(undefined,<cursor>);
@@ -168,6 +170,7 @@ test "self parameter" {
     // argument: S
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: *@This(), a: u32, b: void) bool {}
         \\};
         \\const s: S = undefined;
@@ -175,6 +178,7 @@ test "self parameter" {
     , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: *@This(), a: u32, b: void) bool {}
         \\};
         \\const foo = S.foo(undefined,<cursor>);
@@ -184,6 +188,7 @@ test "self parameter" {
     // argument: *S
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: @This(), a: u32, b: void) bool {}
         \\};
         \\const s: *S = undefined;
@@ -194,6 +199,7 @@ test "self parameter" {
     // argument: *S
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: *@This(), a: u32, b: void) bool {}
         \\};
         \\const s: *S = undefined;
@@ -204,6 +210,7 @@ test "self parameter" {
 test "self parameter is anytype" {
     try testSignatureHelp(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn foo(self: anytype, a: u32, b: void) bool {}
         \\};
         \\const s: S = undefined;

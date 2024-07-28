@@ -419,7 +419,7 @@ test "call" {
         \\const alpha = foo(0);
     , &.{
         .{ "fn", .keyword, .{} },
-        .{ "foo", .method, .{ .declaration = true, .generic = true } },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
         .{ "a", .parameter, .{ .declaration = true } },
         .{ "anytype", .type, .{} },
         .{ "void", .type, .{} },
@@ -430,7 +430,7 @@ test "call" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "foo", .method, .{ .generic = true } },
+        .{ "foo", .function, .{ .generic = true } },
         .{ "0", .number, .{} },
     });
 }
@@ -1233,23 +1233,27 @@ test "function" {
 test "method" {
     try testSemanticTokens(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn create() S {}
         \\    fn doTheThing(self: S) void {}
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "S", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
 
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+
         .{ "fn", .keyword, .{} },
         .{ "create", .function, .{ .declaration = true } },
-        .{ "S", .namespace, .{} },
+        .{ "S", .@"struct", .{} },
 
         .{ "fn", .keyword, .{} },
         .{ "doTheThing", .method, .{ .declaration = true } },
         .{ "self", .parameter, .{ .declaration = true } },
-        .{ "S", .namespace, .{} },
+        .{ "S", .@"struct", .{} },
         .{ "void", .type, .{} },
     });
 }
