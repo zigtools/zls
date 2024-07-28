@@ -3,7 +3,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Ast = std.zig.Ast;
-const log = std.log.scoped(.zls_diagnostics);
+const log = std.log.scoped(.zls_diag);
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
@@ -204,6 +204,9 @@ pub fn generateBuildOnSaveDiagnostics(
     defer tracy_zone.end();
     comptime std.debug.assert(std.process.can_spawn);
 
+    const zig_exe_path = server.config.zig_exe_path orelse return;
+    const zig_lib_path = server.config.zig_lib_path orelse return;
+
     const workspace_path = URI.parse(server.allocator, workspace_uri) catch |err| {
         log.err("failed to parse invalid uri '{s}': {}", .{ workspace_uri, err });
         return;
@@ -223,12 +226,14 @@ pub fn generateBuildOnSaveDiagnostics(
         },
     };
 
+    log.info("Running build-on-save: {s} ({s})", .{ build_zig_path, server.config.build_on_save_step });
+
     const base_args = &[_][]const u8{
-        server.config.zig_exe_path orelse return,
+        zig_exe_path,
         "build",
         server.config.build_on_save_step,
         "--zig-lib-dir",
-        server.config.zig_lib_path orelse return,
+        zig_lib_path,
         "-fno-reference-trace",
         "--summary",
         "none",
@@ -266,7 +271,7 @@ pub fn generateBuildOnSaveDiagnostics(
     defer server.allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| if (code == 0) return else {},
+        .Exited => |code| if (code == 0) return,
         else => {
             const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
             defer server.allocator.free(joined);
