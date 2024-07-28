@@ -352,6 +352,7 @@ pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) error{OutOfMemory}!bool 
     const fn_token = func_node.handle.tree.nodes.items(.main_token)[func_node.node];
     const in_container = try innermostContainer(func_node.handle, func_node.handle.tree.tokens.items(.start)[fn_token]);
     std.debug.assert(in_container.is_type_val);
+    if (in_container.isNamespace()) return false;
     return analyser.firstParamIs(func_ty, in_container);
 }
 

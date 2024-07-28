@@ -1076,6 +1076,50 @@ test "switch capture by ref" {
     });
 }
 
+test "namespace" {
+    try testCompletion(
+        \\const namespace = struct {};
+        \\const bar = namespace.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const namespace = struct {
+        \\    fn alpha() void {}
+        \\    fn beta(_: anytype) void {}
+        \\    fn gamma(_: @This()) void {}
+        \\};
+        \\const bar = namespace.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+    });
+    try testCompletion(
+        \\const namespace = struct {
+        \\    fn alpha() void {}
+        \\    fn beta(_: anytype) void {}
+        \\    fn gamma(_: @This()) void {}
+        \\};
+        \\const instance: namespace = undefined;
+        \\const bar = instance.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+    });
+    try testCompletion(
+        \\fn alpha() void {}
+        \\fn beta(_: anytype) void {}
+        \\fn gamma(_: @This()) void {}
+        \\
+        \\const foo: @This() = undefined;
+        \\const bar = foo.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+    });
+}
+
 test "struct" {
     try testCompletion(
         \\const S = struct {
@@ -1103,6 +1147,7 @@ test "struct" {
 
     try testCompletion(
         \\const Foo = struct {
+        \\    alpha: u32,
         \\    fn add(foo: Foo) Foo {}
         \\};
         \\test {
@@ -1113,6 +1158,7 @@ test "struct" {
         \\        .<cursor>
         \\}
     , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "add", .kind = .Method, .detail = "fn (foo: Foo) Foo" },
     });
 
@@ -1146,6 +1192,7 @@ test "struct" {
         \\fn barImpl(_: *const Foo) void {}
         \\fn bazImpl(_: u32) void {}
         \\const Foo = struct {
+        \\    alpha: u32,
         \\    pub const foo = fooImpl;
         \\    pub const bar = barImpl;
         \\    pub const baz = bazImpl;
@@ -1153,8 +1200,25 @@ test "struct" {
         \\const foo = Foo{};
         \\const baz = foo.<cursor>;
     , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Method, .detail = "fn (_: Foo) void" },
         .{ .label = "bar", .kind = .Method, .detail = "fn (_: *const Foo) void" },
+    });
+    try testCompletion(
+        \\alpha: u32,
+        \\
+        \\fn alpha() void {}
+        \\fn beta(_: anytype) void {}
+        \\fn gamma(_: @This()) void {}
+        \\
+        \\const Self = @This();
+        \\const bar = Self.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "Self", .kind = .Struct },
+        .{ .label = "bar", .kind = .Struct },
     });
 }
 
@@ -1364,6 +1428,7 @@ test "enum" {
         \\    sef2,
         \\};
         \\const S = struct {
+        \\    alpha: u32,
         \\    const Self = @This();
         \\    pub fn f(_: *Self, _: SomeEnum) void {}
         \\};
@@ -1387,6 +1452,7 @@ test "enum" {
         \\    se: SomeEnum,
         \\};
         \\const S = struct {
+        \\    alpha: u32,
         \\    const Self = @This();
         \\    pub fn f(_: *Self, _: SCE) void {}
         \\};
@@ -2226,12 +2292,14 @@ test "usingnamespace" {
         \\    };
         \\}
         \\const Foo = struct {
+        \\    alpha: u32,
         \\    pub usingnamespace Bar(Foo);
         \\    fn deinit(self: Foo) void { _ = self; }
         \\};
         \\const foo: Foo = undefined;
         \\const bar = foo.<cursor>
     , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "inner", .kind = .Method, .detail = "fn (self: Self) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
@@ -2404,11 +2472,13 @@ test "either" {
         \\    fn alpha() void {}
         \\};
         \\const Beta = struct {
+        \\    field: u32,
         \\    fn beta(_: @This()) void {}
         \\};
         \\const foo: if (undefined) Alpha else Beta = undefined;
         \\const bar = foo.<cursor>
     , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
     });
@@ -2417,6 +2487,7 @@ test "either" {
         \\    fn alpha() void {}
         \\};
         \\const Beta = struct {
+        \\    field: u32,
         \\    fn beta(_: @This()) void {}
         \\};
         \\const alpha: Alpha = undefined;
@@ -2424,6 +2495,7 @@ test "either" {
         \\const gamma = if (undefined) alpha else beta;
         \\const foo = gamma.<cursor>
     , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
     });
@@ -2537,11 +2609,13 @@ test "filesystem" {
 test "label details disabled" {
     try testCompletionWithOptions(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\const s = S{};
         \\s.<cursor>
     , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{
             .label = "f",
             .labelDetails = .{
@@ -2556,11 +2630,13 @@ test "label details disabled" {
     });
     try testCompletionWithOptions(
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S, value: u32) !void {}
         \\};
         \\const s = S{};
         \\s.<cursor>
     , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{
             .label = "f",
             .labelDetails = .{
@@ -2825,6 +2901,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\const s = S{};
@@ -2837,6 +2914,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\S.<cursor>
@@ -2848,6 +2926,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f() void {}
         \\};
         \\S.<cursor>
@@ -2859,6 +2938,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\const s = S{};
@@ -2871,6 +2951,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: @This()) void {}
         \\};
         \\const s = S{};
@@ -2883,6 +2964,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: anytype) void {}
         \\};
         \\const s = S{};
@@ -2895,6 +2977,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\const s = S{};
@@ -2907,6 +2990,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S, number: u32) void {}
         \\};
         \\const s = S{};
@@ -2955,6 +3039,7 @@ test "insert replace behaviour - function with snippets" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\S.<cursor>
@@ -2968,6 +3053,7 @@ test "insert replace behaviour - function with snippets" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S, number: u32) void {}
         \\};
         \\var s = S{};
@@ -2982,6 +3068,7 @@ test "insert replace behaviour - function with snippets" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\const s = S{};
@@ -2996,6 +3083,7 @@ test "insert replace behaviour - function with snippets" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
+        \\    alpha: u32,
         \\    fn f(self: S) void {}
         \\};
         \\S.<cursor>
