@@ -26,9 +26,6 @@ semantic_tokens: enum {
     full,
 } = .full,
 
-/// Enables inlay hint support when the client also supports it
-enable_inlay_hints: bool = true,
-
 /// Enable inlay hints for variable types
 inlay_hints_show_variable_type_hints: bool = true,
 

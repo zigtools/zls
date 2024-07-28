@@ -9,7 +9,6 @@ const types = zls.types;
 
 const default_config: Config = .{
     .semantic_tokens = .full,
-    .enable_inlay_hints = true,
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,
 

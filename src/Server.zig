@@ -1580,8 +1580,6 @@ fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: 
 }
 
 fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.InlayHintParams) Error!?[]types.InlayHint {
-    if (!server.config.enable_inlay_hints) return null;
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     // The Language Server Specification does not provide a client capabilities that allows the client to specify the MarkupKind of inlay hints.
