@@ -177,17 +177,6 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         }
     }
 
-    try diagnostics.ensureUnusedCapacity(arena, handle.analysis_errors.items.len);
-    for (handle.analysis_errors.items) |err| {
-        diagnostics.appendAssumeCapacity(.{
-            .range = offsets.locToRange(tree.source, err.loc, server.offset_encoding),
-            .severity = .Error,
-            .code = .{ .string = err.code },
-            .source = "zls",
-            .message = err.message,
-        });
-    }
-
     return .{
         .uri = handle.uri,
         .diagnostics = diagnostics.items,
