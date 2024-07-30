@@ -2071,6 +2071,28 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .greater_than,
         .less_or_equal,
         .greater_or_equal,
+        => {
+            const ty = try analyser.resolveTypeOfNodeInternal(
+                .{ .node = datas[node].lhs, .handle = handle },
+            ) orelse return null;
+            const typeof = ty.typeOf(analyser);
+
+            if (typeof.data == .ip_index) {
+                const key = analyser.ip.indexToKey(typeof.data.ip_index.index);
+                if (key == .vector_type) {
+                    const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
+                        .vector_type = .{
+                            .len = key.vector_type.len,
+                            .child = .bool_type,
+                        },
+                    });
+
+                    return try Type.typeValFromIP(analyser, vector_ty_ip_index);
+                }
+            }
+            return try Type.typeValFromIP(analyser, .bool_type);
+        },
+
         .bool_and,
         .bool_or,
         .bool_not,
