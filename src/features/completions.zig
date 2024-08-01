@@ -603,6 +603,65 @@ fn kindToSortScore(kind: types.CompletionItemKind) []const u8 {
     };
 }
 
+fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.TokenIndex) !std.BufSet {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    switch (likely) {
+        .struct_field, .switch_case => {},
+        else => return std.BufSet.init(builder.arena),
+    }
+    const tree = builder.orig_handle.tree;
+    const token_tags = tree.tokens.items(.tag);
+
+    var used_members_set = std.BufSet.init(builder.arena);
+
+    var depth: usize = 0;
+    var i: Ast.Node.Index = @max(dot_token_index, 2);
+    while (i > 0) : (i -= 1) {
+        switch (token_tags[i]) {
+            .r_brace => {
+                depth += 1;
+            },
+            .l_brace => {
+                if (depth == 0) break;
+                depth -= 1;
+            },
+            .equal, .equal_angle_bracket_right, .comma => {
+                if (depth > 0) continue;
+                if (token_tags[i - 1] == .identifier and token_tags[i - 2] == .period) {
+                    try used_members_set.insert(tree.tokenSlice(i - 1));
+                    i -= 1;
+                }
+            },
+            else => {},
+        }
+    }
+    depth = 0;
+    i = @max(dot_token_index, 2);
+    while (i < tree.tokens.len) : (i += 1) {
+        const tag = token_tags[i];
+        switch (tag) {
+            .l_brace => {
+                depth += 1;
+            },
+            .r_brace => {
+                if (depth == 0) break;
+                depth -= 1;
+            },
+            .equal, .equal_angle_bracket_right, .comma => {
+                if (depth > 0) continue;
+                if (token_tags[i - 1] == .identifier and token_tags[i - 2] == .period) {
+                    try used_members_set.insert(tree.tokenSlice(i - 1));
+                }
+            },
+            else => {},
+        }
+    }
+
+    return used_members_set;
+}
+
 fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -615,6 +674,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 
     blk: {
         const dot_context = getEnumLiteralContext(tree, dot_token_index) orelse break :blk;
+        const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
         const containers = try collectContainerNodes(
             builder,
             builder.orig_handle,
@@ -622,7 +682,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
             dot_context,
         );
         for (containers) |container| {
-            try collectContainerFields(builder, dot_context.likely, container);
+            try collectContainerFields(builder, dot_context.likely, container, used_members_set);
         }
     }
 
@@ -1177,6 +1237,7 @@ fn collectContainerFields(
     builder: *Builder,
     likely: EnumLiteralContext.Likely,
     container: Analyser.Type,
+    omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const node_handle = switch (container.data) {
@@ -1190,6 +1251,7 @@ fn collectContainerFields(
     for (container_decl.ast.members) |member| {
         const field = handle.tree.fullContainerField(member) orelse continue;
         const name = handle.tree.tokenSlice(field.ast.main_token);
+        if (omit_members.contains(name)) continue;
         if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
             try builder.completions.append(builder.arena, .{
                 .label = name,
