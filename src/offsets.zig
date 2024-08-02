@@ -185,13 +185,11 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
 }
 
 test sourceIndexToTokenIndex {
-    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶a", .zig);
+    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶\na", .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(std.zig.Token.Tag, &.{
-        .invalid, // 🠁
-        .invalid, // ↉
-        .invalid, // ¶
+        .invalid, // 🠁↉¶
         .identifier, // a
         .eof,
     }, tree.tokens.items(.tag));
@@ -203,18 +201,22 @@ test sourceIndexToTokenIndex {
     try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 3));
 
     // ↉
-    try std.testing.expectEqual(1, sourceIndexToTokenIndex(tree, 4));
-    try std.testing.expectEqual(1, sourceIndexToTokenIndex(tree, 5));
-    try std.testing.expectEqual(1, sourceIndexToTokenIndex(tree, 6));
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 4));
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 5));
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 6));
 
     // ¶
-    try std.testing.expectEqual(2, sourceIndexToTokenIndex(tree, 7));
-    try std.testing.expectEqual(2, sourceIndexToTokenIndex(tree, 8));
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 7));
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 8));
+
+    // \n
+    try std.testing.expectEqual(0, sourceIndexToTokenIndex(tree, 9));
 
     // a
-    try std.testing.expectEqual(3, sourceIndexToTokenIndex(tree, 9));
+    try std.testing.expectEqual(1, sourceIndexToTokenIndex(tree, 10));
 
-    try std.testing.expectEqual(4, sourceIndexToTokenIndex(tree, 10));
+    // EOF
+    try std.testing.expectEqual(2, sourceIndexToTokenIndex(tree, 11));
 }
 
 fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
@@ -295,22 +297,18 @@ pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
 }
 
 test tokenToIndex {
-    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶a", .zig);
+    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶\na", .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(std.zig.Token.Tag, &.{
-        .invalid, // 🠁
-        .invalid, // ↉
-        .invalid, // ¶
+        .invalid, // 🠁↉¶
         .identifier, // a
         .eof,
     }, tree.tokens.items(.tag));
 
-    try std.testing.expectEqual(0, tokenToIndex(tree, 0)); // 🠁
-    try std.testing.expectEqual(4, tokenToIndex(tree, 1)); // ↉
-    try std.testing.expectEqual(7, tokenToIndex(tree, 2)); // ¶
-    try std.testing.expectEqual(9, tokenToIndex(tree, 3)); // a
-    try std.testing.expectEqual(10, tokenToIndex(tree, 4)); // a
+    try std.testing.expectEqual(0, tokenToIndex(tree, 0)); // 🠁↉¶
+    try std.testing.expectEqual(10, tokenToIndex(tree, 1)); // a
+    try std.testing.expectEqual(11, tokenToIndex(tree, 2)); // EOF
 }
 
 pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
