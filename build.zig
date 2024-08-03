@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// fix(fmt): pointer type syntax to index (take 2) (#20336)
+/// std.zig.tokenizer: simplification and spec conformance (#20885)
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
 const minimum_build_zig_version = "0.14.0-dev.764+eb1a199df";
