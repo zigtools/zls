@@ -152,17 +152,13 @@ pub fn StringPool(comptime config: Config) type {
             return .{ .slice = pool.stringToSliceUnsafe(index) };
         }
 
-        // usingnamespace is used here instead of doing a @compileError if
-        // `config.thread_safe` so that `std.testing.refAllDeclsRecursive` works.
-        usingnamespace if (config.thread_safe) struct {} else struct {
-            /// returns the underlying slice from an interned string
-            /// equal strings are guaranteed to share the same storage
-            ///
-            /// only callable when thread safety is disabled.
-            pub fn stringToSlice(pool: *Pool, index: String) [:0]const u8 {
-                return pool.stringToSliceUnsafe(index);
-            }
-        };
+        /// returns the underlying slice from an interned string
+        /// equal strings are guaranteed to share the same storage
+        ///
+        /// only callable when thread safety is disabled.
+        pub const stringToSlice = if (config.thread_safe) @"usingnamespace" else stringToSliceUnsafe;
+
+        const @"usingnamespace" = {};
 
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage
