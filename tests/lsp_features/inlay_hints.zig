@@ -223,6 +223,10 @@ test "inlay destructuring" {
 }
 test "var decl" {
     try testInlayHints(
+        \\const a<@Vector(2,u8)> = @Vector(2, u8){1,2};
+        \\const foo<@Vector(2,bool)> = a == a;
+    , .{ .kind = .Type });
+    try testInlayHints(
         \\const foo<comptime_int> = 5;
     , .{ .kind = .Type });
     try testInlayHints(
