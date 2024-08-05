@@ -871,32 +871,30 @@ fn extractBuildInformation(
         //     step_dependencies.putAssumeCapacity(dependency_step, {});
         // }
 
-        if (compile.root_module.root_source_file) |root_source_file| {
-            try helper.addStepDependencies(&step_dependencies, root_source_file);
-        }
+        var it = compile.root_module.iterateDependencies(compile, false);
+        while (it.next()) |item| {
+            if (item.module.root_source_file) |root_source_file| {
+                try helper.addStepDependencies(&step_dependencies, root_source_file);
+            }
 
-        for (compile.root_module.import_table.values()) |module| {
-            const root_source_file = module.root_source_file orelse continue;
-            try helper.addStepDependencies(&step_dependencies, root_source_file);
-        }
-
-        for (compile.root_module.include_dirs.items) |include_dir| {
-            switch (include_dir) {
-                .path,
-                .path_system,
-                .path_after,
-                .framework_path,
-                .framework_path_system,
-                => |include_path| try helper.addStepDependencies(&step_dependencies, include_path),
-                .config_header_step => |config_header| try step_dependencies.put(config_header.output_file.step, {}),
-                .other_step => |other| {
-                    if (other.generated_h) |header| {
-                        try step_dependencies.put(header.step, {});
-                    }
-                    if (other.installed_headers_include_tree) |include_tree| {
-                        try step_dependencies.put(include_tree.generated_directory.step, {});
-                    }
-                },
+            for (item.module.include_dirs.items) |include_dir| {
+                switch (include_dir) {
+                    .path,
+                    .path_system,
+                    .path_after,
+                    .framework_path,
+                    .framework_path_system,
+                    => |include_path| try helper.addStepDependencies(&step_dependencies, include_path),
+                    .config_header_step => |config_header| try step_dependencies.put(config_header.output_file.step, {}),
+                    .other_step => |other| {
+                        if (other.generated_h) |header| {
+                            try step_dependencies.put(header.step, {});
+                        }
+                        if (other.installed_headers_include_tree) |include_tree| {
+                            try step_dependencies.put(include_tree.generated_directory.step, {});
+                        }
+                    },
+                }
             }
         }
     }
@@ -918,53 +916,52 @@ fn extractBuildInformation(
     // iterate through all `Step.Compile` steps and extract the necessary information
     for (steps.keys()) |step| {
         const compile = step.cast(Step.Compile) orelse continue;
-        const owner = compile.root_module.owner;
 
-        if (compile.root_module.root_source_file) |root_source_file| {
-            _ = try packages.addPackage("root", root_source_file.getPath(owner));
-        }
+        var it = compile.root_module.iterateDependencies(compile, false);
+        while (it.next()) |item| {
+            if (item.module.root_source_file) |root_source_file| {
+                _ = try packages.addPackage(item.name, root_source_file.getPath(item.module.owner));
+            }
 
-        for (compile.root_module.import_table.keys(), compile.root_module.import_table.values()) |import_name, module| {
-            const root_source_file = module.root_source_file orelse continue;
-            _ = try packages.addPackage(import_name, root_source_file.getPath(module.owner));
-        }
+            if (item.compile) |exe| {
+                try processPkgConfig(arena, &include_dirs, exe);
+            }
 
-        try processPkgConfig(arena, &include_dirs, compile);
+            for (item.module.include_dirs.items) |include_dir| {
+                switch (include_dir) {
+                    .path,
+                    .path_system,
+                    .path_after,
+                    .framework_path,
+                    .framework_path_system,
+                    => |include_path| try include_dirs.put(arena, include_path.getPath(item.module.owner), {}),
 
-        for (compile.root_module.include_dirs.items) |include_dir| {
-            switch (include_dir) {
-                .path,
-                .path_system,
-                .path_after,
-                .framework_path,
-                .framework_path_system,
-                => |include_path| try include_dirs.put(arena, include_path.getPath(owner), {}),
-
-                .other_step => |other| {
-                    if (other.generated_h) |header| {
+                    .other_step => |other| {
+                        if (other.generated_h) |header| {
+                            try include_dirs.put(
+                                arena,
+                                std.fs.path.dirname(header.getPath()).?,
+                                {},
+                            );
+                        }
+                        if (other.installed_headers_include_tree) |include_tree| {
+                            try include_dirs.put(
+                                arena,
+                                include_tree.generated_directory.getPath(),
+                                {},
+                            );
+                        }
+                    },
+                    .config_header_step => |config_header| {
+                        const full_file_path = config_header.output_file.getPath();
+                        const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
                         try include_dirs.put(
                             arena,
-                            std.fs.path.dirname(header.getPath()).?,
+                            header_dir_path,
                             {},
                         );
-                    }
-                    if (other.installed_headers_include_tree) |include_tree| {
-                        try include_dirs.put(
-                            arena,
-                            include_tree.generated_directory.getPath(),
-                            {},
-                        );
-                    }
-                },
-                .config_header_step => |config_header| {
-                    const full_file_path = config_header.output_file.getPath();
-                    const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
-                    try include_dirs.put(
-                        arena,
-                        header_dir_path,
-                        {},
-                    );
-                },
+                    },
+                }
             }
         }
     }

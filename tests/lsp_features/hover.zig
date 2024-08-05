@@ -317,8 +317,8 @@ test "struct" {
     );
     try testHover(
         \\const <cursor>S = struct {
-        \\	fn foo() void {
-        \\		// many lines here
+        \\  fn foo() void {
+        \\      // many lines here
         \\    }
         \\
         \\         fld: u8,
