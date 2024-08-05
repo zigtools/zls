@@ -2074,7 +2074,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const ty = try analyser.resolveTypeOfNodeInternal(
                 .{ .node = datas[node].lhs, .handle = handle },
-            ) orelse return null;
+            ) orelse return try Type.typeValFromIP(analyser, .bool_type);
             const typeof = ty.typeOf(analyser);
 
             if (typeof.data == .ip_index) {
