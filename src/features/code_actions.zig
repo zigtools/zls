@@ -580,7 +580,7 @@ const DiagnosticKind = union(enum) {
 fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     // check of the loc points to a valid identifier
     for (offsets.locToSlice(text, loc)) |c| {
-        if (!isSymbolChar(c)) return null;
+        if (!Analyser.isSymbolChar(c)) return null;
     }
 
     // check if the identifier is followed by a colon
@@ -683,8 +683,4 @@ test getCaptureLoc {
     try std.testing.expect(getCaptureLoc("||", .{ .start = 1, .end = 1 }) == null);
     try std.testing.expect(getCaptureLoc("| |", .{ .start = 1, .end = 3 }) == null);
     try std.testing.expect(getCaptureLoc("|    |", .{ .start = 1, .end = 6 }) == null);
-}
-
-fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlphanumeric(char) or char == '_';
 }

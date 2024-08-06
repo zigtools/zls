@@ -1776,6 +1776,19 @@ test "weird code" {
         .{ "error", .keyword, .{} },
         .{ "foo", .variable, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = union {
+        \\    .bar = 5,
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "union", .keyword, .{} },
+        .{ "bar", .enumMember, .{} },
+        .{ "=", .operator, .{} },
+        .{ "5", .number, .{} },
+    });
 }
 
 const TokenData = struct {

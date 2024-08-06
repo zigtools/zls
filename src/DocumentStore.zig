@@ -265,6 +265,14 @@ pub const Handle = struct {
         return try self.getDocumentScopeCold();
     }
 
+    /// Asserts that `getDocumentScope` has been previously called on `handle`.
+    pub fn getDocumentScopeCached(self: *Handle) DocumentScope {
+        if (builtin.mode == .Debug) {
+            std.debug.assert(self.getStatus().has_document_scope);
+        }
+        return self.impl.document_scope;
+    }
+
     pub fn getZir(self: *Handle) error{OutOfMemory}!Zir {
         if (self.getStatus().has_zir) return self.impl.zir;
         return try self.getZirCold();
