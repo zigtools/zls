@@ -3323,6 +3323,7 @@ pub const PositionContext = union(enum) {
     global_error_set,
     enum_literal: offsets.Loc,
     number_literal: offsets.Loc,
+    char_literal: offsets.Loc,
     /// XXX: Internal use only, currently points to the loc of the first l_paren
     parens_expr: offsets.Loc,
     pre_label,
@@ -3342,6 +3343,7 @@ pub const PositionContext = union(enum) {
             .var_access => |r| r,
             .enum_literal => |r| r,
             .number_literal => |r| r,
+            .char_literal => |r| r,
             .parens_expr => |r| r,
             .pre_label => null,
             .label => null,
@@ -3391,17 +3393,28 @@ pub fn getPositionContext(
     defer tracy_zone.end();
 
     var new_index = doc_index;
-    if (lookahead and new_index + 2 < text.len) {
-        if (text[new_index] == '@') new_index += 2;
-        while (new_index < text.len and isSymbolChar(text[new_index])) : (new_index += 1) {}
-        switch (text[new_index]) {
-            ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
-                var b_index = new_index + 1;
-                while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
-                if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
-            },
-            // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
-            else => {},
+    if (lookahead) {
+        // looking for possible end of char literal
+        if (std.mem.indexOf(u8, text[doc_index..@min(doc_index + 2, text.len)], &.{'\''})) |char_index| {
+            if (text[new_index + char_index - 1] == '\\') {
+                // handles escaped single quotes '\''
+                new_index = @min(new_index + char_index + 2, text.len - 1);
+            } else {
+                new_index += char_index + 1;
+            }
+        } else if (new_index + 2 < text.len) {
+            if (text[new_index] == '@') new_index += 2;
+            while (new_index < text.len and isSymbolChar(text[new_index])) : (new_index += 1) {}
+            switch (text[new_index]) {
+                ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
+                    var b_index = new_index + 1;
+                    while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
+                    if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
+                },
+
+                // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
+                else => {},
+            }
         }
     }
 
@@ -3565,6 +3578,11 @@ pub fn getPositionContext(
                 .number_literal => {
                     if (tok.loc.start <= doc_index and tok.loc.end >= doc_index) {
                         return PositionContext{ .number_literal = tok.loc };
+                    }
+                },
+                .char_literal => {
+                    if (tok.loc.start <= doc_index and tok.loc.end >= doc_index) {
+                        return PositionContext{ .char_literal = tok.loc };
                     }
                 },
                 else => curr_ctx.ctx = .empty,

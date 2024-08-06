@@ -92,6 +92,40 @@ test "literal" {
     );
 }
 
+test "char literal" {
+    try testHover(
+        \\const foo = '<cursor>a';
+    ,
+        \\| Base | Value     |
+        \\| ---- | --------- |
+        \\| BIN  | 0b1100001 |
+        \\| OCT  | 0o141     |
+        \\| DEC  | 97        |
+        \\| HEX  | 0x61      |
+    );
+
+    try testHover(
+        \\const foo = '<cursor>\'';
+    ,
+        \\| Base | Value    |
+        \\| ---- | -------- |
+        \\| BIN  | 0b100111 |
+        \\| OCT  | 0o47     |
+        \\| DEC  | 39       |
+        \\| HEX  | 0x27     |
+    );
+
+    try testHover(
+        \\const foo = '\'<cursor>';
+    ,
+        \\| Base | Value    |
+        \\| ---- | -------- |
+        \\| BIN  | 0b100111 |
+        \\| OCT  | 0o47     |
+        \\| DEC  | 39       |
+        \\| HEX  | 0x27     |
+    );
+}
 test "integer literal" {
     try testHover(
         \\const foo = 4<cursor>2;
