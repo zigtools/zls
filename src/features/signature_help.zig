@@ -257,7 +257,7 @@ pub fn getSignatureInfo(
                     );
                 }
 
-                const name_loc = Analyser.identifierLocFromPosition(loc.end - 1, handle) orelse {
+                const name_loc = Analyser.identifierLocFromIndex(handle.tree, loc.end - 1) orelse {
                     try symbol_stack.append(arena, .l_paren);
                     continue;
                 };

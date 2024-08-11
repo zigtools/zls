@@ -596,6 +596,61 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
+/// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
+/// if the `source_index` points to `@"name"`, the source location of `name` is returned.
+pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
+    std.debug.assert(source_index < tree.source.len);
+
+    var start = source_index;
+    while (start > 0 and isSymbolChar(tree.source[start - 1])) {
+        start -= 1;
+    }
+
+    var end = source_index;
+    while (end < tree.source.len and isSymbolChar(tree.source[end])) {
+        end += 1;
+    }
+
+    if (start == end) return null;
+    return .{ .start = start, .end = end };
+}
+
+test identifierLocFromIndex {
+    var tree = try Ast.parse(std.testing.allocator,
+        \\;name;  ;@builtin; ;@"escaped";
+    , .zig);
+    defer tree.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualSlices(
+        std.zig.Token.Tag,
+        &.{
+            .semicolon, .identifier, .semicolon,
+            .semicolon, .builtin,    .semicolon,
+            .semicolon, .identifier, .semicolon,
+            .eof,
+        },
+        tree.tokens.items(.tag),
+    );
+
+    std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, .{ .start = 1, .end = 5 })));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 1));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 2));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 5));
+
+    std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, .{ .start = 10, .end = 17 })));
+    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 9));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 10));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 10));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 14));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 17));
+
+    std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, .{ .start = 22, .end = 29 })));
+    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 20));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 22));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 25));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 29));
+}
+
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
 /// Examples:
 ///```zig
@@ -4617,28 +4672,6 @@ pub fn resolveExpressionTypeFromAncestors(
     }
 
     return null;
-}
-
-pub fn identifierLocFromPosition(pos_index: usize, handle: *DocumentStore.Handle) ?std.zig.Token.Loc {
-    if (pos_index + 1 >= handle.tree.source.len) return null;
-    var start_idx = pos_index;
-
-    while (start_idx > 0 and Analyser.isSymbolChar(handle.tree.source[start_idx - 1])) {
-        start_idx -= 1;
-    }
-
-    const tree = handle.tree;
-    const token_index = offsets.sourceIndexToTokenIndex(tree, start_idx);
-    if (tree.tokens.items(.tag)[token_index] == .identifier)
-        return offsets.identifierTokenToNameLoc(tree, token_index);
-
-    var end_idx = pos_index;
-    while (end_idx < handle.tree.source.len and Analyser.isSymbolChar(handle.tree.source[end_idx])) {
-        end_idx += 1;
-    }
-
-    if (end_idx <= start_idx) return null;
-    return .{ .start = start_idx, .end = end_idx };
 }
 
 pub fn getSymbolEnumLiteral(
