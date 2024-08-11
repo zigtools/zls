@@ -4,7 +4,7 @@
     .version = "0.14.0-dev",
     // Must match the `minimum_build_zig_version` in `build.zig`
     .minimum_zig_version = "0.14.0-dev.764+eb1a199df",
-    // If you do not use Nix, a ZLS maintainer or Nix user can take care of this.
+    // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
     // nix run github:Cloudef/zig2nix#zon2nix -- build.zig.zon > deps.nix

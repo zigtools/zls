@@ -8,6 +8,12 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// std.zig.tokenizer: simplification and spec conformance (#20885)
 ///
+/// If you do not use Nix, a ZLS maintainer can take care of this.
+/// Whenever this version is increased, run the following command:
+/// ```bash
+/// nix flake update --commit-lock-file
+/// ```
+///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
 const minimum_build_zig_version = "0.14.0-dev.764+eb1a199df";
 
