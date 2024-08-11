@@ -353,12 +353,12 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
     const uri: std.Uri = if (b.graph.env_map.get("ZLS_WORKER_ENDPOINT")) |endpoint| blk: {
         var uri = std.Uri.parse(endpoint) catch std.debug.panic("invalid URI: '{s}'", .{endpoint});
         if (!uri.path.isEmpty()) std.debug.panic("ZLS_WORKER_ENDPOINT URI must have no path component: '{s}'", .{endpoint});
-        uri.path = .{ .raw = "/publish" };
+        uri.path = .{ .raw = "/v1/zls/publish" };
         break :blk uri;
     } else .{
         .scheme = "https",
         .host = .{ .raw = "releases.zigtools.org" },
-        .path = .{ .raw = "/publish" },
+        .path = .{ .raw = "/v1/zls/publish" },
     };
 
     const authorization: std.http.Client.Request.Headers.Value = blk: {
