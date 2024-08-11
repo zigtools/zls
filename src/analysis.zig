@@ -3528,10 +3528,7 @@ pub fn getPositionContext(
                     },
                     else => {},
                 },
-                .builtin => switch (curr_ctx.ctx) {
-                    .empty, .pre_label => curr_ctx.ctx = .{ .builtin = tok.loc },
-                    else => {},
-                },
+                .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
                 .period, .period_asterisk => switch (curr_ctx.ctx) {
                     .empty, .pre_label => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                     .enum_literal => curr_ctx.ctx = .empty,
