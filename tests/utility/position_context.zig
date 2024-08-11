@@ -291,6 +291,37 @@ test "builtin" {
     );
 
     try testContext(
+        \\var foo: <cursor>@
+    ,
+        .empty,
+        null,
+    );
+    try testContext(
+        \\var foo: <cursor>@Thi();
+    ,
+        .builtin,
+        "@Thi",
+    );
+    try testContext(
+        \\var foo: @<cursor>Thi();
+    ,
+        .builtin,
+        "@Thi",
+    );
+    try testContext(
+        \\var foo: @Th<cursor>i();
+    ,
+        .builtin,
+        "@Thi",
+    );
+    try testContext(
+        \\var foo: @Thi<cursor>();
+    ,
+        .builtin,
+        "@Thi",
+    );
+
+    try testContext(
         \\fn foo() void { <cursor>@setRuntime(false); };
     ,
         .builtin,
