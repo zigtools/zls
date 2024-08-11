@@ -1587,6 +1587,49 @@ test "switch cases" {
         .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
+
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\    sef3,
+        \\    sef4,
+        \\};
+        \\fn retEnum(se: SomeEnum) void {
+        \\    switch(se) {
+        \\       .sef1 => {},
+        \\       .sef4 => {},
+        \\       .<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "sef2", .kind = .EnumMember },
+        .{ .label = "sef3", .kind = .EnumMember },
+    });
+
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\    sef3,
+        \\    sef4,
+        \\};
+        \\fn retEnum(se: SomeEnum) void {
+        \\    switch(se) {
+        \\       .sef1, .sef4 => {},
+        \\       .<cursor>
+        \\       .sef3 => {},
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
     try testCompletion(
         \\const Birdie = enum {
         \\    canary,
@@ -1689,7 +1732,6 @@ test "switch cases" {
         \\    }
         \\}
     , &.{
-        .{ .label = "sef1", .kind = .EnumMember },
         .{ .label = "sef2", .kind = .EnumMember },
     });
 }
@@ -1870,7 +1912,7 @@ test "error union" {
     });
 }
 
-test "struct init" {
+test "structinit" {
     try testCompletion(
         \\const S = struct {
         \\    alpha: u32,
@@ -1889,11 +1931,7 @@ test "struct init" {
         \\};
         \\const foo = S{ .alpha = 3, .<cursor>, .gamma = null };
     , &.{
-        // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
-        // TODO `gamma` should be excluded
-        .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
     });
     try testCompletion(
         \\const S = struct {
@@ -1902,8 +1940,6 @@ test "struct init" {
         \\};
         \\const foo = S{ .alpha = S{ .beta = "{}" }, .<cursor> };
     , &.{
-        // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
     try testCompletion(
@@ -1936,11 +1972,7 @@ test "struct init" {
         \\};
         \\const foo = S{ .gamma = undefined, .<cursor> , .alpha = undefined };
     , &.{
-        // TODO `gamma` should be excluded
-        .{ .label = "gamma", .kind = .Field, .detail = "?*S" },
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
-        // TODO `alpha` should be excluded
-        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
     });
     try testCompletion(
         \\const S = struct {
