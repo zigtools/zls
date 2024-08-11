@@ -13,15 +13,15 @@ body:
     id: zig-version
     attributes:
       label: Zig Version
-      description: "The output of `zig version`"
+      description: "The output of `zig version` or git commit hash"
       placeholder: "0.9.0-dev.1275+ac52e0056"
     validations:
       required: true
   - type: input
     id: zls-version
     attributes:
-      label: Zig Language Server Version
-      description: "Your ZLS release or commit"
+      label: ZLS Version
+      description: "The output of `zls --version` or git commit hash"
       placeholder: "b21039d51261923c665d3bc58fadc4b4d5e221ea"
     validations:
       required: true
