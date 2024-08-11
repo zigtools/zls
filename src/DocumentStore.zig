@@ -385,11 +385,9 @@ pub const Handle = struct {
         while (true) {
             const status = self.getStatus();
             if (status.has_document_scope) break;
-            if (status.has_document_scope_lock) {
-                // another thread is currently computing the document scope
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0) {
+            if (status.has_document_scope_lock or
+                self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0)
+            {
                 // another thread is currently computing the document scope
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
@@ -424,11 +422,9 @@ pub const Handle = struct {
         while (true) {
             const status = self.getStatus();
             if (status.has_zir) break;
-            if (status.has_zir_lock) {
-                // another thread is currently computing the ZIR
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0) {
+            if (status.has_zir_lock or
+                self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0)
+            {
                 // another thread is currently computing the ZIR
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
