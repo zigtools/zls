@@ -3993,6 +3993,8 @@ pub fn collectDeclarationsOfContainer(
 
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+        const decl_with_handle = DeclWithHandle{ .decl = decl, .handle = handle };
+        if (handle != original_handle and !decl_with_handle.isPublic()) continue;
 
         switch (decl) {
             .ast_node => |node| switch (node_tags[node]) {
@@ -4036,8 +4038,6 @@ pub fn collectDeclarationsOfContainer(
             else => {},
         }
 
-        const decl_with_handle = DeclWithHandle{ .decl = decl, .handle = handle };
-        if (handle != original_handle and !decl_with_handle.isPublic()) continue;
         try decl_collection.append(analyser.arena.allocator(), decl_with_handle);
     }
 
