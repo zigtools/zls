@@ -877,6 +877,12 @@ fn extractBuildInformation(
                 try helper.addStepDependencies(&step_dependencies, root_source_file);
             }
 
+            for (item.module.import_table.values()) |import| {
+                if (import.root_source_file) |root_source_file| {
+                    try helper.addStepDependencies(&step_dependencies, root_source_file);
+                }
+            }
+
             for (item.module.include_dirs.items) |include_dir| {
                 switch (include_dir) {
                     .path,
@@ -921,6 +927,12 @@ fn extractBuildInformation(
         while (it.next()) |item| {
             if (item.module.root_source_file) |root_source_file| {
                 _ = try packages.addPackage(item.name, root_source_file.getPath(item.module.owner));
+            }
+
+            for (item.module.import_table.keys(), item.module.import_table.values()) |name, import| {
+                if (import.root_source_file) |root_source_file| {
+                    _ = try packages.addPackage(name, root_source_file.getPath(item.module.owner));
+                }
             }
 
             if (item.compile) |exe| {
