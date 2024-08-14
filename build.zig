@@ -150,7 +150,7 @@ pub fn build(b: *Build) !void {
             .root_source_file = b.path("src/main.zig"),
             .version = resolved_zls_version,
             .optimize = optimize,
-            .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_000_000_000 else 1_500_000_000,
+            .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_500_000_000,
             .single_threaded = single_threaded,
             .pic = pie,
             .use_llvm = use_llvm,
@@ -367,27 +367,35 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         .path = .{ .raw = "/v1/zls/publish" },
     };
 
-    const authorization: std.http.Client.Request.Headers.Value = blk: {
-        const api_token = b.graph.env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
-        const usename_password = b.fmt("admin:{s}", .{api_token});
-        const buffer = b.allocator.alloc(u8, std.base64.standard.Encoder.calcSize(usename_password.len)) catch @panic("OOM");
-        const auth = std.base64.standard.Encoder.encode(buffer, usename_password);
-        break :blk .{ .override = b.fmt("Basic {s}", .{auth}) };
-    };
+    const password = b.graph.env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
 
-    var publish_artifacts = PostMultiPartForm.create(b, uri, .{ .authorization = authorization });
+    const publish_exe = b.addExecutable(.{
+        .name = "publish",
+        .target = b.graph.host,
+        .root_source_file = b.path("src/tools/publish_http_form.zig"),
+    });
+
+    // var publish_artifacts = b.addSystemCommand("curl")
+    var publish_artifacts = b.addRunArtifact(publish_exe);
     publish_step.dependOn(&publish_artifacts.step);
 
+    publish_artifacts.addArgs(&.{
+        b.fmt("{}", .{uri}),
+        "--user",
+        b.fmt("admin:{s}", .{password}),
+    });
     // It is possible for the version to be something like `0.12.0-dev` when `git describe` failed.
     // Ideally we would want to report a failure about this when running one of the release/publish steps.
     // The problem is during the configure phase, it is not possible to know which top level steps gets run.
     // So instead we use rely on the release-worker to reject this version string during the make phase.
     // One possible alternative would be to use a configuration option (i.e. -Dpublish) to conditionally run an assertion.
-    publish_artifacts.addText("zls-version", b.fmt("{}", .{release_artifacts[0].version.?}));
-    publish_artifacts.addText("compatibility", "full");
-    publish_artifacts.addText("zig-version", builtin.zig_version_string);
-    publish_artifacts.addText("minimum-build-zig-version", minimum_build_zig_version);
-    publish_artifacts.addText("minimum-runtime-zig-version", minimum_runtime_zig_version);
+    publish_artifacts.addArgs(&.{
+        "--form", b.fmt("zls-version={}", .{release_artifacts[0].version.?}),
+        "--form", "compatibility=full",
+        "--form", b.fmt("zig-version={s}", .{builtin.zig_version_string}),
+        "--form", b.fmt("minimum-build-zig-version={s}", .{minimum_build_zig_version}),
+        "--form", b.fmt("minimum-runtime-zig-version={s}", .{minimum_runtime_zig_version}),
+    });
 
     var compressed_artifacts = std.StringArrayHashMap(std.Build.LazyPath).init(b.allocator);
 
@@ -443,7 +451,8 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 
         const install_tarball = b.addInstallFileWithDir(file_path, install_dir, file_name);
         release_step.dependOn(&install_tarball.step);
-        publish_artifacts.addFile(file_name, file_path);
+        publish_artifacts.addArg("--form");
+        publish_artifacts.addPrefixedFileArg(b.fmt("{s}=@", .{file_name}), file_path);
 
         if (release_minisign) {
             const minisign_basename = b.fmt("{s}.minisig", .{file_name});
@@ -455,151 +464,12 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 
             const install_minising = b.addInstallFileWithDir(minising_file_path, install_dir, minisign_basename);
             release_step.dependOn(&install_minising.step);
-            publish_artifacts.addFile(minisign_basename, minising_file_path);
+
+            publish_artifacts.addArg("--form");
+            publish_artifacts.addPrefixedFileArg(b.fmt("{s}=@", .{minisign_basename}), minising_file_path);
         }
     }
 }
-
-const PostMultiPartForm = struct {
-    pub const base_id: Build.Step.Id = .custom;
-
-    step: Build.Step,
-    uri: std.Uri,
-    headers: std.http.Client.Request.Headers,
-    fields: std.ArrayListUnmanaged(Field) = .{},
-
-    pub const Field = struct {
-        name: []const u8,
-        value: FieldValue,
-        content_type: std.http.Client.Request.Headers.Value,
-    };
-
-    pub const FieldValue = union(enum) {
-        lazy_path: Build.LazyPath,
-        bytes: []u8,
-    };
-
-    pub fn create(owner: *Build, uri: std.Uri, headers: std.http.Client.Request.Headers) *PostMultiPartForm {
-        const self = owner.allocator.create(PostMultiPartForm) catch @panic("OOM");
-        self.* = .{
-            .step = Build.Step.init(.{
-                .id = base_id,
-                .name = "PostMultiPartForm",
-                .owner = owner,
-                .makeFn = make,
-            }),
-            .uri = std.Uri.parse(owner.fmt("{}", .{uri})) catch unreachable, // super efficient dupe
-            .headers = headers,
-        };
-        return self;
-    }
-
-    pub fn addText(self: *PostMultiPartForm, name: []const u8, text: []const u8) void {
-        const b = self.step.owner;
-        self.fields.append(b.allocator, .{
-            .name = b.dupe(name),
-            .value = .{ .bytes = b.dupe(text) },
-            .content_type = .omit,
-        }) catch @panic("OOM");
-    }
-
-    pub fn addFile(self: *PostMultiPartForm, name: []const u8, path: Build.LazyPath) void {
-        const b = self.step.owner;
-        path.addStepDependencies(&self.step);
-        self.fields.append(b.allocator, .{
-            .name = b.dupe(name),
-            .value = .{ .lazy_path = path },
-            .content_type = .{ .override = "application/octet-stream" },
-        }) catch @panic("OOM");
-    }
-
-    fn make(step: *Build.Step, options: Build.Step.MakeOptions) !void {
-        _ = options;
-        const b = step.owner;
-        const self: *const PostMultiPartForm = @fieldParentPtr("step", step);
-
-        var client = std.http.Client{ .allocator = b.allocator };
-        defer client.deinit();
-        try client.initDefaultProxies(b.allocator);
-
-        var server_header_buffer: [16 * 1024]u8 = undefined;
-        var request_options: std.http.Client.RequestOptions = .{
-            .keep_alive = false,
-            .server_header_buffer = &server_header_buffer,
-            .headers = self.headers,
-        };
-
-        var boundary: [64 + 3]u8 = undefined;
-        std.debug.assert((std.fmt.bufPrint(
-            &boundary,
-            "{x:0>16}-{x:0>16}-{x:0>16}-{x:0>16}",
-            .{ std.crypto.random.int(u64), std.crypto.random.int(u64), std.crypto.random.int(u64), std.crypto.random.int(u64) },
-        ) catch unreachable).len == boundary.len);
-
-        request_options.headers.content_type = .{ .override = b.fmt("multipart/form-data; boundary={s}", .{boundary}) };
-
-        var request = try client.open(.POST, self.uri, request_options);
-        defer request.deinit();
-        request.transfer_encoding = .chunked;
-
-        try request.send();
-
-        var buffered_writer = std.io.bufferedWriter(request.writer());
-        const writer = buffered_writer.writer();
-
-        for (self.fields.items) |field| {
-            try writer.print("--{s}\r\n", .{boundary});
-
-            switch (field.value) {
-                .lazy_path => |lazy_path| try writer.print(
-                    "Content-Disposition: form-data; name=\"{s}\"; filename=\"{s}\"\r\n",
-                    .{ field.name, std.fs.path.basename(lazy_path.getPath2(b, step)) },
-                ),
-                .bytes => try writer.print(
-                    "Content-Disposition: form-data; name=\"{s}\"\r\n",
-                    .{field.name},
-                ),
-            }
-
-            switch (field.content_type) {
-                .omit, .default => {},
-                .override => |content_type| try writer.print("Content-Type: {s}\r\n", .{content_type}),
-            }
-            try writer.writeAll("\r\n");
-
-            switch (field.value) {
-                .lazy_path => |lazy_path| {
-                    const path = lazy_path.getPath2(b, step);
-                    const file = try std.fs.openFileAbsolute(path, .{});
-                    defer file.close();
-
-                    var buffer: [16 * 1024]u8 = undefined;
-                    while (true) {
-                        const amt = try file.read(&buffer);
-                        if (amt == 0) break;
-                        try writer.writeAll(buffer[0..amt]);
-                    }
-                },
-                .bytes => |bytes| try writer.writeAll(bytes),
-            }
-            try writer.writeAll("\r\n");
-        }
-        try writer.print("--{s}--\r\n", .{boundary});
-
-        try buffered_writer.flush();
-
-        try request.finish();
-        try request.wait();
-
-        if (request.response.status.class() == .success) return;
-
-        return step.fail("response {s} ({d}): {s}", .{
-            request.response.status.phrase() orelse "",
-            @intFromEnum(request.response.status),
-            try request.reader().readAllAlloc(b.allocator, std.math.maxInt(u32)),
-        });
-    }
-};
 
 const Build = blk: {
     const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
