@@ -33,7 +33,7 @@ jobs:
 
       - name: Build and Publish artifacts
         run: |
-          echo $MINISIGN_SECRET_FILE > minisign.key
+          echo "${MINISIGN_SECRET_FILE}" > minisign.key
           zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary all
           rm -f minisign.key
         env:
