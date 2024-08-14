@@ -33,11 +33,9 @@ jobs:
 
       - name: Build and Publish artifacts
         run: |
-          trap "rm -f minisign.key" EXIT
-          set +x
-          echo "${{ secrets.MINISIGN_SECRET_FILE }}" > minisign.key
-          set -x
+          echo $MINISIGN_SECRET_FILE > minisign.key
           zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary all
           rm -f minisign.key
         env:
           ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
+          MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
