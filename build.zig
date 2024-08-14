@@ -356,6 +356,12 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
     const release_step = b.step("release", "Build all release artifacts. (requires tar and 7z)");
     const release_minisign = b.option(bool, "release-minisign", "Sign release artifacts with Minisign") orelse false;
 
+    const FileExtension = enum {
+        zip,
+        @"tar.xz",
+        @"tar.gz",
+    };
+
     const uri: std.Uri = if (b.graph.env_map.get("ZLS_WORKER_ENDPOINT")) |endpoint| blk: {
         var uri = std.Uri.parse(endpoint) catch std.debug.panic("invalid URI: '{s}'", .{endpoint});
         if (!uri.path.isEmpty()) std.debug.panic("ZLS_WORKER_ENDPOINT URI must have no path component: '{s}'", .{endpoint});
@@ -404,44 +410,52 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         const is_windows = resolved_target.os.tag == .windows;
         const exe_name = b.fmt("{s}{s}", .{ exe.name, resolved_target.exeFileExt() });
 
-        const extensions: []const []const u8 = if (is_windows) &.{"zip"} else &.{ "tar.xz", "tar.gz" };
+        const extensions: []const FileExtension = if (is_windows) &.{.zip} else &.{ .@"tar.xz", .@"tar.gz" };
 
         for (extensions) |extension| {
             const file_name = b.fmt("zls-{s}-{s}-{}.{s}", .{
                 @tagName(target_query.os_tag.?),
                 @tagName(target_query.cpu_arch.?),
                 exe.version.?,
-                extension,
+                @tagName(extension),
             });
 
             const compress_cmd = std.Build.Step.Run.create(b, "compress artifact");
-            if (is_windows) {
-                compress_cmd.step.max_rss = 165_000_000;
-                compress_cmd.addArgs(&.{ "7z", "a", "-mx=9" });
-                compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
-                compress_cmd.addArtifactArg(exe);
-                compress_cmd.addFileArg(exe.getEmittedPdb());
-                compress_cmd.addFileArg(b.path("LICENSE"));
-                compress_cmd.addFileArg(b.path("README.md"));
-            } else {
-                compress_cmd.step.max_rss = 240_000_000;
-                compress_cmd.setEnvironmentVariable("XZ_OPT", "-9");
-                compress_cmd.addArgs(&.{ "tar", "caf" });
-                compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
-                compress_cmd.addPrefixedDirectoryArg("-C", exe.getEmittedBinDirectory());
-                compress_cmd.addArg(exe_name);
+            compress_cmd.step.max_rss = switch (extension) {
+                .zip => 32 * 1024 * 1024, // 32 MiB
+                .@"tar.xz" => 256 * 1024 * 1024, // 256 MiB
+                .@"tar.gz" => 8 * 1024 * 1024, // 8 MiB
+            };
+            switch (extension) {
+                .zip => {
+                    compress_cmd.addArgs(&.{ "7z", "a", "-mx=9" });
+                    compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
+                    compress_cmd.addArtifactArg(exe);
+                    compress_cmd.addFileArg(exe.getEmittedPdb());
+                    compress_cmd.addFileArg(b.path("LICENSE"));
+                    compress_cmd.addFileArg(b.path("README.md"));
+                },
+                .@"tar.xz",
+                .@"tar.gz",
+                => {
+                    compress_cmd.setEnvironmentVariable("XZ_OPT", "-9");
+                    compress_cmd.addArgs(&.{ "tar", "caf" });
+                    compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
+                    compress_cmd.addPrefixedDirectoryArg("-C", exe.getEmittedBinDirectory());
+                    compress_cmd.addArg(exe_name);
 
-                compress_cmd.addPrefixedDirectoryArg("-C", b.path("."));
-                compress_cmd.addArg("LICENSE");
-                compress_cmd.addArg("README.md");
+                    compress_cmd.addPrefixedDirectoryArg("-C", b.path("."));
+                    compress_cmd.addArg("LICENSE");
+                    compress_cmd.addArg("README.md");
 
-                compress_cmd.addArgs(&.{
-                    "--sort=name",
-                    "--numeric-owner",
-                    "--owner=0",
-                    "--group=0",
-                    "--mtime=1970-01-01",
-                });
+                    compress_cmd.addArgs(&.{
+                        "--sort=name",
+                        "--numeric-owner",
+                        "--owner=0",
+                        "--group=0",
+                        "--mtime=1970-01-01",
+                    });
+                },
             }
         }
     }
