@@ -2,7 +2,7 @@
 //
 // The MIT License (Expat)
 //
-// Copyright (c) 2015-2022, Zig contributors
+// Copyright (c) Zig contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -88,44 +88,40 @@ pub const Ctx = if (enable) ___tracy_c_zone_context else struct {
 pub inline fn trace(comptime src: std.builtin.SourceLocation) Ctx {
     if (!enable) return .{};
 
+    const global = struct {
+        const loc: ___tracy_source_location_data = .{
+            .name = null,
+            .function = src.fn_name.ptr,
+            .file = src.file.ptr,
+            .line = src.line,
+            .color = 0,
+        };
+    };
+
     if (enable_callstack) {
-        return ___tracy_emit_zone_begin_callstack(&.{
-            .name = null,
-            .function = src.fn_name.ptr,
-            .file = src.file.ptr,
-            .line = src.line,
-            .color = 0,
-        }, callstack_depth, 1);
+        return ___tracy_emit_zone_begin_callstack(&global.loc, callstack_depth, 1);
     } else {
-        return ___tracy_emit_zone_begin(&.{
-            .name = null,
-            .function = src.fn_name.ptr,
-            .file = src.file.ptr,
-            .line = src.line,
-            .color = 0,
-        }, 1);
+        return ___tracy_emit_zone_begin(&global.loc, 1);
     }
 }
 
 pub inline fn traceNamed(comptime src: std.builtin.SourceLocation, comptime name: [:0]const u8) Ctx {
     if (!enable) return .{};
 
+    const global = struct {
+        const loc: ___tracy_source_location_data = .{
+            .name = name.ptr,
+            .function = src.fn_name.ptr,
+            .file = src.file.ptr,
+            .line = src.line,
+            .color = 0,
+        };
+    };
+
     if (enable_callstack) {
-        return ___tracy_emit_zone_begin_callstack(&.{
-            .name = name.ptr,
-            .function = src.fn_name.ptr,
-            .file = src.file.ptr,
-            .line = src.line,
-            .color = 0,
-        }, callstack_depth, 1);
+        return ___tracy_emit_zone_begin_callstack(&global.loc, callstack_depth, 1);
     } else {
-        return ___tracy_emit_zone_begin(&.{
-            .name = name.ptr,
-            .function = src.fn_name.ptr,
-            .file = src.file.ptr,
-            .line = src.line,
-            .color = 0,
-        }, 1);
+        return ___tracy_emit_zone_begin(&global.loc, 1);
     }
 }
 
@@ -193,8 +189,6 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         }
 
         fn freeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
-            const self: *Self = @ptrCast(@alignCast(ptr));
-            self.parent_allocator.rawFree(buf, buf_align, ret_addr);
             // this condition is to handle free being called on an empty slice that was never even allocated
             // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
             if (buf.len != 0) {
@@ -204,6 +198,8 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
                     free(buf.ptr);
                 }
             }
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.parent_allocator.rawFree(buf, buf_align, ret_addr);
         }
     };
 }
