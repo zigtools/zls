@@ -1340,7 +1340,10 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         try server.document_store.invalidateBuildFile(uri);
     }
 
-    if (std.process.can_spawn and server.config.enable_build_on_save) {
+    if (std.process.can_spawn and
+        server.config.enable_build_on_save and
+        server.client_capabilities.supports_publish_diagnostics)
+    {
         try server.pushJob(.run_build_on_save);
     }
 
