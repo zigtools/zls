@@ -265,6 +265,14 @@ pub const Handle = struct {
         return try self.getDocumentScopeCold();
     }
 
+    /// Asserts that `getDocumentScope` has been previously called on `handle`.
+    pub fn getDocumentScopeCached(self: *Handle) DocumentScope {
+        if (builtin.mode == .Debug) {
+            std.debug.assert(self.getStatus().has_document_scope);
+        }
+        return self.impl.document_scope;
+    }
+
     pub fn getZir(self: *Handle) error{OutOfMemory}!Zir {
         if (self.getStatus().has_zir) return self.impl.zir;
         return try self.getZirCold();
@@ -377,15 +385,14 @@ pub const Handle = struct {
         while (true) {
             const status = self.getStatus();
             if (status.has_document_scope) break;
-            if (status.has_document_scope_lock) {
-                // another thread is currently computing the document scope
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0) {
+            if (status.has_document_scope_lock or
+                self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0)
+            {
                 // another thread is currently computing the document scope
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
             }
+            defer self.impl.condition.broadcast();
 
             self.impl.document_scope = blk: {
                 var document_scope = try DocumentScope.init(self.impl.allocator, self.tree);
@@ -400,8 +407,6 @@ pub const Handle = struct {
             };
             const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .release); // atomically set has_document_scope
             std.debug.assert(old_has_document_scope == 0); // race condition: another thread set `has_document_scope` even though we hold the lock
-
-            self.impl.condition.broadcast();
         }
         return self.impl.document_scope;
     }
@@ -416,15 +421,14 @@ pub const Handle = struct {
         while (true) {
             const status = self.getStatus();
             if (status.has_zir) break;
-            if (status.has_zir_lock) {
-                // another thread is currently computing the ZIR
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            } else if (self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0) {
+            if (status.has_zir_lock or
+                self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0)
+            {
                 // another thread is currently computing the ZIR
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
             }
+            defer self.impl.condition.broadcast();
 
             self.impl.zir = blk: {
                 const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
@@ -443,8 +447,6 @@ pub const Handle = struct {
             _ = self.impl.status.bitReset(@bitOffsetOf(Status, "zir_outdated"), .release); // atomically set zir_outdated
             const old_has_zir = self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir"), .release); // atomically set has_zir
             std.debug.assert(old_has_zir == 0); // race condition: another thread set `has_zir` even though we hold the lock
-
-            self.impl.condition.broadcast();
         }
         return self.impl.zir;
     }

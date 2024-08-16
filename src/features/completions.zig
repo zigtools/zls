@@ -102,6 +102,16 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 ),
             });
         },
+        .container => |scope_handle| {
+            var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+            try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
+
+            for (decls.items) |decl_with_handle| {
+                try declToCompletion(builder, decl_with_handle, .{
+                    .parent_container_ty = ty,
+                });
+            }
+        },
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .merge_error_sets => {
                 const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
@@ -112,29 +122,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
-            .error_set_decl,
-            .root,
-            .container_decl,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            => {
-                var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
-                try builder.analyser.collectDeclarationsOfContainer(node_handle, builder.orig_handle, !ty.is_type_val, &decls);
-                for (decls.items) |decl_with_handle| {
-                    try declToCompletion(builder, decl_with_handle, .{
-                        .parent_container_ty = ty,
-                    });
-                }
-            },
+
             .fn_proto,
             .fn_proto_multi,
             .fn_proto_one,
@@ -373,7 +361,7 @@ fn functionTypeCompletion(
         },
     };
 
-    const kind: types.CompletionItemKind = if (Analyser.isTypeFunction(tree, func))
+    const kind: types.CompletionItemKind = if (func_ty.isTypeFunc())
         .Struct
     else if (has_self_param)
         .Method
@@ -1240,12 +1228,12 @@ fn collectContainerFields(
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    const node_handle = switch (container.data) {
-        .other => |n| n,
+    const scope_handle = switch (container.data) {
+        .container => |s| s,
         else => return,
     };
-    const node = node_handle.node;
-    const handle = node_handle.handle;
+    const node = scope_handle.toNode();
+    const handle = scope_handle.handle;
     var buffer: [2]Ast.Node.Index = undefined;
     const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
@@ -1352,7 +1340,7 @@ fn collectFieldAccessContainerNodes(
     // inconsistent at returning name_loc for methods, ie
     // `abc.method() == .` => fails, `abc.method(.{}){.}` => ok
     // it also fails for `abc.xyz.*` ... currently we take advantage of this quirk
-    const name_loc = Analyser.identifierLocFromPosition(loc.end, handle) orelse {
+    const name_loc = Analyser.identifierLocFromIndex(handle.tree, loc.end) orelse {
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {

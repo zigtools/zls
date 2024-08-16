@@ -362,6 +362,35 @@ test "generic function" {
     });
 }
 
+test "recusive generic function" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn ArrayList(comptime T: type) type {
+        \\    return ArrayList(T);
+        \\}
+        \\const array_list: ArrayList(S) = undefined;
+        \\const foo = array_list.<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn ArrayList(comptime T: type) type {
+        \\    return ArrayList(T);
+        \\}
+        \\const foo = ArrayList(S).<cursor>
+    , &.{});
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn Foo(comptime T: type) type {
+        \\    return Bar(T);
+        \\}
+        \\fn Bar(comptime T: type) type {
+        \\    return Foo(T);
+        \\}
+        \\const foo: Foo(S) = undefined;
+        \\const value = array_list.<cursor>
+    , &.{});
+}
+
 test "std.ArrayList" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(

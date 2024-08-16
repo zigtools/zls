@@ -27,6 +27,9 @@ test "container decl" {
         \\  Field alpha
         \\  Function f
     );
+}
+
+test "tuple" {
     try testDocumentSymbol(
         \\const S = struct {
         \\    []const u8,

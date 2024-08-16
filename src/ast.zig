@@ -1122,6 +1122,40 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     };
 }
 
+pub fn testDeclNameToken(tree: Ast, test_decl_node: Ast.Node.Index) ?Ast.TokenIndex {
+    std.debug.assert(tree.nodes.items(.tag)[test_decl_node] == .test_decl);
+    const node_datas = tree.nodes.items(.data);
+    if (node_datas[test_decl_node].lhs == 0) return null;
+    return node_datas[test_decl_node].lhs;
+}
+
+pub fn testDeclNameAndToken(tree: Ast, test_decl_node: Ast.Node.Index) ?struct { Ast.TokenIndex, []const u8 } {
+    const test_name_token = testDeclNameToken(tree, test_decl_node) orelse return null;
+
+    switch (tree.tokens.items(.tag)[test_name_token]) {
+        .string_literal => {
+            const name = offsets.tokenToSlice(tree, test_name_token);
+            return .{ test_name_token, name[1 .. name.len - 1] };
+        },
+        .identifier => return .{ test_name_token, offsets.identifierTokenToNameSlice(tree, test_name_token) },
+        else => return null,
+    }
+}
+
+/// The main token of a identifier node may not be a identifier token.
+///
+/// Example:
+/// ```zig
+/// const Foo;
+/// @tagName
+/// ```
+/// TODO investigate the parser to figure out why.
+pub fn identifierTokenFromIdentifierNode(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    const main_token = tree.nodes.items(.main_token)[node];
+    if (tree.tokens.items(.tag)[main_token] != .identifier) return null;
+    return main_token;
+}
+
 pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
     const token_tags = tree.tokens.items(.tag);
     if (fn_proto.ast.return_type == 0) return false;
