@@ -30,7 +30,7 @@
             "default": false
         },
         "semantic_tokens": {
-            "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",
+            "description": "Set level of semantic tokens. `partial` only includes information that requires semantic analysis.",
             "type": "string",
             "enum": [
                 "none",
