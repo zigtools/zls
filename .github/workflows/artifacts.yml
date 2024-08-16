@@ -5,7 +5,7 @@ on:
     branches:
       - master
   workflow_dispatch:
-  # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/publish`.
+  # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/v1/zls/publish`.
 
 jobs:
   deploy:
