@@ -8,3 +8,4 @@ coverage:
         informational: true
 github_checks:
   annotations: false
+comment: false
