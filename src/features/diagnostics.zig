@@ -298,12 +298,14 @@ pub fn generateBuildOnSaveDiagnostics(
         // convert them to the desired offset encoding would require loading every file that contains errors
         // is there some efficient way to do this?
         const utf8_position = types.Position{
-            .line = (std.fmt.parseInt(u32, src_line, 10) catch continue) - 1,
-            .character = (std.fmt.parseInt(u32, src_character, 10) catch continue) - 1,
+            .line = (std.fmt.parseInt(u32, src_line, 10) catch continue) -| 1,
+            .character = (std.fmt.parseInt(u32, src_character, 10) catch continue) -| 1,
         };
         const range = types.Range{ .start = utf8_position, .end = utf8_position };
 
-        const msg = pos_and_diag_iterator.rest()[1..];
+        const rest = pos_and_diag_iterator.rest();
+        if (rest.len <= 1) continue;
+        const msg = rest[1..];
 
         if (std.mem.startsWith(u8, msg, "note: ")) {
             try last_related_diagnostics.append(arena, .{
@@ -428,25 +430,24 @@ fn getDiagnosticsFromAstCheck(
     // I believe that with color off it's one diag per line; is this correct?
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
 
-    while (line_iterator.next()) |line| lin: {
-        if (!std.mem.startsWith(u8, line, "<stdin>")) continue;
-
+    while (line_iterator.next()) |line| {
         var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
-        const maybe_first = pos_and_diag_iterator.next();
-        if (maybe_first) |first| {
-            if (first.len <= 1) break :lin;
-        } else break;
+
+        const first = pos_and_diag_iterator.next() orelse continue;
+        if (!std.mem.eql(u8, first, "<stdin>")) continue;
 
         const utf8_position = types.Position{
-            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+            .line = (std.fmt.parseInt(u32, pos_and_diag_iterator.next() orelse continue, 10) catch continue) -| 1,
+            .character = (std.fmt.parseInt(u32, pos_and_diag_iterator.next() orelse continue, 10) catch continue) -| 1,
         };
 
         // zig uses utf-8 encoding for character offsets
         const position = offsets.convertPositionEncoding(handle.tree.source, utf8_position, .@"utf-8", server.offset_encoding);
         const range = offsets.tokenPositionToRange(handle.tree.source, position, server.offset_encoding);
 
-        const msg = pos_and_diag_iterator.rest()[1..];
+        const rest = pos_and_diag_iterator.rest();
+        if (rest.len <= 1) continue;
+        const msg = rest[1..];
 
         if (std.mem.startsWith(u8, msg, "note: ")) {
             try last_related_diagnostics.append(arena, .{
