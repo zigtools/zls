@@ -19,7 +19,7 @@ build_on_save_step: []const u8 = "install",
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
 enable_autofix: bool = false,
 
-/// Set level of semantic tokens. Partial only includes information that requires semantic analysis.
+/// Set level of semantic tokens. `partial` only includes information that requires semantic analysis.
 semantic_tokens: enum {
     none,
     partial,

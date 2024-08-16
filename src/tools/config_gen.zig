@@ -188,7 +188,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         .type = "boolean",
         .description = "Enable debug logging in release builds of ZLS.",
     });
-    configuration.map.putAssumeCapacityNoClobber("zig.trace.server", .{
+    configuration.map.putAssumeCapacityNoClobber("zig.zls.trace.server", .{
         .scope = "window",
         .type = "string",
         .@"enum" = &.{ "off", "messages", "verbose" },
@@ -201,13 +201,16 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         .default = .{ .bool = true },
     });
     configuration.map.putAssumeCapacityNoClobber("zig.zls.path", .{
+        .scope = "machine-overridable",
         .type = "string",
-        .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`.",
+        .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`. The string \"zls\" means lookup ZLS in PATH.",
         .format = "path",
         .default = null,
     });
 
     for (config.options) |option| {
+        if (std.mem.eql(u8, option.name, "zig_exe_path")) continue;
+
         const snake_case_name = try std.fmt.allocPrint(allocator, "zig.zls.{s}", .{option.name});
         defer allocator.free(snake_case_name);
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
@@ -228,7 +231,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     const writer = buffered_writer.writer();
 
     try std.json.stringify(configuration, .{
-        .whitespace = .indent_4,
+        .whitespace = .indent_2,
         .emit_null_optional_fields = false,
     }, writer);
 
