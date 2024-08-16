@@ -1015,6 +1015,16 @@ pub fn updateConfiguration(
         }
     }
 
+    if (server.config.enable_build_on_save) {
+        if (!std.process.can_spawn) {
+            log.info("'enable_build_on_save' is ignored because your OS can't spawn a child process", .{});
+        } else if (server.status == .initialized and server.config.zig_exe_path == null) {
+            log.info("'enable_build_on_save' is ignored because Zig could not be found", .{});
+        } else if (!server.client_capabilities.supports_publish_diagnostics) {
+            log.info("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+        }
+    }
+
     if (server.config.enable_autofix and server.getAutofixMode() == .none) {
         log.warn("`enable_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
     }
