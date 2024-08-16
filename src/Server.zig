@@ -940,6 +940,13 @@ pub fn updateConfiguration(
             result.deinit(server.document_store.allocator);
         }
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
+
+        if (std.process.can_spawn and
+            server.config.enable_build_on_save and
+            server.client_capabilities.supports_publish_diagnostics)
+        {
+            try server.pushJob(.run_build_on_save);
+        }
     }
 
     if (server.status == .initialized) {
