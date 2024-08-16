@@ -12,7 +12,7 @@
       flake-utils.url = "github:numtide/flake-utils";
 
       # llvm: fix @wasmMemory{Size,Grow} for wasm64
-      langref.url = "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in";
+      langref.url = "https://raw.githubusercontent.com/ziglang/zig/eb7f318ea897d51082b70c84591242735c8a2c53/doc/langref.html.in";
       langref.flake = false;
     };
 
