@@ -392,6 +392,7 @@ pub const Handle = struct {
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
             }
+            defer self.impl.condition.broadcast();
 
             self.impl.document_scope = blk: {
                 var document_scope = try DocumentScope.init(self.impl.allocator, self.tree);
@@ -406,8 +407,6 @@ pub const Handle = struct {
             };
             const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .release); // atomically set has_document_scope
             std.debug.assert(old_has_document_scope == 0); // race condition: another thread set `has_document_scope` even though we hold the lock
-
-            self.impl.condition.broadcast();
         }
         return self.impl.document_scope;
     }
@@ -429,6 +428,7 @@ pub const Handle = struct {
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
             }
+            defer self.impl.condition.broadcast();
 
             self.impl.zir = blk: {
                 const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
@@ -447,8 +447,6 @@ pub const Handle = struct {
             _ = self.impl.status.bitReset(@bitOffsetOf(Status, "zir_outdated"), .release); // atomically set zir_outdated
             const old_has_zir = self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir"), .release); // atomically set has_zir
             std.debug.assert(old_has_zir == 0); // race condition: another thread set `has_zir` even though we hold the lock
-
-            self.impl.condition.broadcast();
         }
         return self.impl.zir;
     }
