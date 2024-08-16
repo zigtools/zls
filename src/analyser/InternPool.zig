@@ -3248,16 +3248,16 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
         .usize_type => return .{ .signedness = .unsigned, .bits = target.ptrBitWidth() },
         .isize_type => return .{ .signedness = .signed, .bits = target.ptrBitWidth() },
 
-        .c_char_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.char) },
-        .c_short_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.short) },
-        .c_ushort_type => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ushort) },
-        .c_int_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.int) },
-        .c_uint_type => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.uint) },
-        .c_long_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.long) },
-        .c_ulong_type => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ulong) },
-        .c_longlong_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.longlong) },
-        .c_ulonglong_type => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ulonglong) },
-        .c_longdouble_type => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.longdouble) },
+        .c_char_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.char) },
+        .c_short_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.short) },
+        .c_ushort_type => return .{ .signedness = .unsigned, .bits = target.cTypeBitSize(.ushort) },
+        .c_int_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.int) },
+        .c_uint_type => return .{ .signedness = .unsigned, .bits = target.cTypeBitSize(.uint) },
+        .c_long_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.long) },
+        .c_ulong_type => return .{ .signedness = .unsigned, .bits = target.cTypeBitSize(.ulong) },
+        .c_longlong_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.longlong) },
+        .c_ulonglong_type => return .{ .signedness = .unsigned, .bits = target.cTypeBitSize(.ulonglong) },
+        .c_longdouble_type => return .{ .signedness = .signed, .bits = target.cTypeBitSize(.longdouble) },
 
         // TODO revisit this when error sets support custom int types (comment taken from zig codebase)
         .anyerror_type => return .{ .signedness = .unsigned, .bits = 16 },
@@ -3294,7 +3294,7 @@ pub fn floatBits(ip: *InternPool, ty: Index, target: std.Target) u16 {
         .f64_type => 64,
         .f80_type => 80,
         .f128_type, .comptime_float_type => 128,
-        .c_longdouble_type => target.c_type_bit_size(.longdouble),
+        .c_longdouble_type => target.cTypeBitSize(.longdouble),
 
         else => unreachable,
     };
