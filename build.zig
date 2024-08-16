@@ -88,7 +88,7 @@ pub fn build(b: *Build) !void {
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
         .root_source_file = b.path("src/tools/config_gen.zig"),
-        .target = b.host,
+        .target = b.graph.host,
         .single_threaded = true,
     });
 
