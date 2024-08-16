@@ -299,7 +299,7 @@ pub fn generateBuildOnSaveDiagnostics(
         // is there some efficient way to do this?
         const utf8_position = types.Position{
             .line = (std.fmt.parseInt(u32, src_line, 10) catch continue) -| 1,
-            .character = (std.fmt.parseInt(u32, src_character, 10) catch continue) -| 1,
+            .character = std.fmt.parseInt(u32, src_character, 10) catch continue,
         };
         const range = types.Range{ .start = utf8_position, .end = utf8_position };
 
