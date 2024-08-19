@@ -61,6 +61,17 @@ test "positionToIndex where character value is greater than the line length" {
     try testPositionToIndex("a¶↉🠁\na¶↉🠁\n", 21, 1, .{ 11, 6, 5 });
 }
 
+test "positionToIndex where line value is greater than the number of lines" {
+    try testPositionToIndex("", 0, 1, .{ 0, 0, 0 });
+    try testPositionToIndex("", 0, 1, .{ 3, 2, 1 });
+
+    try testPositionToIndex("hello", 5, 1, .{ 0, 0, 0 });
+    try testPositionToIndex("hello", 5, 1, .{ 3, 2, 1 });
+
+    try testPositionToIndex("hello\nfrom\nzig", 14, 3, .{ 0, 0, 0 });
+    try testPositionToIndex("hello\nfrom\nzig", 14, 3, .{ 3, 2, 1 });
+}
+
 fn testPositionToIndex(text: []const u8, index: usize, line: u32, characters: [3]u32) !void {
     const position8: types.Position = .{ .line = line, .character = characters[0] };
     const position16: types.Position = .{ .line = line, .character = characters[1] };
@@ -69,25 +80,6 @@ fn testPositionToIndex(text: []const u8, index: usize, line: u32, characters: [3
     try std.testing.expectEqual(index, positionToIndex(text, position8, .@"utf-8"));
     try std.testing.expectEqual(index, positionToIndex(text, position16, .@"utf-16"));
     try std.testing.expectEqual(index, positionToIndex(text, position32, .@"utf-32"));
-}
-
-pub fn maybePositionToIndex(text: []const u8, position: types.Position, encoding: Encoding) ?usize {
-    var line: u32 = 0;
-    var line_start_index: usize = 0;
-    for (text, 0..) |c, i| {
-        if (line == position.line) break;
-        if (c == '\n') {
-            line += 1;
-            line_start_index = i + 1;
-        }
-    }
-
-    if (line != position.line) return null;
-
-    const line_text = std.mem.sliceTo(text[line_start_index..], '\n');
-    const line_byte_length = getNCodeUnitByteCount(line_text, position.character, encoding);
-
-    return line_start_index + line_byte_length;
 }
 
 pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Encoding) usize {
@@ -99,8 +91,7 @@ pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Enc
             line += 1;
             line_start_index = i + 1;
         }
-    }
-    std.debug.assert(line == position.line);
+    } else return text.len;
 
     const line_text = std.mem.sliceTo(text[line_start_index..], '\n');
     const line_byte_length = getNCodeUnitByteCount(line_text, position.character, encoding);

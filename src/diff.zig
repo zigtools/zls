@@ -72,7 +72,7 @@ pub fn applyContentChanges(
     text: []const u8,
     content_changes: []const types.TextDocumentContentChangeEvent,
     encoding: offsets.Encoding,
-) error{ OutOfMemory, InvalidParams }![:0]const u8 {
+) error{OutOfMemory}![:0]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -99,8 +99,8 @@ pub fn applyContentChanges(
     for (changes) |item| {
         const content_change = item.literal_0; // TextDocumentContentChangePartial
 
-        const start = offsets.maybePositionToIndex(text_array.items, content_change.range.start, encoding) orelse return error.InvalidParams;
-        const end = offsets.maybePositionToIndex(text_array.items, content_change.range.end, encoding) orelse return error.InvalidParams;
+        const start = offsets.positionToIndex(text_array.items, content_change.range.start, encoding);
+        const end = offsets.positionToIndex(text_array.items, content_change.range.end, encoding);
         try text_array.replaceRange(allocator, start, end - start, content_change.text);
     }
 
@@ -133,13 +133,13 @@ pub fn applyTextEdits(
 
     var last: usize = 0;
     for (text_edits_sortable) |te| {
-        const start = offsets.maybePositionToIndex(text, te.range.start, encoding) orelse text.len;
+        const start = offsets.positionToIndex(text, te.range.start, encoding);
         if (start > last) {
             try final_text.appendSlice(allocator, text[last..start]);
             last = start;
         }
         try final_text.appendSlice(allocator, te.newText);
-        last = offsets.maybePositionToIndex(text, te.range.end, encoding) orelse text.len;
+        last = offsets.positionToIndex(text, te.range.end, encoding);
     }
     if (last < text.len) {
         try final_text.appendSlice(allocator, text[last..]);
