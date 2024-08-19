@@ -56,18 +56,19 @@ fn logFn(
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
 
+    std.debug.lockStdErr();
+    defer std.debug.unlockStdErr();
+
+    const writer = std.io.getStdErr().writer();
+
     blk: {
-        std.debug.lockStdErr();
-        defer std.debug.unlockStdErr();
-
-        const writer = std.io.getStdErr().writer();
-
         writer.print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
         writer.print(format, args) catch break :blk;
         writer.writeByte('\n') catch break :blk;
     }
 
     if (log_file) |file| blk: {
+        file.seekFromEnd(0) catch {};
         file.writer().print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
         file.writer().print(format, args) catch break :blk;
         file.writer().writeByte('\n') catch break :blk;
