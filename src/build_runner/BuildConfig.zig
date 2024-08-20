@@ -1,12 +1,13 @@
 const std = @import("std");
 
 deps_build_roots: []DepsBuildRoots,
-packages: []Pkg,
+packages: []Package,
 include_dirs: []const []const u8,
+top_level_steps: []const []const u8,
 available_options: std.json.ArrayHashMap(AvailableOption),
 
-pub const DepsBuildRoots = Pkg;
-pub const Pkg = struct {
+pub const DepsBuildRoots = Package;
+pub const Package = struct {
     name: []const u8,
     path: []const u8,
 };

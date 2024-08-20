@@ -24,6 +24,8 @@ const mem = std.mem;
 const process = std.process;
 const ArrayList = std.ArrayList;
 const Step = std.Build.Step;
+const Watch = std.Build.Watch;
+const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
 
@@ -37,6 +39,8 @@ const file_watch_version =
     std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
 const live_rebuild_processes =
     std.SemanticVersion.parse("0.14.0-dev.310+9d38e82b5") catch unreachable;
+const file_watch_windows_version =
+    std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -64,15 +68,9 @@ pub fn main() !void {
     // skip my own exe name
     var arg_idx: usize = 1;
 
-    const zig_exe = nextArg(args, &arg_idx) orelse {
-        std.debug.print("Expected path to zig compiler\n", .{});
-        return error.InvalidArgs;
-    };
+    const zig_exe = nextArg(args, &arg_idx) orelse fatal("missing zig compiler path", .{});
     const zig_lib_directory = if (comptime builtin.zig_version.order(file_watch_version).compare(.gte)) blk: {
-        const zig_lib_dir = nextArg(args, &arg_idx) orelse {
-            std.debug.print("Expected zig lib directory path\n", .{});
-            return error.InvalidArgs;
-        };
+        const zig_lib_dir = nextArg(args, &arg_idx) orelse fatal("missing zig lib directory path", .{});
 
         const zig_lib_directory: std.Build.Cache.Directory = .{
             .path = zig_lib_dir,
@@ -81,18 +79,9 @@ pub fn main() !void {
 
         break :blk zig_lib_directory;
     } else {};
-    const build_root = nextArg(args, &arg_idx) orelse {
-        std.debug.print("Expected build root directory path\n", .{});
-        return error.InvalidArgs;
-    };
-    const cache_root = nextArg(args, &arg_idx) orelse {
-        std.debug.print("Expected cache root directory path\n", .{});
-        return error.InvalidArgs;
-    };
-    const global_cache_root = nextArg(args, &arg_idx) orelse {
-        std.debug.print("Expected global cache root directory path\n", .{});
-        return error.InvalidArgs;
-    };
+    const build_root = nextArg(args, &arg_idx) orelse fatal("missing build root directory path", .{});
+    const cache_root = nextArg(args, &arg_idx) orelse fatal("missing cache root directory path", .{});
+    const global_cache_root = nextArg(args, &arg_idx) orelse fatal("missing global cache root directory path", .{});
 
     const build_root_directory: std.Build.Cache.Directory = .{
         .path = build_root,
@@ -151,15 +140,17 @@ pub fn main() !void {
         dependencies.root_deps,
     );
 
+    var targets = ArrayList([]const u8).init(arena);
     var debug_log_scopes = ArrayList([]const u8).init(arena);
     var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
 
     var install_prefix: ?[]const u8 = null;
     var dir_list = std.Build.DirList{};
     var max_rss: u64 = 0;
-    var skip_oom_steps: bool = false;
+    var skip_oom_steps = false;
     var seed: u32 = 0;
     var output_tmp_nonce: ?[16]u8 = null;
+    var debounce_interval_ms: u16 = 50;
 
     while (nextArg(args, &arg_idx)) |arg| {
         if (mem.startsWith(u8, arg, "-Z")) {
@@ -231,7 +222,7 @@ pub fn main() !void {
                 _ = next_arg;
             } else if (mem.eql(u8, arg, "--summary")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
-                    fatal("expected [all|failures|none] after '{s}'", .{arg});
+                    fatal("expected [all|new|failures|none] after '{s}'", .{arg});
                 _ = next_arg;
             } else if ((comptime builtin.zig_version.order(file_watch_version) == .lt) and mem.eql(u8, arg, "--zig-lib-dir")) {
                 builder.zig_lib_dir = .{ .cwd_relative = nextArgOrFatal(args, &arg_idx) };
@@ -239,7 +230,15 @@ pub fn main() !void {
                 const next_arg = nextArg(args, &arg_idx) orelse
                     fatal("expected u32 after '{s}'", .{arg});
                 seed = std.fmt.parseUnsigned(u32, next_arg, 0) catch |err| {
-                    fatal("unable to parse seed '{s}' as 32-bit integer: {s}\n", .{
+                    fatal("unable to parse seed '{s}' as unsigned 32-bit integer: {s}\n", .{
+                        next_arg, @errorName(err),
+                    });
+                };
+            } else if ((builtin.zig_version.order(file_watch_version) != .lt) and mem.eql(u8, arg, "--debounce")) {
+                const next_arg = nextArg(args, &arg_idx) orelse
+                    fatal("expected u16 after '{s}'", .{arg});
+                debounce_interval_ms = std.fmt.parseUnsigned(u16, next_arg, 0) catch |err| {
+                    fatal("unable to parse debounce interval '{s}' as unsigned 16-bit integer: {s}\n", .{
                         next_arg, @errorName(err),
                     });
                 };
@@ -275,6 +274,9 @@ pub fn main() !void {
                 builder.verbose_llvm_cpu_features = true;
             } else if (mem.eql(u8, arg, "--prominent-compile-errors")) {
                 // prominent_compile_errors = true;
+            } else if ((builtin.zig_version.order(file_watch_version) != .lt) and mem.eql(u8, arg, "--watch")) {
+                // watch mode will always be enabled if supported
+                // watch = true;
             } else if (mem.eql(u8, arg, "-fwine")) {
                 builder.enable_wine = true;
             } else if (mem.eql(u8, arg, "-fno-wine")) {
@@ -325,7 +327,7 @@ pub fn main() !void {
                 fatal("unrecognized argument: '{s}'", .{arg});
             }
         } else {
-            fatal("can't pass target as arguments: {s}\n\n", .{arg});
+            try targets.append(arg);
         }
     }
 
@@ -339,6 +341,7 @@ pub fn main() !void {
         std.Progress.start(.{
             .disable_printing = true,
         });
+    defer main_progress_node.end();
 
     builder.debug_log_scopes = debug_log_scopes.items;
     builder.resolveInstallPrefix(install_prefix, dir_list);
@@ -387,6 +390,7 @@ pub fn main() !void {
         .max_rss_mutex = .{},
         .skip_oom_steps = skip_oom_steps,
         .memory_blocked_steps = std.ArrayList(*Step).init(arena),
+        .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
     };
@@ -396,14 +400,79 @@ pub fn main() !void {
         run.max_rss_is_default = true;
     }
 
+    try run.thread_pool.init(thread_pool_options);
+    defer run.thread_pool.deinit();
+
+    const gpa = arena;
     try extractBuildInformation(
+        gpa,
         builder,
         arena,
         main_progress_node,
-        thread_pool_options,
         &run,
         seed,
     );
+
+    const watch_suported = comptime switch (builtin.os.tag) {
+        .linux => builtin.zig_version.order(file_watch_version) != .lt,
+        .windows => builtin.zig_version.order(file_watch_windows_version) != .lt,
+        else => false,
+    };
+    if (!watch_suported) return;
+    var w = try Watch.init();
+
+    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items);
+
+    prepare(gpa, builder, &step_stack, &run, seed) catch |err| switch (err) {
+        error.UncleanExit => process.exit(1),
+        else => return err,
+    };
+
+    // TODO watch mode is currently always disabled until ZLS supports it
+    rebuild: while (false) {
+        runSteps(
+            gpa,
+            builder,
+            step_stack.keys(),
+            main_progress_node,
+            &run,
+        ) catch |err| switch (err) {
+            error.UncleanExit => process.exit(1),
+            else => return err,
+        };
+
+        try w.update(gpa, step_stack.keys());
+
+        // Wait until a file system notification arrives. Read all such events
+        // until the buffer is empty. Then wait for a debounce interval, resetting
+        // if any more events come in. After the debounce interval has passed,
+        // trigger a rebuild on all steps with modified inputs, as well as their
+        // recursive dependants.
+        var debounce_timeout: Watch.Timeout = .none;
+        while (true) switch (try w.wait(gpa, debounce_timeout)) {
+            .timeout => {
+                markFailedStepsDirty(gpa, step_stack.keys());
+                continue :rebuild;
+            },
+            .dirty => if (debounce_timeout == .none) {
+                debounce_timeout = .{ .ms = debounce_interval_ms };
+            },
+            .clean => {},
+        };
+    }
+}
+
+fn markFailedStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
+    for (all_steps) |step| switch (step.state) {
+        .dependency_failure, .failure, .skipped => step.recursiveReset(gpa),
+        else => continue,
+    };
+    // Now that all dirty steps have been found, the remaining steps that
+    // succeeded from last run shall be marked "cached".
+    for (all_steps) |step| switch (step.state) {
+        .success => step.result_cached = true,
+        else => continue,
+    };
 }
 
 const Run = struct {
@@ -412,62 +481,94 @@ const Run = struct {
     max_rss_mutex: std.Thread.Mutex,
     skip_oom_steps: bool,
     memory_blocked_steps: std.ArrayList(*Step),
+    thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
 };
 
-fn runSteps(
-    arena: std.mem.Allocator,
+fn stepNamesToStepStack(
+    gpa: Allocator,
     b: *std.Build,
-    steps: []const *Step,
-    parent_prog_node: ProgressNode,
-    thread_pool_options: std.Thread.Pool.Options,
-    run: *Run,
-    seed: u32,
-) error{ OutOfMemory, DependencyLoopDetected, ExceedingMaxRSS }!void {
-    const gpa = b.allocator;
+    step_names: []const []const u8,
+) !std.AutoArrayHashMapUnmanaged(*Step, void) {
     var step_stack: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
-    defer step_stack.deinit(gpa);
+    errdefer step_stack.deinit(gpa);
 
-    // assert(steps.len != 0);
-    try step_stack.ensureUnusedCapacity(gpa, steps.len);
-    for (0..steps.len) |i| {
-        const step = steps[steps.len - i - 1];
-        step_stack.putAssumeCapacity(step, {});
+    if (step_names.len == 0) {
+        const default_step = if (b.top_level_steps.get("check")) |tls| &tls.step else b.default_step;
+        try step_stack.put(gpa, default_step, {});
+    } else {
+        try step_stack.ensureUnusedCapacity(gpa, step_names.len);
+        for (0..step_names.len) |i| {
+            const step_name = step_names[step_names.len - i - 1];
+            const s = b.top_level_steps.get(step_name) orelse {
+                std.debug.print("no step named '{s}'\n  access the help menu with 'zig build -h'\n", .{step_name});
+                process.exit(1);
+            };
+            step_stack.putAssumeCapacity(&s.step, {});
+        }
     }
 
-    const starting_steps = try arena.dupe(*Step, step_stack.keys());
+    return step_stack;
+}
+
+fn prepare(
+    gpa: Allocator,
+    b: *std.Build,
+    step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
+    run: *Run,
+    seed: u32,
+) error{ OutOfMemory, UncleanExit }!void {
+    const starting_steps = try gpa.dupe(*Step, step_stack.keys());
+    defer gpa.free(starting_steps);
 
     var rng = std.Random.DefaultPrng.init(seed);
     const rand = rng.random();
     rand.shuffle(*Step, starting_steps);
 
     for (starting_steps) |s| {
-        try constructGraphAndCheckForDependencyLoop(b, s, &step_stack, rand);
+        constructGraphAndCheckForDependencyLoop(b, s, step_stack, rand) catch |err| switch (err) {
+            error.DependencyLoopDetected => return uncleanExit(),
+            else => |e| return e,
+        };
     }
 
     {
         // Check that we have enough memory to complete the build.
+        var any_problems = false;
         for (step_stack.keys()) |s| {
             if (s.max_rss == 0) continue;
             if (s.max_rss > run.max_rss) {
                 if (run.skip_oom_steps) {
                     s.state = .skipped_oom;
                 } else {
-                    return error.ExceedingMaxRSS;
+                    std.debug.print("{s}{s}: this step declares an upper bound of {d} bytes of memory, exceeding the available {d} bytes of memory\n", .{
+                        s.owner.dep_prefix, s.name, s.max_rss, run.max_rss,
+                    });
+                    any_problems = true;
                 }
             }
         }
+        if (any_problems) {
+            if (run.max_rss_is_default) {
+                std.debug.print("note: use --maxrss to override the default", .{});
+            }
+            return uncleanExit();
+        }
     }
+}
 
-    var thread_pool: std.Thread.Pool = undefined;
-    thread_pool.init(thread_pool_options) catch @panic("failed to initialize thread pool");
-    defer thread_pool.deinit();
+fn runSteps(
+    gpa: std.mem.Allocator,
+    b: *std.Build,
+    steps: []const *Step,
+    parent_prog_node: ProgressNode,
+    run: *Run,
+) error{ OutOfMemory, UncleanExit }!void {
+    const thread_pool = &run.thread_pool;
 
     {
-        defer parent_prog_node.end();
-
-        var step_prog = parent_prog_node.start("steps", step_stack.count());
+        var step_prog = parent_prog_node.start("steps", steps.len);
         defer step_prog.end();
 
         var wait_group: std.Thread.WaitGroup = .{};
@@ -476,71 +577,19 @@ fn runSteps(
         // Here we spawn the initial set of tasks with a nice heuristic -
         // dependency order. Each worker when it finishes a step will then
         // check whether it should run any dependants.
-        const steps_slice = step_stack.keys();
-        for (0..steps_slice.len) |i| {
-            const step = steps_slice[steps_slice.len - i - 1];
+        for (steps) |step| {
             if (step.state == .skipped_oom) continue;
 
             wait_group.start();
             thread_pool.spawn(workerMakeOneStep, .{
-                &wait_group, &thread_pool, b, step, if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) &step_prog else step_prog, run,
+                &wait_group, b, step, if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) &step_prog else step_prog, run,
             }) catch @panic("OOM");
         }
     }
     assert(run.memory_blocked_steps.items.len == 0);
 
-    var test_skip_count: usize = 0;
-    var test_fail_count: usize = 0;
-    var test_pass_count: usize = 0;
-    var test_leak_count: usize = 0;
-    var test_count: usize = 0;
-
-    var success_count: usize = 0;
-    var skipped_count: usize = 0;
-    var failure_count: usize = 0;
-    var pending_count: usize = 0;
-    var total_compile_errors: usize = 0;
-    var compile_error_steps: std.ArrayListUnmanaged(*Step) = .{};
-    defer compile_error_steps.deinit(gpa);
-
-    for (step_stack.keys()) |s| {
-        test_fail_count += s.test_results.fail_count;
-        test_skip_count += s.test_results.skip_count;
-        test_leak_count += s.test_results.leak_count;
-        test_pass_count += s.test_results.passCount();
-        test_count += s.test_results.test_count;
-
-        switch (s.state) {
-            .precheck_unstarted => unreachable,
-            .precheck_started => unreachable,
-            .running => unreachable,
-            .precheck_done => {
-                // precheck_done is equivalent to dependency_failure in the case of
-                // transitive dependencies. For example:
-                // A -> B -> C (failure)
-                // B will be marked as dependency_failure, while A may never be queued, and thus
-                // remain in the initial state of precheck_done.
-                s.state = .dependency_failure;
-                pending_count += 1;
-            },
-            .dependency_failure => pending_count += 1,
-            .success => success_count += 1,
-            .skipped, .skipped_oom => skipped_count += 1,
-            .failure => {
-                failure_count += 1;
-                const compile_errors_len = s.result_error_bundle.errorMessageCount();
-                if (compile_errors_len > 0) {
-                    s.result_error_bundle.renderToStdErr(.{
-                        .ttyconf = .no_color,
-                    });
-                    total_compile_errors += compile_errors_len;
-                    try compile_error_steps.append(gpa, s);
-                }
-            },
-        }
-    }
-
-    // TODO report summary
+    _ = gpa;
+    // TODO collect std.zig.ErrorBundle's and stderr from failed steps and send them to ZLS
 }
 
 /// Traverse the dependency graph depth-first and make it undirected by having
@@ -595,13 +644,13 @@ fn constructGraphAndCheckForDependencyLoop(
 
 fn workerMakeOneStep(
     wg: *std.Thread.WaitGroup,
-    thread_pool: *std.Thread.Pool,
     b: *std.Build,
     s: *Step,
     prog_node: ProgressNode,
     run: *Run,
 ) void {
     defer wg.finish();
+    const thread_pool = &run.thread_pool;
 
     // First, check the conditions for running this step. If they are not met,
     // then we return without doing the step, relying on another worker to
@@ -682,7 +731,7 @@ fn workerMakeOneStep(
         for (s.dependants.items) |dep| {
             wg.start();
             thread_pool.spawn(workerMakeOneStep, .{
-                wg, thread_pool, b, dep, prog_node, run,
+                wg, b, dep, prog_node, run,
             }) catch @panic("OOM");
         }
     }
@@ -708,7 +757,7 @@ fn workerMakeOneStep(
 
                 wg.start();
                 thread_pool.spawn(workerMakeOneStep, .{
-                    wg, thread_pool, b, dep, prog_node, run,
+                    wg, b, dep, prog_node, run,
                 }) catch @panic("OOM");
             } else {
                 run.memory_blocked_steps.items[i] = dep;
@@ -727,7 +776,7 @@ fn nextArg(args: [][:0]const u8, idx: *usize) ?[:0]const u8 {
 
 fn nextArgOrFatal(args: [][:0]const u8, idx: *usize) [:0]const u8 {
     return nextArg(args, idx) orelse {
-        std.debug.print("expected argument after '{s}'\n  access the help menu with 'zig build -h'\n", .{args[idx.*]});
+        std.debug.print("expected argument after '{s}'\n  access the help menu with 'zig build -h'\n", .{args[idx.* - 1]});
         process.exit(1);
     };
 }
@@ -735,6 +784,26 @@ fn nextArgOrFatal(args: [][:0]const u8, idx: *usize) [:0]const u8 {
 fn argsRest(args: [][:0]const u8, idx: usize) ?[][:0]const u8 {
     if (idx >= args.len) return null;
     return args[idx..];
+}
+
+/// Perhaps in the future there could be an Advanced Options flag such as
+/// --debug-build-runner-leaks which would make this function return instead of
+/// calling exit.
+fn cleanExit() void {
+    if (comptime builtin.zig_version.order(std_progress_rework_version) != .lt) {
+        std.debug.lockStdErr();
+    }
+    process.exit(0);
+}
+
+/// Perhaps in the future there could be an Advanced Options flag such as
+/// --debug-build-runner-leaks which would make this function return instead of
+/// calling exit.
+fn uncleanExit() error{UncleanExit} {
+    if (comptime builtin.zig_version.order(std_progress_rework_version) != .lt) {
+        std.debug.lockStdErr();
+    }
+    process.exit(1);
 }
 
 fn fatal(comptime f: []const u8, args: anytype) noreturn {
@@ -786,8 +855,8 @@ const Packages = struct {
         return path_gop_result.found_existing;
     }
 
-    pub fn toPackageList(self: *Packages) ![]BuildConfig.Pkg {
-        var result: std.ArrayListUnmanaged(BuildConfig.Pkg) = .{};
+    pub fn toPackageList(self: *Packages) ![]BuildConfig.Package {
+        var result: std.ArrayListUnmanaged(BuildConfig.Package) = .{};
         errdefer result.deinit(self.allocator);
 
         var name_iter = self.packages.iterator();
@@ -811,53 +880,54 @@ const Packages = struct {
 };
 
 fn extractBuildInformation(
+    gpa: Allocator,
     b: *std.Build,
-    arena: std.mem.Allocator,
+    arena: Allocator,
     main_progress_node: ProgressNode,
-    thread_pool_options: std.Thread.Pool.Options,
     run: *Run,
     seed: u32,
 ) !void {
     var steps = std.AutoArrayHashMapUnmanaged(*Step, void){};
-    defer steps.deinit(arena);
+    defer steps.deinit(gpa);
 
     // collect the set of all steps
     {
-        var stack = std.ArrayListUnmanaged(*Step){};
+        var stack: std.ArrayListUnmanaged(*Step) = .{};
+        defer stack.deinit(gpa);
 
-        try stack.ensureUnusedCapacity(arena, b.top_level_steps.count());
+        try stack.ensureUnusedCapacity(gpa, b.top_level_steps.count());
         for (b.top_level_steps.values()) |tls| {
             stack.appendAssumeCapacity(&tls.step);
         }
 
-        defer stack.deinit(b.allocator);
         while (stack.popOrNull()) |step| {
-            const gop = try steps.getOrPut(b.allocator, step);
+            const gop = try steps.getOrPut(gpa, step);
             if (gop.found_existing) continue;
 
-            try stack.appendSlice(b.allocator, step.dependencies.items);
+            try stack.appendSlice(gpa, step.dependencies.items);
         }
     }
 
-    var step_dependencies = std.AutoArrayHashMap(*Step, void).init(arena);
-
     const helper = struct {
-        fn addStepDependencies(set: *std.AutoArrayHashMap(*Step, void), lazy_path: std.Build.LazyPath) !void {
+        fn addStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
             const lazy_path_updated_version = comptime std.SemanticVersion.parse("0.13.0-dev.79+6bc0cef60") catch unreachable;
             if (comptime builtin.zig_version.order(lazy_path_updated_version) == .lt) {
                 switch (lazy_path) {
                     .src_path, .path, .cwd_relative, .dependency => {},
-                    .generated => |gen| try set.put(gen.step, {}),
-                    .generated_dirname => |gen| try set.put(gen.generated.step, {}),
+                    .generated => |gen| try set.put(allocator, gen.step, {}),
+                    .generated_dirname => |gen| try set.put(allocator, gen.generated.step, {}),
                 }
             } else {
                 switch (lazy_path) {
                     .src_path, .cwd_relative, .dependency => {},
-                    .generated => |gen| try set.put(gen.file.step, {}),
+                    .generated => |gen| try set.put(allocator, gen.file.step, {}),
                 }
             }
         }
     };
+
+    var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
+    defer step_dependencies.deinit(gpa);
 
     // collect dependencies of all `Step.Compile` steps
     for (steps.keys()) |step| {
@@ -866,7 +936,7 @@ fn extractBuildInformation(
         // adding all dependencies would be possible but may add dependencies that
         // are never used to resolve a path.
         //
-        // try step_dependencies.ensureUnusedCapacity(arena, step.dependencies.items.len);
+        // try step_dependencies.ensureUnusedCapacity(gpa, step.dependencies.items.len);
         // for (step.dependencies.items) |dependency_step| {
         //     step_dependencies.putAssumeCapacity(dependency_step, {});
         // }
@@ -874,12 +944,12 @@ fn extractBuildInformation(
         var it = compile.root_module.iterateDependencies(compile, false);
         while (it.next()) |item| {
             if (item.module.root_source_file) |root_source_file| {
-                try helper.addStepDependencies(&step_dependencies, root_source_file);
+                try helper.addStepDependencies(gpa, &step_dependencies, root_source_file);
             }
 
             for (item.module.import_table.values()) |import| {
                 if (import.root_source_file) |root_source_file| {
-                    try helper.addStepDependencies(&step_dependencies, root_source_file);
+                    try helper.addStepDependencies(gpa, &step_dependencies, root_source_file);
                 }
             }
 
@@ -890,14 +960,14 @@ fn extractBuildInformation(
                     .path_after,
                     .framework_path,
                     .framework_path_system,
-                    => |include_path| try helper.addStepDependencies(&step_dependencies, include_path),
-                    .config_header_step => |config_header| try step_dependencies.put(config_header.output_file.step, {}),
+                    => |include_path| try helper.addStepDependencies(gpa, &step_dependencies, include_path),
+                    .config_header_step => |config_header| try step_dependencies.put(gpa, config_header.output_file.step, {}),
                     .other_step => |other| {
                         if (other.generated_h) |header| {
-                            try step_dependencies.put(header.step, {});
+                            try step_dependencies.put(gpa, header.step, {});
                         }
                         if (other.installed_headers_include_tree) |include_tree| {
-                            try step_dependencies.put(include_tree.generated_directory.step, {});
+                            try step_dependencies.put(gpa, include_tree.generated_directory.step, {});
                         }
                     },
                 }
@@ -905,19 +975,23 @@ fn extractBuildInformation(
         }
     }
 
+    prepare(gpa, b, &step_dependencies, run, seed) catch |err| switch (err) {
+        error.UncleanExit => process.exit(1),
+        else => return err,
+    };
+
     // run all steps that are dependencies of a `Step.Compile` step
     try runSteps(
-        arena,
+        gpa,
         b,
         step_dependencies.keys(),
         main_progress_node,
-        thread_pool_options,
         run,
-        seed,
     );
 
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    var packages = Packages{ .allocator = arena };
+    var packages: Packages = .{ .allocator = gpa };
+    defer packages.deinit();
 
     // iterate through all `Step.Compile` steps and extract the necessary information
     for (steps.keys()) |step| {
@@ -936,7 +1010,7 @@ fn extractBuildInformation(
             }
 
             if (item.compile) |exe| {
-                try processPkgConfig(arena, &include_dirs, exe);
+                try processPkgConfig(gpa, &include_dirs, exe);
             }
 
             for (item.module.include_dirs.items) |include_dir| {
@@ -1001,7 +1075,7 @@ fn extractBuildInformation(
                 if (!@hasDecl(package_info, "build_zig")) break :blk;
                 try deps_build_roots.append(arena, .{
                     .name = root_dep[0],
-                    .path = try std.fs.path.resolve(arena, &[_][]const u8{ package_info.build_root, "./build.zig" }),
+                    .path = try std.fs.path.join(arena, &.{ package_info.build_root, "build.zig" }),
                 });
             }
         }
@@ -1020,6 +1094,7 @@ fn extractBuildInformation(
             .deps_build_roots = deps_build_roots.items,
             .packages = try packages.toPackageList(),
             .include_dirs = include_dirs.keys(),
+            .top_level_steps = b.top_level_steps.keys(),
             .available_options = available_options,
         },
         .{
