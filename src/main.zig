@@ -55,23 +55,28 @@ fn logFn(
         .debug => "debug",
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
+    const trimmed_scope = if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt;
+
+    var buffer: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    const no_space_left = blk: {
+        fbs.writer().print("{s} ({s:^6}): ", .{ level_txt, trimmed_scope }) catch break :blk true;
+        fbs.writer().print(format, args) catch break :blk true;
+        fbs.writer().writeByte('\n') catch break :blk true;
+        break :blk false;
+    };
+    if (no_space_left) {
+        buffer[buffer.len - 3 ..][0..3].* = "...".*;
+    }
 
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
 
-    const writer = std.io.getStdErr().writer();
+    std.io.getStdErr().writeAll(fbs.getWritten()) catch {};
 
-    blk: {
-        writer.print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
-        writer.print(format, args) catch break :blk;
-        writer.writeByte('\n') catch break :blk;
-    }
-
-    if (log_file) |file| blk: {
+    if (log_file) |file| {
         file.seekFromEnd(0) catch {};
-        file.writer().print("{s:<5} ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch break :blk;
-        file.writer().print(format, args) catch break :blk;
-        file.writer().writeByte('\n') catch break :blk;
+        file.writeAll(fbs.getWritten()) catch {};
     }
 }
 
