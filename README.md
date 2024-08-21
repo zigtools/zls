@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/zigtools/zls/master/.github/assets/zls-opt.svg" alt="Zig Language Server" width=200>
+<img src="https://raw.githubusercontent.com/zigtools/zls/master/.github/assets/zls-opt.svg" alt="ZLS Logo" width=200>
 
 [![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
 [![codecov](https://codecov.io/github/zigtools/zls/graph/badge.svg?token=WE18MPF00W)](https://codecov.io/github/zigtools/zls)
@@ -6,7 +6,7 @@
 
 **Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
 
-The Zig Language Server (ZLS) is a tool that implements Microsoft's Language Server Protocol for Zig in Zig. In simpler terms: it'll provide you with completions, go-to definition, [etc.](#features) when you write Zig code!
+ZLS is a non-official implementation of the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) for [Zig](https://ziglang.org/) in Zig. It provides developers with IDE [features](#features) in their editor.
 
 ## Installation
 

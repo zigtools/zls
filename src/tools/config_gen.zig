@@ -92,7 +92,7 @@ const Config = struct {
 const Schema = struct {
     @"$schema": []const u8 = "http://json-schema.org/schema",
     title: []const u8 = "ZLS Config",
-    description: []const u8 = "Configuration file for the zig language server (ZLS)",
+    description: []const u8 = "Configuration file for ZLS",
     type: []const u8 = "object",
     properties: std.json.ArrayHashMap(SchemaEntry),
 };

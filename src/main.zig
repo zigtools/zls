@@ -10,7 +10,7 @@ const binned_allocator = @import("binned_allocator.zig");
 const log = std.log.scoped(.zls_main);
 
 const usage =
-    \\ZLS - A non-official Zig Language Server
+    \\ZLS - A non-official language server for Zig
     \\
     \\Commands:
     \\  help, --help,             Print this help and exit
