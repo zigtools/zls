@@ -223,8 +223,8 @@ pub fn translate(
                 // log.debug("zig-version: {s}", .{zcs.receive_fifo.readableSliceOfLen(header.bytes_len)});
                 zcs.pooler.fifo(.in).discard(header.bytes_len);
             },
-            .emit_bin_path => {
-                const body_size = @sizeOf(std.zig.Server.Message.EmitBinPath);
+            .emit_digest => {
+                const body_size = @sizeOf(std.zig.Server.Message.EmitDigest);
                 if (header.bytes_len <= body_size) return error.InvalidResponse;
 
                 _ = try zcs.receiveEmitBinPath();
