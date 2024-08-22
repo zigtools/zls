@@ -20,11 +20,13 @@ let
 
   fetchGitZig = { name, url, hash }: let
     parts = splitString "#" url;
-    base = elemAt parts 0;
-    rev = elemAt parts 1;
+    url_base = elemAt parts 0;
+    url_without_query = elemAt (splitString "?" url_base) 0;
+    rev_base = elemAt parts 1;
+    rev = if match "^[a-fA-F0-9]{40}$" rev_base != null then rev_base else "refs/heads/${rev_base}";
   in fetchgit {
     inherit name rev hash;
-    url = base;
+    url = url_without_query;
     deepClone = false;
   };
 
@@ -58,11 +60,11 @@ in linkFarm name [
     };
   }
   {
-    name = "1220518fd5cefa481497bb3484ffab48a42e69c31088e37f52ea361f9ce884d2131c";
+    name = "1220c527c348bd6ce5dd545aacaf811a47f7f08dfeb2cb6fd9325680b788b5272041";
     path = fetchZigArtifact {
       name = "lsp-codegen";
-      url = "https://github.com/zigtools/zig-lsp-codegen/archive/13d1d9e44e1c602953437438b163950298ff8d85.tar.gz";
-      hash = "sha256-13twCDbxhnF7Zb2tLsBUySc8nOOQXzC0XbV4RAE5HCc=";
+      url = "https://github.com/zigtools/zig-lsp-codegen/archive/193a210ebe4a090a6f1bf1cb538375b56472688d.tar.gz";
+      hash = "sha256-JqtvsWdQULNfLlesil24Dzms9RWODdoTAKblRjL5z1M=";
     };
   }
 ]

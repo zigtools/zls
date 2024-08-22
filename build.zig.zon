@@ -20,8 +20,8 @@
             .hash = "1220102cb2c669d82184fb1dc5380193d37d68b54e8d75b76b2d155b9af7d7e2e76d",
         },
         .@"lsp-codegen" = .{
-            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/13d1d9e44e1c602953437438b163950298ff8d85.tar.gz",
-            .hash = "1220518fd5cefa481497bb3484ffab48a42e69c31088e37f52ea361f9ce884d2131c",
+            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/193a210ebe4a090a6f1bf1cb538375b56472688d.tar.gz",
+            .hash = "1220c527c348bd6ce5dd545aacaf811a47f7f08dfeb2cb6fd9325680b788b5272041",
         },
     },
     .paths = .{""},
