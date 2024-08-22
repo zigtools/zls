@@ -16,17 +16,17 @@ const ConfigOption = struct {
     default: std.json.Value,
 
     fn getTypescriptType(self: ConfigOption) error{UnsupportedType}![]const u8 {
-        return if (std.mem.eql(u8, self.type, "[]const []const u8"))
+        std.debug.assert(self.type.len != 0);
+        const ty = self.type[@intFromBool(self.type[0] == '?')..];
+        return if (std.mem.eql(u8, ty, "[]const []const u8"))
             "array"
-        else if (std.mem.eql(u8, self.type, "[]const u8"))
+        else if (std.mem.eql(u8, ty, "[]const u8"))
             "string"
-        else if (std.mem.eql(u8, self.type, "?[]const u8"))
-            "string"
-        else if (std.mem.eql(u8, self.type, "bool"))
+        else if (std.mem.eql(u8, ty, "bool"))
             "boolean"
-        else if (std.mem.eql(u8, self.type, "usize"))
+        else if (std.mem.eql(u8, ty, "usize"))
             "integer"
-        else if (std.mem.eql(u8, self.type, "enum"))
+        else if (std.mem.eql(u8, ty, "enum"))
             "string"
         else
             error.UnsupportedType;
@@ -276,7 +276,8 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
             .description = option.description,
             .@"enum" = option.@"enum",
             .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
-            .default = default,
+            // "enable_build_on_save" need to be explicitly set to 'null' so that it doesn't default to 'false'
+            .default = default orelse .null,
         });
     }
 

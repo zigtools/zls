@@ -10,8 +10,8 @@ enable_snippets: bool = true,
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 
-/// Whether to enable build-on-save diagnostics
-enable_build_on_save: bool = false,
+/// Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.
+enable_build_on_save: ?bool = null,
 
 /// Specify which arguments should be passed to Zig when running build-on-save.
 ///

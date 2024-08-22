@@ -267,6 +267,10 @@ pub fn generateBuildOnSaveDiagnostics(
         }
     }
 
+    if (!(server.config.enable_build_on_save orelse has_check_step)) {
+        return;
+    }
+
     if (has_check_step) {
         std.debug.assert(!has_explicit_steps);
         try argv.append(arena, "check");
