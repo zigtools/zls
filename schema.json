@@ -15,9 +15,9 @@
             "default": true
         },
         "enable_build_on_save": {
-            "description": "Whether to enable build-on-save diagnostics",
+            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.",
             "type": "boolean",
-            "default": false
+            "default": null
         },
         "build_on_save_args": {
             "description": "Specify which arguments should be passed to Zig when running build-on-save.\n\nIf the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.",

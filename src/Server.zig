@@ -945,7 +945,7 @@ pub fn updateConfiguration(
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
 
         if (std.process.can_spawn and
-            server.config.enable_build_on_save and
+            server.config.enable_build_on_save != false and
             server.client_capabilities.supports_publish_diagnostics)
         {
             try server.pushJob(.run_build_on_save);
@@ -1018,7 +1018,7 @@ pub fn updateConfiguration(
         }
     }
 
-    if (server.config.enable_build_on_save) {
+    if (server.config.enable_build_on_save orelse false) {
         if (!std.process.can_spawn) {
             log.info("'enable_build_on_save' is ignored because your OS can't spawn a child process", .{});
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
@@ -1354,7 +1354,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
     }
 
     if (std.process.can_spawn and
-        server.config.enable_build_on_save and
+        server.config.enable_build_on_save != false and
         server.client_capabilities.supports_publish_diagnostics)
     {
         try server.pushJob(.run_build_on_save);

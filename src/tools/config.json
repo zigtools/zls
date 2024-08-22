@@ -14,9 +14,9 @@
         },
         {
             "name": "enable_build_on_save",
-            "description": "Whether to enable build-on-save diagnostics",
-            "type": "bool",
-            "default": false
+            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.",
+            "type": "?bool",
+            "default": null
         },
         {
             "name": "build_on_save_args",
