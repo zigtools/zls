@@ -90,6 +90,7 @@ fn selectVersionInternal(
 }
 
 test selectVersionInternal {
+    @setEvalBranchQuota(6_000);
     const expect = std.testing.expect;
     const expectEqual = std.testing.expectEqual;
     const parse = std.SemanticVersion.parse;
