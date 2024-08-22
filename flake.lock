@@ -72,18 +72,6 @@
         "type": "github"
       }
     },
-    "langref": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-1I8Eut7rSqCayxqV5npFujw7l++Ul5NCBUa62hGhOlA=",
-        "type": "file",
-        "url": "https://raw.githubusercontent.com/ziglang/zig/eb7f318ea897d51082b70c84591242735c8a2c53/doc/langref.html.in"
-      },
-      "original": {
-        "type": "file",
-        "url": "https://raw.githubusercontent.com/ziglang/zig/eb7f318ea897d51082b70c84591242735c8a2c53/doc/langref.html.in"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1724242322,
@@ -104,7 +92,6 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "gitignore": "gitignore",
-        "langref": "langref",
         "nixpkgs": "nixpkgs",
         "zig-overlay": "zig-overlay"
       }
