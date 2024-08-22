@@ -59,7 +59,7 @@ pub fn receiveMessage(client: *Client) !InMessage.Header {
     return error.Timeout;
 }
 
-pub fn receiveEmitBinPath(client: *Client) !InMessage.EmitDigest {
+pub fn receiveEmitDigest(client: *Client) !InMessage.EmitDigest {
     const reader = client.pooler.fifo(.in).reader();
     return reader.readStruct(InMessage.EmitDigest);
 }

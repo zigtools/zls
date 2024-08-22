@@ -156,6 +156,8 @@ pub fn translate(
         "translate-c",
         "--zig-lib-dir",
         zig_lib_path,
+        "--cache-dir",
+        global_cache_path,
         "--global-cache-dir",
         global_cache_path,
         "-lc",
@@ -227,10 +229,13 @@ pub fn translate(
                 const body_size = @sizeOf(std.zig.Server.Message.EmitDigest);
                 if (header.bytes_len <= body_size) return error.InvalidResponse;
 
-                _ = try zcs.receiveEmitBinPath();
+                _ = try zcs.receiveEmitDigest();
 
                 const trailing_size = header.bytes_len - body_size;
-                const result_path = zcs.pooler.fifo(.in).readableSliceOfLen(trailing_size);
+                const bin_result_path = zcs.pooler.fifo(.in).readableSliceOfLen(trailing_size);
+                const hex_result_path = std.Build.Cache.binToHex(bin_result_path[0..16].*);
+                const result_path = try std.fs.path.join(allocator, &.{ global_cache_path, "o", &hex_result_path, "cimport.zig" });
+                defer allocator.free(result_path);
 
                 return Result{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
             },
