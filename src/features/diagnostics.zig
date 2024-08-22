@@ -215,6 +215,9 @@ pub fn generateBuildOnSaveDiagnostics(
         },
     };
 
+    const build_zig_uri = try URI.fromPath(server.allocator, build_zig_path);
+    defer server.allocator.free(build_zig_uri);
+
     const base_args = &[_][]const u8{
         zig_exe_path,
         "build",
@@ -230,18 +233,49 @@ pub fn generateBuildOnSaveDiagnostics(
     argv.appendSliceAssumeCapacity(base_args);
     argv.appendSliceAssumeCapacity(server.config.build_on_save_args);
 
+    const has_explicit_steps = for (server.config.build_on_save_args) |extra_arg| {
+        if (!std.mem.startsWith(u8, extra_arg, "-")) break true;
+    } else false;
+
+    var has_check_step: bool = false;
+
     blk: {
         server.document_store.lock.lockShared();
         defer server.document_store.lock.unlockShared();
-        const build_file = server.document_store.build_files.get(build_zig_path) orelse break :blk;
-        const build_associated_config = build_file.build_associated_config orelse break :blk;
-        const build_options = build_associated_config.value.build_options orelse break :blk;
+        const build_file = server.document_store.build_files.get(build_zig_uri) orelse break :blk;
 
-        try argv.ensureUnusedCapacity(arena, build_options.len);
-        for (build_options) |build_option| {
-            argv.appendAssumeCapacity(try build_option.formatParam(arena));
+        no_build_config: {
+            const build_associated_config = build_file.build_associated_config orelse break :no_build_config;
+            const build_options = build_associated_config.value.build_options orelse break :no_build_config;
+
+            try argv.ensureUnusedCapacity(arena, build_options.len);
+            for (build_options) |build_option| {
+                argv.appendAssumeCapacity(try build_option.formatParam(arena));
+            }
+        }
+
+        no_check: {
+            if (has_explicit_steps) break :no_check;
+            const config = build_file.tryLockConfig() orelse break :no_check;
+            defer build_file.unlockConfig();
+            for (config.top_level_steps) |tls| {
+                if (std.mem.eql(u8, tls, "check")) {
+                    has_check_step = true;
+                    break;
+                }
+            }
         }
     }
+
+    if (has_check_step) {
+        std.debug.assert(!has_explicit_steps);
+        try argv.append(arena, "check");
+    }
+
+    const extra_args_joined = try std.mem.join(server.allocator, " ", argv.items[base_args.len..]);
+    defer server.allocator.free(extra_args_joined);
+
+    log.info("Running build-on-save: {s} ({s})", .{ build_zig_uri, extra_args_joined });
 
     const result = std.process.Child.run(.{
         .allocator = server.allocator,
