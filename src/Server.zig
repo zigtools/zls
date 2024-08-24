@@ -55,8 +55,6 @@ wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = .{},
-// ensure that build on save is only executed once at a time
-running_build_on_save_processes: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
@@ -65,8 +63,18 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 /// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
+workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
+
+const Workspace = struct {
+    uri: types.URI,
+    is_build_on_save_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    fn deinit(self: *Workspace, allocator: std.mem.Allocator) void {
+        allocator.free(self.uri);
+    }
+};
 
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
@@ -91,12 +99,9 @@ const ClientCapabilities = struct {
     /// bricking the preview window in Sublime Text.
     /// https://github.com/zigtools/zls/pull/261
     max_detail_length: u32 = 1024 * 1024,
-    workspace_folders: []types.URI = &.{},
     client_name: ?[]const u8 = null,
 
     fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
-        for (self.workspace_folders) |uri| allocator.free(uri);
-        allocator.free(self.workspace_folders);
         if (self.client_name) |name| allocator.free(name);
         self.* = undefined;
     }
@@ -521,14 +526,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
-    if (request.workspaceFolders) |workspace_folders| {
-        server.client_capabilities.workspace_folders = try server.allocator.alloc(types.URI, workspace_folders.len);
-        @memset(server.client_capabilities.workspace_folders, "");
-        for (server.client_capabilities.workspace_folders, workspace_folders) |*dest, src| {
-            dest.* = try server.allocator.dupe(u8, src.uri);
-        }
-    }
-
     if (request.trace) |trace| {
         // To support --enable-message-tracing, only allow turning this on here
         if (trace != .off) {
@@ -541,8 +538,10 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     }
     log.debug("Offset Encoding:  {s}", .{@tagName(server.offset_encoding)});
 
-    for (server.client_capabilities.workspace_folders) |uri| {
-        log.info("Workspace Folder: '{s}'", .{uri});
+    if (request.workspaceFolders) |workspace_folders| {
+        for (workspace_folders) |src| {
+            try server.addWorkspace(src.uri);
+        }
     }
 
     server.status = .initializing;
@@ -769,38 +768,36 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 }
 
+fn addWorkspace(server: *Server, uri: types.URI) !void {
+    try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
+    server.workspaces.appendAssumeCapacity(.{
+        .uri = try server.allocator.dupe(u8, uri),
+    });
+    log.info("added Workspace Folder: {s}", .{uri});
+}
+
+fn removeWorkspace(server: *Server, uri: types.URI) void {
+    for (server.workspaces.items, 0..) |workspace, i| {
+        if (std.mem.eql(u8, workspace.uri, uri)) {
+            var removed_workspace = server.workspaces.swapRemove(i);
+            removed_workspace.deinit(server.allocator);
+            log.info("removed Workspace Folder: {s}", .{uri});
+            break;
+        }
+    } else {
+        log.warn("could not remove Workspace Folder: {s}", .{uri});
+    }
+}
+
 fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {
     _ = arena;
 
-    var folders = std.ArrayListUnmanaged(types.URI).fromOwnedSlice(server.client_capabilities.workspace_folders);
-    errdefer folders.deinit(server.allocator);
-
-    var i: usize = 0;
-    while (i < folders.items.len) {
-        const uri = folders.items[i];
-        for (notification.event.removed) |removed| {
-            if (std.mem.eql(u8, removed.uri, uri)) {
-                server.allocator.free(folders.swapRemove(i));
-                break;
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    try folders.ensureUnusedCapacity(server.allocator, notification.event.added.len);
-    for (notification.event.added) |added| {
-        folders.appendAssumeCapacity(try server.allocator.dupe(u8, added.uri));
-    }
-
-    server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
-
     for (notification.event.added) |folder| {
-        log.info("added Workspace Folder: {s}", .{folder.uri});
+        try server.addWorkspace(folder.uri);
     }
 
     for (notification.event.removed) |folder| {
-        log.info("removed Workspace Folder: {s}", .{folder.uri});
+        server.removeWorkspace(folder.uri);
     }
 }
 
@@ -1785,6 +1782,8 @@ pub fn destroy(server: *Server) void {
     server.job_queue.deinit();
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
+    for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
+    server.workspaces.deinit(server.allocator);
     server.client_capabilities.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
@@ -2013,17 +2012,17 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
         .run_build_on_save => {
             if (!std.process.can_spawn) unreachable;
 
-            if (server.running_build_on_save_processes.load(.seq_cst) != 0) return;
-
-            for (server.client_capabilities.workspace_folders) |workspace_folder_uri| {
-                _ = server.running_build_on_save_processes.fetchAdd(1, .acq_rel);
-                defer _ = server.running_build_on_save_processes.fetchSub(1, .acq_rel);
+            // TODO data-race on server.workspaces
+            for (server.workspaces.items) |*workspace| {
+                const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
+                if (was_build_on_save_running) continue;
+                defer workspace.is_build_on_save_running.store(false, .release);
 
                 var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
                 defer arena_allocator.deinit();
                 var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
-                diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace_folder_uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
-                    log.err("failed to run build on save on {s}: {}", .{ workspace_folder_uri, err });
+                diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace.uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
+                    log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
                     return;
                 };
 
