@@ -5,6 +5,7 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_diag);
 
 const Server = @import("../Server.zig");
+const Config = @import("../Config.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("lsp").types;
 const Analyser = @import("../analysis.zig");
@@ -191,7 +192,9 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 }
 
 pub fn generateBuildOnSaveDiagnostics(
-    server: *Server,
+    allocator: std.mem.Allocator,
+    store: *DocumentStore,
+    config: Config,
     workspace_uri: types.URI,
     arena: std.mem.Allocator,
     diagnostics: *std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)),
@@ -200,19 +203,19 @@ pub fn generateBuildOnSaveDiagnostics(
     defer tracy_zone.end();
     comptime std.debug.assert(std.process.can_spawn);
 
-    const zig_exe_path = server.config.zig_exe_path orelse return;
-    const zig_lib_path = server.config.zig_lib_path orelse return;
+    const zig_exe_path = config.zig_exe_path orelse return;
+    const zig_lib_path = config.zig_lib_path orelse return;
 
-    const workspace_path = URI.parse(server.allocator, workspace_uri) catch |err| {
+    const workspace_path = URI.parse(allocator, workspace_uri) catch |err| {
         log.err("failed to parse invalid uri '{s}': {}", .{ workspace_uri, err });
         return;
     };
-    defer server.allocator.free(workspace_path);
+    defer allocator.free(workspace_path);
 
     std.debug.assert(std.fs.path.isAbsolute(workspace_path));
 
-    const build_zig_path = try std.fs.path.join(server.allocator, &.{ workspace_path, "build.zig" });
-    defer server.allocator.free(build_zig_path);
+    const build_zig_path = try std.fs.path.join(allocator, &.{ workspace_path, "build.zig" });
+    defer allocator.free(build_zig_path);
 
     std.fs.accessAbsolute(build_zig_path, .{}) catch |err| switch (err) {
         error.FileNotFound => return,
@@ -222,8 +225,8 @@ pub fn generateBuildOnSaveDiagnostics(
         },
     };
 
-    const build_zig_uri = try URI.fromPath(server.allocator, build_zig_path);
-    defer server.allocator.free(build_zig_uri);
+    const build_zig_uri = try URI.fromPath(allocator, build_zig_path);
+    defer allocator.free(build_zig_uri);
 
     const base_args = &[_][]const u8{
         zig_exe_path,
@@ -235,21 +238,21 @@ pub fn generateBuildOnSaveDiagnostics(
         "none",
     };
 
-    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, base_args.len + server.config.build_on_save_args.len);
+    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, base_args.len + config.build_on_save_args.len);
     defer argv.deinit(arena);
     argv.appendSliceAssumeCapacity(base_args);
-    argv.appendSliceAssumeCapacity(server.config.build_on_save_args);
+    argv.appendSliceAssumeCapacity(config.build_on_save_args);
 
-    const has_explicit_steps = for (server.config.build_on_save_args) |extra_arg| {
+    const has_explicit_steps = for (config.build_on_save_args) |extra_arg| {
         if (!std.mem.startsWith(u8, extra_arg, "-")) break true;
     } else false;
 
     var has_check_step: bool = false;
 
     blk: {
-        server.document_store.lock.lockShared();
-        defer server.document_store.lock.unlockShared();
-        const build_file = server.document_store.build_files.get(build_zig_uri) orelse break :blk;
+        store.lock.lockShared();
+        defer store.lock.unlockShared();
+        const build_file = store.build_files.get(build_zig_path) orelse break :blk;
 
         no_build_config: {
             const build_associated_config = build_file.build_associated_config orelse break :no_build_config;
@@ -263,9 +266,9 @@ pub fn generateBuildOnSaveDiagnostics(
 
         no_check: {
             if (has_explicit_steps) break :no_check;
-            const config = build_file.tryLockConfig() orelse break :no_check;
+            const build_config = build_file.tryLockConfig() orelse break :no_check;
             defer build_file.unlockConfig();
-            for (config.top_level_steps) |tls| {
+            for (build_config.top_level_steps) |tls| {
                 if (std.mem.eql(u8, tls, "check")) {
                     has_check_step = true;
                     break;
@@ -274,7 +277,7 @@ pub fn generateBuildOnSaveDiagnostics(
         }
     }
 
-    if (!(server.config.enable_build_on_save orelse has_check_step)) {
+    if (!(config.enable_build_on_save orelse has_check_step)) {
         return;
     }
 
@@ -283,30 +286,30 @@ pub fn generateBuildOnSaveDiagnostics(
         try argv.append(arena, "check");
     }
 
-    const extra_args_joined = try std.mem.join(server.allocator, " ", argv.items[base_args.len..]);
-    defer server.allocator.free(extra_args_joined);
+    const extra_args_joined = try std.mem.join(allocator, " ", argv.items[base_args.len..]);
+    defer allocator.free(extra_args_joined);
 
     log.info("Running build-on-save: {s} ({s})", .{ build_zig_uri, extra_args_joined });
 
     const result = std.process.Child.run(.{
-        .allocator = server.allocator,
+        .allocator = allocator,
         .argv = argv.items,
         .cwd = workspace_path,
         .max_output_bytes = 1024 * 1024,
     }) catch |err| {
-        const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
-        defer server.allocator.free(joined);
+        const joined = std.mem.join(allocator, " ", argv.items) catch return;
+        defer allocator.free(joined);
         log.err("failed zig build command:\n{s}\nerror:{}\n", .{ joined, err });
         return err;
     };
-    defer server.allocator.free(result.stdout);
-    defer server.allocator.free(result.stderr);
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
 
     switch (result.term) {
         .Exited => |code| if (code == 0) return,
         else => {
-            const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
-            defer server.allocator.free(joined);
+            const joined = std.mem.join(allocator, " ", argv.items) catch return;
+            defer allocator.free(joined);
             log.err("failed zig build command:\n{s}\nstderr:{s}\n\n", .{ joined, result.stderr });
         },
     }
