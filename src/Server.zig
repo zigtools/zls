@@ -162,13 +162,11 @@ pub const Status = enum {
 const Job = union(enum) {
     incoming_message: std.json.Parsed(Message),
     generate_diagnostics: DocumentStore.Uri,
-    run_build_on_save,
 
     fn deinit(self: Job, allocator: std.mem.Allocator) void {
         switch (self) {
             .incoming_message => |parsed_message| parsed_message.deinit(),
             .generate_diagnostics => |uri| allocator.free(uri),
-            .run_build_on_save => {},
         }
     }
 
@@ -179,15 +177,12 @@ const Job = union(enum) {
         /// this `Job` requires shared access to `Server` and `DocumentStore`
         /// other non exclusive jobs can be processed in parallel
         shared,
-        /// this `Job` operates atomically and does not require any synchronisation
-        atomic,
     };
 
     fn syncMode(self: Job) SynchronizationMode {
         return switch (self) {
             .incoming_message => |parsed_message| if (isBlockingMessage(parsed_message.value)) .exclusive else .shared,
             .generate_diagnostics => .shared,
-            .run_build_on_save => .atomic,
         };
     }
 };
@@ -941,7 +936,7 @@ pub fn updateConfiguration(
             server.config.enable_build_on_save != false and
             server.client_capabilities.supports_publish_diagnostics)
         {
-            try server.pushJob(.run_build_on_save);
+            try server.thread_pool.spawn(runBuildOnSave, .{server});
         }
     }
 
@@ -1350,7 +1345,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         server.config.enable_build_on_save != false and
         server.client_capabilities.supports_publish_diagnostics)
     {
-        try server.pushJob(.run_build_on_save);
+        try server.thread_pool.spawn(runBuildOnSave, .{server});
     }
 
     if (server.getAutofixMode() == .on_save) {
@@ -1650,6 +1645,33 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn runBuildOnSave(server: *Server) void {
+    comptime std.debug.assert(std.process.can_spawn);
+
+    // TODO data-race on server.workspaces
+    for (server.workspaces.items) |*workspace| {
+        const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
+        if (was_build_on_save_running) continue;
+        defer workspace.is_build_on_save_running.store(false, .release);
+
+        var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+        defer arena_allocator.deinit();
+        var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
+        diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace.uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
+            log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
+            return;
+        };
+
+        for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
+            const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
+                .uri = document_uri,
+                .diagnostics = diagnostics.items,
+            }) catch return;
+            server.allocator.free(json_message);
+        }
+    }
+}
+
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1814,23 +1836,17 @@ pub fn loop(server: *Server) !void {
 
         while (server.job_queue.readItem()) |job| {
             if (zig_builtin.single_threaded) {
-                server.processJob(job, null);
+                server.processJob(job);
                 continue;
             }
 
             switch (job.syncMode()) {
                 .exclusive => {
                     server.waitAndWork();
-                    server.processJob(job, null);
+                    server.processJob(job);
                 },
                 .shared => {
-                    server.wait_group.start();
-                    errdefer job.deinit(server.allocator);
-                    try server.thread_pool.spawn(processJob, .{ server, job, &server.wait_group });
-                },
-                .atomic => {
-                    errdefer job.deinit(server.allocator);
-                    try server.thread_pool.spawn(processJob, .{ server, job, null });
+                    server.thread_pool.spawnWg(&server.wait_group, processJob, .{ server, job });
                 },
             }
         }
@@ -1988,12 +2004,10 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
     };
 }
 
-fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) void {
+fn processJob(server: *Server, job: Job) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     tracy_zone.setName(@tagName(job));
-    defer if (!zig_builtin.single_threaded and wait_group != null) wait_group.?.finish();
-
     defer job.deinit(server.allocator);
 
     switch (job) {
@@ -2008,32 +2022,6 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle) catch return;
             const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
             server.allocator.free(json_message);
-        },
-        .run_build_on_save => {
-            if (!std.process.can_spawn) unreachable;
-
-            // TODO data-race on server.workspaces
-            for (server.workspaces.items) |*workspace| {
-                const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
-                if (was_build_on_save_running) continue;
-                defer workspace.is_build_on_save_running.store(false, .release);
-
-                var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-                defer arena_allocator.deinit();
-                var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
-                diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace.uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
-                    log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
-                    return;
-                };
-
-                for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
-                    const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-                        .uri = document_uri,
-                        .diagnostics = diagnostics.items,
-                    }) catch return;
-                    server.allocator.free(json_message);
-                }
-            }
         },
     }
 }
