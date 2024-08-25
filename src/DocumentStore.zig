@@ -643,11 +643,13 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     if (self.getBuildFile(uri)) |build_file| return build_file;
 
-    self.lock.lock();
-    defer self.lock.unlock();
+    const new_build_file: *BuildFile = blk: {
+        self.lock.lock();
+        defer self.lock.unlock();
 
-    const gop = self.build_files.getOrPut(self.allocator, uri) catch return null;
-    if (!gop.found_existing) {
+        const gop = self.build_files.getOrPut(self.allocator, uri) catch return null;
+        if (gop.found_existing) return gop.value_ptr.*;
+
         gop.value_ptr.* = self.allocator.create(BuildFile) catch |err| {
             self.build_files.swapRemoveAt(gop.index);
             log.debug("Failed to load build file {s}: {}", .{ uri, err });
@@ -661,9 +663,16 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
             return null;
         };
         gop.key_ptr.* = gop.value_ptr.*.uri;
+        break :blk gop.value_ptr.*;
+    };
+
+    // this code path is only reached when the build file is new
+
+    if (std.process.can_spawn) {
+        self.invalidateBuildFile(new_build_file.uri);
     }
 
-    return gop.value_ptr.*;
+    return new_build_file;
 }
 
 /// **Thread safe** takes an exclusive lock
@@ -737,25 +746,32 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 
 /// Invalidates a build files.
 /// **Thread safe** takes a shared lock
-pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
+pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     comptime std.debug.assert(std.process.can_spawn);
 
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
     if (self.config.global_cache_path == null) return;
 
-    const uri = try self.allocator.dupe(u8, build_file_uri);
-    errdefer self.allocator.free(uri);
-
     if (builtin.single_threaded) {
-        self.invalidateBuildFileWorker(uri);
-    } else {
-        try self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, uri });
+        self.invalidateBuildFileWorker(build_file_uri, false);
+        return;
     }
+
+    const duped_uri = self.allocator.dupe(u8, build_file_uri) catch {
+        self.invalidateBuildFileWorker(build_file_uri, false);
+        return;
+    };
+
+    self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, duped_uri, true }) catch {
+        self.allocator.free(duped_uri);
+        self.invalidateBuildFileWorker(build_file_uri, false);
+        return;
+    };
 }
 
-fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri) void {
-    defer self.allocator.free(build_file_uri);
+fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build_file_uri_owned: bool) void {
+    defer if (is_build_file_uri_owned) self.allocator.free(build_file_uri);
 
     const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
@@ -1095,10 +1111,6 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
         if (err != error.FileNotFound) {
             log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
         }
-    }
-
-    if (std.process.can_spawn) {
-        try self.invalidateBuildFile(build_file.uri);
     }
 
     log.info("Loaded build file '{s}'", .{build_file.uri});
