@@ -31,6 +31,7 @@ const excluded_builtins_set = blk: {
         .{"bitCast"},
         .{"bitOffsetOf"},
         .{"bitSizeOf"},
+        .{"branchHint"},
         .{"breakpoint"}, // no parameters
         // .{"mulAdd"},
         .{"byteSwap"},
@@ -96,7 +97,6 @@ const excluded_builtins_set = blk: {
         .{"returnAddress"}, // no parameters
         // .{"select"},
         // .{"setAlignStack"},
-        .{"setCold"},
         .{"setEvalBranchQuota"},
         .{"setFloatMode"},
         .{"setRuntimeSafety"},

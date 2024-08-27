@@ -376,7 +376,7 @@ pub const Handle = struct {
     }
 
     fn getDocumentScopeCold(self: *Handle) error{OutOfMemory}!DocumentScope {
-        @setCold(true);
+        @branchHint(.cold);
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
@@ -412,7 +412,7 @@ pub const Handle = struct {
     }
 
     fn getZirCold(self: *Handle) error{OutOfMemory}!Zir {
-        @setCold(true);
+        @branchHint(.cold);
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
