@@ -3482,6 +3482,7 @@ pub fn getPositionContext(
                     .enum_literal => curr_ctx.ctx = .{
                         .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
+                    .parens_expr => curr_ctx.ctx = .{ .var_access = tok.loc },
                     else => {},
                 },
                 .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
