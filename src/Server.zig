@@ -911,11 +911,11 @@ pub fn updateConfiguration(
                 else => {
                     if (old_config_value != new_config_value) {
                         switch (@typeInfo(@TypeOf(new_config_value))) {
-                            .Bool,
-                            .Int,
-                            .Float,
+                            .bool,
+                            .int,
+                            .float,
                             => log.info("Set config option '{s}' to '{}'", .{ field.name, new_config_value }),
-                            .Enum => log.info("Set config option '{s}' to '{s}'", .{ field.name, @tagName(new_config_value) }),
+                            .@"enum" => log.info("Set config option '{s}' to '{s}'", .{ field.name, @tagName(new_config_value) }),
                             else => @compileError("unexpected config type ++ (" ++ @typeName(@TypeOf(new_config_value)) ++ ")"),
                         }
                         @field(server.config, field.name) = new_config_value;

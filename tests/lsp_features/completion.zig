@@ -3589,7 +3589,7 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
     try set.ensureTotalCapacity(allocator, items.len);
     for (items) |item| {
         const maybe_kind = switch (@typeInfo(@TypeOf(item.kind))) {
-            .Optional => item.kind,
+            .optional => item.kind,
             else => @as(?@TypeOf(item.kind), item.kind),
         };
         if (maybe_kind) |kind| {
