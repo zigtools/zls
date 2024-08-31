@@ -194,18 +194,18 @@ pub const Configuration = getConfigurationType();
 // returns a Struct which is the same as `Config` except that every field is optional.
 fn getConfigurationType() type {
     var config_info: std.builtin.Type = @typeInfo(Config);
-    var fields: [config_info.Struct.fields.len]std.builtin.Type.StructField = undefined;
-    for (config_info.Struct.fields, &fields) |field, *new_field| {
+    var fields: [config_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
+    for (config_info.@"struct".fields, &fields) |field, *new_field| {
         new_field.* = field;
-        if (@typeInfo(field.type) != .Optional) {
+        if (@typeInfo(field.type) != .optional) {
             new_field.type = @Type(std.builtin.Type{
-                .Optional = .{ .child = field.type },
+                .optional = .{ .child = field.type },
             });
         }
         new_field.default_value = &@as(new_field.type, null);
     }
-    config_info.Struct.fields = fields[0..];
-    config_info.Struct.decls = &.{};
+    config_info.@"struct".fields = fields[0..];
+    config_info.@"struct".decls = &.{};
     return @Type(config_info);
 }
 

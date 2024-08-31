@@ -1676,7 +1676,7 @@ pub fn coerce(
     if (in_memory_result == .ok) return try ip.getUnknown(gpa, dest_ty);
 
     switch (ip.zigTypeTag(dest_ty)) {
-        .Optional => optional: {
+        .optional => optional: {
             // null to ?T
             if (inst_ty == .null_type) {
                 return try ip.getNull(gpa, dest_ty);
@@ -1698,11 +1698,11 @@ pub fn coerce(
                 .val = intermediate,
             } });
         },
-        .Pointer => pointer: {
+        .pointer => pointer: {
             const dest_info = ip.indexToKey(dest_ty).pointer_type;
 
             // Function body to function pointer.
-            if (ip.zigTypeTag(inst_ty) == .Fn) {
+            if (ip.zigTypeTag(inst_ty) == .@"fn") {
                 return try ip.getUnknown(gpa, dest_ty);
             }
 
@@ -1781,7 +1781,7 @@ pub fn coerce(
             if (dest_info.elem_type == .anyopaque_type and inst_ty_key == .pointer_type) {
                 // TODO if (!sema.checkPtrAttributes(dest_ty, inst_ty, &in_memory_result)) break :pointer;
                 const elem_ty = ip.indexToKey(inst_ty).pointer_type.elem_type;
-                const is_pointer = ip.zigTypeTag(elem_ty) == .Pointer;
+                const is_pointer = ip.zigTypeTag(elem_ty) == .pointer;
                 if (is_pointer or ip.isPtrLikeOptional(elem_ty)) {
                     in_memory_result = .{ .double_ptr_to_anyopaque = .{
                         .actual = inst_ty,
@@ -1795,9 +1795,9 @@ pub fn coerce(
 
             return try ip.getUnknown(gpa, dest_ty);
         },
-        .Int, .ComptimeInt => switch (ip.zigTypeTag(inst_ty)) {
-            .Float, .ComptimeFloat => return try ip.getUnknown(gpa, dest_ty),
-            .Int, .ComptimeInt => {
+        .int, .comptime_int => switch (ip.zigTypeTag(inst_ty)) {
+            .float, .comptime_float => return try ip.getUnknown(gpa, dest_ty),
+            .int, .comptime_int => {
                 if (try ip.intFitsInType(inst, dest_ty, target)) {
                     return try ip.coerceInt(gpa, dest_ty, inst);
                 } else {
@@ -1810,13 +1810,13 @@ pub fn coerce(
             },
             else => {},
         },
-        .Float, .ComptimeFloat => return try ip.getUnknown(gpa, dest_ty),
-        .Enum => return try ip.getUnknown(gpa, dest_ty),
-        .ErrorUnion => return try ip.getUnknown(gpa, dest_ty),
-        .Union => return try ip.getUnknown(gpa, dest_ty),
-        .Array => switch (ip.zigTypeTag(inst_ty)) {
-            .Vector => return try ip.getUnknown(gpa, dest_ty),
-            .Struct => {
+        .float, .comptime_float => return try ip.getUnknown(gpa, dest_ty),
+        .@"enum" => return try ip.getUnknown(gpa, dest_ty),
+        .error_union => return try ip.getUnknown(gpa, dest_ty),
+        .@"union" => return try ip.getUnknown(gpa, dest_ty),
+        .array => switch (ip.zigTypeTag(inst_ty)) {
+            .vector => return try ip.getUnknown(gpa, dest_ty),
+            .@"struct" => {
                 if (inst_ty == Index.empty_struct_type) {
                     const len = ip.indexToKey(dest_ty).array_type.len;
                     if (len != 0) {
@@ -1833,8 +1833,8 @@ pub fn coerce(
             },
             else => {},
         },
-        .Vector => return try ip.getUnknown(gpa, dest_ty),
-        .Struct => return try ip.getUnknown(gpa, dest_ty),
+        .vector => return try ip.getUnknown(gpa, dest_ty),
+        .@"struct" => return try ip.getUnknown(gpa, dest_ty),
         else => {},
     }
 
@@ -2216,7 +2216,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 },
                 .function_type => {
                     if (candidate_info.flags.is_const and
-                        ip.zigTypeTag(candidate_info.elem_type) == .Fn and
+                        ip.zigTypeTag(candidate_info.elem_type) == .@"fn" and
                         .ok == try ip.coerceInMemoryAllowedFns(gpa, arena, chosen, candidate_info.elem_type, target))
                     {
                         chosen = candidate;
@@ -2503,7 +2503,7 @@ fn coerceInMemoryAllowed(
     }
 
     switch (dest_tag) {
-        .Int => {
+        .int => {
             const dest_info = ip.intInfo(dest_ty, target);
             const src_info = ip.intInfo(src_ty, target);
 
@@ -2523,7 +2523,7 @@ fn coerceInMemoryAllowed(
             }
             return .ok;
         },
-        .Float => {
+        .float => {
             const dest_bits = ip.floatBits(dest_ty, target);
             const src_bits = ip.floatBits(src_ty, target);
             if (dest_bits == src_bits) return .ok;
@@ -2532,10 +2532,10 @@ fn coerceInMemoryAllowed(
                 .wanted = src_ty,
             } };
         },
-        .Pointer => {
+        .pointer => {
             return try ip.coerceInMemoryAllowedPtrs(gpa, arena, dest_ty, src_ty, dest_is_const, target);
         },
-        .Optional => {
+        .optional => {
             // Pointer-like Optionals
             const maybe_dest_ptr_ty = ip.optionalPtrTy(dest_ty);
             const maybe_src_ptr_ty = ip.optionalPtrTy(src_ty);
@@ -2564,10 +2564,10 @@ fn coerceInMemoryAllowed(
 
             return .ok;
         },
-        .Fn => {
+        .@"fn" => {
             return try ip.coerceInMemoryAllowedFns(gpa, arena, dest_ty, src_ty, target);
         },
-        .ErrorUnion => {
+        .error_union => {
             const dest_payload = dest_key.error_union_type.payload_type;
             const src_payload = src_key.error_union_type.payload_type;
             const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_payload, src_payload, dest_is_const, target);
@@ -2583,10 +2583,10 @@ fn coerceInMemoryAllowed(
             if (dest_set == .none or src_set == .none) return .ok;
             return try ip.coerceInMemoryAllowedErrorSets(gpa, arena, dest_set, src_set);
         },
-        .ErrorSet => {
+        .error_set => {
             return try ip.coerceInMemoryAllowedErrorSets(gpa, arena, dest_ty, src_ty);
         },
-        .Array => {
+        .array => {
             const dest_info = dest_key.array_type;
             const src_info = src_key.array_type;
             if (dest_info.len != src_info.len) {
@@ -2618,7 +2618,7 @@ fn coerceInMemoryAllowed(
             }
             return .ok;
         },
-        .Vector => {
+        .vector => {
             const dest_len = dest_key.vector_type.len;
             const src_len = src_key.vector_type.len;
 
@@ -2932,7 +2932,7 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
             .f80,
             .f128,
             .c_longdouble,
-            => .Float,
+            => .float,
 
             .usize,
             .isize,
@@ -2945,51 +2945,51 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
             .c_ulong,
             .c_longlong,
             .c_ulonglong,
-            => .Int,
+            => .int,
 
-            .comptime_int => .ComptimeInt,
-            .comptime_float => .ComptimeFloat,
+            .comptime_int => .comptime_int,
+            .comptime_float => .comptime_float,
 
-            .anyopaque => .Opaque,
-            .bool => .Bool,
-            .void => .Void,
-            .type => .Type,
-            .anyerror => .ErrorSet,
-            .noreturn => .NoReturn,
-            .anyframe_type => .AnyFrame,
-            .empty_struct_type => .Struct,
-            .null_type => .Null,
-            .undefined_type => .Undefined,
-            .enum_literal_type => .EnumLiteral,
+            .anyopaque => .@"opaque",
+            .bool => .bool,
+            .void => .void,
+            .type => .type,
+            .anyerror => .error_set,
+            .noreturn => .noreturn,
+            .anyframe_type => .@"anyframe",
+            .empty_struct_type => .@"struct",
+            .null_type => .null,
+            .undefined_type => .undefined,
+            .enum_literal_type => .enum_literal,
 
-            .atomic_order => .Enum,
-            .atomic_rmw_op => .Enum,
-            .calling_convention => .Enum,
-            .address_space => .Enum,
-            .float_mode => .Enum,
-            .reduce_op => .Enum,
-            .modifier => .Enum,
-            .prefetch_options => .Struct,
-            .export_options => .Struct,
-            .extern_options => .Struct,
-            .type_info => .Union,
+            .atomic_order => .@"enum",
+            .atomic_rmw_op => .@"enum",
+            .calling_convention => .@"enum",
+            .address_space => .@"enum",
+            .float_mode => .@"enum",
+            .reduce_op => .@"enum",
+            .modifier => .@"enum",
+            .prefetch_options => .@"struct",
+            .export_options => .@"struct",
+            .extern_options => .@"struct",
+            .type_info => .@"union",
 
             .unknown => unreachable,
             .generic_poison => unreachable,
         },
-        .type_int_signed, .type_int_unsigned => .Int,
-        .type_pointer => .Pointer,
-        .type_array => .Array,
-        .type_struct => .Struct,
-        .type_optional => .Optional,
-        .type_error_union => .ErrorUnion,
-        .type_error_set => .ErrorSet,
-        .type_enum => .Enum,
-        .type_function => .Fn,
-        .type_union => .Union,
-        .type_tuple => .Struct,
-        .type_vector => .Vector,
-        .type_anyframe => .AnyFrame,
+        .type_int_signed, .type_int_unsigned => .int,
+        .type_pointer => .pointer,
+        .type_array => .array,
+        .type_struct => .@"struct",
+        .type_optional => .optional,
+        .type_error_union => .error_union,
+        .type_error_set => .error_set,
+        .type_enum => .@"enum",
+        .type_function => .@"fn",
+        .type_union => .@"union",
+        .type_tuple => .@"struct",
+        .type_vector => .vector,
+        .type_anyframe => .@"anyframe",
 
         .simple_value,
         .int_u64,
@@ -3433,8 +3433,8 @@ pub fn elemType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    assert(ip.zigTypeTag(a_ty) == .ErrorSet);
-    assert(ip.zigTypeTag(b_ty) == .ErrorSet);
+    assert(ip.zigTypeTag(a_ty) == .error_set);
+    assert(ip.zigTypeTag(b_ty) == .error_set);
 
     // Anything merged with anyerror is anyerror.
     if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
@@ -3709,7 +3709,7 @@ pub fn isZero(ip: *InternPool, val: Index) bool {
 
 /// If the value fits in the given integer, return it, otherwise null.
 pub fn toInt(ip: *InternPool, val: Index, comptime T: type) ?T {
-    comptime assert(@typeInfo(T) == .Int);
+    comptime assert(@typeInfo(T) == .int);
     return switch (ip.indexToKey(val)) {
         .simple_value => |simple| switch (simple) {
             .null_value => 0,
