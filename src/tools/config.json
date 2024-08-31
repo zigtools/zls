@@ -19,10 +19,10 @@
             "default": false
         },
         {
-            "name": "build_on_save_step",
-            "description": "Select which step should be executed on build-on-save",
-            "type": "[]const u8",
-            "default": "install"
+            "name": "build_on_save_args",
+            "description": "Specify which arguments should be passed to Zig when running build-on-save.\n\nIf the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.",
+            "type": "[]const []const u8",
+            "default": []
         },
         {
             "name": "enable_autofix",

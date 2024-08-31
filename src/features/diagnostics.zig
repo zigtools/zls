@@ -215,12 +215,9 @@ pub fn generateBuildOnSaveDiagnostics(
         },
     };
 
-    log.info("Running build-on-save: {s} ({s})", .{ build_zig_path, server.config.build_on_save_step });
-
     const base_args = &[_][]const u8{
         zig_exe_path,
         "build",
-        server.config.build_on_save_step,
         "--zig-lib-dir",
         zig_lib_path,
         "-fno-reference-trace",
@@ -228,9 +225,10 @@ pub fn generateBuildOnSaveDiagnostics(
         "none",
     };
 
-    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, base_args.len);
+    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, base_args.len + server.config.build_on_save_args.len);
     defer argv.deinit(arena);
     argv.appendSliceAssumeCapacity(base_args);
+    argv.appendSliceAssumeCapacity(server.config.build_on_save_args);
 
     blk: {
         server.document_store.lock.lockShared();

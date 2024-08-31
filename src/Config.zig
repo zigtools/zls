@@ -13,8 +13,10 @@ enable_argument_placeholders: bool = true,
 /// Whether to enable build-on-save diagnostics
 enable_build_on_save: bool = false,
 
-/// Select which step should be executed on build-on-save
-build_on_save_step: []const u8 = "install",
+/// Specify which arguments should be passed to Zig when running build-on-save.
+///
+/// If the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.
+build_on_save_args: []const []const u8 = &.{},
 
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
 enable_autofix: bool = false,
