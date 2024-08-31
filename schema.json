@@ -19,10 +19,13 @@
             "type": "boolean",
             "default": false
         },
-        "build_on_save_step": {
-            "description": "Select which step should be executed on build-on-save",
-            "type": "string",
-            "default": "install"
+        "build_on_save_args": {
+            "description": "Specify which arguments should be passed to Zig when running build-on-save.\n\nIf the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "default": []
         },
         "enable_autofix": {
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",

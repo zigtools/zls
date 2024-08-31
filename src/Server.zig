@@ -891,36 +891,39 @@ pub fn updateConfiguration(
         (server.config.build_runner_path == null or !std.mem.eql(u8, server.config.build_runner_path.?, new_config.build_runner_path.?));
 
     inline for (std.meta.fields(Config)) |field| {
-        if (@field(new_cfg, field.name)) |new_config_value| {
-            const old_config_value = @field(server.config, field.name);
-            switch (@TypeOf(old_config_value)) {
-                ?[]const u8 => {
-                    const override_old_value =
-                        if (old_config_value) |old_value| !std.mem.eql(u8, old_value, new_config_value) else true;
-                    if (override_old_value) {
-                        log.info("Set config option '{s}' to '{s}'", .{ field.name, new_config_value });
-                        @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
-                    }
-                },
-                []const u8 => {
-                    if (!std.mem.eql(u8, old_config_value, new_config_value)) {
-                        log.info("Set config option '{s}' to '{s}'", .{ field.name, new_config_value });
-                        @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
-                    }
-                },
-                else => {
-                    if (old_config_value != new_config_value) {
-                        switch (@typeInfo(@TypeOf(new_config_value))) {
-                            .bool,
-                            .int,
-                            .float,
-                            => log.info("Set config option '{s}' to '{}'", .{ field.name, new_config_value }),
-                            .@"enum" => log.info("Set config option '{s}' to '{s}'", .{ field.name, @tagName(new_config_value) }),
-                            else => @compileError("unexpected config type ++ (" ++ @typeName(@TypeOf(new_config_value)) ++ ")"),
+        if (@field(new_cfg, field.name)) |new_value| {
+            const old_value_maybe_optional = @field(server.config, field.name);
+
+            const override_value = blk: {
+                const old_value = if (@typeInfo(@TypeOf(old_value_maybe_optional)) == .optional)
+                    if (old_value_maybe_optional) |old_value| old_value else break :blk true
+                else
+                    old_value_maybe_optional;
+
+                break :blk switch (@TypeOf(old_value)) {
+                    []const []const u8 => {
+                        if (old_value.len != new_value.len) break :blk true;
+                        for (old_value, new_value) |old, new| {
+                            if (!std.mem.eql(u8, old, new)) break :blk true;
                         }
-                        @field(server.config, field.name) = new_config_value;
-                    }
-                },
+                        break :blk false;
+                    },
+                    []const u8 => !std.mem.eql(u8, old_value, new_value),
+                    else => old_value != new_value,
+                };
+            };
+
+            if (override_value) {
+                log.info("Set config option '{s}' to {}", .{ field.name, std.json.fmt(new_value, .{}) });
+                @field(server.config, field.name) = switch (@TypeOf(new_value)) {
+                    []const []const u8 => blk: {
+                        const copy = try config_arena.alloc([]const u8, new_value.len);
+                        for (copy, new_value) |*duped, original| duped.* = try config_arena.dupe(u8, original);
+                        break :blk copy;
+                    },
+                    []const u8 => try config_arena.dupe(u8, new_value),
+                    else => new_value,
+                };
             }
         }
     }

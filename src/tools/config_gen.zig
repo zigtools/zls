@@ -16,7 +16,9 @@ const ConfigOption = struct {
     default: std.json.Value,
 
     fn getTypescriptType(self: ConfigOption) error{UnsupportedType}![]const u8 {
-        return if (std.mem.eql(u8, self.type, "[]const u8"))
+        return if (std.mem.eql(u8, self.type, "[]const []const u8"))
+            "array"
+        else if (std.mem.eql(u8, self.type, "[]const u8"))
             "string"
         else if (std.mem.eql(u8, self.type, "?[]const u8"))
             "string"
@@ -62,6 +64,15 @@ const ConfigOption = struct {
     ) !void {
         _ = options;
         if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
+        if (config.default == .array) {
+            try writer.writeAll("&.{");
+            for (config.default.array.items, 0..) |item, i| {
+                if (i != 0) try writer.writeByte(',');
+                try std.json.stringify(item, .{}, writer);
+            }
+            try writer.writeByte('}');
+            return;
+        }
         if (config.@"enum" != null) {
             try writer.print(".{s}", .{config.default.string});
             return;
@@ -89,19 +100,47 @@ const Schema = struct {
 const SchemaEntry = struct {
     description: []const u8,
     type: []const u8,
+    items: ?struct { type: []const u8 } = null,
     @"enum": ?[]const []const u8 = null,
     default: std.json.Value,
 };
 
-fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    _ = allocator;
+fn formatDocs(
+    text: []const u8,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) @TypeOf(writer).Error!void {
+    _ = options;
+    if (fmt.len != 1) std.fmt.invalidFmtError(fmt, text);
+    const prefix = switch (fmt[0]) {
+        'n' => "// ",
+        'd' => "/// ",
+        '!' => "//! ",
+        else => std.fmt.invalidFmtError(fmt, text),
+    };
+    var i: usize = 0;
+    var iterator = std.mem.splitScalar(u8, text, '\n');
+    while (iterator.next()) |line| : (i += 1) {
+        if (i != 0) try writer.writeByte('\n');
+        try writer.print("{s}{s}", .{ prefix, line });
+    }
+}
 
-    const config_file = try std.fs.cwd().createFile(path, .{});
-    defer config_file.close();
+/// The format specifier must be one of:
+///  * `{n}` writes normal (`//`) comments.
+///  * `{d}` writes doc-comments (`///`) comments.
+///  * `{!}` writes top-level-doc-comments (`//!`) comments.
+fn fmtDocs(text: []const u8) std.fmt.Formatter(formatDocs) {
+    return .{ .data = text };
+}
 
-    var buff_out = std.io.bufferedWriter(config_file.writer());
+fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.mem.Allocator.Error)!void {
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    const writer = buffer.writer();
 
-    _ = try buff_out.write(
+    try writer.writeAll(
         \\//! DO NOT EDIT
         \\//! Configuration options for ZLS.
         \\//! If you want to add a config option edit
@@ -111,26 +150,39 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
     );
 
     for (config.options) |option| {
-        try buff_out.writer().print(
+        try writer.print(
             \\
-            \\/// {s}
+            \\{d}
             \\{}: {} = {},
             \\
         , .{
-            std.mem.trim(u8, option.description, &std.ascii.whitespace),
+            fmtDocs(std.mem.trim(u8, option.description, &std.ascii.whitespace)),
             std.zig.fmtId(std.mem.trim(u8, option.name, &std.ascii.whitespace)),
             option.fmtZigType(),
             option.fmtDefaultValue(),
         });
     }
 
-    _ = try buff_out.write(
+    _ = try writer.writeAll(
         \\
         \\// DO NOT EDIT
         \\
     );
 
-    try buff_out.flush();
+    const source_unformatted = try buffer.toOwnedSliceSentinel(0);
+    defer allocator.free(source_unformatted);
+
+    var tree = try std.zig.Ast.parse(allocator, source_unformatted, .zig);
+    defer tree.deinit(allocator);
+    std.debug.assert(tree.errors.len == 0);
+
+    buffer.clearRetainingCapacity();
+    try tree.renderToArrayList(&buffer, .{});
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = path,
+        .data = buffer.items,
+    });
 }
 
 fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
@@ -148,6 +200,7 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
         schema.properties.map.putAssumeCapacityNoClobber(option.name, .{
             .description = option.description,
             .type = try option.getTypescriptType(),
+            .items = if (std.mem.eql(u8, option.type, "[]const []const u8")) .{ .type = "string" } else null,
             .@"enum" = option.@"enum",
             .default = option.default,
         });
