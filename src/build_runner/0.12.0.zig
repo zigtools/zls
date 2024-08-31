@@ -1068,7 +1068,7 @@ fn extractBuildInformation(
 
     var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
     for (dependencies.root_deps) |root_dep| {
-        inline for (@typeInfo(dependencies.packages).Struct.decls) |package| blk: {
+        inline for (comptime std.meta.declarations(dependencies.packages)) |package| blk: {
             if (std.mem.eql(u8, package.name, root_dep[1])) {
                 const package_info = @field(dependencies.packages, package.name);
                 if (!@hasDecl(package_info, "build_root")) break :blk;
