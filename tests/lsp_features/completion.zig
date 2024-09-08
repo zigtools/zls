@@ -820,6 +820,14 @@ test "if/for/while/catch scopes" {
     try testCompletion(
         \\const S = struct { pub const T = u32; };
         \\test {
+        \\    if (true) S.<cursor>
+        \\}
+    , &.{
+        .{ .label = "T", .kind = .Constant, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const S = struct { pub const T = u32; };
+        \\test {
         \\    if (true) {
         \\    } else {
         \\        S.<cursor>
