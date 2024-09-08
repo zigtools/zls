@@ -908,6 +908,34 @@ fn extractBuildInformation(
         }
     }
 
+    var dependency_iterator: std.Build.Module.DependencyIterator = .{
+        .allocator = gpa,
+        .index = 0,
+        .set = .{},
+        .chase_dyn_libs = true,
+    };
+    defer dependency_iterator.deinit();
+
+    // collect root modules of `Step.Compile`
+    for (steps.keys()) |step| {
+        const compile = step.cast(Step.Compile) orelse continue;
+
+        dependency_iterator.set.ensureUnusedCapacity(arena, compile.root_module.import_table.count() + 1) catch @panic("OOM");
+        dependency_iterator.set.putAssumeCapacity(.{
+            .module = &compile.root_module,
+            .compile = compile,
+        }, "root");
+    }
+
+    // collect public modules
+    for (b.modules.values()) |module| {
+        dependency_iterator.set.ensureUnusedCapacity(gpa, module.import_table.count() + 1) catch @panic("OOM");
+        dependency_iterator.set.putAssumeCapacity(.{
+            .module = module,
+            .compile = null,
+        }, "root");
+    }
+
     const helper = struct {
         fn addStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
             const lazy_path_updated_version = comptime std.SemanticVersion.parse("0.13.0-dev.79+6bc0cef60") catch unreachable;
@@ -924,55 +952,49 @@ fn extractBuildInformation(
                 }
             }
         }
-    };
-
-    var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
-    defer step_dependencies.deinit(gpa);
-
-    // collect dependencies of all `Step.Compile` steps
-    for (steps.keys()) |step| {
-        const compile = step.cast(Step.Compile) orelse continue;
-
-        // adding all dependencies would be possible but may add dependencies that
-        // are never used to resolve a path.
-        //
-        // try step_dependencies.ensureUnusedCapacity(gpa, step.dependencies.items.len);
-        // for (step.dependencies.items) |dependency_step| {
-        //     step_dependencies.putAssumeCapacity(dependency_step, {});
-        // }
-
-        var it = compile.root_module.iterateDependencies(compile, false);
-        while (it.next()) |item| {
-            if (item.module.root_source_file) |root_source_file| {
-                try helper.addStepDependencies(gpa, &step_dependencies, root_source_file);
+        fn addModuleDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), module: *std.Build.Module) !void {
+            if (module.root_source_file) |root_source_file| {
+                try addStepDependencies(allocator, set, root_source_file);
             }
 
-            for (item.module.import_table.values()) |import| {
+            for (module.import_table.values()) |import| {
                 if (import.root_source_file) |root_source_file| {
-                    try helper.addStepDependencies(gpa, &step_dependencies, root_source_file);
+                    try addStepDependencies(allocator, set, root_source_file);
                 }
             }
 
-            for (item.module.include_dirs.items) |include_dir| {
+            for (module.include_dirs.items) |include_dir| {
                 switch (include_dir) {
                     .path,
                     .path_system,
                     .path_after,
                     .framework_path,
                     .framework_path_system,
-                    => |include_path| try helper.addStepDependencies(gpa, &step_dependencies, include_path),
-                    .config_header_step => |config_header| try step_dependencies.put(gpa, config_header.output_file.step, {}),
+                    => |include_path| try addStepDependencies(allocator, set, include_path),
+                    .config_header_step => |config_header| try set.put(allocator, config_header.output_file.step, {}),
                     .other_step => |other| {
                         if (other.generated_h) |header| {
-                            try step_dependencies.put(gpa, header.step, {});
+                            try set.put(allocator, header.step, {});
                         }
                         if (other.installed_headers_include_tree) |include_tree| {
-                            try step_dependencies.put(gpa, include_tree.generated_directory.step, {});
+                            try set.put(allocator, include_tree.generated_directory.step, {});
                         }
                     },
                 }
             }
         }
+    };
+
+    var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
+    defer step_dependencies.deinit(gpa);
+
+    var dependency_items: std.ArrayListUnmanaged(std.Build.Module.DependencyIterator.Item) = .{};
+    defer dependency_items.deinit(gpa);
+
+    // collect all dependencies
+    while (dependency_iterator.next()) |item| {
+        try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
+        try dependency_items.append(gpa, item);
     }
 
     prepare(gpa, b, &step_dependencies, run, seed) catch |err| switch (err) {
@@ -980,7 +1002,7 @@ fn extractBuildInformation(
         else => return err,
     };
 
-    // run all steps that are dependencies of a `Step.Compile` step
+    // run all steps that are dependencies
     try runSteps(
         gpa,
         b,
@@ -993,61 +1015,56 @@ fn extractBuildInformation(
     var packages: Packages = .{ .allocator = gpa };
     defer packages.deinit();
 
-    // iterate through all `Step.Compile` steps and extract the necessary information
-    for (steps.keys()) |step| {
-        const compile = step.cast(Step.Compile) orelse continue;
+    // extract packages and include paths
+    for (dependency_items.items) |item| {
+        if (item.module.root_source_file) |root_source_file| {
+            _ = try packages.addPackage(item.name, root_source_file.getPath(item.module.owner));
+        }
 
-        var it = compile.root_module.iterateDependencies(compile, false);
-        while (it.next()) |item| {
-            if (item.module.root_source_file) |root_source_file| {
-                _ = try packages.addPackage(item.name, root_source_file.getPath(item.module.owner));
+        for (item.module.import_table.keys(), item.module.import_table.values()) |name, import| {
+            if (import.root_source_file) |root_source_file| {
+                _ = try packages.addPackage(name, root_source_file.getPath(item.module.owner));
             }
+        }
 
-            for (item.module.import_table.keys(), item.module.import_table.values()) |name, import| {
-                if (import.root_source_file) |root_source_file| {
-                    _ = try packages.addPackage(name, root_source_file.getPath(item.module.owner));
-                }
-            }
+        if (item.compile) |exe| {
+            try processPkgConfig(gpa, &include_dirs, exe);
+        }
 
-            if (item.compile) |exe| {
-                try processPkgConfig(gpa, &include_dirs, exe);
-            }
+        for (item.module.include_dirs.items) |include_dir| {
+            switch (include_dir) {
+                .path,
+                .path_system,
+                .path_after,
+                .framework_path,
+                .framework_path_system,
+                => |include_path| try include_dirs.put(arena, include_path.getPath(item.module.owner), {}),
 
-            for (item.module.include_dirs.items) |include_dir| {
-                switch (include_dir) {
-                    .path,
-                    .path_system,
-                    .path_after,
-                    .framework_path,
-                    .framework_path_system,
-                    => |include_path| try include_dirs.put(arena, include_path.getPath(item.module.owner), {}),
-
-                    .other_step => |other| {
-                        if (other.generated_h) |header| {
-                            try include_dirs.put(
-                                arena,
-                                std.fs.path.dirname(header.getPath()).?,
-                                {},
-                            );
-                        }
-                        if (other.installed_headers_include_tree) |include_tree| {
-                            try include_dirs.put(
-                                arena,
-                                include_tree.generated_directory.getPath(),
-                                {},
-                            );
-                        }
-                    },
-                    .config_header_step => |config_header| {
-                        const full_file_path = config_header.output_file.getPath();
-                        const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
+                .other_step => |other| {
+                    if (other.generated_h) |header| {
                         try include_dirs.put(
                             arena,
-                            header_dir_path,
+                            std.fs.path.dirname(header.getPath()).?,
                             {},
                         );
-                    },
-                }
+                    }
+                    if (other.installed_headers_include_tree) |include_tree| {
+                        try include_dirs.put(
+                            arena,
+                            include_tree.generated_directory.getPath(),
+                            {},
+                        );
+                    }
+                },
+                .config_header_step => |config_header| {
+                    const full_file_path = config_header.output_file.getPath();
+                    const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
+                    try include_dirs.put(
+                        arena,
+                        header_dir_path,
+                        {},
+                    );
+                },
             }
         }
     }
