@@ -10,6 +10,7 @@ pub const Snipped = struct {
 
 pub const top_level_decl_data = [_]Snipped{
     .{ .label = "std", .kind = .Snippet, .text = "const std = @import(\"std\");" },
+    .{ .label = "root", .kind = .Snippet, .text = "const root = @import(\"root\");" },
     .{ .label = "import", .kind = .Snippet, .text = "const $1 = @import(\"$2\")" },
     .{ .label = "fn", .kind = .Snippet, .text = "fn ${1:name}($2) ${3:!void} {$0}" },
     .{ .label = "pub fn", .kind = .Snippet, .text = "pub fn ${1:name}($2) ${3:!void} {$0}" },
