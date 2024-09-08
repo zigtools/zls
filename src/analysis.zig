@@ -3473,7 +3473,11 @@ pub fn getPositionContext(
                     curr_ctx.ctx = .{ .string_literal = tok.loc };
                 },
                 .identifier => switch (curr_ctx.ctx) {
-                    .empty, .pre_label, .var_access => curr_ctx.ctx = .{ .var_access = tok.loc },
+                    .empty,
+                    .pre_label,
+                    .var_access,
+                    .parens_expr,
+                    => curr_ctx.ctx = .{ .var_access = tok.loc },
                     .label => |filled| if (!filled) {
                         curr_ctx.ctx = .{ .label = true };
                     } else {
@@ -3482,7 +3486,6 @@ pub fn getPositionContext(
                     .enum_literal => curr_ctx.ctx = .{
                         .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
-                    .parens_expr => curr_ctx.ctx = .{ .var_access = tok.loc },
                     else => {},
                 },
                 .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
@@ -3562,6 +3565,7 @@ pub fn getPositionContext(
                     return state.ctx;
                 }
             },
+            .parens_expr => |loc| return .{ .var_access = loc },
             else => return state.ctx,
         }
     }
