@@ -923,6 +923,33 @@ test "function parameter" {
     );
 }
 
+test "nested" {
+    try testHover(
+        \\const Error = error{InvalidBaz};
+        \\pub fn FooResponse(comptime T: type) type {
+        \\  return struct {baz: T};
+        \\}
+        \\
+        \\pub fn Foo(comptime T: type) type {
+        \\  return struct {
+        \\      pub fn fooAnd<cursor>Bar(self: *T, baz: u8) (Error || error{
+        \\          InvalidFoo,
+        \\          InvalidBar,
+        \\      })!FooResponse(T) {}
+        \\  };
+        \\}
+    ,
+        \\```zig
+        \\fn fooAndBar(self: *T, baz: u8) (Error || error{
+        \\    InvalidFoo,
+        \\    InvalidBar,
+        \\})!FooResponse(T)
+        \\```
+        \\
+        \\Go to [FooResponse](file:///test.zig#L2)
+    );
+}
+
 test "optional" {
     try testHover(
         \\const S = struct { a: i32 };

@@ -152,7 +152,7 @@ fn hoverSymbolRecursive(
         for (doc_strings.items) |doc|
             try writer.print("{s}\n\n", .{doc});
         if (is_fn) {
-            try writer.print("```zig\n{s}\n```", .{def_str});
+            try Analyser.formatFunctionSignatureMarkdown(def_str, writer);
         } else {
             try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         }
