@@ -119,21 +119,21 @@ fn bswap(x: anytype) @TypeOf(x) {
 
     const T = @TypeOf(x);
     switch (@typeInfo(T)) {
-        .Enum => return @as(T, @enumFromInt(@byteSwap(@intFromEnum(x)))),
-        .Int => return @byteSwap(x),
-        .Struct => |info| switch (info.layout) {
-            .Extern => {
+        .@"enum" => return @as(T, @enumFromInt(@byteSwap(@intFromEnum(x)))),
+        .int => return @byteSwap(x),
+        .@"struct" => |info| switch (info.layout) {
+            .@"extern" => {
                 var result: T = undefined;
                 inline for (info.fields) |field| {
                     @field(result, field.name) = bswap(@field(x, field.name));
                 }
                 return result;
             },
-            .Packed => {
+            .@"packed" => {
                 const I = info.backing_integer.?;
                 return @as(T, @bitCast(@byteSwap(@as(I, @bitCast(x)))));
             },
-            .Auto => @compileError("auto layout struct"),
+            .auto => @compileError("auto layout struct"),
         },
         else => @compileError("bswap on type " ++ @typeName(T)),
     }
