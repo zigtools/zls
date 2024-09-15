@@ -1021,44 +1021,13 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     return build_config;
 }
 
-/// walks the build.zig files above "uri"
-const BuildDotZigIterator = struct {
-    allocator: std.mem.Allocator,
-    dir_path: []const u8,
-    i: usize,
-
-    fn init(allocator: std.mem.Allocator, file_path: []const u8) !BuildDotZigIterator {
-        const dir_path = std.fs.path.dirname(file_path) orelse file_path;
-
-        return BuildDotZigIterator{
-            .allocator = allocator,
-            .dir_path = dir_path,
-            .i = std.fs.path.diskDesignator(file_path).len + 1,
-        };
-    }
-
-    /// Caller owns returned memory.
-    fn next(self: *BuildDotZigIterator) !?[]const u8 {
-        while (true) {
-            if (self.i >= self.dir_path.len)
-                return null;
-
-            const potential_root_path = self.dir_path[0..self.i];
-
-            self.i += 1;
-            while (self.i < self.dir_path.len and !std.fs.path.isSep(self.dir_path[self.i])) : (self.i += 1) {}
-
-            if (!std.fs.path.isAbsolute(potential_root_path)) continue;
-
-            var dir = try std.fs.openDirAbsolute(potential_root_path, .{});
-            defer dir.close();
-            if (dir.access("build.zig", .{})) {
-                // found a build.zig file
-                return try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
-            } else |_| continue;
-        }
-    }
-};
+/// Checks if the build.zig file is accessible in dir.
+fn buildDotZigExists(dir_path: []const u8) bool {
+    var dir = std.fs.openDirAbsolute(dir_path, .{}) catch return false;
+    defer dir.close();
+    dir.access("build.zig", .{}) catch return false;
+    return true;
+}
 
 /// Walk down the tree towards the uri. When we hit `build.zig` files
 /// add them to the list of potential build files.
@@ -1075,8 +1044,11 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]Uri {
     const path = try URI.parse(self.allocator, uri);
     defer self.allocator.free(path);
 
-    var build_it = try BuildDotZigIterator.init(self.allocator, path);
-    while (try build_it.next()) |build_path| {
+    var current_path: []const u8 = path;
+    while (std.fs.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
+        if (!buildDotZigExists(potential_root_path)) continue;
+
+        const build_path = try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
         defer self.allocator.free(build_path);
 
         try potential_build_files.ensureUnusedCapacity(self.allocator, 1);
@@ -1089,6 +1061,12 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]Uri {
         };
         potential_build_files.appendAssumeCapacity(build_file_uri);
     }
+    // The potential build files that come first should have higher priority.
+    //
+    // `build.zig` files that are higher up in the filesystem are more likely
+    // to be the `build.zig` of the entire project/package instead of just a
+    // sub-project/package.
+    std.mem.reverse([]const u8, potential_build_files.items);
 
     return try potential_build_files.toOwnedSlice(self.allocator);
 }
