@@ -78,6 +78,7 @@ pub const DeclarationLookupContext = struct {
 };
 
 /// Assumes that the `node` is not a container_field of a struct tuple field.
+/// Returns a `.identifier` or `.builtin` token.
 fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
@@ -130,8 +131,10 @@ fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     };
 
     if (token_index >= tree.tokens.len) return null;
-    if (token_tags[token_index] != .identifier) return null;
-    return token_index;
+    return switch (token_tags[token_index]) {
+        .identifier, .builtin => token_index,
+        else => null,
+    };
 }
 
 pub const Declaration = union(enum) {
@@ -254,6 +257,7 @@ pub const Declaration = union(enum) {
         return std.meta.eql(a, b);
     }
 
+    /// Returns a `.identifier` or `.builtin` token.
     pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
         return switch (decl) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
@@ -863,6 +867,7 @@ noinline fn walkContainerDecl(
                 container_field.convertToNonTupleLike(tree.nodes);
                 if (container_field.ast.tuple_like) continue;
                 const main_token = container_field.ast.main_token;
+                if (token_tags[main_token] != .identifier) continue;
                 try scope.pushDeclaration(main_token, .{ .ast_node = decl }, .field);
 
                 if (is_enum_or_tagged_union) {

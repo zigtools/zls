@@ -233,19 +233,24 @@ fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
     return .{ .start = source_index, .end = index };
 }
 
+/// Support formats:
+/// - `foo`
+/// - `@"foo"`
+/// - `@foo`
 pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
-    if (text[source_index] == '@') {
-        std.debug.assert(text[source_index + 1] == '\"');
+    if (text[source_index] == '@' and text[source_index + 1] == '\"') {
         const start_index = source_index + 2;
         var index: usize = start_index;
         while (true) : (index += 1) {
-            if (text[index] == '\"') {
-                break;
+            switch (text[index]) {
+                '\n', '\"' => break,
+                else => {},
             }
         }
         return .{ .start = start_index, .end = index };
     } else {
         var index: usize = source_index;
+        if (text[index] == '@') index += 1;
         while (true) : (index += 1) {
             switch (text[index]) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
@@ -268,6 +273,8 @@ test identifierIndexToNameLoc {
     try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@\"hello\"", 0));
     try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@\"hello\" world", 0));
     try std.testing.expectEqualStrings("world", identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
+
+    try std.testing.expectEqualStrings("@hello", identifierIndexToNameSlice("@hello", 0));
 }
 
 pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []const u8 {
@@ -275,7 +282,11 @@ pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []con
 }
 
 pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc {
-    std.debug.assert(tree.tokens.items(.tag)[identifier_token] == .identifier);
+    std.debug.assert(switch (tree.tokens.items(.tag)[identifier_token]) {
+        .builtin => true, // The Zig parser likes to emit .builtin where a identifier would be expected
+        .identifier => true,
+        else => false,
+    });
     return identifierIndexToNameLoc(tree.source, tree.tokens.items(.start)[identifier_token]);
 }
 
