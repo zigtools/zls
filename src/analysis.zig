@@ -599,7 +599,7 @@ pub fn isSnakeCase(name: []const u8) bool {
 /// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
 /// if the `source_index` points to `@"name"`, the source location of `name` is returned.
 pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
-    std.debug.assert(source_index < tree.source.len);
+    std.debug.assert(source_index <= tree.source.len);
 
     var start = source_index;
     while (start > 0 and isSymbolChar(tree.source[start - 1])) {
@@ -617,17 +617,17 @@ pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
 
 test identifierLocFromIndex {
     var tree = try Ast.parse(std.testing.allocator,
-        \\;name;  ;@builtin; ;@"escaped";
+        \\;name;  ;@builtin; ;@"escaped";end
     , .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
         std.zig.Token.Tag,
         &.{
-            .semicolon, .identifier, .semicolon,
-            .semicolon, .builtin,    .semicolon,
-            .semicolon, .identifier, .semicolon,
-            .eof,
+            .semicolon,  .identifier, .semicolon,
+            .semicolon,  .builtin,    .semicolon,
+            .semicolon,  .identifier, .semicolon,
+            .identifier, .eof,
         },
         tree.tokens.items(.tag),
     );
@@ -649,6 +649,13 @@ test identifierLocFromIndex {
     try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 22));
     try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 25));
     try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 29));
+
+    std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, .{ .start = 31, .end = 34 })));
+    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 30));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 31));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 32));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 33));
+    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 34));
 }
 
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
