@@ -3604,6 +3604,7 @@ pub const DeclWithHandle = struct {
         return a.decl.eql(b.decl) and std.mem.eql(u8, a.handle.uri, b.handle.uri);
     }
 
+    /// Returns a `.identifier` or `.builtin` token.
     pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
         return self.decl.nameToken(self.handle.tree);
     }

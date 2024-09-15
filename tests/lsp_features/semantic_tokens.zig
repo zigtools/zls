@@ -1788,6 +1788,19 @@ test "weird code" {
         .{ "=", .operator, .{} },
         .{ "5", .number, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = enum {
+        \\    @"a",
+        \\    @b,
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .@"enum", .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "enum", .keyword, .{} },
+        .{ "@\"a\"", .enumMember, .{ .declaration = true } },
+        .{ "@b", .enumMember, .{ .declaration = true } },
+    });
 }
 
 const TokenData = struct {
