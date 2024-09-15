@@ -2073,8 +2073,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             for (start..end + 1, 0..) |token_index, i| {
                 const slice = tree.tokenSlice(@intCast(token_index));
-                const carriage_return_ending: usize = if (slice[slice.len - 2] == '\r') 2 else 1;
-                length += slice.len - carriage_return_ending - 2 + @intFromBool(i != 0);
+                length += slice.len - 2 + @intFromBool(i != 0);
             }
 
             const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{

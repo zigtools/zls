@@ -91,10 +91,9 @@ test "string literals" {
         .{ "const", .keyword, .{} },
         .{ "gamma", .variable, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        // TODO remove the newline
-        .{ "\\\\hello\n", .string, .{} },
-        .{ "\\\\world\n", .string, .{} },
-        .{ "\\\\\n", .string, .{} },
+        .{ "\\\\hello", .string, .{} },
+        .{ "\\\\world", .string, .{} },
+        .{ "\\\\", .string, .{} },
     });
 }
 

@@ -278,7 +278,7 @@ test "multi-line string literal" {
         \\    \\world
         \\;
     , &.{
-        .{ .startLine = 1, .startCharacter = 4, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 1, .startCharacter = 4, .endLine = 2, .endCharacter = 11 },
     });
 }
 
