@@ -256,6 +256,25 @@ test "field access" {
         .field_access,
         "Foo.bar",
     );
+
+    try testContext(
+        \\if (true) foo.<cursor>bar == 3
+    ,
+        .field_access,
+        "foo.bar",
+    );
+    try testContext(
+        \\if (true) foo.ba<cursor>r == 3
+    ,
+        .field_access,
+        "foo.bar",
+    );
+    try testContext(
+        \\if (true) foo.bar<cursor> == 3
+    ,
+        .field_access,
+        "foo.bar",
+    );
 }
 
 test "builtin" {
