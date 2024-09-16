@@ -1,3 +1,0 @@
-[submodule "src/tracy"]
-	path = src/tracy
-	url = https://github.com/wolfpld/tracy
