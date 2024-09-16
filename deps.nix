@@ -67,4 +67,12 @@ in linkFarm name [
       hash = "sha256-Q1Lm0YornfymWeryFdKe0AXsOJxhxHH72U1IcMxiVtA=";
     };
   }
+  {
+    name = "122022a478dccaed1309fb5d022f4041eec45d40c93a855ed24fad970774c2426d91";
+    path = fetchZigArtifact {
+      name = "tracy";
+      url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz";
+      hash = "sha256-LBHKgW8rdWvicw+GsAkpIEGfPavHpxc4Kf/Yl9kYiKE=";
+    };
+  }
 ]
