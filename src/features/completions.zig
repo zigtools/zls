@@ -1067,6 +1067,7 @@ fn getEnumLiteralContext(
         (dot_token_index - 2)
     else
         (dot_token_index - 1);
+    if (token_index == 0) return null;
 
     var dot_context = EnumLiteralContext{ .likely = .enum_literal };
 

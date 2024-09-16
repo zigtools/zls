@@ -2610,6 +2610,12 @@ test "enum completion on out of bound parameter index" {
     , &.{});
 }
 
+test "enum completion on out of bound token index" {
+    try testCompletion(
+        \\ = 1.<cursor>
+    , &.{});
+}
+
 test "combine doc comments of declaration and definition" {
     if (true) return error.SkipZigTest; // TODO
     try testCompletion(
