@@ -19,35 +19,47 @@ pub const Builder = struct {
 
     pub fn generateCodeAction(
         builder: *Builder,
-        diagnostic: types.Diagnostic,
+        error_bundle: std.zig.ErrorBundle,
         actions: *std.ArrayListUnmanaged(types.CodeAction),
-        remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
     ) error{OutOfMemory}!void {
-        const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
+        var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .{};
 
-        const loc = offsets.rangeToLoc(builder.handle.tree.source, diagnostic.range, builder.offset_encoding);
+        if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
+        for (error_bundle.getMessages()) |msg_index| {
+            const err = error_bundle.getErrorMessage(msg_index);
+            const message = error_bundle.nullTerminatedString(err.msg);
+            const kind = DiagnosticKind.parse(message) orelse continue;
 
-        switch (kind) {
-            .unused => |id| switch (id) {
-                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
-                .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
-            },
-            .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
-            .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
-            .omit_discard => |id| switch (id) {
-                .@"error capture; omit it instead" => {},
-                .@"error capture" => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
-            },
-            // the undeclared identifier may be a discard
-            .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
-            .unreachable_code => {
-                // TODO
-                // autofix: comment out code
-                // fix: remove code
-            },
-            .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
+            if (err.src_loc == .none) continue;
+            const src_loc = error_bundle.getSourceLocation(err.src_loc);
+
+            const loc: offsets.Loc = .{
+                .start = src_loc.span_start,
+                .end = src_loc.span_end,
+            };
+
+            switch (kind) {
+                .unused => |id| switch (id) {
+                    .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
+                    .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
+                    .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
+                    .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                },
+                .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
+                .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
+                .omit_discard => |id| switch (id) {
+                    .@"error capture; omit it instead" => {},
+                    .@"error capture" => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                },
+                // the undeclared identifier may be a discard
+                .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
+                .unreachable_code => {
+                    // TODO
+                    // autofix: comment out code
+                    // fix: remove code
+                },
+                .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
+            }
         }
     }
 

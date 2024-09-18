@@ -353,27 +353,24 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     if (handle.tree.errors.len != 0) return .{};
     if (handle.tree.mode == .zon) return .{};
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
-    if (diagnostics.items.len == 0) return .{};
+    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
+    defer error_bundle.deinit(server.allocator);
+    if (error_bundle.errorMessageCount() == 0) return .{};
 
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
-    var builder = code_actions.Builder{
+    var builder: code_actions.Builder = .{
         .arena = arena,
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
 
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
-    }
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    try builder.generateCodeAction(error_bundle, &actions);
 
-    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     for (actions.items) |action| {
         std.debug.assert(action.kind != null);
         std.debug.assert(action.edit != null);
@@ -1616,24 +1613,21 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     if (handle.tree.errors.len != 0) return null;
     if (handle.tree.mode == .zon) return null;
 
+    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
+    defer error_bundle.deinit(server.allocator);
+
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
-    var builder = code_actions.Builder{
+    var builder: code_actions.Builder = .{
         .arena = arena,
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
-
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
-    }
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    try builder.generateCodeAction(error_bundle, &actions);
 
     // Always generate code action organizeImports
     try builder.generateOrganizeImportsAction(&actions);

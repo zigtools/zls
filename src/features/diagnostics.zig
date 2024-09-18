@@ -24,11 +24,11 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 
     const tree = handle.tree;
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
 
     try diagnostics.ensureUnusedCapacity(arena, tree.errors.len);
     for (tree.errors) |err| {
-        var buffer = std.ArrayListUnmanaged(u8){};
+        var buffer: std.ArrayListUnmanaged(u8) = .{};
         try tree.renderError(err, buffer.writer(arena));
 
         diagnostics.appendAssumeCapacity(.{
@@ -41,7 +41,15 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     if (tree.errors.len == 0 and tree.mode == .zig) {
-        try getAstCheckDiagnostics(server, arena, handle, &diagnostics);
+        var error_bundle = try getAstCheckDiagnostics(server, handle);
+        defer error_bundle.deinit(server.allocator);
+        var diagnostics_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
+        try errorBundleToDiagnostics(error_bundle, arena, &diagnostics_set, "ast-check", server.offset_encoding);
+        switch (diagnostics_set.count()) {
+            0 => {},
+            1 => try diagnostics.appendSlice(arena, diagnostics_set.values()[0].items),
+            else => unreachable, // ast-check diagnostics only affect a single file
+        }
     }
 
     if (server.config.enable_autofix and tree.mode == .zig) {
@@ -132,6 +140,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
             .failure => |bundle| bundle,
         };
 
+        if (error_bundle.errorMessageCount() == 0) continue; // `getMessages` can't be called on an empty ErrorBundle
         try diagnostics.ensureUnusedCapacity(arena, error_bundle.errorMessageCount());
         for (error_bundle.getMessages()) |err_msg_index| {
             const err_msg = error_bundle.getErrorMessage(err_msg_index);
@@ -331,11 +340,11 @@ pub fn generateBuildOnSaveDiagnostics(
         // TODO zig uses utf-8 encoding for character offsets
         // convert them to the desired offset encoding would require loading every file that contains errors
         // is there some efficient way to do this?
-        const utf8_position = types.Position{
+        const utf8_position: types.Position = .{
             .line = (std.fmt.parseInt(u32, src_line, 10) catch continue) -| 1,
             .character = std.fmt.parseInt(u32, src_character, 10) catch continue,
         };
-        const range = types.Range{ .start = utf8_position, .end = utf8_position };
+        const range: types.Range = .{ .start = utf8_position, .end = utf8_position };
 
         const rest = pos_and_diag_iterator.rest();
         if (rest.len <= 1) continue;
@@ -362,7 +371,7 @@ pub fn generateBuildOnSaveDiagnostics(
 
         if (std.mem.startsWith(u8, msg, "error: ")) {
             last_diagnostic_uri = try URI.fromPath(arena, absolute_src_path);
-            last_diagnostic = types.Diagnostic{
+            last_diagnostic = .{
                 .range = range,
                 .severity = .Error,
                 .code = .{ .string = "zig_build" },
@@ -371,7 +380,7 @@ pub fn generateBuildOnSaveDiagnostics(
             };
         } else {
             last_diagnostic_uri = try URI.fromPath(arena, absolute_src_path);
-            last_diagnostic = types.Diagnostic{
+            last_diagnostic = .{
                 .range = range,
                 .severity = .Error,
                 .code = .{ .string = "zig_build" },
@@ -390,43 +399,53 @@ pub fn generateBuildOnSaveDiagnostics(
     }
 }
 
-pub fn getAstCheckDiagnostics(
-    server: *Server,
-    arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
-) error{OutOfMemory}!void {
+/// caller owns the returned ErrorBundle
+pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) error{OutOfMemory}!std.zig.ErrorBundle {
     std.debug.assert(handle.tree.errors.len == 0);
     std.debug.assert(handle.tree.mode == .zig);
+
+    var eb: std.zig.ErrorBundle.Wip = undefined;
+    try eb.init(server.allocator);
+    defer eb.deinit();
 
     if (server.config.prefer_ast_check_as_child_process and
         std.process.can_spawn and
         server.config.zig_exe_path != null)
     {
-        getDiagnosticsFromAstCheck(server, arena, handle, diagnostics) catch |err| {
+        getErrorBundleFromAstCheck(
+            server.allocator,
+            server.config.zig_exe_path.?,
+            &server.zig_ast_check_lock,
+            handle.tree.source,
+            &eb,
+        ) catch |err| {
             log.err("failed to run ast-check: {}", .{err});
         };
     } else {
-        try getDiagnosticsFromZir(server, arena, handle, diagnostics);
+        const zir = try handle.getZir();
+        std.debug.assert(handle.getZirStatus() == .done);
+
+        if (zir.hasCompileErrors()) {
+            try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
+        }
     }
+
+    return try eb.toOwnedBundle("");
 }
 
-fn getDiagnosticsFromAstCheck(
-    server: *Server,
-    arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+fn getErrorBundleFromAstCheck(
+    allocator: std.mem.Allocator,
+    zig_exe_path: []const u8,
+    zig_ast_check_lock: *std.Thread.Mutex,
+    source: [:0]const u8,
+    error_bundle: *std.zig.ErrorBundle.Wip,
 ) !void {
     comptime std.debug.assert(std.process.can_spawn);
-    std.debug.assert(server.config.zig_exe_path != null);
-
-    const zig_exe_path = server.config.zig_exe_path.?;
-
     const stderr_bytes = blk: {
-        server.zig_ast_check_lock.lock();
-        defer server.zig_ast_check_lock.unlock();
+        zig_ast_check_lock.lock();
+        defer zig_ast_check_lock.unlock();
 
-        var process = std.process.Child.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+        var process = std.process.Child.init(&.{ zig_exe_path, "ast-check", "--color", "off" }, allocator);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Ignore;
         process.stderr_behavior = .Pipe;
@@ -435,170 +454,167 @@ fn getDiagnosticsFromAstCheck(
             log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
             return;
         };
-        try process.stdin.?.writeAll(handle.tree.source);
+        try process.stdin.?.writeAll(source);
         process.stdin.?.close();
 
         process.stdin = null;
 
-        const stderr_bytes = try process.stderr.?.readToEndAlloc(server.allocator, std.math.maxInt(usize));
-        errdefer server.allocator.free(stderr_bytes);
+        const stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, std.math.maxInt(u32));
+        errdefer allocator.free(stderr_bytes);
 
         const term = process.wait() catch |err| {
             log.warn("Failed to await zig ast-check process, error: {}", .{err});
-            server.allocator.free(stderr_bytes);
+            allocator.free(stderr_bytes);
             return;
         };
 
         if (term != .Exited) {
-            server.allocator.free(stderr_bytes);
+            allocator.free(stderr_bytes);
             return;
         }
         break :blk stderr_bytes;
     };
-    defer server.allocator.free(stderr_bytes);
+    defer allocator.free(stderr_bytes);
 
-    var last_diagnostic: ?types.Diagnostic = null;
-    // we don't store DiagnosticRelatedInformation in last_diagnostic instead
-    // its stored in last_related_diagnostics because we need an ArrayList
-    var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
+    var last_error_message: ?std.zig.ErrorBundle.ErrorMessage = null;
+    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .{};
+    defer notes.deinit(allocator);
 
-    // I believe that with color off it's one diag per line; is this correct?
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
-
     while (line_iterator.next()) |line| {
         var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
 
-        const first = pos_and_diag_iterator.next() orelse continue;
-        if (!std.mem.eql(u8, first, "<stdin>")) continue;
+        const src_path = pos_and_diag_iterator.next() orelse continue;
+        const line_string = pos_and_diag_iterator.next() orelse continue;
+        const column_string = pos_and_diag_iterator.next() orelse continue;
+        const msg = pos_and_diag_iterator.rest();
 
-        const utf8_position = types.Position{
-            .line = (std.fmt.parseInt(u32, pos_and_diag_iterator.next() orelse continue, 10) catch continue) -| 1,
-            .character = (std.fmt.parseInt(u32, pos_and_diag_iterator.next() orelse continue, 10) catch continue) -| 1,
-        };
+        if (!std.mem.eql(u8, src_path, "<stdin>")) continue;
 
         // zig uses utf-8 encoding for character offsets
-        const position = offsets.convertPositionEncoding(handle.tree.source, utf8_position, .@"utf-8", server.offset_encoding);
-        const range = offsets.tokenPositionToRange(handle.tree.source, position, server.offset_encoding);
+        const utf8_position: types.Position = .{
+            .line = (std.fmt.parseInt(u32, line_string, 10) catch continue) -| 1,
+            .character = (std.fmt.parseInt(u32, column_string, 10) catch continue) -| 1,
+        };
+        const source_index = offsets.positionToIndex(source, utf8_position, .@"utf-8");
+        const source_line = offsets.lineSliceAtIndex(source, source_index);
 
-        const rest = pos_and_diag_iterator.rest();
-        if (rest.len <= 1) continue;
-        const msg = rest[1..];
+        var loc: offsets.Loc = .{ .start = source_index, .end = source_index };
 
-        if (std.mem.startsWith(u8, msg, "note: ")) {
-            try last_related_diagnostics.append(arena, .{
-                .location = .{
-                    .uri = handle.uri,
-                    .range = range,
-                },
-                .message = try arena.dupe(u8, msg["note: ".len..]),
-            });
+        while (loc.end < source.len and Analyser.isSymbolChar(source[loc.end])) {
+            loc.end += 1;
+        }
+
+        const src_loc = try error_bundle.addSourceLocation(.{
+            .src_path = 0,
+            .line = utf8_position.line,
+            .column = utf8_position.character,
+            .span_start = @intCast(loc.start),
+            .span_main = @intCast(source_index),
+            .span_end = @intCast(loc.end),
+            .source_line = try error_bundle.addString(source_line),
+        });
+
+        if (std.mem.startsWith(u8, msg, " note: ")) {
+            try notes.append(allocator, try error_bundle.addErrorMessage(.{
+                .msg = try error_bundle.addString(msg[" note: ".len..]),
+                .src_loc = src_loc,
+            }));
             continue;
         }
 
-        if (last_diagnostic) |*diagnostic| {
-            diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(arena);
-            try diagnostics.append(arena, diagnostic.*);
-            last_diagnostic = null;
+        const message = if (std.mem.startsWith(u8, msg, " error: ")) msg[" error: ".len..] else msg;
+
+        if (last_error_message) |*em| {
+            em.notes_len = @intCast(notes.items.len);
+            try error_bundle.addRootErrorMessage(em.*);
+            const notes_start = try error_bundle.reserveNotes(em.notes_len);
+            @memcpy(error_bundle.extra.items[notes_start..][0..em.notes_len], @as([]const u32, @ptrCast(notes.items)));
+
+            notes.clearRetainingCapacity();
+            last_error_message = null;
         }
 
-        if (std.mem.startsWith(u8, msg, "error: ")) {
-            last_diagnostic = types.Diagnostic{
-                .range = range,
-                .severity = .Error,
-                .code = .{ .string = "ast_check" },
-                .source = "zls",
-                .message = try arena.dupe(u8, msg["error: ".len..]),
-            };
-        } else {
-            last_diagnostic = types.Diagnostic{
-                .range = range,
-                .severity = .Error,
-                .code = .{ .string = "ast_check" },
-                .source = "zls",
-                .message = try arena.dupe(u8, msg),
-            };
-        }
+        last_error_message = .{
+            .msg = try error_bundle.addString(message),
+            .src_loc = src_loc,
+            .notes_len = undefined, // set later
+        };
     }
 
-    if (last_diagnostic) |*diagnostic| {
-        diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(arena);
-        try diagnostics.append(arena, diagnostic.*);
-        last_diagnostic = null;
+    if (last_error_message) |*em| {
+        em.notes_len = @intCast(notes.items.len);
+        try error_bundle.addRootErrorMessage(em.*);
+        const notes_start = try error_bundle.reserveNotes(em.notes_len);
+        @memcpy(error_bundle.extra.items[notes_start..][0..em.notes_len], @as([]const u32, @ptrCast(notes.items)));
     }
 }
 
-fn getDiagnosticsFromZir(
-    server: *const Server,
+pub fn errorBundleToDiagnostics(
+    error_bundle: std.zig.ErrorBundle,
     arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    diagnostics: *std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)),
+    code: []const u8,
+    /// The diagnostic's code, which usually appear in the user interface.
+    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!void {
-    const tree = handle.tree;
-    std.debug.assert(tree.errors.len == 0);
-    const zir = try handle.getZir();
-    std.debug.assert(handle.getZirStatus() == .done);
+    if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
+    for (error_bundle.getMessages()) |msg_index| {
+        const err = error_bundle.getErrorMessage(msg_index);
+        if (err.src_loc == .none) continue;
 
-    const payload_index = zir.extra[@intFromEnum(Zir.ExtraIndex.compile_errors)];
-    if (payload_index == 0) return;
+        const src_loc = error_bundle.getSourceLocation(err.src_loc);
+        const src_path = error_bundle.nullTerminatedString(src_loc.src_path);
+        const src_range = errorBundleSourceLocationToRange(error_bundle, src_loc, offset_encoding);
 
-    const header = zir.extraData(Zir.Inst.CompileErrors, payload_index);
-    const items_len = header.data.items_len;
+        const eb_notes = error_bundle.getNotes(msg_index);
+        const lsp_notes = try arena.alloc(types.DiagnosticRelatedInformation, eb_notes.len);
+        for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
+            const eb_note = error_bundle.getErrorMessage(eb_note_index);
+            if (eb_note.src_loc == .none) continue;
 
-    try diagnostics.ensureUnusedCapacity(arena, items_len);
+            const note_src_loc = error_bundle.getSourceLocation(eb_note.src_loc);
+            const note_src_path = error_bundle.nullTerminatedString(src_loc.src_path);
+            const note_src_range = errorBundleSourceLocationToRange(error_bundle, note_src_loc, offset_encoding);
 
-    var extra_index = header.end;
-    for (0..items_len) |_| {
-        const item = zir.extraData(Zir.Inst.CompileErrors.Item, extra_index);
-        extra_index = item.end;
-        const err_loc = blk: {
-            if (item.data.node != 0) {
-                break :blk offsets.nodeToLoc(tree, item.data.node);
-            }
-            const loc = offsets.tokenToLoc(tree, item.data.token);
-            break :blk offsets.Loc{
-                .start = loc.start + item.data.byte_offset,
-                .end = loc.end,
+            lsp_note.* = .{
+                .location = .{
+                    .uri = try URI.fromPath(arena, note_src_path),
+                    .range = note_src_range,
+                },
+                .message = try arena.dupe(u8, error_bundle.nullTerminatedString(eb_note.msg)),
             };
-        };
-
-        var notes: []types.DiagnosticRelatedInformation = &.{};
-        if (item.data.notes != 0) {
-            const block = zir.extraData(Zir.Inst.Block, item.data.notes);
-            const body = zir.extra[block.end..][0..block.data.body_len];
-            notes = try arena.alloc(types.DiagnosticRelatedInformation, body.len);
-            for (notes, body) |*note, note_index| {
-                const note_item = zir.extraData(Zir.Inst.CompileErrors.Item, note_index);
-                const msg = zir.nullTerminatedString(note_item.data.msg);
-
-                const loc = blk: {
-                    if (note_item.data.node != 0) {
-                        break :blk offsets.nodeToLoc(tree, note_item.data.node);
-                    }
-                    const loc = offsets.tokenToLoc(tree, note_item.data.token);
-                    break :blk offsets.Loc{
-                        .start = loc.start + note_item.data.byte_offset,
-                        .end = loc.end,
-                    };
-                };
-
-                note.* = .{
-                    .location = .{
-                        .uri = handle.uri,
-                        .range = offsets.locToRange(handle.tree.source, loc, server.offset_encoding),
-                    },
-                    .message = msg,
-                };
-            }
         }
 
-        const msg = zir.nullTerminatedString(item.data.msg);
-        diagnostics.appendAssumeCapacity(.{
-            .range = offsets.locToRange(handle.tree.source, err_loc, server.offset_encoding),
+        const uri = try URI.fromPath(arena, src_path);
+
+        const gop = try diagnostics.getOrPutValue(arena, uri, .{});
+        try gop.value_ptr.append(arena, .{
+            .range = src_range,
             .severity = .Error,
-            .code = .{ .string = "ast_check" },
+            .code = .{ .string = code },
             .source = "zls",
-            .message = msg,
-            .relatedInformation = if (notes.len != 0) notes else null,
+            .message = try arena.dupe(u8, error_bundle.nullTerminatedString(err.msg)),
+            .relatedInformation = lsp_notes,
         });
     }
+}
+
+fn errorBundleSourceLocationToRange(
+    error_bundle: std.zig.ErrorBundle,
+    src_loc: std.zig.ErrorBundle.SourceLocation,
+    offset_encoding: offsets.Encoding,
+) types.Range {
+    const source_line = error_bundle.nullTerminatedString(src_loc.source_line);
+
+    const source_line_range_utf8: types.Range = .{
+        .start = .{ .line = 0, .character = src_loc.column - (src_loc.span_main - src_loc.span_start) },
+        .end = .{ .line = 0, .character = src_loc.column + (src_loc.span_end - src_loc.span_main) },
+    };
+    const source_line_range = offsets.convertRangeEncoding(source_line, source_line_range_utf8, .@"utf-8", offset_encoding);
+
+    return .{
+        .start = .{ .line = src_loc.line, .character = source_line_range.start.character },
+        .end = .{ .line = src_loc.line, .character = source_line_range.end.character },
+    };
 }
