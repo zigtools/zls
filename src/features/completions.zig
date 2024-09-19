@@ -1425,6 +1425,13 @@ fn resolveBuiltinFnArg(
             }
         }
 
+        if (std.mem.eql(u8, name, "@branchHint")) {
+            switch (arg_index) {
+                0 => break :name "BranchHint",
+                else => return null,
+            }
+        }
+
         return null;
     };
 
