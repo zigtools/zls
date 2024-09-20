@@ -415,7 +415,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
             compress_cmd.step.max_rss = switch (extension) {
                 .zip => 160 * 1024 * 1024, // 160 MiB
                 .@"tar.xz" => 256 * 1024 * 1024, // 256 MiB
-                .@"tar.gz" => 8 * 1024 * 1024, // 8 MiB
+                .@"tar.gz" => 16 * 1024 * 1024, // 12 MiB
             };
             switch (extension) {
                 .zip => {
