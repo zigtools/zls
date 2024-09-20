@@ -1126,72 +1126,115 @@ fn getSwitchOrStructInitContext(
     find_identifier: while (upper_index > 0) : (upper_index -= 1) {
         switch (token_tags[upper_index]) {
             .r_brace => braces_depth += 1,
-            .l_brace => braces_depth -= 1,
-            .period => if (braces_depth == one_opening and token_tags[upper_index + 1] == .l_brace) { // anon struct init `.{.`
-                // if the preceding token is `=`, then this might be a `var foo: Foo = .{.`
-                if (upper_index > 1 and token_tags[upper_index - 1] == .equal) {
-                    upper_index -= 2; // eat `= .`
-                    break :find_identifier;
-                }
-                // We never return from this branch/condition to the `find_identifier: while ..` loop, so reset and reuse these
-                fn_arg_index = 0;
-                braces_depth = even; // not actually looking for/expecting an uneven number of braces, just making use of the helpful const
-                parens_depth = even;
-                while (upper_index > 0) : (upper_index -= 1) {
-                    switch (token_tags[upper_index]) {
-                        .r_brace => braces_depth += 1,
-                        .l_brace => braces_depth -= 1,
-                        .r_paren => parens_depth += 1,
-                        .l_paren => {
-                            parens_depth -= 1;
-                            if (parens_depth == one_opening and token_tags[upper_index - 1] == .identifier) {
-                                upper_index -= 1;
-                                break :find_identifier;
+            .l_brace => {
+                braces_depth -= 1;
+                if (braces_depth != one_opening) continue;
+                upper_index -= 1;
+                switch (token_tags[upper_index]) {
+                    // `S{.`
+                    .identifier => break :find_identifier,
+                    // anon struct init `.{.`
+                    .period => {
+                        if (upper_index < 3) return null;
+                        upper_index -= 1;
+                        if (token_tags[upper_index] == .ampersand) upper_index -= 1; // `&.{.`
+                        if (token_tags[upper_index] == .equal) { // `= .{.`
+                            upper_index -= 1; // eat the `=`
+                            switch (token_tags[upper_index]) {
+                                .identifier, // `const s: S = .{.`, `S{.name = .`
+                                .period_asterisk, //  `s.* = .{.`
+                                => break :find_identifier,
+                                else => return null,
                             }
-                        },
-                        .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
-                            fn_arg_index += 1;
-                        },
-                        .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
-                        else => {},
-                    }
+                        }
+                        // We never return from this branch/condition to the `find_identifier: while ..` loop, so reset and reuse these
+                        fn_arg_index = 0;
+                        braces_depth = even; // not actually looking for/expecting an uneven number of braces, just making use of the helpful const
+                        parens_depth = even;
+                        while (upper_index > 0) : (upper_index -= 1) {
+                            switch (token_tags[upper_index]) {
+                                .r_brace => braces_depth += 1,
+                                .l_brace => {
+                                    braces_depth -= 1;
+                                    if (braces_depth == one_opening) return null;
+                                },
+                                .r_paren => parens_depth += 1,
+                                .l_paren => {
+                                    parens_depth -= 1;
+                                    if (parens_depth == one_opening and switch (token_tags[upper_index - 1]) {
+                                        .identifier,
+                                        .builtin,
+                                        => true,
+                                        else => false,
+                                    }) {
+                                        upper_index -= 1;
+                                        break :find_identifier;
+                                    }
+                                },
+                                .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
+                                    fn_arg_index += 1;
+                                },
+                                .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+                                else => {},
+                            }
+                        }
+                        return null;
+                    },
+                    // The opening brace is preceded by a r_paren => evaluate
+                    .r_paren => {
+                        need_ret_type = true;
+                        var token_index = upper_index - 1; // if `switch` we need the last token of the condition
+                        parens_depth = even;
+                        // Walk backwards counting parens until one_opening then check the preceding token's tag
+                        while (token_index > 0) : (token_index -= 1) {
+                            switch (token_tags[token_index]) {
+                                .r_paren => parens_depth += 1,
+                                .l_paren => {
+                                    parens_depth -= 1;
+                                    if (parens_depth == one_opening)
+                                        switch (token_tags[token_index - 1]) {
+                                            .keyword_switch => {
+                                                likely = .switch_case;
+                                                upper_index -= 1; // eat the switch's .r_paren
+                                                break :find_identifier;
+                                            },
+                                            .identifier,
+                                            // .builtin, // `@f(){.`
+                                            => {
+                                                upper_index = token_index - 1; // the fn name
+                                                break :find_identifier;
+                                            },
+                                            else => return null,
+                                        };
+                                },
+                                .semicolon => return null,
+                                else => {},
+                            }
+                        }
+                    },
+                    else => return null,
                 }
-                break :find_identifier;
             },
             // We're fishing for a `f(some, other{}, .<cursor>enum)`
-            .r_paren => {
-                parens_depth += 1;
-                if (braces_depth == one_opening) { // The opening brace is preceded by a r_paren => evaluate
-                    need_ret_type = true;
-                    var token_index = upper_index - 1; // if `switch` we need the last token of the condition
-                    parens_depth = even;
-                    // Walk backwards counting parens until one_opening then check the preceding token's tag
-                    while (token_index > 0) : (token_index -= 1) {
-                        switch (token_tags[token_index]) {
-                            .r_paren => parens_depth += 1,
-                            .l_paren => {
-                                parens_depth -= 1;
-                                if (parens_depth == one_opening)
-                                    switch (token_tags[token_index - 1]) {
-                                        .keyword_switch => {
-                                            likely = .switch_case;
-                                            upper_index -= 1; // eat the switch's .r_paren
-                                            break :find_identifier;
-                                        },
-                                        .identifier => {
-                                            upper_index = token_index - 1; // the fn name
-                                            break :find_identifier;
-                                        },
-                                        else => return null,
-                                    };
-                            },
-                            .semicolon => return null,
-                            else => {},
-                        }
-                    }
+            .r_paren => parens_depth += 1,
+            .l_paren => {
+                parens_depth -= 1;
+                if (parens_depth != one_opening) continue;
+                if (braces_depth != even) return null;
+                upper_index -= 1;
+                switch (token_tags[upper_index]) {
+                    // `f(.`
+                    .identifier,
+                    .builtin,
+                    .keyword_addrspace,
+                    .keyword_callconv,
+                    => {
+                        likely = .enum_arg;
+                        break :find_identifier;
+                    },
+                    else => return null,
                 }
             },
-            .l_paren => parens_depth -= 1,
             .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
                 fn_arg_index += 1;
             },
@@ -1283,9 +1326,133 @@ fn collectContainerNodes(
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, &types_with_handles),
+        .builtin => |loc| try collectBuiltinContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
+        .keyword => |tag| try collectKeywordFnContainerNodes(builder, tag, dot_context, &types_with_handles),
         else => {},
     }
     return types_with_handles.toOwnedSlice(builder.arena);
+}
+
+fn resolveBuiltinFnArg(
+    analyser: *Analyser,
+    arg_index: usize,
+    /// Includes leading `@`
+    name: []const u8,
+) std.mem.Allocator.Error!?Analyser.Type {
+    const builtin_name: []const u8 = name: {
+        if (std.mem.eql(u8, name, "@Type")) {
+            switch (arg_index) {
+                0 => break :name "Type",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@setFloatMode")) {
+            switch (arg_index) {
+                0 => break :name "FloatMode",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@prefetch")) {
+            switch (arg_index) {
+                1 => break :name "PrefetchOptions",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@reduce")) {
+            switch (arg_index) {
+                0 => break :name "ReduceOp",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@export")) {
+            switch (arg_index) {
+                1 => break :name "ExportOptions",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@extern")) {
+            switch (arg_index) {
+                1 => break :name "ExternOptions",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@fence")) {
+            switch (arg_index) {
+                0 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@cmpxchgWeak") or std.mem.eql(u8, name, "@cmpxchgStrong")) {
+            switch (arg_index) {
+                4, 5 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@atomicLoad")) {
+            switch (arg_index) {
+                2 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@atomicStore")) {
+            switch (arg_index) {
+                3 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@atomicRmw")) {
+            switch (arg_index) {
+                2 => break :name "AtomicRmwOp",
+                4 => break :name "AtomicOrder",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@call")) {
+            switch (arg_index) {
+                0 => break :name "CallModifier",
+                else => return null,
+            }
+        }
+
+        if (std.mem.eql(u8, name, "@branchHint")) {
+            switch (arg_index) {
+                0 => break :name "BranchHint",
+                else => return null,
+            }
+        }
+
+        return null;
+    };
+
+    return analyser.instanceStdBuiltinType(builtin_name);
+}
+
+fn collectBuiltinContainerNodes(
+    builder: *Builder,
+    handle: *DocumentStore.Handle,
+    loc: offsets.Loc,
+    dot_context: EnumLiteralContext,
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+) error{OutOfMemory}!void {
+    if (dot_context.need_ret_type) return;
+    if (try resolveBuiltinFnArg(
+        builder.analyser,
+        dot_context.fn_arg_index,
+        handle.tree.source[loc.start..loc.end],
+    )) |ty| {
+        try types_with_handles.append(builder.arena, ty);
+    }
 }
 
 fn collectVarAccessContainerNodes(
@@ -1434,4 +1601,27 @@ fn collectEnumLiteralContainerNodes(
         if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
+}
+
+fn collectKeywordFnContainerNodes(
+    builder: *Builder,
+    tag: std.zig.Token.Tag,
+    dot_context: EnumLiteralContext,
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+) error{OutOfMemory}!void {
+    const builtin_type_name: []const u8 = name: {
+        switch (tag) {
+            .keyword_addrspace => switch (dot_context.fn_arg_index) {
+                0 => break :name "AddressSpace",
+                else => return,
+            },
+            .keyword_callconv => switch (dot_context.fn_arg_index) {
+                0 => break :name "CallingConvention",
+                else => return,
+            },
+            else => return,
+        }
+    };
+    const ty = try builder.analyser.instanceStdBuiltinType(builtin_type_name) orelse return;
+    try types_with_handles.append(builder.arena, ty);
 }
