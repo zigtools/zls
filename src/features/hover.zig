@@ -209,6 +209,7 @@ fn hoverDefinitionBuiltin(
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     pos_index: usize,
+    name_loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
@@ -216,19 +217,12 @@ fn hoverDefinitionBuiltin(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-
-    const builtin = for (data.builtins) |builtin| {
-        if (std.mem.eql(u8, builtin.name[1..], name)) {
-            break builtin;
-        }
-    } else return null;
 
     var contents: std.ArrayListUnmanaged(u8) = .{};
     var writer = contents.writer(arena);
 
-    if (std.mem.eql(u8, name, "cImport")) blk: {
+    if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
             const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
@@ -254,6 +248,8 @@ fn hoverDefinitionBuiltin(
             },
         }
     }
+
+    const builtin = data.builtins.get(name) orelse return null;
 
     switch (markup_kind) {
         .plaintext, .unknown_value => {
@@ -457,7 +453,7 @@ pub fn hover(
     const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
 
     const response = switch (pos_context) {
-        .builtin => try hoverDefinitionBuiltin(analyser, arena, handle, source_index, markup_kind, offset_encoding),
+        .builtin => |loc| try hoverDefinitionBuiltin(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .var_access => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind, offset_encoding),

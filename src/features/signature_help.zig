@@ -180,27 +180,23 @@ pub fn getSignatureInfo(
                 const expr_last_token = curr_token - 1;
                 if (token_tags[expr_last_token] == .builtin) {
                     // Builtin token, find the builtin and construct signature information.
-                    for (data.builtins) |builtin| {
-                        if (std.mem.eql(u8, builtin.name, tree.tokenSlice(expr_last_token))) {
-                            const param_infos = try arena.alloc(
-                                types.ParameterInformation,
-                                builtin.arguments.len,
-                            );
-                            for (param_infos, builtin.arguments) |*info, argument| {
-                                info.* = .{
-                                    .label = .{ .string = argument },
-                                    .documentation = null,
-                                };
-                            }
-                            return types.SignatureInformation{
-                                .label = builtin.signature,
-                                .documentation = .{ .string = builtin.documentation },
-                                .parameters = param_infos,
-                                .activeParameter = paren_commas,
-                            };
-                        }
+                    const builtin = data.builtins.get(tree.tokenSlice(expr_last_token)) orelse return null;
+                    const param_infos = try arena.alloc(
+                        types.ParameterInformation,
+                        builtin.arguments.len,
+                    );
+                    for (param_infos, builtin.arguments) |*info, argument| {
+                        info.* = .{
+                            .label = .{ .string = argument },
+                            .documentation = null,
+                        };
                     }
-                    return null;
+                    return types.SignatureInformation{
+                        .label = builtin.signature,
+                        .documentation = .{ .string = builtin.documentation },
+                        .parameters = param_infos,
+                        .activeParameter = paren_commas,
+                    };
                 }
                 // Scan for a function call lhs expression.
                 var state: union(enum) {

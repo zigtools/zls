@@ -530,9 +530,7 @@ fn writeNodeInlayHint(
 
             if (params.len == 0) return;
 
-            for (data.builtins) |builtin| {
-                if (!std.mem.eql(u8, builtin.name, name)) continue;
-
+            if (data.builtins.get(name)) |builtin| {
                 try writeBuiltinHint(builder, params, builtin.arguments);
             }
         },

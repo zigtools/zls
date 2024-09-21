@@ -515,22 +515,22 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
-    try builder.completions.ensureUnusedCapacity(builder.arena, data.builtins.len);
-    for (data.builtins) |builtin| {
+    try builder.completions.ensureUnusedCapacity(builder.arena, data.builtins.kvs.len);
+    for (data.builtins.keys(), data.builtins.values()) |name, builtin| {
         const new_text = switch (new_text_format) {
-            .only_name => builtin.name,
+            .only_name => name,
             .snippet => blk: {
-                if (builtin.arguments.len == 0) break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{builtin.name});
+                if (builtin.arguments.len == 0) break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
                 if (use_snippets and use_placeholders) break :blk builtin.snippet;
-                if (use_snippets) break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{builtin.name});
-                break :blk builtin.name;
+                if (use_snippets) break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name});
+                break :blk name;
             },
         };
 
         builder.completions.appendAssumeCapacity(.{
-            .label = builtin.name,
+            .label = name,
             .kind = .Function,
-            .filterText = builtin.name[1..],
+            .filterText = name[1..],
             .detail = builtin.signature,
             .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
             .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
