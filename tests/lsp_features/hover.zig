@@ -1177,6 +1177,16 @@ test "escaped identifier" {
         \\(comptime_int)
         \\```
     );
+    try testHover(
+        \\const @"hello <cursor> world" = 42;
+    ,
+        \\```zig
+        \\const @"hello  world" = 42
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
 }
 
 // https://github.com/zigtools/zls/issues/1378
