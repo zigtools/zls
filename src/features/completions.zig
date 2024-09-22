@@ -338,26 +338,28 @@ fn functionTypeCompletion(
                     .snippet_placeholders = true,
                 })});
             }
+            if (builder.server.config.enable_auto_close_parameter_braces) {
+                switch (func.ast.params.len) {
+                    // No arguments, leave cursor at the end
+                    0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
+                    1 => {
+                        if (has_self_param) {
+                            // The one argument is a self parameter, leave cursor at the end
+                            break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
+                        }
 
-            switch (func.ast.params.len) {
-                // No arguments, leave cursor at the end
-                0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
-                1 => {
-                    if (has_self_param) {
-                        // The one argument is a self parameter, leave cursor at the end
-                        break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
-                    }
-
-                    // Non-self parameter, leave the cursor in the parentheses
-                    if (!use_snippets) break :blk func_name;
-                    break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                },
-                else => {
-                    // Atleast one non-self parameter, leave the cursor in the parentheses
-                    if (!use_snippets) break :blk func_name;
-                    break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                },
+                        // Non-self parameter, leave the cursor in the parentheses
+                        if (!use_snippets) break :blk func_name;
+                        break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
+                    },
+                    else => {
+                        // Atleast one non-self parameter, leave the cursor in the parentheses
+                        if (!use_snippets) break :blk func_name;
+                        break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
+                    },
+                }
             }
+            break :blk try std.fmt.allocPrint(builder.arena, "{s}(", .{func_name});
         },
     };
 
