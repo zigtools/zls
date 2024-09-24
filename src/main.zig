@@ -89,20 +89,24 @@ fn defaultLogFilePath(allocator: std.mem.Allocator) std.mem.Allocator.Error!?[]c
     return try std.fs.path.join(allocator, &.{ cache_path, "zls", "zls.log" });
 }
 
-fn createLogFile(allocator: std.mem.Allocator, override_log_file_path: ?[]const u8) ?std.fs.File {
-    const log_file_path = override_log_file_path orelse defaultLogFilePath(allocator) catch null orelse return null;
-    defer if (override_log_file_path == null) allocator.free(log_file_path);
+fn createLogFile(allocator: std.mem.Allocator, override_log_file_path: ?[]const u8) ?struct { std.fs.File, []const u8 } {
+    const log_file_path = if (override_log_file_path) |log_file_path|
+        allocator.dupe(u8, log_file_path) catch return null
+    else
+        defaultLogFilePath(allocator) catch null orelse return null;
+    errdefer allocator.free(log_file_path);
 
     if (std.fs.path.dirname(log_file_path)) |dirname| {
         std.fs.cwd().makePath(dirname) catch {};
     }
 
-    const file = std.fs.cwd().createFile(log_file_path, .{ .truncate = false }) catch return null;
+    const file = std.fs.cwd().createFile(log_file_path, .{ .truncate = false }) catch {
+        allocator.free(log_file_path);
+        return null;
+    };
     errdefer file.close();
 
-    log.info("Log File:         {s}", .{log_file_path});
-
-    return file;
+    return .{ file, log_file_path };
 }
 
 /// Output format of `zls env`
@@ -320,21 +324,21 @@ pub fn main() !u8 {
     const result = try parseArgs(allocator);
     defer result.deinit(allocator);
 
+    log_file, const log_file_path = createLogFile(allocator, result.log_file_path) orelse .{ null, null };
+    defer if (log_file_path) |path| allocator.free(path);
+    defer if (log_file) |file| {
+        file.close();
+        log_file = null;
+    };
+
     const resolved_log_level = result.log_level orelse runtime_log_level;
 
     log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
     log.info("Message Tracing:  {}", .{result.enable_message_tracing});
     log.info("Log Level:        {s}", .{@tagName(resolved_log_level)});
-
-    const new_log_file = createLogFile(allocator, result.log_file_path) orelse blk: {
-        log.info("Log File:         null", .{});
-        break :blk null;
-    };
-    defer if (new_log_file) |file| file.close();
+    log.info("Log File:         {?s}", .{log_file_path});
 
     runtime_log_level = resolved_log_level;
-    log_file = new_log_file;
-    defer log_file = null;
 
     var transport: zls.lsp.ThreadSafeTransport(.{
         .ChildTransport = zls.lsp.TransportOverStdio,
