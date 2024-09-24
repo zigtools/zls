@@ -496,7 +496,7 @@ fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Rang
         format = .snippet;
     } else if (insert_can_be_snippet or replace_can_be_snippet) {
         // snippet completions would be possible but insert and replace would need different `newText`
-    } else if (!std.mem.startsWith(u8, source[builder.source_index..], "(")) {
+    } else if (!std.mem.startsWith(u8, source[end_index..], "(")) {
         format = .snippet;
     }
 

@@ -3378,7 +3378,7 @@ test "insert replace behaviour - function with snippets" {
         .enable_argument_placeholders = false,
     });
 
-    // remove the following test when partial argument placeholders are supported (see test below)
+    // remove the following tests when partial argument placeholders are supported (see test below)
     try testCompletionTextEdit(.{
         .source =
         \\fn func(comptime T: type, number: u32) void {}
@@ -3386,6 +3386,17 @@ test "insert replace behaviour - function with snippets" {
         ,
         .label = "func",
         .expected_insert_line = "const foo = func(u32);",
+        .expected_replace_line = "const foo = func(u32);",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(comptime T: type, number: u32) void {}
+        \\const foo = <cursor>c(u32);
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = funcc(u32);",
         .expected_replace_line = "const foo = func(u32);",
         .enable_snippets = true,
         .enable_argument_placeholders = true,
