@@ -249,15 +249,15 @@ pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
         }
         return .{ .start = start_index, .end = index };
     } else {
-        var index: usize = source_index;
-        if (text[index] == '@') index += 1;
+        const start: usize = source_index + @intFromBool(text[source_index] == '@');
+        var index = start;
         while (true) : (index += 1) {
             switch (text[index]) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
                 else => break,
             }
         }
-        return .{ .start = source_index, .end = index };
+        return .{ .start = start, .end = index };
     }
 }
 
@@ -274,7 +274,7 @@ test identifierIndexToNameLoc {
     try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@\"hello\" world", 0));
     try std.testing.expectEqualStrings("world", identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
 
-    try std.testing.expectEqualStrings("@hello", identifierIndexToNameSlice("@hello", 0));
+    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@hello", 0));
 }
 
 pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []const u8 {

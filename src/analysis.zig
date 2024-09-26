@@ -599,7 +599,17 @@ pub fn isSnakeCase(name: []const u8) bool {
 /// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
 /// if the `source_index` points to `@"name"`, the source location of `name` is returned.
 pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
-    std.debug.assert(source_index <= tree.source.len);
+    const token = offsets.sourceIndexToTokenIndex(tree, source_index);
+    switch (tree.tokens.items(.tag)[token]) {
+        .identifier,
+        .builtin,
+        => {
+            const token_loc = offsets.tokenToLoc(tree, token);
+            if (!(token_loc.start <= source_index and source_index <= token_loc.end)) return null;
+            return offsets.identifierIndexToNameLoc(tree.source, tree.tokens.items(.start)[token]);
+        },
+        else => {},
+    }
 
     var start = source_index;
     while (start > 0 and isSymbolChar(tree.source[start - 1])) {
@@ -617,45 +627,59 @@ pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
 
 test identifierLocFromIndex {
     var tree = try Ast.parse(std.testing.allocator,
-        \\;name;  ;@builtin; ;@"escaped";end
+        \\ name  @builtin  @"escaped"  @"s p a c e"  end
     , .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
         std.zig.Token.Tag,
-        &.{
-            .semicolon,  .identifier, .semicolon,
-            .semicolon,  .builtin,    .semicolon,
-            .semicolon,  .identifier, .semicolon,
-            .identifier, .eof,
-        },
+        &.{ .identifier, .builtin, .identifier, .identifier, .identifier, .eof },
         tree.tokens.items(.tag),
     );
 
-    std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, .{ .start = 1, .end = 5 })));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 1));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 2));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 1, .end = 5 }), identifierLocFromIndex(tree, 5));
+    {
+        const expected_loc: offsets.Loc = .{ .start = 1, .end = 5 };
+        std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, expected_loc)));
 
-    std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, .{ .start = 10, .end = 17 })));
-    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 9));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 10));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 10));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 14));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 10, .end = 17 }), identifierLocFromIndex(tree, 17));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 1));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 2));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 5));
+    }
 
-    std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, .{ .start = 22, .end = 29 })));
-    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 20));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 22));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 25));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 22, .end = 29 }), identifierLocFromIndex(tree, 29));
+    {
+        const expected_loc: offsets.Loc = .{ .start = 8, .end = 15 };
+        std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, expected_loc)));
 
-    std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, .{ .start = 31, .end = 34 })));
-    try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 30));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 31));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 32));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 33));
-    try std.testing.expectEqual(@as(?offsets.Loc, .{ .start = 31, .end = 34 }), identifierLocFromIndex(tree, 34));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 6));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 7));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 8));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 11));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 15));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 16));
+    }
+
+    {
+        const expected_loc: offsets.Loc = .{ .start = 19, .end = 26 };
+        std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 16));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 17));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 18));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 19));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 23));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 27));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 28));
+    }
+
+    {
+        const expected_loc: offsets.Loc = .{ .start = 43, .end = 46 };
+        std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 42));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 43));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 45));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 46));
+    }
 }
 
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
