@@ -419,7 +419,7 @@ pub fn main() !void {
         else => false,
     };
     if (!watch_suported) return;
-    var w = try Watch.init();
+    var w = Watch.init() catch return;
 
     var step_stack = try stepNamesToStepStack(gpa, builder, targets.items);
 
