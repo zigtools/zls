@@ -125,6 +125,23 @@ const Builder = struct {
                     tree.tokens.items(.start)[name_token],
                 ) orelse return;
 
+                // If the lookup result is the same as the identifier being
+                // searched, then its the declaration itself, so skip it.
+                // This is useful for enums:
+                // const Number = enum { zero };
+                // Here, `zero` is an `identifier`, but also the lookup result.
+                // we shouldn't consider this as a reference.
+                const child_name_token = child.nameToken();
+                const child_name_loc = offsets.identifierTokenToNameLoc(child.handle.tree, child_name_token);
+                const child_name = offsets.locToSlice(child.handle.tree.source, child_name_loc);
+                const name_loc = offsets.tokenToLoc(tree, name_token);
+                if (child_name_loc.start == name_loc.start and
+                    child_name_loc.end == name_loc.end and
+                    std.mem.eql(u8, child_name, name))
+                {
+                    return;
+                }
+
                 if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, name_token);
                 }
