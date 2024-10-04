@@ -68,6 +68,8 @@ const Builder = struct {
     locations: std.ArrayListUnmanaged(types.Location) = .{},
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
+    /// Whether the `decl_handle` has been added
+    did_add_decl_handle: bool = false,
     analyser: *Analyser,
     encoding: offsets.Encoding,
 
@@ -81,6 +83,12 @@ const Builder = struct {
     }
 
     fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
+        if (self.decl_handle.handle == handle and
+            self.decl_handle.nameToken() == token_index)
+        {
+            if (self.did_add_decl_handle) return;
+            self.did_add_decl_handle = true;
+        }
         try self.locations.append(self.allocator, .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
