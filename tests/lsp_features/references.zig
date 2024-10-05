@@ -97,6 +97,16 @@ test "for/while capture" {
     );
 }
 
+test "enum field access" {
+    try testReferences(
+        \\const E = enum {
+        \\  <0>,
+        \\  bar
+        \\};
+        \\const e = E.<0>;
+    );
+}
+
 test "struct field access" {
     try testReferences(
         \\const S = struct {<0>: u32 = 3};
