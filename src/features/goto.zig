@@ -51,7 +51,7 @@ fn gotoDefinitionSymbol(
             };
 
             // If a type node was found, try to resolve that to its definition token.
-            // For `const myVar: MyType = ...`, we will land on `MyType` first (`type_declaration`),
+            // For `const myVar: MyType = ...`, we will land on `MyType` first (`type_node`),
             // and then the token that declares `MyType` (eg `struct`).
             if (try type_node.definitionToken(analyser)) |token_handle| {
                 break :blk token_handle;
