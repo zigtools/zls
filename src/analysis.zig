@@ -3111,6 +3111,10 @@ pub const NodeWithHandle = struct {
         if (a.node != b.node) return false;
         return std.mem.eql(u8, a.handle.uri, b.handle.uri);
     }
+
+    pub fn resolveType(self: NodeWithHandle, analyser: *Analyser) error{OutOfMemory}!?Type {
+        return analyser.resolveTypeOfNodeInternal(self);
+    }
 };
 
 pub fn getFieldAccessType(

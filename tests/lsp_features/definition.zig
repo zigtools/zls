@@ -30,6 +30,11 @@ test "global variable" {
     try testDefinition(
         \\const <def><decl><>foo</decl></def>: <tdef>u32</tdef> = 5;
     );
+
+    try testDefinition(
+        \\const S = <tdef>struct</tdef> { alpha: u32 };
+        \\const <>s: S  = S{ .alpha = 5 };
+    );
 }
 
 test "local variable" {
