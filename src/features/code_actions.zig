@@ -47,6 +47,7 @@ pub const Builder = struct {
                 // fix: remove code
             },
             .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
+            .unorganized_import => try handleUnorganizedImport(builder, actions),
         }
     }
 
@@ -366,6 +367,234 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
     });
 }
 
+fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction)) !void {
+    const tree = builder.handle.tree;
+    if (tree.errors.len != 0) return;
+
+    const imports = try getImportsDecls(tree, builder.arena);
+
+    // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
+
+    const sorted_imports = try builder.arena.dupe(ImportDecl, imports.items);
+    std.sort.heap(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+
+    var edits = std.ArrayListUnmanaged(types.TextEdit){};
+
+    // remove previous imports
+    for (imports.items, 0..) |import_decl, i| {
+        // if two imports are next to each other we can extend the previous text edit
+        if (i != 0 and import_decl.var_decl - 1 == imports.items[i - 1].var_decl) {
+            const new_end = offsets.indexToPosition(tree.source, import_decl.getSourceEndIndex(tree, true), builder.offset_encoding);
+            edits.items[edits.items.len - 1].range.end = new_end;
+        } else {
+            try edits.append(builder.arena, .{
+                .range = offsets.locToRange(tree.source, import_decl.getLoc(tree, true), builder.offset_encoding),
+                .newText = "",
+            });
+        }
+    }
+
+    // add sorted imports
+    {
+        var new_text = std.ArrayListUnmanaged(u8){};
+        var writer = new_text.writer(builder.arena);
+
+        for (sorted_imports, 0..) |import_decl, i| {
+            if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
+                try new_text.append(builder.arena, '\n');
+            }
+
+            try writer.print("{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
+        }
+        try writer.writeByte('\n');
+
+        const insert_pos: types.Position = pos: {
+            const tokens = tree.tokens.items(.tag);
+            if (tokens.len < 2 or tokens[0] != .container_doc_comment) {
+                break :pos .{ .line = 0, .character = 0 };
+            }
+            // Insert after doc comment
+            break :pos offsets.tokenToPosition(tree, 1, builder.offset_encoding);
+        };
+
+        try edits.append(builder.arena, .{
+            .range = .{ .start = insert_pos, .end = insert_pos },
+            .newText = new_text.items,
+        });
+    }
+
+    const workspace_edit = try builder.createWorkspaceEdit(edits.items);
+
+    try actions.append(builder.arena, .{
+        .title = "organize @import",
+        .kind = .@"source.organizeImports",
+        .isPreferred = true,
+        .edit = workspace_edit,
+    });
+}
+
+/// const name_slice = @import(value_slice);
+pub const ImportDecl = struct {
+    var_decl: Ast.Node.Index,
+    first_comment_token: ?Ast.TokenIndex,
+    name: []const u8,
+    value: []const u8,
+
+    /// declaration order controls sorting order
+    pub const Kind = enum {
+        std,
+        builtin,
+        build_options,
+        package,
+        file,
+    };
+
+    pub const sort_case_sensitive: bool = false;
+    pub const sort_public_decls_first: bool = false;
+
+    pub fn lessThan(context: Ast, lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = lhs.getKind();
+        const rhs_kind = rhs.getKind();
+        if (lhs_kind != rhs_kind) return @intFromEnum(lhs_kind) < @intFromEnum(rhs_kind);
+
+        if (sort_public_decls_first) {
+            const node_tokens = context.nodes.items(.main_token);
+            const token_tags = context.tokens.items(.tag);
+
+            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and token_tags[node_tokens[lhs.var_decl] - 1] == .keyword_pub;
+            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and token_tags[node_tokens[rhs.var_decl] - 1] == .keyword_pub;
+            if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
+        }
+
+        if (sort_case_sensitive) {
+            return std.mem.lessThan(u8, lhs.getSortSlice(), rhs.getSortSlice());
+        } else {
+            return std.ascii.lessThanIgnoreCase(lhs.getSortSlice(), rhs.getSortSlice());
+        }
+    }
+
+    pub fn getKind(self: ImportDecl) Kind {
+        const name = self.value[1 .. self.value.len - 1];
+
+        if (std.mem.endsWith(u8, name, ".zig")) return .file;
+
+        if (std.mem.eql(u8, name, "std")) return .std;
+        if (std.mem.eql(u8, name, "builtin")) return .builtin;
+        if (std.mem.eql(u8, name, "build_options")) return .build_options;
+
+        return .package;
+    }
+
+    /// returns the string by which this import should be sorted
+    pub fn getSortSlice(self: ImportDecl) []const u8 {
+        switch (self.getKind()) {
+            .file => {
+                if (std.mem.indexOfScalar(u8, self.value, '/') != null) {
+                    return self.value[1 .. self.value.len - 1];
+                }
+                return self.name;
+            },
+            // There used to be unreachable for other than file and package, but the user
+            // can just write @import("std") twice.
+            else => return self.name,
+        }
+    }
+
+    /// returns true if there should be an empty line between these two imports
+    /// assumes `lessThan(void, lhs, rhs) == true`
+    pub fn addSeperator(lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = @intFromEnum(lhs.getKind());
+        const rhs_kind = @intFromEnum(rhs.getKind());
+        if (rhs_kind <= @intFromEnum(Kind.build_options)) return false;
+        return lhs_kind != rhs_kind;
+    }
+
+    pub fn getSourceStartIndex(self: ImportDecl, tree: Ast) usize {
+        return offsets.tokenToIndex(tree, self.first_comment_token orelse tree.firstToken(self.var_decl));
+    }
+
+    pub fn getSourceEndIndex(self: ImportDecl, tree: Ast, include_line_break: bool) usize {
+        const token_tags = tree.tokens.items(.tag);
+
+        var last_token = ast.lastToken(tree, self.var_decl);
+        if (last_token + 1 < tree.tokens.len - 1 and token_tags[last_token + 1] == .semicolon) {
+            last_token += 1;
+        }
+
+        var end = offsets.tokenToLoc(tree, last_token).end;
+        if (!include_line_break) return end;
+        while (end < tree.source.len) {
+            switch (tree.source[end]) {
+                ' ', '\t', '\n' => end += 1,
+                else => break,
+            }
+        }
+        return end;
+    }
+
+    /// similar to `offsets.nodeToLoc` but will also include preceding comments and postfix semicolon and line break
+    pub fn getLoc(self: ImportDecl, tree: Ast, include_line_break: bool) offsets.Loc {
+        return .{
+            .start = self.getSourceStartIndex(tree),
+            .end = self.getSourceEndIndex(tree, include_line_break),
+        };
+    }
+};
+
+pub fn getImportsDecls(tree: Ast, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayListUnmanaged(ImportDecl) {
+    var imports = std.ArrayListUnmanaged(ImportDecl){};
+    errdefer imports.deinit(allocator);
+
+    const node_tags = tree.nodes.items(.tag);
+    const node_data = tree.nodes.items(.data);
+    const node_tokens = tree.nodes.items(.main_token);
+    next_decl: for (tree.rootDecls()) |node| {
+        // TODO allow this pattern: const name = @import("file.zig").Decl;
+
+        if (node_tags[node] != .simple_var_decl) continue;
+        const var_decl = tree.simpleVarDecl(node);
+
+        const base_token = var_decl.ast.init_node;
+
+        const init_node: u32 = find_init_node: {
+            // Handle @import with field access (`@import("foo").foo.bar`)
+            var inode = base_token;
+            return while (true) {
+                switch (node_tags[inode]) {
+                    .builtin_call_two, .builtin_call_two_comma => {
+                        break :find_init_node inode;
+                    },
+                    .field_access => {
+                        inode = node_data[inode].lhs;
+                        continue;
+                    },
+                    else => continue :next_decl,
+                }
+            };
+        };
+
+        const call_name = offsets.tokenToSlice(tree, node_tokens[init_node]);
+        if (!std.mem.eql(u8, call_name, "@import")) continue;
+        // TODO what about @embedFile ?
+
+        if (node_data[init_node].lhs == 0 or node_data[init_node].rhs != 0) continue;
+        const import_param_node = node_data[init_node].lhs;
+        if (node_tags[import_param_node] != .string_literal) continue;
+
+        const name_token = var_decl.ast.mut_token + 1;
+        const value_token = node_tokens[import_param_node];
+
+        try imports.append(allocator, .{
+            .var_decl = node,
+            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+            .name = offsets.tokenToSlice(tree, name_token),
+            .value = offsets.tokenToSlice(tree, value_token),
+        });
+    }
+
+    return imports;
+}
+
 fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
@@ -524,6 +753,7 @@ const DiagnosticKind = union(enum) {
     undeclared_identifier,
     unreachable_code,
     var_never_mutated,
+    unorganized_import,
 
     const IdCat = enum {
         @"function parameter",
@@ -559,6 +789,8 @@ const DiagnosticKind = union(enum) {
             return .undeclared_identifier;
         } else if (std.mem.eql(u8, msg, "local variable is never mutated")) {
             return .var_never_mutated;
+        } else if (std.mem.eql(u8, msg, "unorganized @import statement")) {
+            return .unorganized_import;
         }
         return null;
     }
