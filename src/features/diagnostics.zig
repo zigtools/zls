@@ -118,6 +118,47 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
                     else => {},
                 }
             }
+
+            // Organize imports
+            const imports = try code_actions.getImportsDecls(tree, arena);
+            const rootDecls = tree.rootDecls();
+            std.log.debug("Imports: {any}", .{imports.items});
+            std.log.debug("RootDecls: {any}", .{rootDecls});
+            // If there are imports mixed in with other declarations, report them
+            var first_bad_import: usize = 0;
+            for (rootDecls) |decl_idx| {
+                if (first_bad_import >= imports.items.len) break;
+                if (decl_idx != imports.items[first_bad_import].var_decl) break;
+                first_bad_import += 1;
+            }
+            if (first_bad_import < imports.items.len) {
+                for (imports.items[first_bad_import..]) |import_decl| {
+                    try diagnostics.append(arena, .{
+                        .range = offsets.nodeToRange(tree, import_decl.var_decl, server.offset_encoding),
+                        .severity = .Hint,
+                        .code = .{ .string = "unorganized_import" },
+                        .source = "zls",
+                        .message = "unorganized @import statement",
+                    });
+                }
+            }
+            // Now check the order of the imports at the correct position by sorting the indexes
+            const sort_checked = imports.items[0..first_bad_import];
+            var decl_indexes = try arena.alloc(usize, sort_checked.len);
+            for (decl_indexes[0..decl_indexes.len], 0..) |*decl_index, i| {
+                decl_index.* = i;
+            }
+            std.sort.block(usize, decl_indexes, .{ sort_checked, tree }, sortIdxLessThen);
+            for (decl_indexes, 0..) |decl_index, i| {
+                if (decl_index == i) continue;
+                try diagnostics.append(arena, .{
+                    .range = offsets.nodeToRange(tree, sort_checked[i].var_decl, server.offset_encoding),
+                    .severity = .Hint,
+                    .code = .{ .string = "unorganized_import" },
+                    .source = "zls",
+                    .message = "unorganized @import statement",
+                });
+            }
         }
     }
 
@@ -179,6 +220,13 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         .uri = handle.uri,
         .diagnostics = diagnostics.items,
     };
+}
+
+fn sortIdxLessThen(ctx: struct { []code_actions.ImportDecl, Ast }, lhs: usize, rhs: usize) bool {
+    const imports = ctx[0];
+    const lhs_decl = imports[lhs];
+    const rhs_decl = imports[rhs];
+    return code_actions.ImportDecl.lessThan(ctx[1], lhs_decl, rhs_decl);
 }
 
 pub fn generateBuildOnSaveDiagnostics(
