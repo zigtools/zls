@@ -1,5 +1,4 @@
 const std = @import("std");
-const zig_builtin = @import("builtin");
 
 const ConfigOption = struct {
     /// Name of config option

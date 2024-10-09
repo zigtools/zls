@@ -5,7 +5,6 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_completions);
 
 const Server = @import("../Server.zig");
-const Config = @import("../Config.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("lsp").types;
 const Analyser = @import("../analysis.zig");

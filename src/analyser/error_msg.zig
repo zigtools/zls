@@ -1,10 +1,7 @@
 const std = @import("std");
-const types = @import("lsp").types;
-const offsets = @import("../offsets.zig");
 
 const InternPool = @import("InternPool.zig");
 const Index = InternPool.Index;
-const Key = InternPool.Key;
 
 pub const ErrorMsg = union(enum) {
     /// zig: expected type '{}', found '{}'
