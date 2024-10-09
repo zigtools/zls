@@ -10,6 +10,9 @@ enable_snippets: bool = true,
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 
+/// Whether to automatically close parameter braces
+enable_auto_close_parameter_braces: bool = true,
+
 /// Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.
 enable_build_on_save: ?bool = null,
 
