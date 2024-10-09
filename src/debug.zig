@@ -2,7 +2,6 @@
 
 const std = @import("std");
 
-const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const DocumentScope = @import("DocumentScope.zig");
 

@@ -1,8 +1,6 @@
 //! Configuration options related to a specific `BuildFile`.
 const std = @import("std");
 
-const Self = @This();
-
 pub const BuildOption = struct {
     name: []const u8,
     value: ?[]const u8 = null,

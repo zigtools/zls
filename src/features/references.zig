@@ -2,10 +2,8 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
-const log = std.log.scoped(.zls_references);
 
 const Server = @import("../Server.zig");
-const DocumentScope = @import("../DocumentScope.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const lsp = @import("lsp");

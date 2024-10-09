@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const zig_builtin = @import("builtin");
-const builtin = @import("builtin");
 const Config = @import("DocumentStore.zig").Config;
 const ast = @import("ast.zig");
 const tracy = @import("tracy");

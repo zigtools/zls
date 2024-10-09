@@ -1,12 +1,9 @@
 const std = @import("std");
 const zls = @import("zls");
-const builtin = @import("builtin");
 
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
-
-const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "empty" {
     try testFoldingRange("", &.{});

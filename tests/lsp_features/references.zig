@@ -1,6 +1,5 @@
 const std = @import("std");
 const zls = @import("zls");
-const builtin = @import("builtin");
 
 const helper = @import("../helper.zig");
 const Context = @import("../context.zig").Context;

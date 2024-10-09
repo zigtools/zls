@@ -1,13 +1,11 @@
 //! Implementation of [`textDocument/publishDiagnostics`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics)
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_diag);
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
-const BuildAssociatedConfig = @import("../BuildAssociatedConfig.zig");
 const types = @import("lsp").types;
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");

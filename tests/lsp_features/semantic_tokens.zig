@@ -1,6 +1,5 @@
 const std = @import("std");
 const zls = @import("zls");
-const builtin = @import("builtin");
 
 const Context = @import("../context.zig").Context;
 const ErrorBuilder = @import("../ErrorBuilder.zig");
@@ -1675,11 +1674,6 @@ test "assembly" {
         .{ "\"b\"", .string, .{} },
     });
 }
-
-const S = struct {
-    const foo = @compileError("some message");
-};
-const bar = S.foo;
 
 test "deprecated" {
     try testSemanticTokens(

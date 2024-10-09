@@ -13,7 +13,6 @@ const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
-const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
 
 const DocumentStore = @This();

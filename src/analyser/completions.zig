@@ -5,8 +5,6 @@ const std = @import("std");
 const InternPool = @import("InternPool.zig");
 const types = @import("lsp").types;
 
-const Ast = std.zig.Ast;
-
 /// generates a list of dot completions for the given typed-value in `index`
 /// the given `index` must belong to the given InternPool
 pub fn dotCompletions(

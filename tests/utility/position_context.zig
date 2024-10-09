@@ -2,8 +2,6 @@ const std = @import("std");
 const zls = @import("zls");
 
 const Analyser = zls.Analyser;
-const types = zls.types;
-const offsets = zls.offsets;
 
 const allocator = std.testing.allocator;
 
