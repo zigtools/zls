@@ -380,20 +380,6 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
 
     var edits = std.ArrayListUnmanaged(types.TextEdit){};
 
-    // remove previous imports
-    for (imports.items, 0..) |import_decl, i| {
-        // if two imports are next to each other we can extend the previous text edit
-        if (i != 0 and import_decl.var_decl - 1 == imports.items[i - 1].var_decl) {
-            const new_end = offsets.indexToPosition(tree.source, import_decl.getSourceEndIndex(tree, true), builder.offset_encoding);
-            edits.items[edits.items.len - 1].range.end = new_end;
-        } else {
-            try edits.append(builder.arena, .{
-                .range = offsets.locToRange(tree.source, import_decl.getLoc(tree, true), builder.offset_encoding),
-                .newText = "",
-            });
-        }
-    }
-
     // add sorted imports
     {
         var new_text = std.ArrayListUnmanaged(u8){};
@@ -420,6 +406,17 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         try edits.append(builder.arena, .{
             .range = .{ .start = insert_pos, .end = insert_pos },
             .newText = new_text.items,
+        });
+    }
+
+    // remove previous imports
+    // The order is unintuitive, but citing spec:
+    // "it is possible that multiple edits have the same start position: multiple inserts, or any number of inserts followed by a single remove or replace edit."
+    for (imports.items) |import_decl| {
+        // if two imports are next to each other we can extend the previous text edit
+        try edits.append(builder.arena, .{
+            .range = offsets.locToRange(tree.source, import_decl.getLoc(tree, true), builder.offset_encoding),
+            .newText = "",
         });
     }
 
