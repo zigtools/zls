@@ -7,7 +7,6 @@ const tracy = @import("tracy");
 const known_folders = @import("known-folders");
 
 const Config = @import("Config.zig");
-const offsets = @import("offsets.zig");
 
 const logger = std.log.scoped(.zls_config);
 

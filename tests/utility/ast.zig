@@ -2,10 +2,8 @@ const std = @import("std");
 const zls = @import("zls");
 
 const helper = @import("../helper.zig");
-const Context = @import("../context.zig").Context;
 const ErrorBuilder = @import("../ErrorBuilder.zig");
 
-const types = zls.types;
 const offsets = zls.offsets;
 const ast = zls.ast;
 

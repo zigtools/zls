@@ -2,12 +2,10 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
-const log = std.log.scoped(.zls_hover);
 
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
-const URI = @import("../uri.zig");
 const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
