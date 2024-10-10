@@ -3111,14 +3111,6 @@ pub const NodeWithHandle = struct {
         if (a.node != b.node) return false;
         return std.mem.eql(u8, a.handle.uri, b.handle.uri);
     }
-
-    pub fn definitionToken(self: NodeWithHandle, analyser: *Analyser) error{OutOfMemory}!?TokenWithHandle {
-        const maybe_decl_handle = try analyser.resolveVarDeclAlias(self);
-        if (maybe_decl_handle) |decl_handle| {
-            return try decl_handle.definitionToken(analyser, true);
-        }
-        return null;
-    }
 };
 
 pub fn getFieldAccessType(

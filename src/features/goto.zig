@@ -39,29 +39,15 @@ fn gotoDefinitionSymbol(
         .declaration => try decl_handle.definitionToken(analyser, false),
         .definition => try decl_handle.definitionToken(analyser, true),
         .type_definition => blk: {
-            // Try to find a type associated with the node (e.g: an annotation identifier).
-            const type_node = try decl_handle.typeDeclarationNode() orelse {
-                // If none found, try to resolve the type and guess
-                if (try decl_handle.resolveType(analyser)) |resolved_type| {
-                    if (try resolved_type.typeDefinitionToken()) |token_handle| {
-                        break :blk token_handle;
-                    }
-                }
-                return null;
-            };
-
-            // If a type node was found, try to resolve that to its definition token.
-            // For `const myVar: MyType = ...`, we will land on `MyType` first (`type_node`),
-            // and then the token that declares `MyType` (eg `struct`).
-            if (try type_node.definitionToken(analyser)) |token_handle| {
-                break :blk token_handle;
+            if (try decl_handle.resolveType(analyser)) |ty| {
+                if (try ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
             }
+            const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
-            // If no definition node could be found for the type, return the type node itself.
-            const target_range = offsets.nodeToRange(type_node.handle.tree, type_node.node, offset_encoding);
+            const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
             return types.DefinitionLink{
                 .originSelectionRange = name_range,
-                .targetUri = type_node.handle.uri,
+                .targetUri = type_declaration.handle.uri,
                 .targetRange = target_range,
                 .targetSelectionRange = target_range,
             };
