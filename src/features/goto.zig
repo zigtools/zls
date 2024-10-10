@@ -37,18 +37,12 @@ fn gotoDefinitionSymbol(
         .declaration => try decl_handle.definitionToken(analyser, false),
         .definition => try decl_handle.definitionToken(analyser, true),
         .type_definition => blk: {
-            // we should actually resolve the definition but declaration is can be more reliably implemented.
-            const type_declaration = try decl_handle.typeDeclarationNode() orelse {
-                // just resolve the type and guess
-                if (try decl_handle.resolveType(analyser)) |resolved_type| {
-                    if (try resolved_type.typeDefinitionToken()) |token_handle| {
-                        break :blk token_handle;
-                    }
-                }
-                return null;
-            };
-            const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
+            if (try decl_handle.resolveType(analyser)) |ty| {
+                if (try ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
+            }
+            const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
+            const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
             return types.DefinitionLink{
                 .originSelectionRange = name_range,
                 .targetUri = type_declaration.handle.uri,
@@ -69,7 +63,6 @@ fn gotoDefinitionSymbol(
 
 fn gotoDefinitionLabel(
     analyser: *Analyser,
-    arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     pos_index: usize,
     kind: GotoKind,
@@ -77,7 +70,6 @@ fn gotoDefinitionLabel(
 ) error{OutOfMemory}!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-    _ = arena;
 
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -87,7 +79,6 @@ fn gotoDefinitionLabel(
 
 fn gotoDefinitionGlobal(
     analyser: *Analyser,
-    arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     pos_index: usize,
     kind: GotoKind,
@@ -95,7 +86,6 @@ fn gotoDefinitionGlobal(
 ) error{OutOfMemory}!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-    _ = arena;
 
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -251,7 +241,6 @@ pub fn gotoHandler(
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     var analyser = Analyser.init(
         server.allocator,
@@ -261,11 +250,12 @@ pub fn gotoHandler(
     );
     defer analyser.deinit();
 
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
     const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => |loc| try gotoDefinitionBuiltin(&server.document_store, handle, loc, server.offset_encoding),
-        .var_access => try gotoDefinitionGlobal(&analyser, arena, handle, source_index, kind, server.offset_encoding),
+        .var_access => try gotoDefinitionGlobal(&analyser, handle, source_index, kind, server.offset_encoding),
         .field_access => |loc| blk: {
             const links = try gotoDefinitionFieldAccess(&analyser, arena, handle, source_index, loc, kind, server.offset_encoding) orelse return null;
             if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
@@ -281,7 +271,7 @@ pub fn gotoHandler(
         .cinclude_string_literal,
         .embedfile_string_literal,
         => try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding),
-        .label => try gotoDefinitionLabel(&analyser, arena, handle, source_index, kind, server.offset_encoding),
+        .label => try gotoDefinitionLabel(&analyser, handle, source_index, kind, server.offset_encoding),
         .enum_literal => try gotoDefinitionEnumLiteral(&analyser, arena, handle, source_index, kind, server.offset_encoding),
         else => null,
     } orelse return null;
