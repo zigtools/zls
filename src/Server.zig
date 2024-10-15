@@ -55,8 +55,6 @@ wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = .{},
-// ensure that build on save is only executed once at a time
-running_build_on_save_processes: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
@@ -65,8 +63,18 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 /// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
+workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
+
+const Workspace = struct {
+    uri: types.URI,
+    is_build_on_save_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    fn deinit(self: *Workspace, allocator: std.mem.Allocator) void {
+        allocator.free(self.uri);
+    }
+};
 
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
@@ -91,12 +99,9 @@ const ClientCapabilities = struct {
     /// bricking the preview window in Sublime Text.
     /// https://github.com/zigtools/zls/pull/261
     max_detail_length: u32 = 1024 * 1024,
-    workspace_folders: []types.URI = &.{},
     client_name: ?[]const u8 = null,
 
     fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
-        for (self.workspace_folders) |uri| allocator.free(uri);
-        allocator.free(self.workspace_folders);
         if (self.client_name) |name| allocator.free(name);
         self.* = undefined;
     }
@@ -157,13 +162,11 @@ pub const Status = enum {
 const Job = union(enum) {
     incoming_message: std.json.Parsed(Message),
     generate_diagnostics: DocumentStore.Uri,
-    run_build_on_save,
 
     fn deinit(self: Job, allocator: std.mem.Allocator) void {
         switch (self) {
             .incoming_message => |parsed_message| parsed_message.deinit(),
             .generate_diagnostics => |uri| allocator.free(uri),
-            .run_build_on_save => {},
         }
     }
 
@@ -174,15 +177,12 @@ const Job = union(enum) {
         /// this `Job` requires shared access to `Server` and `DocumentStore`
         /// other non exclusive jobs can be processed in parallel
         shared,
-        /// this `Job` operates atomically and does not require any synchronisation
-        atomic,
     };
 
     fn syncMode(self: Job) SynchronizationMode {
         return switch (self) {
             .incoming_message => |parsed_message| if (isBlockingMessage(parsed_message.value)) .exclusive else .shared,
             .generate_diagnostics => .shared,
-            .run_build_on_save => .atomic,
         };
     }
 };
@@ -352,27 +352,24 @@ fn getAutofixMode(server: *Server) enum {
 fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (handle.tree.errors.len != 0) return .{};
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
-    if (diagnostics.items.len == 0) return .{};
+    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
+    defer error_bundle.deinit(server.allocator);
+    if (error_bundle.errorMessageCount() == 0) return .{};
 
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
-    var builder = code_actions.Builder{
+    var builder: code_actions.Builder = .{
         .arena = arena,
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
 
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
-    }
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    try builder.generateCodeAction(error_bundle, &actions);
 
-    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     for (actions.items) |action| {
         std.debug.assert(action.kind != null);
         std.debug.assert(action.edit != null);
@@ -523,14 +520,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
-    if (request.workspaceFolders) |workspace_folders| {
-        server.client_capabilities.workspace_folders = try server.allocator.alloc(types.URI, workspace_folders.len);
-        @memset(server.client_capabilities.workspace_folders, "");
-        for (server.client_capabilities.workspace_folders, workspace_folders) |*dest, src| {
-            dest.* = try server.allocator.dupe(u8, src.uri);
-        }
-    }
-
     if (request.trace) |trace| {
         // To support --enable-message-tracing, only allow turning this on here
         if (trace != .off) {
@@ -543,8 +532,10 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     }
     log.debug("Offset Encoding:  {s}", .{@tagName(server.offset_encoding)});
 
-    for (server.client_capabilities.workspace_folders) |uri| {
-        log.info("Workspace Folder: '{s}'", .{uri});
+    if (request.workspaceFolders) |workspace_folders| {
+        for (workspace_folders) |src| {
+            try server.addWorkspace(src.uri);
+        }
     }
 
     server.status = .initializing;
@@ -771,38 +762,36 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 }
 
+fn addWorkspace(server: *Server, uri: types.URI) !void {
+    try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
+    server.workspaces.appendAssumeCapacity(.{
+        .uri = try server.allocator.dupe(u8, uri),
+    });
+    log.info("added Workspace Folder: {s}", .{uri});
+}
+
+fn removeWorkspace(server: *Server, uri: types.URI) void {
+    for (server.workspaces.items, 0..) |workspace, i| {
+        if (std.mem.eql(u8, workspace.uri, uri)) {
+            var removed_workspace = server.workspaces.swapRemove(i);
+            removed_workspace.deinit(server.allocator);
+            log.info("removed Workspace Folder: {s}", .{uri});
+            break;
+        }
+    } else {
+        log.warn("could not remove Workspace Folder: {s}", .{uri});
+    }
+}
+
 fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {
     _ = arena;
 
-    var folders = std.ArrayListUnmanaged(types.URI).fromOwnedSlice(server.client_capabilities.workspace_folders);
-    errdefer folders.deinit(server.allocator);
-
-    var i: usize = 0;
-    while (i < folders.items.len) {
-        const uri = folders.items[i];
-        for (notification.event.removed) |removed| {
-            if (std.mem.eql(u8, removed.uri, uri)) {
-                server.allocator.free(folders.swapRemove(i));
-                break;
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    try folders.ensureUnusedCapacity(server.allocator, notification.event.added.len);
-    for (notification.event.added) |added| {
-        folders.appendAssumeCapacity(try server.allocator.dupe(u8, added.uri));
-    }
-
-    server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
-
     for (notification.event.added) |folder| {
-        log.info("added Workspace Folder: {s}", .{folder.uri});
+        try server.addWorkspace(folder.uri);
     }
 
     for (notification.event.removed) |folder| {
-        log.info("removed Workspace Folder: {s}", .{folder.uri});
+        server.removeWorkspace(folder.uri);
     }
 }
 
@@ -932,7 +921,7 @@ pub fn updateConfiguration(
         if (!std.process.can_spawn) break :blk;
 
         for (server.document_store.build_files.keys()) |build_file_uri| {
-            try server.document_store.invalidateBuildFile(build_file_uri);
+            server.document_store.invalidateBuildFile(build_file_uri);
         }
     }
 
@@ -942,12 +931,7 @@ pub fn updateConfiguration(
         }
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
 
-        if (std.process.can_spawn and
-            server.config.enable_build_on_save != false and
-            server.client_capabilities.supports_publish_diagnostics)
-        {
-            try server.pushJob(.run_build_on_save);
-        }
+        server.scheduleBuildOnSave();
     }
 
     if (server.status == .initialized) {
@@ -1348,15 +1332,10 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
     const uri = notification.textDocument.uri;
 
     if (std.process.can_spawn and DocumentStore.isBuildFile(uri)) {
-        try server.document_store.invalidateBuildFile(uri);
+        server.document_store.invalidateBuildFile(uri);
     }
 
-    if (std.process.can_spawn and
-        server.config.enable_build_on_save != false and
-        server.client_capabilities.supports_publish_diagnostics)
-    {
-        try server.pushJob(.run_build_on_save);
-    }
+    server.scheduleBuildOnSave();
 
     if (server.getAutofixMode() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
@@ -1611,27 +1590,25 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!lsp.ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    // as of right now, only ast-check errors may get a code action
+    if (handle.tree.errors.len != 0) return null;
+
+    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
+    defer error_bundle.deinit(server.allocator);
+    if (error_bundle.errorMessageCount() == 0) return null;
+
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
-    var builder = code_actions.Builder{
+    var builder: code_actions.Builder = .{
         .arena = arena,
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
 
-    // as of right now, only ast-check errors may get a code action
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    if (handle.tree.errors.len == 0) {
-        try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
-    }
-
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
-    }
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    try builder.generateCodeAction(error_bundle, &actions);
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
@@ -1652,6 +1629,59 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
+}
+
+fn scheduleBuildOnSave(server: *Server) void {
+    if (!std.process.can_spawn) return;
+    if (server.config.enable_build_on_save != false) return;
+    if (!server.client_capabilities.supports_publish_diagnostics) return;
+
+    for (server.workspaces.items) |*workspace| {
+        if (zig_builtin.single_threaded) {
+            server.runBuildOnSave(workspace);
+        } else {
+            // TODO race-condition: `server.workspaces` may be modified
+            server.thread_pool.spawn(runBuildOnSave, .{ server, workspace }) catch {
+                server.runBuildOnSave(workspace);
+            };
+        }
+    }
+}
+
+fn runBuildOnSave(server: *Server, workspace: *Workspace) void {
+    comptime std.debug.assert(std.process.can_spawn);
+
+    const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
+    if (was_build_on_save_running) return;
+
+    defer workspace.is_build_on_save_running.store(false, .release);
+
+    var diagnostic_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
+
+    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+    defer arena_allocator.deinit();
+
+    diagnostics_gen.generateBuildOnSaveDiagnostics(
+        server.allocator,
+        &server.document_store,
+        // TODO data-race on server.config
+        server.config,
+        workspace.uri,
+        arena_allocator.allocator(),
+        &diagnostic_set,
+    ) catch |err| {
+        log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
+        return;
+    };
+
+    for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
+        std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
+        const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
+            .uri = document_uri,
+            .diagnostics = diagnostics.items,
+        }) catch return;
+        server.allocator.free(json_message);
+    }
 }
 
 const HandledRequestParams = union(enum) {
@@ -1766,7 +1796,7 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
     } else {
         try server.thread_pool.init(.{
             .allocator = allocator,
-            .n_jobs = 4, // what is a good value here?
+            .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
         });
         server.document_store.thread_pool = &server.thread_pool;
     }
@@ -1786,6 +1816,8 @@ pub fn destroy(server: *Server) void {
     server.job_queue.deinit();
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
+    for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
+    server.workspaces.deinit(server.allocator);
     server.client_capabilities.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
@@ -1816,23 +1848,17 @@ pub fn loop(server: *Server) !void {
 
         while (server.job_queue.readItem()) |job| {
             if (zig_builtin.single_threaded) {
-                server.processJob(job, null);
+                server.processJob(job);
                 continue;
             }
 
             switch (job.syncMode()) {
                 .exclusive => {
                     server.waitAndWork();
-                    server.processJob(job, null);
+                    server.processJob(job);
                 },
                 .shared => {
-                    server.wait_group.start();
-                    errdefer job.deinit(server.allocator);
-                    try server.thread_pool.spawn(processJob, .{ server, job, &server.wait_group });
-                },
-                .atomic => {
-                    errdefer job.deinit(server.allocator);
-                    try server.thread_pool.spawn(processJob, .{ server, job, null });
+                    server.thread_pool.spawnWg(&server.wait_group, processJob, .{ server, job });
                 },
             }
         }
@@ -1990,12 +2016,10 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
     };
 }
 
-fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) void {
+fn processJob(server: *Server, job: Job) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     tracy_zone.setName(@tagName(job));
-    defer if (!zig_builtin.single_threaded and wait_group != null) wait_group.?.finish();
-
     defer job.deinit(server.allocator);
 
     switch (job) {
@@ -2010,32 +2034,6 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle) catch return;
             const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
             server.allocator.free(json_message);
-        },
-        .run_build_on_save => {
-            if (!std.process.can_spawn) unreachable;
-
-            if (server.running_build_on_save_processes.load(.seq_cst) != 0) return;
-
-            for (server.client_capabilities.workspace_folders) |workspace_folder_uri| {
-                _ = server.running_build_on_save_processes.fetchAdd(1, .acq_rel);
-                defer _ = server.running_build_on_save_processes.fetchSub(1, .acq_rel);
-
-                var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-                defer arena_allocator.deinit();
-                var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
-                diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace_folder_uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
-                    log.err("failed to run build on save on {s}: {}", .{ workspace_folder_uri, err });
-                    return;
-                };
-
-                for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
-                    const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-                        .uri = document_uri,
-                        .diagnostics = diagnostics.items,
-                    }) catch return;
-                    server.allocator.free(json_message);
-                }
-            }
         },
     }
 }
