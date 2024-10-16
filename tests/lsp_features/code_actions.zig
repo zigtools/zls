@@ -573,8 +573,6 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     defer text_edits.deinit(allocator);
 
-    // std.log.err("Response: {any}", .{response});
-
     for (response) |action| {
         const code_action = action.CodeAction;
         if (code_action.kind.? != .@"source.fixAll") continue;
@@ -601,17 +599,13 @@ fn testDiagnostic(before: []const u8, after: []const u8, diagnostic: types.Diagn
     const uri = try ctx.addDocument(before);
     const handle = ctx.server.document_store.getHandle(uri).?;
 
-    var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-    try diagnostics.append(allocator, diagnostic);
-    defer diagnostics.deinit(allocator);
-
     const params = types.CodeActionParams{
         .textDocument = .{ .uri = uri },
         .range = .{
             .start = .{ .line = 0, .character = 0 },
             .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
         },
-        .context = .{ .diagnostics = diagnostics.items },
+        .context = .{ .diagnostics = &.{diagnostic} },
     };
 
     @setEvalBranchQuota(5000);
@@ -622,8 +616,6 @@ fn testDiagnostic(before: []const u8, after: []const u8, diagnostic: types.Diagn
 
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     defer text_edits.deinit(allocator);
-
-    // std.log.err("Response: {any}", .{response});
 
     for (response) |action| {
         const code_action = action.CodeAction;
