@@ -373,10 +373,11 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
 
     const imports = try getImportsDecls(tree, builder.arena);
 
+    // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
 
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports.items);
-    std.sort.heap(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+    std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
     var edits = std.ArrayListUnmanaged(types.TextEdit){};
 
