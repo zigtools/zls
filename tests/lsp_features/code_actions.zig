@@ -413,19 +413,6 @@ test "organize imports" {
         \\
         \\
     , importDiagnostic);
-    // Imports bubble up
-    try testDiagnostic(
-        \\const std = @import("std");
-        \\fn main() void {}
-        \\const abc = @import("abc.zig");
-    ,
-        \\const std = @import("std");
-        \\
-        \\const abc = @import("abc.zig");
-        \\
-        \\fn main() void {}
-        \\
-    , importDiagnostic);
     // Relative paths are sorted by import path
     try testDiagnostic(
         \\const y = @import("a/file2.zig");
@@ -438,8 +425,25 @@ test "organize imports" {
         \\
         \\
     , importDiagnostic);
+}
+
+test "organize imports - bubbles up" {
+    try testDiagnostic(
+        \\const std = @import("std");
+        \\fn main() void {}
+        \\const abc = @import("abc.zig");
+    ,
+        \\const std = @import("std");
+        \\
+        \\const abc = @import("abc.zig");
+        \\
+        \\fn main() void {}
+        \\
+    , importDiagnostic);
+}
+
+test "organize imports - scope" {
     // Ignore imports not in root scope
-    // The imports are sorted by import name
     try testDiagnostic(
         \\const b = @import("a.zig");
         \\const a = @import("b.zig");
@@ -460,6 +464,9 @@ test "organize imports" {
         \\  _ = x; // autofix
         \\}
     , importDiagnostic);
+}
+
+test "organize imports - comments" {
     // Doc comments are preserved
     try testDiagnostic(
         \\const xyz = @import("xyz.zig");
@@ -472,6 +479,24 @@ test "organize imports" {
         \\
         \\
     , importDiagnostic);
+    // Respects top-level doc-comment
+    try testDiagnostic(
+        \\//! A module doc
+        \\
+        \\const abc = @import("abc.zig");
+        \\const std = @import("std");
+    ,
+        \\//! A module doc
+        \\
+        \\const std = @import("std");
+        \\
+        \\const abc = @import("abc.zig");
+        \\
+        \\
+    , importDiagnostic);
+}
+
+test "organize imports - field access" {
     // field access on import
     try testDiagnostic(
         \\const xyz = @import("xyz.zig").a.long.chain;
@@ -482,6 +507,7 @@ test "organize imports" {
         \\
         \\
     , importDiagnostic);
+    // declarations without @import move under other imports for now
     try testDiagnostic(
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\const xyz_related = xyz.related;
@@ -493,6 +519,9 @@ test "organize imports" {
         \\const xyz_related = xyz.related;
         \\
     , importDiagnostic);
+}
+
+test "organize imports - edge cases" {
     // Withstands non-standard behavior
     try testDiagnostic(
         \\const std = @import("std");
@@ -500,21 +529,6 @@ test "organize imports" {
         \\const std = @import("std");
     ,
         \\const std = @import("std");
-        \\const std = @import("std");
-        \\
-        \\const abc = @import("abc.zig");
-        \\
-        \\
-    , importDiagnostic);
-    // Respects top-level doc-comment
-    try testDiagnostic(
-        \\//! A module doc
-        \\
-        \\const abc = @import("abc.zig");
-        \\const std = @import("std");
-    ,
-        \\//! A module doc
-        \\
         \\const std = @import("std");
         \\
         \\const abc = @import("abc.zig");
