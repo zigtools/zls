@@ -1633,10 +1633,8 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
-    const providedDiagnostics = request.context.diagnostics;
-    for (providedDiagnostics) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
-    }
+    // Always generate code action organizeImports
+    try builder.generateOrganizeImportsAction(&actions);
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
