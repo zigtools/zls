@@ -51,6 +51,13 @@ pub const Builder = struct {
         }
     }
 
+    pub fn generateOrganizeImportsAction(
+        builder: *Builder,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+    ) error{OutOfMemory}!void {
+        try handleUnorganizedImport(builder, actions);
+    }
+
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };

@@ -383,7 +383,7 @@ test "organize imports" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , importDiagnostic);
+    );
     // Three different import groups: std, build_options and builtin, but these groups do not have separator
     // Builtin comes before build_options despite alphabetical order (they are different import kinds)
     // Case insensitive, pub is preserved
@@ -412,7 +412,7 @@ test "organize imports" {
         \\const Server = @import("Server.zig");
         \\
         \\
-    , importDiagnostic);
+    );
     // Relative paths are sorted by import path
     try testDiagnostic(
         \\const y = @import("a/file2.zig");
@@ -424,7 +424,7 @@ test "organize imports" {
         \\const x = @import("a/file3.zig");
         \\
         \\
-    , importDiagnostic);
+    );
 }
 
 test "organize imports - bubbles up" {
@@ -439,7 +439,7 @@ test "organize imports - bubbles up" {
         \\
         \\fn main() void {}
         \\
-    , importDiagnostic);
+    );
 }
 
 test "organize imports - scope" {
@@ -463,7 +463,7 @@ test "organize imports - scope" {
         \\  _ = y; // autofix
         \\  _ = x; // autofix
         \\}
-    , importDiagnostic);
+    );
 }
 
 test "organize imports - comments" {
@@ -478,7 +478,7 @@ test "organize imports - comments" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , importDiagnostic);
+    );
     // Respects top-level doc-comment
     try testDiagnostic(
         \\//! A module doc
@@ -493,7 +493,7 @@ test "organize imports - comments" {
         \\const abc = @import("abc.zig");
         \\
         \\
-    , importDiagnostic);
+    );
 }
 
 test "organize imports - field access" {
@@ -506,7 +506,7 @@ test "organize imports - field access" {
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\
         \\
-    , importDiagnostic);
+    );
     // declarations without @import move under other imports for now
     try testDiagnostic(
         \\const xyz = @import("xyz.zig").a.long.chain;
@@ -518,7 +518,7 @@ test "organize imports - field access" {
         \\
         \\const xyz_related = xyz.related;
         \\
-    , importDiagnostic);
+    );
 }
 
 test "organize imports - edge cases" {
@@ -534,7 +534,7 @@ test "organize imports - edge cases" {
         \\const abc = @import("abc.zig");
         \\
         \\
-    , importDiagnostic);
+    );
 }
 
 fn testAutofix(before: []const u8, after: []const u8) !void {
@@ -552,8 +552,7 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     const handle = ctx.server.document_store.getHandle(uri).?;
 
     var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-    // try zls.diagnostics.getAstCheckDiagnostics(ctx.server, ctx.arena.allocator(), handle, &diagnostics);
-    defer diagnostics.deinit(allocator);
+    try zls.diagnostics.getAstCheckDiagnostics(ctx.server, ctx.arena.allocator(), handle, &diagnostics);
 
     const params = types.CodeActionParams{
         .textDocument = .{ .uri = uri },
@@ -591,7 +590,7 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     try std.testing.expectEqualStrings(after, handle.tree.source);
 }
 
-fn testDiagnostic(before: []const u8, after: []const u8, diagnostic: types.Diagnostic) !void {
+fn testDiagnostic(before: []const u8, after: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
     ctx.server.config.enable_autofix = true;
@@ -605,7 +604,7 @@ fn testDiagnostic(before: []const u8, after: []const u8, diagnostic: types.Diagn
             .start = .{ .line = 0, .character = 0 },
             .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
         },
-        .context = .{ .diagnostics = &.{diagnostic} },
+        .context = .{ .diagnostics = &.{} },
     };
 
     @setEvalBranchQuota(5000);
