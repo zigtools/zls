@@ -387,9 +387,11 @@ test "organize imports" {
         \\const Config = @import("Config.zig");
         \\const debug = @import("debug.zig");
         \\const Server = @import("Server.zig");
+        \\const root = @import("root");
     ,
         \\const std = @import("std");
         \\const builtin = @import("builtin");
+        \\const root = @import("root");
         \\const build_options = @import("build_options");
         \\
         \\const tres = @import("tres");

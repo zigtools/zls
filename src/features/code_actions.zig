@@ -477,6 +477,7 @@ pub const ImportDecl = struct {
             if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
         }
 
+        // 'root' gets sorted after 'builtin'
         if (sort_case_sensitive) {
             return std.mem.lessThan(u8, lhs.getSortSlice(), rhs.getSortSlice());
         } else {
@@ -491,6 +492,7 @@ pub const ImportDecl = struct {
 
         if (std.mem.eql(u8, name, "std")) return .std;
         if (std.mem.eql(u8, name, "builtin")) return .builtin;
+        if (std.mem.eql(u8, name, "root")) return .builtin;
         if (std.mem.eql(u8, name, "build_options")) return .build_options;
 
         return .package;
