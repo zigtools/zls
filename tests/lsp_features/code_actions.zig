@@ -363,17 +363,6 @@ test "ignore autofix comment whitespace" {
     );
 }
 
-const importDiagnostic = types.Diagnostic{
-    .range = .{
-        .start = .{ .line = 1, .character = 0 },
-        .end = .{ .line = 2, .character = 0 },
-    },
-    .severity = .Hint,
-    .code = .{ .string = "unorganized_import" },
-    .source = "zls",
-    .message = "unorganized @import statement",
-};
-
 test "organize imports" {
     try testDiagnostic(
         \\const xyz = @import("xyz.zig");
@@ -482,11 +471,13 @@ test "organize imports - comments" {
     // Respects top-level doc-comment
     try testDiagnostic(
         \\//! A module doc
+        \\//! Another line
         \\
         \\const abc = @import("abc.zig");
         \\const std = @import("std");
     ,
         \\//! A module doc
+        \\//! Another line
         \\
         \\const std = @import("std");
         \\
