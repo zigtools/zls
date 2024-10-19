@@ -352,7 +352,7 @@ fn functionTypeCompletion(
                     break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
                 },
                 else => {
-                    // Atleast one non-self parameter, leave the cursor in the parentheses
+                    // At least one non-self parameter, leave the cursor in the parentheses
                     if (!use_snippets) break :blk func_name;
                     break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
                 },

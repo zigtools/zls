@@ -155,7 +155,7 @@ test "discard capture with comment" {
         \\test {
         \\    if (1 == 1) |a| // a comment
         \\    {}
-        \\    for (0..10, 0..10, 0..10) |i, j, k| // a commment
+        \\    for (0..10, 0..10, 0..10) |i, j, k| // a comment
         \\    {}
         \\}
         \\
@@ -165,7 +165,7 @@ test "discard capture with comment" {
         \\    {
         \\        _ = a; // autofix
         \\    }
-        \\    for (0..10, 0..10, 0..10) |i, j, k| // a commment
+        \\    for (0..10, 0..10, 0..10) |i, j, k| // a comment
         \\    {
         \\        _ = i; // autofix
         \\        _ = j; // autofix
@@ -180,7 +180,7 @@ test "discard capture with comment" {
         \\    // a comment
         \\    {}
         \\    for (0..10, 0..10, 0..10) |i, j, k|
-        \\    // a commment
+        \\    // a comment
         \\    {}
         \\}
         \\
@@ -192,7 +192,7 @@ test "discard capture with comment" {
         \\        _ = a; // autofix
         \\    }
         \\    for (0..10, 0..10, 0..10) |i, j, k|
-        \\    // a commment
+        \\    // a comment
         \\    {
         \\        _ = i; // autofix
         \\        _ = j; // autofix
@@ -205,7 +205,7 @@ test "discard capture with comment" {
         \\test {
         \\    if (1 == 1) |a| { // a comment
         \\    }
-        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a commment
+        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a comment
         \\    }
         \\}
         \\
@@ -214,7 +214,7 @@ test "discard capture with comment" {
         \\    if (1 == 1) |a| { // a comment
         \\        _ = a; // autofix
         \\    }
-        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a commment
+        \\    for (0..10, 0..10, 0..10) |i, j, k| { // a comment
         \\        _ = i; // autofix
         \\        _ = j; // autofix
         \\        _ = k; // autofix
