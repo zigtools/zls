@@ -413,14 +413,9 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         }
         try writer.writeByte('\n');
 
-        const insert_pos: types.Position = pos: {
-            const tokens = tree.tokens.items(.tag);
-            if (tokens.len < 2 or tokens[0] != .container_doc_comment) {
-                break :pos .{ .line = 0, .character = 0 };
-            }
-            // Insert after doc comment
-            break :pos offsets.tokenToPosition(tree, 1, builder.offset_encoding);
-        };
+        const tokens = tree.tokens.items(.tag);
+        const first_token = std.mem.indexOfNone(std.zig.Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
+        const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
 
         try edits.append(builder.arena, .{
             .range = .{ .start = insert_pos, .end = insert_pos },
