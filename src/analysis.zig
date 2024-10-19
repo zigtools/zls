@@ -1319,6 +1319,37 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
     } });
 }
 
+fn resolveStringLiteral(analyser: *Analyser, node_param: NodeWithHandle) !?[]const u8 {
+    var node_with_handle = node_param;
+    if (try analyser.resolveVarDeclAlias(node_with_handle)) |decl_with_handle| {
+        if (decl_with_handle.decl == .ast_node) {
+            node_with_handle = .{
+                .node = decl_with_handle.decl.ast_node,
+                .handle = decl_with_handle.handle,
+            };
+        }
+    }
+    const string_literal_node = switch (node_with_handle.handle.tree.nodes.items(.tag)[node_with_handle.node]) {
+        .string_literal => node_with_handle.node,
+        .global_var_decl,
+        .local_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => blk: {
+            const init_node = node_with_handle.handle.tree.fullVarDecl(node_with_handle.node).?.ast.init_node;
+            if (node_with_handle.handle.tree.nodes.items(.tag)[init_node] != .string_literal) return null;
+            break :blk init_node;
+        },
+        else => return null,
+    };
+    const field_name_token = node_with_handle.handle.tree.nodes.items(.main_token)[string_literal_node];
+    const field_name = offsets.tokenToSlice(node_with_handle.handle.tree, field_name_token);
+
+    // Need at least one char between the quotes, eg "a"
+    if (field_name.len < 2) return null;
+    return field_name[1 .. field_name.len - 1];
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -1834,42 +1865,39 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 };
             }
 
+            if (std.mem.eql(u8, call_name, "@FieldType")) {
+                if (params.len < 2) return null;
+
+                const container_type = (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = params[0],
+                    .handle = handle,
+                })) orelse return null;
+                if (container_type.data != .container) return null;
+
+                const field_name = try analyser.resolveStringLiteral(.{
+                    .node = params[1],
+                    .handle = handle,
+                }) orelse return null;
+
+                const field = try analyser.lookupSymbolContainer(container_type.data.container, field_name, .field) orelse return null;
+                const result = try field.resolveType(analyser) orelse return null;
+                return result.typeOf(analyser);
+            }
+
             if (std.mem.eql(u8, call_name, "@field")) {
                 if (params.len < 2) return null;
-                var field_name_node: NodeWithHandle = .{ .node = params[1], .handle = handle };
-                if (try analyser.resolveVarDeclAlias(field_name_node)) |decl_with_handle| {
-                    if (decl_with_handle.decl == .ast_node) {
-                        field_name_node = .{
-                            .node = decl_with_handle.decl.ast_node,
-                            .handle = decl_with_handle.handle,
-                        };
-                    }
-                }
-                const string_literal_node = switch (field_name_node.handle.tree.nodes.items(.tag)[field_name_node.node]) {
-                    .string_literal => field_name_node.node,
-                    .global_var_decl,
-                    .local_var_decl,
-                    .aligned_var_decl,
-                    .simple_var_decl,
-                    => blk: {
-                        const init_node = field_name_node.handle.tree.fullVarDecl(field_name_node.node).?.ast.init_node;
-                        if (field_name_node.handle.tree.nodes.items(.tag)[init_node] != .string_literal) return null;
-                        break :blk init_node;
-                    },
-                    else => return null,
-                };
-                const field_name_token = field_name_node.handle.tree.nodes.items(.main_token)[string_literal_node];
-                const field_name = offsets.tokenToSlice(field_name_node.handle.tree, field_name_token);
-
-                // Need at least one char between the quotes, eg "a"
-                if (field_name.len < 2) return null;
 
                 const lhs = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = params[0],
                     .handle = handle,
                 })) orelse return null;
 
-                return try analyser.resolveFieldAccess(lhs, field_name[1 .. field_name.len - 1]);
+                const field_name = try analyser.resolveStringLiteral(.{
+                    .node = params[1],
+                    .handle = handle,
+                }) orelse return null;
+
+                return try analyser.resolveFieldAccess(lhs, field_name);
             }
 
             if (std.mem.eql(u8, call_name, "@src")) {
