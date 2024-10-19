@@ -615,7 +615,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             },
             .documentHighlightProvider = .{ .bool = true },
             .hoverProvider = .{ .bool = true },
-            .codeActionProvider = .{ .bool = true },
+            .codeActionProvider = .{ .CodeActionOptions = .{ .codeActionKinds = code_actions.supportedCodeActions() } },
             .declarationProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
             .typeDefinitionProvider = .{ .bool = true },
