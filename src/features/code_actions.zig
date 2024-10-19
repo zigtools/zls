@@ -76,6 +76,17 @@ pub const Builder = struct {
     }
 };
 
+/// To report server capabilities
+pub fn supportedCodeActions() []const types.CodeActionKind {
+    return &.{
+        .quickfix,
+        .refactor,
+        .source,
+        .@"source.organizeImports",
+        .@"source.fixAll",
+    };
+}
+
 pub fn collectAutoDiscardDiagnostics(
     tree: Ast,
     arena: std.mem.Allocator,
