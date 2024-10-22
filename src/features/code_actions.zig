@@ -389,7 +389,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
     const tree = builder.handle.tree;
     if (tree.errors.len != 0) return;
 
-    const imports = try getImportsDecls(tree, builder.arena);
+    const imports = try getImportsDecls(builder, builder.arena);
 
     // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
@@ -451,6 +451,10 @@ pub const ImportDecl = struct {
     name: []const u8,
     value: []const u8,
 
+    /// Strings for sorting second order imports (e.g. `const ascii = std.ascii`)
+    parent_name: ?[]const u8 = null,
+    parent_value: ?[]const u8 = null,
+
     /// declaration order controls sorting order
     pub const Kind = enum {
         std,
@@ -477,6 +481,9 @@ pub const ImportDecl = struct {
             if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
         }
 
+        // First the parent @import, then the child using it
+        if (lhs.isParent(rhs)) return true;
+
         // 'root' gets sorted after 'builtin'
         if (sort_case_sensitive) {
             return std.mem.lessThan(u8, lhs.getSortSlice(), rhs.getSortSlice());
@@ -485,8 +492,13 @@ pub const ImportDecl = struct {
         }
     }
 
+    pub fn isParent(self: ImportDecl, child: ImportDecl) bool {
+        if (self.parent_name == null or child.parent_name == null) return false;
+        return std.mem.eql(u8, self.name, child.parent_name.?) and std.mem.eql(u8, self.value, child.parent_value.?);
+    }
+
     pub fn getKind(self: ImportDecl) Kind {
-        const name = self.value[1 .. self.value.len - 1];
+        const name = self.getSortValue()[1 .. self.getSortValue().len - 1];
 
         if (std.mem.endsWith(u8, name, ".zig")) return .file;
 
@@ -502,15 +514,23 @@ pub const ImportDecl = struct {
     pub fn getSortSlice(self: ImportDecl) []const u8 {
         switch (self.getKind()) {
             .file => {
-                if (std.mem.indexOfScalar(u8, self.value, '/') != null) {
-                    return self.value[1 .. self.value.len - 1];
+                if (std.mem.indexOfScalar(u8, self.getSortValue(), '/') != null) {
+                    return self.value[1 .. self.getSortValue().len - 1];
                 }
-                return self.name;
+                return self.getSortName();
             },
             // There used to be unreachable for other than file and package, but the user
             // can just write @import("std") twice.
-            else => return self.name,
+            else => return self.getSortName(),
         }
+    }
+
+    pub fn getSortName(self: ImportDecl) []const u8 {
+        return self.parent_name orelse self.name;
+    }
+
+    pub fn getSortValue(self: ImportDecl) []const u8 {
+        return self.parent_value orelse self.value;
     }
 
     /// returns true if there should be an empty line between these two imports
@@ -554,55 +574,94 @@ pub const ImportDecl = struct {
     }
 };
 
-pub fn getImportsDecls(tree: Ast, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayListUnmanaged(ImportDecl) {
+pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayListUnmanaged(ImportDecl) {
+    const tree = builder.handle.tree;
     var imports = std.ArrayListUnmanaged(ImportDecl){};
     errdefer imports.deinit(allocator);
 
     const node_tags = tree.nodes.items(.tag);
     const node_data = tree.nodes.items(.data);
     const node_tokens = tree.nodes.items(.main_token);
-    next_decl: for (tree.rootDecls()) |node| {
-        // TODO allow this pattern: const name = @import("file.zig").Decl;
 
-        if (node_tags[node] != .simple_var_decl) continue;
-        const var_decl = tree.simpleVarDecl(node);
+    // iterate until no more imports are found
+    var updated = true;
+    while (updated) {
+        updated = false;
+        next_decl: for (tree.rootDecls()) |node| {
+            if (node_tags[node] != .simple_var_decl) continue;
 
-        const base_token = var_decl.ast.init_node;
+            // check if we already have this import
+            for (imports.items) |import_decl| {
+                if (import_decl.var_decl == node) continue :next_decl;
+            }
+            const var_decl = tree.simpleVarDecl(node);
 
-        const init_node: u32 = find_init_node: {
-            // Handle @import with field access (`@import("foo").foo.bar`)
-            var inode = base_token;
-            return while (true) {
-                switch (node_tags[inode]) {
-                    .builtin_call_two, .builtin_call_two_comma => {
-                        break :find_init_node inode;
-                    },
-                    .field_access => {
-                        inode = node_data[inode].lhs;
-                        continue;
-                    },
-                    else => continue :next_decl,
+            const base_token = var_decl.ast.init_node;
+
+            const init_node: u32 = find_init_node: {
+                // Handle @import with field access (`@import("foo").foo.bar`)
+                var inode = base_token;
+                while (true) {
+                    switch (node_tags[inode]) {
+                        .builtin_call_two, .builtin_call_two_comma => {
+                            break :find_init_node inode;
+                        },
+                        .field_access => {
+                            inode = node_data[inode].lhs;
+                            continue;
+                        },
+                        .identifier => {
+                            // Might be an import (like 'std' identifier)
+                            const slice = offsets.tokenToSlice(tree, node_tokens[inode]);
+                            const idx = offsets.tokenToIndex(tree, node_tokens[inode]);
+                            const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
+                            const declIdx = symbolDecl.decl.ast_node;
+                            // if the decl is in known imports, add this one as well
+                            const parentDecl = find_decl: {
+                                for (imports.items) |import_decl| {
+                                    if (import_decl.var_decl == declIdx) {
+                                        break :find_decl import_decl;
+                                    }
+                                }
+                                break :find_decl null;
+                            };
+                            if (parentDecl) |decl| {
+                                try imports.append(allocator, .{
+                                    .var_decl = node,
+                                    .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                                    .name = slice,
+                                    .value = slice,
+                                    .parent_name = decl.getSortName(),
+                                    .parent_value = decl.getSortValue(),
+                                });
+                                updated = true;
+                            }
+                            continue :next_decl;
+                        },
+                        else => continue :next_decl,
+                    }
                 }
             };
-        };
 
-        const call_name = offsets.tokenToSlice(tree, node_tokens[init_node]);
-        if (!std.mem.eql(u8, call_name, "@import")) continue;
-        // TODO what about @embedFile ?
+            const call_name = offsets.tokenToSlice(tree, node_tokens[init_node]);
+            if (!std.mem.eql(u8, call_name, "@import")) continue;
+            // TODO what about @embedFile ?
 
-        if (node_data[init_node].lhs == 0 or node_data[init_node].rhs != 0) continue;
-        const import_param_node = node_data[init_node].lhs;
-        if (node_tags[import_param_node] != .string_literal) continue;
+            if (node_data[init_node].lhs == 0 or node_data[init_node].rhs != 0) continue;
+            const import_param_node = node_data[init_node].lhs;
+            if (node_tags[import_param_node] != .string_literal) continue;
 
-        const name_token = var_decl.ast.mut_token + 1;
-        const value_token = node_tokens[import_param_node];
+            const name_token = var_decl.ast.mut_token + 1;
+            const value_token = node_tokens[import_param_node];
 
-        try imports.append(allocator, .{
-            .var_decl = node,
-            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
-            .name = offsets.tokenToSlice(tree, name_token),
-            .value = offsets.tokenToSlice(tree, value_token),
-        });
+            try imports.append(allocator, .{
+                .var_decl = node,
+                .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                .name = offsets.tokenToSlice(tree, name_token),
+                .value = offsets.tokenToSlice(tree, value_token),
+            });
+            updated = true;
+        }
     }
 
     return imports;
