@@ -500,16 +500,57 @@ test "organize imports - field access" {
         \\
         \\
     );
-    // declarations without @import move under other imports for now
+    // declarations without @import move under the parent import
     try testDiagnostic(
         \\const xyz = @import("xyz.zig").a.long.chain;
-        \\const xyz_related = xyz.related;
         \\const abc = @import("abc.zig");
+        \\const abc_related = abc.related;
     ,
         \\const abc = @import("abc.zig");
+        \\const abc_related = abc.related;
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\
+        \\
+    );
+    try testDiagnostic(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+        \\
+        \\const mem = std.mem;
+    ,
+        \\const std = @import("std");
+        \\const mem = std.mem;
+        \\const builtin = @import("builtin");
+        \\
+        \\
+    );
+    // Inverse chain of parents
+    try testDiagnostic(
+        \\const abc = @import("abc.zig");
+        \\const isLower = ascii.isLower;
+        \\const ascii = std.ascii;
+        \\const std = @import("std");
+    ,
+        \\const std = @import("std");
+        \\const ascii = std.ascii;
+        \\const isLower = ascii.isLower;
+        \\
+        \\const abc = @import("abc.zig");
+        \\
+        \\
+    );
+    // Parent chains are not mixed
+    try testDiagnostic(
+        \\const xyz = @import("xyz.zig");
+        \\const abc = @import("abc.zig");
         \\const xyz_related = xyz.related;
+        \\const abc_related = abc.related;
+    ,
+        \\const abc = @import("abc.zig");
+        \\const abc_related = abc.related;
+        \\const xyz = @import("xyz.zig");
+        \\const xyz_related = xyz.related;
+        \\
         \\
     );
 }
