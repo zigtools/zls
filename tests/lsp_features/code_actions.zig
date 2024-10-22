@@ -544,9 +544,11 @@ test "organize imports - field access" {
         \\const xyz = @import("xyz.zig");
         \\const abc = @import("abc.zig");
         \\const xyz_related = xyz.related;
+        \\/// comment
         \\const abc_related = abc.related;
     ,
         \\const abc = @import("abc.zig");
+        \\/// comment
         \\const abc_related = abc.related;
         \\const xyz = @import("xyz.zig");
         \\const xyz_related = xyz.related;
