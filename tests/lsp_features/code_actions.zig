@@ -557,6 +557,18 @@ test "organize imports - field access" {
     );
 }
 
+test "organize imports - @embedFile" {
+    try testDiagnostic(
+        \\const foo = @embedFile("foo.zig");
+        \\const abc = @import("abc.zig");
+    ,
+        \\const abc = @import("abc.zig");
+        \\
+        \\const foo = @embedFile("foo.zig");
+        \\
+    );
+}
+
 test "organize imports - edge cases" {
     // Withstands non-standard behavior
     try testDiagnostic(

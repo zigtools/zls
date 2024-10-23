@@ -47,7 +47,6 @@ pub const Builder = struct {
                 // fix: remove code
             },
             .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
-            .unorganized_import => try handleUnorganizedImport(builder, actions),
         }
     }
 
@@ -552,15 +551,9 @@ pub const ImportDecl = struct {
             last_token += 1;
         }
 
-        var end = offsets.tokenToLoc(tree, last_token).end;
+        const end = offsets.tokenToLoc(tree, last_token).end;
         if (!include_line_break) return end;
-        while (end < tree.source.len) {
-            switch (tree.source[end]) {
-                ' ', '\t', '\n' => end += 1,
-                else => break,
-            }
-        }
-        return end;
+        return std.mem.indexOfNonePos(u8, tree.source, end, &.{ ' ', '\t', '\n' }) orelse tree.source.len;
     }
 
     /// similar to `offsets.nodeToLoc` but will also include preceding comments and postfix semicolon and line break
@@ -603,7 +596,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         // @import("string") case
                         const init_node = inode;
                         const call_name = offsets.tokenToSlice(tree, token);
-                        if (!std.mem.eql(u8, call_name, "@import")) continue;
+                        if (!std.mem.eql(u8, call_name, "@import")) continue :next_decl;
                         // TODO what about @embedFile ?
 
                         if (node_data[init_node].lhs == 0 or node_data[init_node].rhs != 0) continue :next_decl;
@@ -621,7 +614,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         };
                     },
                     .field_access => {
-                        // `@import("foo").foo.bar` or `@import("foo").foo.bar` case
+                        // `@import("foo").bar` or `foo.bar` case
                         // drill down to the base import
                         inode = node_data[inode].lhs;
                         continue;
@@ -816,7 +809,6 @@ const DiagnosticKind = union(enum) {
     undeclared_identifier,
     unreachable_code,
     var_never_mutated,
-    unorganized_import,
 
     const IdCat = enum {
         @"function parameter",
@@ -852,8 +844,6 @@ const DiagnosticKind = union(enum) {
             return .undeclared_identifier;
         } else if (std.mem.eql(u8, msg, "local variable is never mutated")) {
             return .var_never_mutated;
-        } else if (std.mem.eql(u8, msg, "unorganized @import statement")) {
-            return .unorganized_import;
         }
         return null;
     }
