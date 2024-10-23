@@ -586,25 +586,22 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                 if (import_decl.var_decl == node) continue :next_decl;
             }
             const var_decl = tree.simpleVarDecl(node);
-            const base_token = var_decl.ast.init_node;
-
-            var inode = base_token;
+            var current_node = var_decl.ast.init_node;
             const import: ImportDecl = found_decl: while (true) {
-                const token = node_tokens[inode];
-                switch (node_tags[inode]) {
+                const token = node_tokens[current_node];
+                switch (node_tags[current_node]) {
                     .builtin_call_two, .builtin_call_two_comma => {
-                        // @import("string") case
-                        const init_node = inode;
-                        const call_name = offsets.tokenToSlice(tree, token);
-                        if (!std.mem.eql(u8, call_name, "@import")) continue :next_decl;
+                        // `>@import("string")<` case
+                        const builtin_name = offsets.tokenToSlice(tree, token);
+                        if (!std.mem.eql(u8, builtin_name, "@import")) continue :next_decl;
                         // TODO what about @embedFile ?
 
-                        if (node_data[init_node].lhs == 0 or node_data[init_node].rhs != 0) continue :next_decl;
-                        const import_param_node = node_data[init_node].lhs;
-                        if (node_tags[import_param_node] != .string_literal) continue :next_decl;
+                        if (node_data[current_node].lhs == 0 or node_data[current_node].rhs != 0) continue :next_decl;
+                        const param_node = node_data[current_node].lhs;
+                        if (node_tags[param_node] != .string_literal) continue :next_decl;
 
                         const name_token = var_decl.ast.mut_token + 1;
-                        const value_token = node_tokens[import_param_node];
+                        const value_token = node_tokens[param_node];
 
                         break :found_decl .{
                             .var_decl = node,
@@ -614,20 +611,20 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         };
                     },
                     .field_access => {
-                        // `@import("foo").bar` or `foo.bar` case
+                        // `@import("foo").>bar<` or `foo.>bar<` case
                         // drill down to the base import
-                        inode = node_data[inode].lhs;
+                        current_node = node_data[current_node].lhs;
                         continue;
                     },
                     .identifier => {
-                        // `std.ascii` case - Might be an import
+                        // `>std<.ascii` case - Might be an alias
                         const slice = offsets.tokenToSlice(tree, token);
                         const idx = offsets.tokenToIndex(tree, token);
                         const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
-                        const declIdx = symbolDecl.decl.ast_node;
+                        const decl_found = symbolDecl.decl.ast_node;
                         // if the decl is in known imports, add this one as well
                         for (imports.items) |import_decl| {
-                            if (import_decl.var_decl == declIdx) {
+                            if (import_decl.var_decl == decl_found) {
                                 break :found_decl .{
                                     .var_decl = node,
                                     .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
