@@ -2731,9 +2731,9 @@ test "builtin fns taking an enum arg" {
     });
     try testCompletionTextEdit(.{
         .source = "fn foo() callconv(.<cursor>",
-        .label = "AAPCS",
-        .expected_insert_line = "fn foo() callconv(.AAPCS",
-        .expected_replace_line = "fn foo() callconv(.AAPCS",
+        .label = "arm_aapcs",
+        .expected_insert_line = "fn foo() callconv(.{ .arm_aapcs = ",
+        .expected_replace_line = "fn foo() callconv(.{ .arm_aapcs = ",
     });
 }
 

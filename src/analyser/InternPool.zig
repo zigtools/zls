@@ -125,7 +125,7 @@ pub const Key = union(enum) {
         flags: Flags = .{},
 
         pub const Flags = packed struct(u32) {
-            calling_convention: std.builtin.CallingConvention = .Unspecified,
+            calling_convention: std.builtin.CallingConvention.Tag = .auto,
             is_generic: bool = false,
             is_var_args: bool = false,
             _: u6 = 0,
@@ -1098,8 +1098,8 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Many, .is_const = true } } } },
         .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .noreturn_type } } },
         .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .void_type } } },
-        .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .void_type, .flags = .{ .calling_convention = .Naked } } } },
-        .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .void_type, .flags = .{ .calling_convention = .C } } } },
+        .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .void_type, .flags = .{ .calling_convention = .naked } } } },
+        .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = Index.Slice.empty, .return_type = .void_type, .flags = .{ .calling_convention = std.builtin.CallingConvention.c } } } },
         .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .flags = .{ .size = .One, .is_const = true } } } },
         .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .flags = .{ .size = .Slice, .is_const = true } } } },
         .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .flags = .{ .size = .Slice, .is_const = true } } } },
@@ -2450,8 +2450,8 @@ const InMemoryCoercionResult = union(enum) {
     };
 
     const CC = struct {
-        actual: std.builtin.CallingConvention,
-        wanted: std.builtin.CallingConvention,
+        actual: std.builtin.CallingConvention.Tag,
+        wanted: std.builtin.CallingConvention.Tag,
     };
 
     const BitRange = struct {
@@ -3952,8 +3952,18 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             if (function_info.flags.alignment != 0) {
                 try writer.print("align({d}) ", .{function_info.flags.alignment});
             }
-            if (function_info.flags.calling_convention != .Unspecified) {
-                try writer.print("callconv(.{s}) ", .{@tagName(function_info.flags.calling_convention)});
+            if (function_info.flags.calling_convention != .auto) blk: {
+                const cc = function_info.flags.calling_convention;
+                if (builtin.target.cCallingConvention()) |ccc| {
+                    if (cc == ccc) {
+                        try writer.writeAll("callconv(.c) ");
+                        break :blk;
+                    }
+                }
+                switch (cc) {
+                    .auto, .@"async", .naked, .@"inline" => try writer.print("callconv(.{}) ", .{std.zig.fmtId(@tagName(cc))}),
+                    else => try writer.print("callconv({any}) ", .{cc}),
+                }
             }
 
             return function_info.return_type;
@@ -4532,11 +4542,11 @@ test "function type" {
         },
     } });
 
-    const @"fn() align(4) callconv(.C) type" = try ip.get(gpa, .{ .function_type = .{
+    const @"fn() align(4) callconv(.c) type" = try ip.get(gpa, .{ .function_type = .{
         .args = Index.Slice.empty,
         .return_type = .type_type,
         .flags = .{
-            .calling_convention = .C,
+            .calling_convention = std.builtin.CallingConvention.c,
             .alignment = 4,
         },
     } });
@@ -4544,7 +4554,7 @@ test "function type" {
     try expectFmt("fn(i32) bool", "{}", .{@"fn(i32) bool".fmt(&ip)});
     try expectFmt("fn(comptime type, noalias i32) type", "{}", .{@"fn(comptime type, noalias i32) type".fmt(&ip)});
     try expectFmt("fn(i32, ...) type", "{}", .{@"fn(i32, ...) type".fmt(&ip)});
-    try expectFmt("fn() align(4) callconv(.C) type", "{}", .{@"fn() align(4) callconv(.C) type".fmt(&ip)});
+    try expectFmt("fn() align(4) callconv(.c) type", "{}", .{@"fn() align(4) callconv(.c) type".fmt(&ip)});
 }
 
 test "union value" {
