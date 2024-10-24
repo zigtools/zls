@@ -63,9 +63,9 @@ const excluded_builtins_set = blk: {
         .{"errorCast"},
         // .{"export"},
         // .{"extern"},
-        // .{"fence"},
         // .{"field"},
         // .{"fieldParentPtr"},
+        // .{"FieldType"},
         .{"floatCast"},
         .{"floatFromInt"},
         .{"frameAddress"}, // no parameters
@@ -95,7 +95,6 @@ const excluded_builtins_set = blk: {
         .{"rem"},
         .{"returnAddress"}, // no parameters
         // .{"select"},
-        // .{"setAlignStack"},
         .{"setEvalBranchQuota"},
         .{"setFloatMode"},
         .{"setRuntimeSafety"},
