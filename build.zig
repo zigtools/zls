@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// std.zig.tokenizer: simplify line-based tokens
+/// Replace `std.builtin.CallingConvention` with a tagged union, eliminating `@setAlignStack`
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 /// ```
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.1517+900753455";
+const minimum_build_zig_version = "0.14.0-dev.1983+6bf52b050";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0
