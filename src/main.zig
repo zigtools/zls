@@ -66,7 +66,7 @@ fn logFn(
         break :blk false;
     };
     if (no_space_left) {
-        buffer[buffer.len - 3 ..][0..3].* = "...".*;
+        buffer[buffer.len - 4 ..][0..4].* = "...\n".*;
     }
 
     std.debug.lockStdErr();
