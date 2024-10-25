@@ -390,12 +390,14 @@ fn hoverNumberLiteral(
 
     switch (markup_kind) {
         .markdown => return try std.fmt.allocPrint(arena,
+            \\```md
             \\| Base | {[value]s:<[count]} |
             \\| ---- | {[dash]s:-<[count]} |
             \\| BIN  | {[sign]s}0b{[number]b:<[len]} |
             \\| OCT  | {[sign]s}0o{[number]o:<[len]} |
             \\| DEC  | {[sign]s}{[number]d:<[len]}   |
             \\| HEX  | {[sign]s}0x{[number]X:<[len]} |
+            \\```
         , .{
             .sign = if (is_negative) "-" else "",
             .dash = "-",
