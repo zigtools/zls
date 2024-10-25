@@ -143,6 +143,37 @@ pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
     return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
+/// Formats a function signature in markdown style with 4 space indent for cases where it's a nested
+/// decl and is more than a single line.
+///
+/// Otherwise it will write the signature as it's provided but in markdown style.
+pub fn formatFunctionSignatureMarkdown(signature: []const u8, writer: anytype) @TypeOf(writer).Error!void {
+    var iter = std.mem.tokenizeScalar(u8, signature, '\n');
+
+    try writer.writeAll("```zig\n");
+
+    const first = iter.next() orelse unreachable; // Expected at least one.
+    try writer.writeAll(first);
+
+    while (iter.next()) |slice| {
+        const trimmed = std.mem.trimLeft(u8, slice, " ");
+
+        switch (trimmed[0]) {
+            ')', '}' => {
+                try writer.writeAll("\n");
+                try writer.writeAll(trimmed);
+            },
+            else => {
+                try writer.writeAll("\n");
+                try writer.writeAll("    ");
+                try writer.writeAll(trimmed);
+            },
+        }
+    }
+
+    try writer.writeAll("\n```");
+}
+
 fn formatSnippetPlaceholder(
     data: []const u8,
     comptime fmt: []const u8,
