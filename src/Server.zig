@@ -615,7 +615,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             },
             .documentHighlightProvider = .{ .bool = true },
             .hoverProvider = .{ .bool = true },
-            .codeActionProvider = .{ .bool = true },
+            .codeActionProvider = .{ .CodeActionOptions = .{ .codeActionKinds = code_actions.supported_code_actions } },
             .declarationProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
             .typeDefinitionProvider = .{ .bool = true },
@@ -1632,6 +1632,9 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     for (diagnostics.items) |diagnostic| {
         try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
+
+    // Always generate code action organizeImports
+    try builder.generateOrganizeImportsAction(&actions);
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
