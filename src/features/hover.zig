@@ -401,8 +401,8 @@ fn hoverNumberLiteral(
             .dash = "-",
             .value = "Value",
             .number = number,
-            .count = @bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative),
-            .len = @bitSizeOf(@TypeOf(number)) - @clz(number),
+            .count = @max(@bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative), "Value".len),
+            .len = @max(@bitSizeOf(@TypeOf(number)) - @clz(number), "Value".len - "0x".len),
         }),
         .plaintext, .unknown_value => return try std.fmt.allocPrint(
             arena,
