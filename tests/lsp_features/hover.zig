@@ -95,96 +95,114 @@ test "char literal" {
     try testHover(
         \\const foo = '<cursor>a';
     ,
+        \\```md
         \\| Base | Value     |
         \\| ---- | --------- |
         \\| BIN  | 0b1100001 |
         \\| OCT  | 0o141     |
         \\| DEC  | 97        |
         \\| HEX  | 0x61      |
+        \\```
     );
 
     try testHover(
         \\const foo = '<cursor>\'';
     ,
+        \\```md
         \\| Base | Value    |
         \\| ---- | -------- |
         \\| BIN  | 0b100111 |
         \\| OCT  | 0o47     |
         \\| DEC  | 39       |
         \\| HEX  | 0x27     |
+        \\```
     );
 
     try testHover(
         \\const foo = '\'<cursor>';
     ,
+        \\```md
         \\| Base | Value    |
         \\| ---- | -------- |
         \\| BIN  | 0b100111 |
         \\| OCT  | 0o47     |
         \\| DEC  | 39       |
         \\| HEX  | 0x27     |
+        \\```
     );
 }
 test "integer literal" {
     try testHover(
         \\const foo = 4<cursor>2;
     ,
+        \\```md
         \\| Base | Value    |
         \\| ---- | -------- |
         \\| BIN  | 0b101010 |
         \\| OCT  | 0o52     |
         \\| DEC  | 42       |
         \\| HEX  | 0x2A     |
+        \\```
     );
     try testHover(
         \\const foo = -4<cursor>2;
     ,
+        \\```md
         \\| Base | Value     |
         \\| ---- | --------- |
         \\| BIN  | -0b101010 |
         \\| OCT  | -0o52     |
         \\| DEC  | -42       |
         \\| HEX  | -0x2A     |
+        \\```
     );
     try testHover(
         \\const foo = 0b101<cursor>010;
     ,
+        \\```md
         \\| Base | Value    |
         \\| ---- | -------- |
         \\| BIN  | 0b101010 |
         \\| OCT  | 0o52     |
         \\| DEC  | 42       |
         \\| HEX  | 0x2A     |
+        \\```
     );
     try testHover(
         \\const foo = -0b101<cursor>010;
     ,
+        \\```md
         \\| Base | Value     |
         \\| ---- | --------- |
         \\| BIN  | -0b101010 |
         \\| OCT  | -0o52     |
         \\| DEC  | -42       |
         \\| HEX  | -0x2A     |
+        \\```
     );
     try testHover(
         \\const foo = 0x2<cursor>A;
     ,
+        \\```md
         \\| Base | Value    |
         \\| ---- | -------- |
         \\| BIN  | 0b101010 |
         \\| OCT  | 0o52     |
         \\| DEC  | 42       |
         \\| HEX  | 0x2A     |
+        \\```
     );
     try testHover(
         \\const foo = -0x2<cursor>A;
     ,
+        \\```md
         \\| Base | Value     |
         \\| ---- | --------- |
         \\| BIN  | -0b101010 |
         \\| OCT  | -0o52     |
         \\| DEC  | -42       |
         \\| HEX  | -0x2A     |
+        \\```
     );
     try testHoverWithOptions(
         \\const foo = 4<cursor>2;
