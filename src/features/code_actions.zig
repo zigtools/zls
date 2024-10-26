@@ -391,7 +391,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
     // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
 
-    const sorted_imports = try builder.arena.dupe(ImportDecl, imports.items);
+    const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
     var edits = std.ArrayListUnmanaged(types.TextEdit){};
@@ -458,6 +458,20 @@ pub const ImportDecl = struct {
     /// Strings for sorting second order imports (e.g. `const ascii = std.ascii`)
     parent_name: ?[]const u8 = null,
     parent_value: ?[]const u8 = null,
+
+    pub const AstNodeAdapter = struct {
+        pub fn hash(ctx: @This(), ast_node: Ast.Node.Index) u32 {
+            _ = ctx;
+            const hash_fn = std.array_hash_map.getAutoHashFn(Ast.Node.Index, void);
+            return hash_fn({}, ast_node);
+        }
+
+        pub fn eql(ctx: @This(), a: Ast.Node.Index, b: ImportDecl, b_index: usize) bool {
+            _ = ctx;
+            _ = b_index;
+            return a == b.var_decl;
+        }
+    };
 
     /// declaration order controls sorting order
     pub const Kind = enum {
@@ -573,27 +587,37 @@ pub const ImportDecl = struct {
     }
 };
 
-pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayListUnmanaged(ImportDecl) {
+pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
     const tree = builder.handle.tree;
-    var imports = std.ArrayListUnmanaged(ImportDecl){};
-    errdefer imports.deinit(allocator);
 
     const node_tags = tree.nodes.items(.tag);
     const node_data = tree.nodes.items(.data);
     const node_tokens = tree.nodes.items(.main_token);
 
+    const root_decls = tree.rootDecls();
+
+    var skip_set = try std.DynamicBitSetUnmanaged.initEmpty(allocator, root_decls.len);
+    defer skip_set.deinit(allocator);
+
+    var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .{};
+    defer imports.deinit(allocator);
+
     // iterate until no more imports are found
     var updated = true;
     while (updated) {
         updated = false;
-        next_decl: for (tree.rootDecls()) |node| {
-            if (node_tags[node] != .simple_var_decl) continue;
+        var it = skip_set.iterator(.{ .kind = .unset });
+        next_decl: while (it.next()) |root_decl_index| {
+            const node = root_decls[root_decl_index];
 
-            // check if we already have this import
-            for (imports.items) |import_decl| {
-                if (import_decl.var_decl == node) continue :next_decl;
-            }
+            var do_skip: bool = true;
+            defer if (do_skip) skip_set.set(root_decl_index);
+
+            if (skip_set.isSet(root_decl_index)) continue;
+
+            if (node_tags[node] != .simple_var_decl) continue;
             const var_decl = tree.simpleVarDecl(node);
+
             var current_node = var_decl.ast.init_node;
             const import: ImportDecl = found_decl: while (true) {
                 const token = node_tokens[current_node];
@@ -636,30 +660,31 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         // const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
                         if (symbolDecl.decl != .ast_node) continue :next_decl;
                         const decl_found = symbolDecl.decl.ast_node;
-                        // if the decl is in known imports, add this one as well
-                        for (imports.items) |import_decl| {
-                            if (import_decl.var_decl == decl_found) {
-                                break :found_decl .{
-                                    .var_decl = node,
-                                    .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
-                                    .name = name,
-                                    .value = name,
-                                    .parent_name = import_decl.getSortName(),
-                                    .parent_value = import_decl.getSortValue(),
-                                };
-                            }
-                        }
-                        continue :next_decl;
+
+                        const import_decl = imports.getKeyAdapted(decl_found, ImportDecl.AstNodeAdapter{}) orelse {
+                            // We may find the import in a future loop iteration
+                            do_skip = false;
+                            continue :next_decl;
+                        };
+                        break :found_decl .{
+                            .var_decl = node,
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .name = name,
+                            .value = name,
+                            .parent_name = import_decl.getSortName(),
+                            .parent_value = import_decl.getSortValue(),
+                        };
                     },
                     else => continue :next_decl,
                 }
             };
-            try imports.append(allocator, import);
+            const gop = try imports.getOrPutContextAdapted(allocator, import.var_decl, ImportDecl.AstNodeAdapter{}, {});
+            if (!gop.found_existing) gop.key_ptr.* = import;
             updated = true;
         }
     }
 
-    return imports;
+    return try allocator.dupe(ImportDecl, imports.keys());
 }
 
 fn detectIndentation(source: []const u8) []const u8 {
