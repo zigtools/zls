@@ -176,6 +176,22 @@ pub fn build(b: *Build) !void {
     exe.root_module.addImport("zls", zls_module);
     b.installArtifact(exe);
 
+    const bench_exe = b.addExecutable(.{
+        .name = "bench",
+        .root_source_file = b.path("bench.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+        .pic = pie,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
+    });
+    bench_exe.root_module.addImport("zls", zls_module);
+    bench_exe.root_module.addImport("test_options", test_options_module);
+
+    const bench_step = b.step("bench", "Build benchmark");
+    bench_step.dependOn(&b.addInstallArtifact(bench_exe, .{}).step);
+
     const test_step = b.step("test", "Run all the tests");
 
     const tests = b.addTest(.{

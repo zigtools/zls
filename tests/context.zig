@@ -17,8 +17,6 @@ const default_config: Config = .{
     .global_cache_path = test_options.global_cache_path,
 };
 
-const allocator = std.testing.allocator;
-
 pub const Context = struct {
     server: *Server,
     arena: std.heap.ArenaAllocator,
@@ -28,6 +26,10 @@ pub const Context = struct {
     var resolved_config: ?Config = null;
 
     pub fn init() !Context {
+        return try initWithAllocator(std.testing.allocator);
+    }
+
+    pub fn initWithAllocator(allocator: std.mem.Allocator) !Context {
         const server = try Server.create(allocator);
         errdefer server.destroy();
 
