@@ -74,60 +74,31 @@ const Builder = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
+        const result_ranges = try builder.allocator.alloc(types.Range, builder.locations.items.len);
+        errdefer builder.allocator.free(result_ranges);
+
+        // one mapping for every start and end position
+        var mappings = try builder.allocator.alloc(offsets.multiple.IndexToPositionMapping, builder.locations.items.len * 2);
+        defer builder.allocator.free(mappings);
+
+        for (builder.locations.items, result_ranges, 0..) |*folding_range, *result, i| {
+            mappings[2 * i + 0] = .{ .output = &result.start, .source_index = folding_range.loc.start };
+            mappings[2 * i + 1] = .{ .output = &result.end, .source_index = folding_range.loc.end };
+        }
+
+        offsets.multiple.indexToPositionWithMappings(builder.tree.source, mappings, builder.encoding);
+
         const result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
         errdefer builder.allocator.free(result_locations);
 
-        for (builder.locations.items, result_locations) |folding_range, *result| {
+        for (builder.locations.items, result_ranges, result_locations) |folding_range, range, *result| {
             result.* = .{
-                .startLine = undefined,
-                .endLine = undefined,
+                .startLine = range.start.line,
+                .startCharacter = range.start.character,
+                .endLine = range.end.line,
+                .endCharacter = range.end.character,
                 .kind = folding_range.kind,
             };
-        }
-
-        // a mapping from a source index to a line character pair
-        const IndexToPositionEntry = struct {
-            output: *types.FoldingRange,
-            source_index: usize,
-            where: enum { start, end },
-
-            const Self = @This();
-
-            fn lessThan(_: void, lhs: Self, rhs: Self) bool {
-                return lhs.source_index < rhs.source_index;
-            }
-        };
-
-        // one mapping for every start and end position
-        var mappings = try builder.allocator.alloc(IndexToPositionEntry, builder.locations.items.len * 2);
-        defer builder.allocator.free(mappings);
-
-        for (builder.locations.items, result_locations, 0..) |*folding_range, *result, i| {
-            mappings[2 * i + 0] = .{ .output = result, .source_index = folding_range.loc.start, .where = .start };
-            mappings[2 * i + 1] = .{ .output = result, .source_index = folding_range.loc.end, .where = .end };
-        }
-
-        // sort mappings based on their source index
-        std.mem.sort(IndexToPositionEntry, mappings, {}, IndexToPositionEntry.lessThan);
-
-        var last_index: usize = 0;
-        var last_position: types.Position = .{ .line = 0, .character = 0 };
-        for (mappings) |mapping| {
-            const index = mapping.source_index;
-            const position = offsets.advancePosition(builder.tree.source, last_position, last_index, index, builder.encoding);
-            defer last_index = index;
-            defer last_position = position;
-
-            switch (mapping.where) {
-                .start => {
-                    mapping.output.startLine = position.line;
-                    mapping.output.startCharacter = position.character;
-                },
-                .end => {
-                    mapping.output.endLine = position.line;
-                    mapping.output.endCharacter = position.character;
-                },
-            }
         }
 
         return result_locations;

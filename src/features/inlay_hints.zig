@@ -182,23 +182,24 @@ const Builder = struct {
     }
 
     fn getInlayHints(self: *Builder, offset_encoding: offsets.Encoding) error{OutOfMemory}![]types.InlayHint {
-        std.mem.sort(InlayHint, self.hints.items, {}, InlayHint.lessThan);
+        const source_indices = try self.arena.alloc(usize, self.hints.items.len);
+        for (source_indices, self.hints.items) |*index, hint| {
+            index.* = hint.index;
+        }
 
-        var last_index: usize = 0;
-        var last_position: types.Position = .{ .line = 0, .character = 0 };
+        const positions = try self.arena.alloc(types.Position, self.hints.items.len);
+
+        try offsets.multiple.indexToPosition(
+            self.arena,
+            self.handle.tree.source,
+            source_indices,
+            positions,
+            offset_encoding,
+        );
 
         const converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
-        for (converted_hints, self.hints.items) |*converted_hint, hint| {
-            const position = offsets.advancePosition(
-                self.handle.tree.source,
-                last_position,
-                last_index,
-                hint.index,
-                offset_encoding,
-            );
-            defer last_index = hint.index;
-            defer last_position = position;
-            converted_hint.* = types.InlayHint{
+        for (converted_hints, self.hints.items, positions) |*converted_hint, hint, position| {
+            converted_hint.* = .{
                 .position = position,
                 .label = .{ .string = hint.label },
                 .kind = hint.kind,
@@ -207,6 +208,7 @@ const Builder = struct {
                 .paddingRight = hint.kind == .Parameter,
             };
         }
+
         return converted_hints;
     }
 };

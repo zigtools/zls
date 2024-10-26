@@ -169,18 +169,6 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
     try ast.iterateChildren(tree, node, &new_ctx, error{OutOfMemory}, callback);
 }
 
-/// a mapping from a source index to a line character pair
-const IndexToPositionEntry = struct {
-    output: *types.Position,
-    source_index: usize,
-
-    const Self = @This();
-
-    fn lessThan(_: void, lhs: Self, rhs: Self) bool {
-        return lhs.source_index < rhs.source_index;
-    }
-};
-
 /// converts `Symbol` to `types.DocumentSymbol`
 fn convertSymbols(
     arena: std.mem.Allocator,
@@ -198,25 +186,12 @@ fn convertSymbols(
     // instead of converting every `offsets.Loc` to `types.Range` by calling `offsets.locToRange`
     // we instead store a mapping from source indices to their desired position, sort them by their source index
     // and then iterate through them which avoids having to re-iterate through the source file to find out the line number
-    // this reduces algorithmic complexity from `O(file_size*symbol_count)` to `O(symbol_count*log(symbol_count))`
-    var mappings = std.ArrayListUnmanaged(IndexToPositionEntry){};
+    var mappings = std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping){};
     try mappings.ensureTotalCapacityPrecise(arena, total_symbol_count * 4);
 
     const result = convertSymbolsInternal(from, &symbol_buffer, &mappings);
 
-    // sort items based on their source position
-    std.mem.sort(IndexToPositionEntry, mappings.items, {}, IndexToPositionEntry.lessThan);
-
-    var last_index: usize = 0;
-    var last_position: types.Position = .{ .line = 0, .character = 0 };
-    for (mappings.items) |mapping| {
-        const index = mapping.source_index;
-        const position = offsets.advancePosition(tree.source, last_position, last_index, index, encoding);
-        defer last_index = index;
-        defer last_position = position;
-
-        mapping.output.* = position;
-    }
+    offsets.multiple.indexToPositionWithMappings(tree.source, mappings.items, encoding);
 
     return result;
 }
@@ -224,7 +199,7 @@ fn convertSymbols(
 fn convertSymbolsInternal(
     from: []const Symbol,
     symbol_buffer: *std.ArrayListUnmanaged(types.DocumentSymbol),
-    mappings: *std.ArrayListUnmanaged(IndexToPositionEntry),
+    mappings: *std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping),
 ) []types.DocumentSymbol {
     // acquire storage for exactly `from.len` symbols
     const prev_len = symbol_buffer.items.len;
@@ -241,7 +216,7 @@ fn convertSymbolsInternal(
             .selectionRange = undefined,
             .children = convertSymbolsInternal(symbol.children.items, symbol_buffer, mappings),
         };
-        mappings.appendSliceAssumeCapacity(&[4]IndexToPositionEntry{
+        mappings.appendSliceAssumeCapacity(&[4]offsets.multiple.IndexToPositionMapping{
             .{ .output = &out.range.start, .source_index = symbol.loc.start },
             .{ .output = &out.selectionRange.start, .source_index = symbol.selection_loc.start },
             .{ .output = &out.selectionRange.end, .source_index = symbol.selection_loc.end },

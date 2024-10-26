@@ -781,6 +781,120 @@ test positionInsideRange {
     try std.testing.expect(!positionInsideRange(.{ .line = 3, .character = 6 }, range));
 }
 
+/// More efficient conversion functions that operate on multiple elements.
+pub const multiple = struct {
+    /// a mapping from a source index to a line character pair
+    pub const IndexToPositionMapping = struct {
+        output: *types.Position,
+        source_index: usize,
+
+        fn lessThan(_: void, lhs: IndexToPositionMapping, rhs: IndexToPositionMapping) bool {
+            return lhs.source_index < rhs.source_index;
+        }
+    };
+
+    pub fn indexToPositionWithMappings(
+        text: []const u8,
+        mappings: []IndexToPositionMapping,
+        encoding: Encoding,
+    ) void {
+        std.mem.sort(IndexToPositionMapping, mappings, {}, IndexToPositionMapping.lessThan);
+
+        var last_index: usize = 0;
+        var last_position: types.Position = .{ .line = 0, .character = 0 };
+        for (mappings) |mapping| {
+            const index = mapping.source_index;
+            const position = advancePosition(text, last_position, last_index, index, encoding);
+            defer last_index = index;
+            defer last_position = position;
+
+            mapping.output.* = position;
+        }
+    }
+
+    pub fn indexToPosition(
+        allocator: std.mem.Allocator,
+        text: []const u8,
+        source_indices: []const usize,
+        result_positions: []types.Position,
+        encoding: Encoding,
+    ) error{OutOfMemory}!void {
+        std.debug.assert(source_indices.len == result_positions.len);
+
+        // one mapping for every start and end position
+        const mappings = try allocator.alloc(IndexToPositionMapping, source_indices.len);
+        defer allocator.free(mappings);
+
+        for (mappings, source_indices, result_positions) |*mapping, index, *position| {
+            mapping.* = .{ .output = position, .source_index = index };
+        }
+
+        indexToPositionWithMappings(text, mappings, encoding);
+    }
+
+    test "indexToPosition" {
+        const text =
+            \\hello
+            \\world
+        ;
+
+        const source_indices: []const usize = &.{ 3, 9, 6, 0 };
+        var result_positions: [4]types.Position = undefined;
+        try multiple.indexToPosition(std.testing.allocator, text, source_indices, &result_positions, .@"utf-16");
+
+        try std.testing.expectEqualSlices(types.Position, &.{
+            .{ .line = 0, .character = 3 },
+            .{ .line = 1, .character = 3 },
+            .{ .line = 1, .character = 0 },
+            .{ .line = 0, .character = 0 },
+        }, &result_positions);
+    }
+
+    pub fn locToRange(
+        allocator: std.mem.Allocator,
+        text: []const u8,
+        locs: []const Loc,
+        ranges: []types.Range,
+        encoding: Encoding,
+    ) error{OutOfMemory}!void {
+        std.debug.assert(locs.len == ranges.len);
+
+        // one mapping for every start and end position
+        var mappings = try allocator.alloc(IndexToPositionMapping, locs.len * 2);
+        defer allocator.free(mappings);
+
+        for (locs, ranges, 0..) |loc, *range, i| {
+            mappings[2 * i + 0] = .{ .output = &range.start, .source_index = loc.start };
+            mappings[2 * i + 1] = .{ .output = &range.end, .source_index = loc.end };
+        }
+
+        indexToPositionWithMappings(text, mappings, encoding);
+    }
+
+    test "locToRange" {
+        const text =
+            \\hello
+            \\world
+        ;
+
+        const locs: []const Loc = &.{
+            .{ .start = 3, .end = 9 },
+            .{ .start = 6, .end = 0 },
+        };
+        var result_ranges: [2]types.Range = undefined;
+        try multiple.locToRange(std.testing.allocator, text, locs, &result_ranges, .@"utf-16");
+
+        try std.testing.expectEqualSlices(types.Range, &.{
+            .{ .start = .{ .line = 0, .character = 3 }, .end = .{ .line = 1, .character = 3 } },
+            .{ .start = .{ .line = 1, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
+        }, &result_ranges);
+    }
+};
+
+comptime {
+    std.testing.refAllDecls(multiple);
+}
+
 // Helper functions
 
 /// advance `position` which starts at `from_index` to `to_index` accounting for line breaks
