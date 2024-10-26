@@ -490,8 +490,9 @@ pub const ImportDecl = struct {
     }
 
     pub fn isParent(self: ImportDecl, child: ImportDecl) bool {
-        if (self.parent_name == null or child.parent_name == null) return false;
-        return std.mem.eql(u8, self.name, child.parent_name.?) and std.mem.eql(u8, self.value, child.parent_value.?);
+        const parent_name = child.parent_name orelse return false;
+        const parent_value = child.parent_value orelse return false;
+        return std.mem.eql(u8, self.name, parent_name) and std.mem.eql(u8, self.value, parent_value);
     }
 
     pub fn getKind(self: ImportDecl) Kind {
@@ -618,9 +619,15 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                     },
                     .identifier => {
                         // `>std<.ascii` case - Might be an alias
-                        const slice = offsets.tokenToSlice(tree, token);
-                        const idx = offsets.tokenToIndex(tree, token);
-                        const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
+                        const name_token = ast.identifierTokenFromIdentifierNode(tree, current_node) orelse continue :next_decl;
+                        const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                        const source_index = offsets.tokenToIndex(tree, token);
+                        const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
+
+                        // const slice = offsets.tokenToSlice(tree, token);
+                        // const idx = offsets.tokenToIndex(tree, token);
+                        // const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
+                        if (symbolDecl.decl != .ast_node) continue :next_decl;
                         const decl_found = symbolDecl.decl.ast_node;
                         // if the decl is in known imports, add this one as well
                         for (imports.items) |import_decl| {
@@ -628,8 +635,8 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                                 break :found_decl .{
                                     .var_decl = node,
                                     .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
-                                    .name = slice,
-                                    .value = slice,
+                                    .name = name,
+                                    .value = name,
                                     .parent_name = import_decl.getSortName(),
                                     .parent_value = import_decl.getSortValue(),
                                 };
