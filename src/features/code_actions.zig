@@ -420,15 +420,22 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         });
     }
 
-    // remove previous imports
-    // The order is unintuitive, but citing spec:
-    // "it is possible that multiple edits have the same start position: multiple inserts, or any number of inserts followed by a single remove or replace edit."
-    for (imports.items) |import_decl| {
-        // if two imports are next to each other we can extend the previous text edit
-        try edits.append(builder.arena, .{
-            .range = offsets.locToRange(tree.source, import_decl.getLoc(tree, true), builder.offset_encoding),
-            .newText = "",
-        });
+    {
+        // remove previous imports
+        const import_locs = try builder.arena.alloc(offsets.Loc, imports.len);
+        for (imports, import_locs) |import_decl, *loc| {
+            loc.* = import_decl.getLoc(tree, true);
+        }
+
+        const import_ranges = try builder.arena.alloc(types.Range, imports.len);
+        try offsets.multiple.locToRange(builder.arena, tree.source, import_locs, import_ranges, builder.offset_encoding);
+
+        for (import_ranges) |range| {
+            try edits.append(builder.arena, .{
+                .range = range,
+                .newText = "",
+            });
+        }
     }
 
     const workspace_edit = try builder.createWorkspaceEdit(edits.items);
