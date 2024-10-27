@@ -255,6 +255,22 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                 }
             }
 
+            const detail = if (maybe_resolved_ty) |ty| blk: {
+                    if (ty.is_type_val and ty.data == .ip_index and !builder.analyser.ip.isUnknown(ty.data.ip_index.index)) {
+                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
+                    } else {
+                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                    }
+                } else null;
+
+            const label_details: ?types.CompletionItemLabelDetails = blk: {
+                if (!builder.server.client_capabilities.label_details_support) break :blk null;
+
+                break :blk .{
+                    .description = detail
+                };
+            };
+
             builder.completions.appendAssumeCapacity(.{
                 .label = name,
                 .kind = kind,
@@ -264,13 +280,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                         .value = message,
                     },
                 } else documentation,
-                .detail = if (maybe_resolved_ty) |ty| blk: {
-                    if (ty.is_type_val and ty.data == .ip_index and !builder.analyser.ip.isUnknown(ty.data.ip_index.index)) {
-                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
-                    } else {
-                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
-                    }
-                } else null,
+                .detail = detail,
+                .labelDetails = label_details,
                 .deprecated = if (compile_error_message != null and builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
                 .tags = if (compile_error_message != null and builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
             });
