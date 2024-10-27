@@ -4,6 +4,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
+const DocumentScope = @import("../DocumentScope.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
@@ -602,6 +603,9 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
     var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .{};
     defer imports.deinit(allocator);
 
+    // var importNames: std.array_hash_map.StringArrayHashMapUnmanaged(void) = .{};
+    // defer importNames.deinit(allocator);
+
     // iterate until no more imports are found
     var updated = true;
     while (updated) {
@@ -652,25 +656,39 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         // `>std<.ascii` case - Might be an alias
                         const name_token = ast.identifierTokenFromIdentifierNode(tree, current_node) orelse continue :next_decl;
                         const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                        const source_index = offsets.tokenToIndex(tree, token);
-                        const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
+                        // lookupSymbolGlobal calls are expensive. Check if name is a known imports first.
+                        // if (!importNames.contains(name)) {
+                        //     do_skip = false;
+                        //     continue :next_decl;
+                        // }
 
-                        // const slice = offsets.tokenToSlice(tree, token);
-                        // const idx = offsets.tokenToIndex(tree, token);
-                        // const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, slice, idx) orelse continue :next_decl;
-                        if (symbolDecl.decl != .ast_node) continue :next_decl;
-                        const decl_found = symbolDecl.decl.ast_node;
+                        const document_scope = try builder.handle.getDocumentScope();
+                        // const source_index = offsets.tokenToIndex(tree, token);
+
+                        const decl_index = document_scope.getScopeDeclaration(.{
+                            .scope = DocumentScope.Scope.Index.root,
+                            .name = name,
+                            .kind = .other,
+                        }).unwrap() orelse continue :next_decl;
+                        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+
+                        // const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
+
+                        if (decl != .ast_node) continue :next_decl;
+                        const decl_found = decl.ast_node;
 
                         const import_decl = imports.getKeyAdapted(decl_found, ImportDecl.AstNodeAdapter{}) orelse {
                             // We may find the import in a future loop iteration
                             do_skip = false;
                             continue :next_decl;
                         };
+                        const ident_name_token = var_decl.ast.mut_token + 1;
+                        const var_name = offsets.tokenToSlice(tree, ident_name_token);
                         break :found_decl .{
                             .var_decl = node,
                             .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
-                            .name = name,
-                            .value = name,
+                            .name = var_name,
+                            .value = var_name,
                             .parent_name = import_decl.getSortName(),
                             .parent_value = import_decl.getSortValue(),
                         };
@@ -680,6 +698,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
             };
             const gop = try imports.getOrPutContextAdapted(allocator, import.var_decl, ImportDecl.AstNodeAdapter{}, {});
             if (!gop.found_existing) gop.key_ptr.* = import;
+            // try importNames.put(allocator, import.name, {});
             updated = true;
         }
     }
