@@ -535,7 +535,7 @@ pub const ImportDecl = struct {
         switch (self.getKind()) {
             .file => {
                 if (std.mem.indexOfScalar(u8, self.getSortValue(), '/') != null) {
-                    return self.value[1 .. self.getSortValue().len - 1];
+                    return self.getSortValue()[1 .. self.getSortValue().len - 1];
                 }
                 return self.getSortName();
             },
