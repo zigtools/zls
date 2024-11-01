@@ -827,7 +827,7 @@ pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle:
 
     if (fn_decl.ast.return_type == 0) return null;
     const return_type = fn_decl.ast.return_type;
-    const ret = .{ .node = return_type, .handle = handle };
+    const ret: NodeWithHandle = .{ .node = return_type, .handle = handle };
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
     if (!child_type.is_type_val) return null;
@@ -1449,7 +1449,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var fallback_type: ?Type = null;
 
             if (var_decl.ast.type_node != 0) blk: {
-                const type_node = .{ .node = var_decl.ast.type_node, .handle = handle };
+                const type_node: NodeWithHandle = .{ .node = var_decl.ast.type_node, .handle = handle };
                 const decl_type = try analyser.resolveTypeOfNodeInternal(type_node) orelse break :blk;
                 if (decl_type.isMetaType()) {
                     fallback_type = decl_type;
@@ -1459,7 +1459,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             if (var_decl.ast.init_node != 0) blk: {
-                const value = .{ .node = var_decl.ast.init_node, .handle = handle };
+                const value: NodeWithHandle = .{ .node = var_decl.ast.init_node, .handle = handle };
                 return try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
             }
 
@@ -1495,7 +1495,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buffer: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&buffer, node).?;
 
-            const callee = .{ .node = call.ast.fn_expr, .handle = handle };
+            const callee: NodeWithHandle = .{ .node = call.ast.fn_expr, .handle = handle };
             const ty = try analyser.resolveTypeOfNodeInternal(callee) orelse return null;
             const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
@@ -1554,7 +1554,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     return try Type.typeValFromIP(analyser, .void_type);
             }
 
-            const base = .{ .node = datas[node].lhs, .handle = handle };
+            const base: NodeWithHandle = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
             return try base_type.instanceTypeVal(analyser);
         },
@@ -1576,7 +1576,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .@"try",
         .address_of,
         => {
-            const base = .{ .node = datas[node].lhs, .handle = handle };
+            const base: NodeWithHandle = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse
                 return null;
             return switch (node_tags[node]) {
@@ -4345,7 +4345,7 @@ fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const
 
         const tree = handle.tree;
 
-        const expr = .{ .node = tree.nodes.items(.data)[index].lhs, .handle = handle };
+        const expr: NodeWithHandle = .{ .node = tree.nodes.items(.data)[index].lhs, .handle = handle };
         const expr_type = (try analyser.resolveTypeOfNodeUncached(expr)) orelse
             continue;
 
