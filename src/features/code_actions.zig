@@ -298,13 +298,13 @@ fn handleUnusedCapture(
     const add_suffix_newline = is_last_capture and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
 
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
-    const action1 = .{
+    const action1: types.CodeAction = .{
         .title = "discard capture",
         .kind = .@"source.fixAll",
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
     };
-    const action2 = .{
+    const action2: types.CodeAction = .{
         .title = "discard capture name",
         .kind = .quickfix,
         .isPreferred = false,
