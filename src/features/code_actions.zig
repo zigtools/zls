@@ -603,9 +603,6 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
     var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .{};
     defer imports.deinit(allocator);
 
-    // var importNames: std.array_hash_map.StringArrayHashMapUnmanaged(void) = .{};
-    // defer importNames.deinit(allocator);
-
     // iterate until no more imports are found
     var updated = true;
     while (updated) {
@@ -656,23 +653,18 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         // `>std<.ascii` case - Might be an alias
                         const name_token = ast.identifierTokenFromIdentifierNode(tree, current_node) orelse continue :next_decl;
                         const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                        // lookupSymbolGlobal calls are expensive. Check if name is a known imports first.
-                        // if (!importNames.contains(name)) {
-                        //     do_skip = false;
-                        //     continue :next_decl;
-                        // }
 
+                        // calling `lookupSymbolGlobal` is slower than just looking up a symbol at the root scope directly.
+                        // const decl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
                         const document_scope = try builder.handle.getDocumentScope();
-                        // const source_index = offsets.tokenToIndex(tree, token);
 
                         const decl_index = document_scope.getScopeDeclaration(.{
-                            .scope = DocumentScope.Scope.Index.root,
+                            .scope = .root,
                             .name = name,
                             .kind = .other,
                         }).unwrap() orelse continue :next_decl;
-                        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
 
-                        // const symbolDecl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
+                        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
 
                         if (decl != .ast_node) continue :next_decl;
                         const decl_found = decl.ast_node;
@@ -698,7 +690,6 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
             };
             const gop = try imports.getOrPutContextAdapted(allocator, import.var_decl, ImportDecl.AstNodeAdapter{}, {});
             if (!gop.found_existing) gop.key_ptr.* = import;
-            // try importNames.put(allocator, import.name, {});
             updated = true;
         }
     }
