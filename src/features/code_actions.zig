@@ -4,6 +4,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
+const DocumentScope = @import("../DocumentScope.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
@@ -50,6 +51,13 @@ pub const Builder = struct {
         }
     }
 
+    pub fn generateOrganizeImportsAction(
+        builder: *Builder,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+    ) error{OutOfMemory}!void {
+        try handleUnorganizedImport(builder, actions);
+    }
+
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
@@ -66,6 +74,15 @@ pub const Builder = struct {
 
         return workspace_edit;
     }
+};
+
+/// To report server capabilities
+pub const supported_code_actions: []const types.CodeActionKind = &.{
+    .quickfix,
+    .refactor,
+    .source,
+    .@"source.organizeImports",
+    .@"source.fixAll",
 };
 
 pub fn collectAutoDiscardDiagnostics(
@@ -364,6 +381,320 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
             builder.createTextEditLoc(var_keyword_loc, "const"),
         }),
     });
+}
+
+fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction)) !void {
+    const tree = builder.handle.tree;
+    if (tree.errors.len != 0) return;
+
+    const imports = try getImportsDecls(builder, builder.arena);
+
+    // The optimization is disabled because it does not detect the case where imports and other decls are mixed
+    // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
+
+    const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
+    std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+
+    var edits = std.ArrayListUnmanaged(types.TextEdit){};
+
+    // add sorted imports
+    {
+        var new_text = std.ArrayListUnmanaged(u8){};
+        var writer = new_text.writer(builder.arena);
+
+        for (sorted_imports, 0..) |import_decl, i| {
+            if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
+                try new_text.append(builder.arena, '\n');
+            }
+
+            try writer.print("{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
+        }
+        try writer.writeByte('\n');
+
+        const tokens = tree.tokens.items(.tag);
+        const first_token = std.mem.indexOfNone(std.zig.Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
+        const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+
+        try edits.append(builder.arena, .{
+            .range = .{ .start = insert_pos, .end = insert_pos },
+            .newText = new_text.items,
+        });
+    }
+
+    {
+        // remove previous imports
+        const import_locs = try builder.arena.alloc(offsets.Loc, imports.len);
+        for (imports, import_locs) |import_decl, *loc| {
+            loc.* = import_decl.getLoc(tree, true);
+        }
+
+        const import_ranges = try builder.arena.alloc(types.Range, imports.len);
+        try offsets.multiple.locToRange(builder.arena, tree.source, import_locs, import_ranges, builder.offset_encoding);
+
+        for (import_ranges) |range| {
+            try edits.append(builder.arena, .{
+                .range = range,
+                .newText = "",
+            });
+        }
+    }
+
+    const workspace_edit = try builder.createWorkspaceEdit(edits.items);
+
+    try actions.append(builder.arena, .{
+        .title = "organize @import",
+        .kind = .@"source.organizeImports",
+        .isPreferred = true,
+        .edit = workspace_edit,
+    });
+}
+
+/// const name_slice = @import(value_slice);
+pub const ImportDecl = struct {
+    var_decl: Ast.Node.Index,
+    first_comment_token: ?Ast.TokenIndex,
+    name: []const u8,
+    value: []const u8,
+
+    /// Strings for sorting second order imports (e.g. `const ascii = std.ascii`)
+    parent_name: ?[]const u8 = null,
+    parent_value: ?[]const u8 = null,
+
+    pub const AstNodeAdapter = struct {
+        pub fn hash(ctx: @This(), ast_node: Ast.Node.Index) u32 {
+            _ = ctx;
+            const hash_fn = std.array_hash_map.getAutoHashFn(Ast.Node.Index, void);
+            return hash_fn({}, ast_node);
+        }
+
+        pub fn eql(ctx: @This(), a: Ast.Node.Index, b: ImportDecl, b_index: usize) bool {
+            _ = ctx;
+            _ = b_index;
+            return a == b.var_decl;
+        }
+    };
+
+    /// declaration order controls sorting order
+    pub const Kind = enum {
+        std,
+        builtin,
+        build_options,
+        package,
+        file,
+    };
+
+    pub const sort_case_sensitive: bool = false;
+    pub const sort_public_decls_first: bool = false;
+
+    pub fn lessThan(context: Ast, lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = lhs.getKind();
+        const rhs_kind = rhs.getKind();
+        if (lhs_kind != rhs_kind) return @intFromEnum(lhs_kind) < @intFromEnum(rhs_kind);
+
+        if (sort_public_decls_first) {
+            const node_tokens = context.nodes.items(.main_token);
+            const token_tags = context.tokens.items(.tag);
+
+            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and token_tags[node_tokens[lhs.var_decl] - 1] == .keyword_pub;
+            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and token_tags[node_tokens[rhs.var_decl] - 1] == .keyword_pub;
+            if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
+        }
+
+        // First the parent @import, then the child using it
+        if (lhs.isParent(rhs)) return true;
+
+        // 'root' gets sorted after 'builtin'
+        if (sort_case_sensitive) {
+            return std.mem.lessThan(u8, lhs.getSortSlice(), rhs.getSortSlice());
+        } else {
+            return std.ascii.lessThanIgnoreCase(lhs.getSortSlice(), rhs.getSortSlice());
+        }
+    }
+
+    pub fn isParent(self: ImportDecl, child: ImportDecl) bool {
+        const parent_name = child.parent_name orelse return false;
+        const parent_value = child.parent_value orelse return false;
+        return std.mem.eql(u8, self.name, parent_name) and std.mem.eql(u8, self.value, parent_value);
+    }
+
+    pub fn getKind(self: ImportDecl) Kind {
+        const name = self.getSortValue()[1 .. self.getSortValue().len - 1];
+
+        if (std.mem.endsWith(u8, name, ".zig")) return .file;
+
+        if (std.mem.eql(u8, name, "std")) return .std;
+        if (std.mem.eql(u8, name, "builtin")) return .builtin;
+        if (std.mem.eql(u8, name, "root")) return .builtin;
+        if (std.mem.eql(u8, name, "build_options")) return .build_options;
+
+        return .package;
+    }
+
+    /// returns the string by which this import should be sorted
+    pub fn getSortSlice(self: ImportDecl) []const u8 {
+        switch (self.getKind()) {
+            .file => {
+                if (std.mem.indexOfScalar(u8, self.getSortValue(), '/') != null) {
+                    return self.getSortValue()[1 .. self.getSortValue().len - 1];
+                }
+                return self.getSortName();
+            },
+            // There used to be unreachable for other than file and package, but the user
+            // can just write @import("std") twice.
+            else => return self.getSortName(),
+        }
+    }
+
+    pub fn getSortName(self: ImportDecl) []const u8 {
+        return self.parent_name orelse self.name;
+    }
+
+    pub fn getSortValue(self: ImportDecl) []const u8 {
+        return self.parent_value orelse self.value;
+    }
+
+    /// returns true if there should be an empty line between these two imports
+    /// assumes `lessThan(void, lhs, rhs) == true`
+    pub fn addSeperator(lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = @intFromEnum(lhs.getKind());
+        const rhs_kind = @intFromEnum(rhs.getKind());
+        if (rhs_kind <= @intFromEnum(Kind.build_options)) return false;
+        return lhs_kind != rhs_kind;
+    }
+
+    pub fn getSourceStartIndex(self: ImportDecl, tree: Ast) usize {
+        return offsets.tokenToIndex(tree, self.first_comment_token orelse tree.firstToken(self.var_decl));
+    }
+
+    pub fn getSourceEndIndex(self: ImportDecl, tree: Ast, include_line_break: bool) usize {
+        const token_tags = tree.tokens.items(.tag);
+
+        var last_token = ast.lastToken(tree, self.var_decl);
+        if (last_token + 1 < tree.tokens.len - 1 and token_tags[last_token + 1] == .semicolon) {
+            last_token += 1;
+        }
+
+        const end = offsets.tokenToLoc(tree, last_token).end;
+        if (!include_line_break) return end;
+        return std.mem.indexOfNonePos(u8, tree.source, end, &.{ ' ', '\t', '\n' }) orelse tree.source.len;
+    }
+
+    /// similar to `offsets.nodeToLoc` but will also include preceding comments and postfix semicolon and line break
+    pub fn getLoc(self: ImportDecl, tree: Ast, include_line_break: bool) offsets.Loc {
+        return .{
+            .start = self.getSourceStartIndex(tree),
+            .end = self.getSourceEndIndex(tree, include_line_break),
+        };
+    }
+};
+
+pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
+    const tree = builder.handle.tree;
+
+    const node_tags = tree.nodes.items(.tag);
+    const node_data = tree.nodes.items(.data);
+    const node_tokens = tree.nodes.items(.main_token);
+
+    const root_decls = tree.rootDecls();
+
+    var skip_set = try std.DynamicBitSetUnmanaged.initEmpty(allocator, root_decls.len);
+    defer skip_set.deinit(allocator);
+
+    var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .{};
+    defer imports.deinit(allocator);
+
+    // iterate until no more imports are found
+    var updated = true;
+    while (updated) {
+        updated = false;
+        var it = skip_set.iterator(.{ .kind = .unset });
+        next_decl: while (it.next()) |root_decl_index| {
+            const node = root_decls[root_decl_index];
+
+            var do_skip: bool = true;
+            defer if (do_skip) skip_set.set(root_decl_index);
+
+            if (skip_set.isSet(root_decl_index)) continue;
+
+            if (node_tags[node] != .simple_var_decl) continue;
+            const var_decl = tree.simpleVarDecl(node);
+
+            var current_node = var_decl.ast.init_node;
+            const import: ImportDecl = found_decl: while (true) {
+                const token = node_tokens[current_node];
+                switch (node_tags[current_node]) {
+                    .builtin_call_two, .builtin_call_two_comma => {
+                        // `>@import("string")<` case
+                        const builtin_name = offsets.tokenToSlice(tree, token);
+                        if (!std.mem.eql(u8, builtin_name, "@import")) continue :next_decl;
+                        // TODO what about @embedFile ?
+
+                        if (node_data[current_node].lhs == 0 or node_data[current_node].rhs != 0) continue :next_decl;
+                        const param_node = node_data[current_node].lhs;
+                        if (node_tags[param_node] != .string_literal) continue :next_decl;
+
+                        const name_token = var_decl.ast.mut_token + 1;
+                        const value_token = node_tokens[param_node];
+
+                        break :found_decl .{
+                            .var_decl = node,
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .name = offsets.tokenToSlice(tree, name_token),
+                            .value = offsets.tokenToSlice(tree, value_token),
+                        };
+                    },
+                    .field_access => {
+                        // `@import("foo").>bar<` or `foo.>bar<` case
+                        // drill down to the base import
+                        current_node = node_data[current_node].lhs;
+                        continue;
+                    },
+                    .identifier => {
+                        // `>std<.ascii` case - Might be an alias
+                        const name_token = ast.identifierTokenFromIdentifierNode(tree, current_node) orelse continue :next_decl;
+                        const name = offsets.identifierTokenToNameSlice(tree, name_token);
+
+                        // calling `lookupSymbolGlobal` is slower than just looking up a symbol at the root scope directly.
+                        // const decl = try builder.analyser.lookupSymbolGlobal(builder.handle, name, source_index) orelse continue :next_decl;
+                        const document_scope = try builder.handle.getDocumentScope();
+
+                        const decl_index = document_scope.getScopeDeclaration(.{
+                            .scope = .root,
+                            .name = name,
+                            .kind = .other,
+                        }).unwrap() orelse continue :next_decl;
+
+                        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+
+                        if (decl != .ast_node) continue :next_decl;
+                        const decl_found = decl.ast_node;
+
+                        const import_decl = imports.getKeyAdapted(decl_found, ImportDecl.AstNodeAdapter{}) orelse {
+                            // We may find the import in a future loop iteration
+                            do_skip = false;
+                            continue :next_decl;
+                        };
+                        const ident_name_token = var_decl.ast.mut_token + 1;
+                        const var_name = offsets.tokenToSlice(tree, ident_name_token);
+                        break :found_decl .{
+                            .var_decl = node,
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .name = var_name,
+                            .value = var_name,
+                            .parent_name = import_decl.getSortName(),
+                            .parent_value = import_decl.getSortValue(),
+                        };
+                    },
+                    else => continue :next_decl,
+                }
+            };
+            const gop = try imports.getOrPutContextAdapted(allocator, import.var_decl, ImportDecl.AstNodeAdapter{}, {});
+            if (!gop.found_existing) gop.key_ptr.* = import;
+            updated = true;
+        }
+    }
+
+    return try allocator.dupe(ImportDecl, imports.keys());
 }
 
 fn detectIndentation(source: []const u8) []const u8 {
