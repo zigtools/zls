@@ -247,7 +247,9 @@ pub const Handle = struct {
         const duped_uri = try allocator.dupe(u8, uri);
         errdefer allocator.free(duped_uri);
 
-        const tree = try parseTree(allocator, text);
+        const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(uri), ".zon")) .zon else .zig;
+
+        const tree = try parseTree(allocator, text, mode);
         errdefer tree.deinit(allocator);
 
         return .{
@@ -467,11 +469,11 @@ pub const Handle = struct {
         }
     }
 
-    fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8) error{OutOfMemory}!Ast {
+    fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
 
-        var tree = try Ast.parse(allocator, new_text, .zig);
+        var tree = try Ast.parse(allocator, new_text, mode);
         errdefer tree.deinit(allocator);
 
         // remove unused capacity
@@ -494,7 +496,7 @@ pub const Handle = struct {
             .open = self.getStatus().open,
         };
 
-        const new_tree = try parseTree(self.impl.allocator, new_text);
+        const new_tree = try parseTree(self.impl.allocator, new_text, self.tree.mode);
 
         self.impl.lock.lock();
         errdefer @compileError("");
