@@ -245,7 +245,7 @@ fn testMFReferences(sources: []const []const u8) !void {
         var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
         defer phr.deinit(allocator);
 
-        const uri = try ctx.addDocument(phr.new_source);
+        const uri = try ctx.addDocument(.{ .source = phr.new_source });
         files.putAssumeCapacityNoClobber(uri, .{ .source = source, .new_source = phr.new_source });
         phr.new_source = ""; // `files` takes ownership of `new_source` from `phr`
 

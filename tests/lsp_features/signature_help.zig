@@ -261,7 +261,7 @@ fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_ac
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri = try ctx.addDocument(text);
+    const test_uri = try ctx.addDocument(.{ .source = text });
 
     const params = types.SignatureHelpParams{
         .textDocument = .{ .uri = test_uri },

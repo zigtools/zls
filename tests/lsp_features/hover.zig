@@ -1308,13 +1308,13 @@ fn testHoverWithOptions(
 
     ctx.server.client_capabilities.hover_supports_md = options.markup_kind == .markdown;
 
-    const test_uri = "file:///test.zig";
-    try ctx.server.sendNotificationSync(ctx.arena.allocator(), "textDocument/didOpen", .{
-        .textDocument = .{ .uri = test_uri, .languageId = "zig", .version = 420, .text = text },
+    const uri = try ctx.addDocument(.{
+        .uri = "file:///test.zig",
+        .source = text,
     });
 
     const params = types.HoverParams{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = uri },
         .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
     };
 

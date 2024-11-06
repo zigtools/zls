@@ -509,7 +509,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     ctx.server.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
     ctx.server.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
 
-    const test_uri = try ctx.addDocument(phr.new_source);
+    const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },

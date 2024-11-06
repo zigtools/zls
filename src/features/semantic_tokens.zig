@@ -1040,9 +1040,9 @@ pub fn writeSemanticTokens(
         .limited = limited,
     };
 
-    var nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();
+    var nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else ast.rootDecls(handle.tree);
     if (nodes.len == 1 and nodes[0] == 0) {
-        nodes = handle.tree.rootDecls();
+        nodes = ast.rootDecls(handle.tree);
     }
 
     // reverse the ast from the root declarations

@@ -3675,7 +3675,7 @@ fn testCompletionWithOptions(
     ctx.server.config.enable_snippets = options.enable_snippets;
     ctx.server.config.completion_label_details = options.completion_label_details;
 
-    const test_uri = try ctx.addDocument(text);
+    const test_uri = try ctx.addDocument(.{ .source = text });
 
     const params = types.CompletionParams{
         .textDocument = .{ .uri = test_uri },
@@ -3913,7 +3913,7 @@ fn testCompletionTextEdit(
     ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
     ctx.server.config.enable_snippets = options.enable_snippets;
 
-    const test_uri = try ctx.addDocument(text);
+    const test_uri = try ctx.addDocument(.{ .source = text });
     const handle = ctx.server.document_store.getHandle(test_uri).?;
 
     const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);

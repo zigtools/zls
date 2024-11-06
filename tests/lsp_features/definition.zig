@@ -233,7 +233,7 @@ fn testDefinition(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri = try ctx.addDocument(phr.new_source);
+    const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
     var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();

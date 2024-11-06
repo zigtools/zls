@@ -69,15 +69,19 @@ pub const Context = struct {
     }
 
     // helper
-    pub fn addDocument(self: *Context, source: []const u8) ![]const u8 {
+    pub fn addDocument(self: *Context, options: struct {
+        uri: ?[]const u8 = null,
+        source: []const u8,
+        mode: std.zig.Ast.Mode = .zig,
+    }) ![]const u8 {
         const fmt = switch (builtin.os.tag) {
-            .windows => "file:///C:\\nonexistent\\test-{d}.zig",
-            else => "file:///nonexistent/test-{d}.zig",
+            .windows => "file:///C:\\nonexistent\\test-{d}.{s}",
+            else => "file:///nonexistent/test-{d}.{s}",
         };
-        const uri = try std.fmt.allocPrint(
+        const uri = options.uri orelse try std.fmt.allocPrint(
             self.arena.allocator(),
             fmt,
-            .{self.file_id},
+            .{ self.file_id, @tagName(options.mode) },
         );
 
         const params = types.DidOpenTextDocumentParams{
@@ -85,7 +89,7 @@ pub const Context = struct {
                 .uri = uri,
                 .languageId = "zig",
                 .version = 420,
-                .text = source,
+                .text = options.source,
             },
         };
 

@@ -1217,6 +1217,14 @@ pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
+pub fn rootDecls(tree: Ast) []const Node.Index {
+    const nodes_data = tree.nodes.items(.data);
+    switch (tree.mode) {
+        .zig => return tree.extra_data[nodes_data[0].lhs..nodes_data[0].rhs],
+        .zon => return (&nodes_data[0].lhs)[0..1],
+    }
+}
+
 pub fn isBuiltinCall(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .builtin_call,

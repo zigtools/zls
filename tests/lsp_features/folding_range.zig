@@ -302,7 +302,7 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri = try ctx.addDocument(source);
+    const test_uri = try ctx.addDocument(.{ .source = source });
 
     const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 

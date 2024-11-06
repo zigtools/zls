@@ -1727,6 +1727,25 @@ test "deprecated" {
     });
 }
 
+test "zon file" {
+    try testSemanticTokensOptions(
+        \\.{
+        \\    .foo = "bar",
+        \\    .baz = true,
+        \\}
+    , &.{
+        .{ ".", .property, .{} },
+        .{ "foo", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "\"bar\"", .string, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "baz", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "true", .keywordLiteral, .{} },
+    }, .{ .mode = .zon });
+}
+
 test "recursive usingnamespace" {
     // this test is supposed to check against infinite recursion when resolving usingnamespace
     try testSemanticTokens(
@@ -1849,10 +1868,23 @@ const TokenIterator = struct {
 };
 
 fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) !void {
+    try testSemanticTokensOptions(source, expected_tokens, .{});
+}
+
+fn testSemanticTokensOptions(
+    source: [:0]const u8,
+    expected_tokens: []const TokenData,
+    options: struct {
+        mode: std.zig.Ast.Mode = .zig,
+    },
+) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const uri = try ctx.addDocument(source);
+    const uri = try ctx.addDocument(.{
+        .source = source,
+        .mode = options.mode,
+    });
 
     const params = types.SemanticTokensParams{
         .textDocument = .{ .uri = uri },

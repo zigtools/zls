@@ -596,7 +596,7 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     ctx.server.config.enable_autofix = true;
     ctx.server.config.prefer_ast_check_as_child_process = !want_zir;
 
-    const uri = try ctx.addDocument(before);
+    const uri = try ctx.addDocument(.{ .source = before });
     const handle = ctx.server.document_store.getHandle(uri).?;
 
     var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
@@ -643,7 +643,7 @@ fn testDiagnostic(before: []const u8, after: []const u8) !void {
     defer ctx.deinit();
     ctx.server.config.enable_autofix = true;
 
-    const uri = try ctx.addDocument(before);
+    const uri = try ctx.addDocument(.{ .source = before });
     const handle = ctx.server.document_store.getHandle(uri).?;
 
     const params = types.CodeActionParams{
