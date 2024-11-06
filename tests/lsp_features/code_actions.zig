@@ -363,8 +363,66 @@ test "ignore autofix comment whitespace" {
     );
 }
 
-test "organize imports" {
+test "remove function parameter" {
     try testDiagnostic(
+        \\fn foo(alpha: u32) void {}
+    ,
+        \\fn foo() void {}
+    , .{ .filter_title = "remove function parameter" });
+    try testDiagnostic(
+        \\fn foo(
+        \\    alpha: u32,
+        \\) void {}
+    ,
+        \\fn foo() void {}
+    , .{ .filter_title = "remove function parameter" });
+}
+
+test "variable never mutated" {
+    try testDiagnostic(
+        \\test {
+        \\    var foo = 5;
+        \\    _ = foo;
+        \\}
+    ,
+        \\test {
+        \\    const foo = 5;
+        \\    _ = foo;
+        \\}
+    , .{ .filter_title = "use 'const'" });
+}
+
+test "discard capture name" {
+    try testDiagnostic(
+        \\test {
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |value| {}
+        \\}
+    ,
+        \\test {
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |_| {}
+        \\}
+    , .{ .filter_title = "discard capture name" });
+}
+
+test "remove capture" {
+    // TODO fix whitespace
+    try testDiagnostic(
+        \\test {
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |value| {}
+        \\}
+    ,
+        \\test {
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe)  {}
+        \\}
+    , .{ .filter_title = "remove capture" });
+}
+
+test "organize imports" {
+    try testOrganizeImports(
         \\const xyz = @import("xyz.zig");
         \\const abc = @import("abc.zig");
     ,
@@ -376,7 +434,7 @@ test "organize imports" {
     // Three different import groups: std, build_options and builtin, but these groups do not have separator
     // Builtin comes before build_options despite alphabetical order (they are different import kinds)
     // Case insensitive, pub is preserved
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const std = @import("std");
         \\const abc = @import("abc.zig");
         \\const build_options = @import("build_options");
@@ -405,7 +463,7 @@ test "organize imports" {
         \\
     );
     // Relative paths are sorted by import path
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const y = @import("a/file2.zig");
         \\const x = @import("a/file3.zig");
         \\const z = @import("a/file1.zig");
@@ -419,7 +477,7 @@ test "organize imports" {
 }
 
 test "organize imports - bubbles up" {
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const std = @import("std");
         \\fn main() void {}
         \\const abc = @import("abc.zig");
@@ -435,7 +493,7 @@ test "organize imports - bubbles up" {
 
 test "organize imports - scope" {
     // Ignore imports not in root scope
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const b = @import("a.zig");
         \\const a = @import("b.zig");
         \\fn main() void {
@@ -459,7 +517,7 @@ test "organize imports - scope" {
 
 test "organize imports - comments" {
     // Doc comments are preserved
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const xyz = @import("xyz.zig");
         \\/// Do not look inside
         \\const abc = @import("abc.zig");
@@ -471,7 +529,7 @@ test "organize imports - comments" {
         \\
     );
     // Respects top-level doc-comment
-    try testDiagnostic(
+    try testOrganizeImports(
         \\//! A module doc
         \\//! Another line
         \\
@@ -491,7 +549,7 @@ test "organize imports - comments" {
 
 test "organize imports - field access" {
     // field access on import
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\const abc = @import("abc.zig");
     ,
@@ -501,7 +559,7 @@ test "organize imports - field access" {
         \\
     );
     // declarations without @import move under the parent import
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\const abc = @import("abc.zig");
         \\const abc_related = abc.related;
@@ -512,7 +570,7 @@ test "organize imports - field access" {
         \\
         \\
     );
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const std = @import("std");
         \\const builtin = @import("builtin");
         \\
@@ -525,7 +583,7 @@ test "organize imports - field access" {
         \\
     );
     // Inverse chain of parents
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const abc = @import("abc.zig");
         \\const isLower = ascii.isLower;
         \\const ascii = std.ascii;
@@ -540,7 +598,7 @@ test "organize imports - field access" {
         \\
     );
     // Parent chains are not mixed
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const xyz = @import("xyz.zig");
         \\const abc = @import("abc.zig");
         \\const xyz_related = xyz.related;
@@ -558,7 +616,7 @@ test "organize imports - field access" {
 }
 
 test "organize imports - @embedFile" {
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const foo = @embedFile("foo.zig");
         \\const abc = @import("abc.zig");
     ,
@@ -571,7 +629,7 @@ test "organize imports - @embedFile" {
 
 test "organize imports - edge cases" {
     // Withstands non-standard behavior
-    try testDiagnostic(
+    try testOrganizeImports(
         \\const std = @import("std");
         \\const abc = @import("abc.zig");
         \\const std = @import("std");
@@ -586,15 +644,27 @@ test "organize imports - edge cases" {
 }
 
 fn testAutofix(before: []const u8, after: []const u8) !void {
-    try testAutofixOptions(before, after, true); // diagnostics come from our AstGen fork
-    try testAutofixOptions(before, after, false); // diagnostics come from calling zig ast-check
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from our AstGen fork
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
 }
 
-fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !void {
+fn testOrganizeImports(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports" });
+}
+
+fn testDiagnostic(
+    before: []const u8,
+    after: []const u8,
+    options: struct {
+        filter_kind: ?types.CodeActionKind = null,
+        filter_title: ?[]const u8 = null,
+        want_zir: bool = true,
+    },
+) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
     ctx.server.config.enable_autofix = true;
-    ctx.server.config.prefer_ast_check_as_child_process = !want_zir;
+    ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
 
     const uri = try ctx.addDocument(.{ .source = before });
     const handle = ctx.server.document_store.getHandle(uri).?;
@@ -621,51 +691,11 @@ fn testAutofixOptions(before: []const u8, after: []const u8, want_zir: bool) !vo
     defer text_edits.deinit(allocator);
 
     for (response) |action| {
-        const code_action = action.CodeAction;
-        if (code_action.kind.? != .@"source.fixAll") continue;
-        const workspace_edit = code_action.edit.?;
-        const changes = workspace_edit.changes.?.map;
-        try std.testing.expectEqual(@as(usize, 1), changes.count());
-        try std.testing.expect(changes.contains(uri));
+        const code_action: types.CodeAction = action.CodeAction;
 
-        try text_edits.appendSlice(allocator, changes.get(uri).?);
-    }
+        if (options.filter_kind) |kind| if (!code_action.kind.?.eql(kind)) continue;
+        if (options.filter_title) |title| if (!std.mem.eql(u8, title, code_action.title)) continue;
 
-    const actual = try zls.diff.applyTextEdits(allocator, before, text_edits.items, ctx.server.offset_encoding);
-    defer allocator.free(actual);
-    try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
-
-    try std.testing.expectEqualStrings(after, handle.tree.source);
-}
-
-fn testDiagnostic(before: []const u8, after: []const u8) !void {
-    var ctx = try Context.init();
-    defer ctx.deinit();
-    ctx.server.config.enable_autofix = true;
-
-    const uri = try ctx.addDocument(.{ .source = before });
-    const handle = ctx.server.document_store.getHandle(uri).?;
-
-    const params = types.CodeActionParams{
-        .textDocument = .{ .uri = uri },
-        .range = .{
-            .start = .{ .line = 0, .character = 0 },
-            .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
-        },
-        .context = .{ .diagnostics = &.{} },
-    };
-
-    @setEvalBranchQuota(5000);
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
-    };
-
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
-    defer text_edits.deinit(allocator);
-
-    for (response) |action| {
-        const code_action = action.CodeAction;
         const workspace_edit = code_action.edit.?;
         const changes = workspace_edit.changes.?.map;
         try std.testing.expectEqual(@as(usize, 1), changes.count());
