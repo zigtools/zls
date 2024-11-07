@@ -121,14 +121,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
-
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => {},
-            else => unreachable,
+            else => {},
         },
         .ip_index => |payload| try analyser_completions.dotCompletions(
             builder.arena,

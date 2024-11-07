@@ -185,21 +185,40 @@ test "var decl" {
 
 test "var decl destructure" {
     try testSemanticTokens(
-        \\const foo = {
+        \\test {
         \\    var alpha: bool, var beta = .{ 1, 2 };
         \\};
     , &.{
-        .{ "const", .keyword, .{} },
-        .{ "foo", .variable, .{ .declaration = true } },
-        .{ "=", .operator, .{} },
+        .{ "test", .keyword, .{} },
+
         .{ "var", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true } },
         .{ "bool", .type, .{} },
+
         .{ "var", .keyword, .{} },
         .{ "beta", .variable, .{ .declaration = true } },
+
         .{ "=", .operator, .{} },
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },
+    });
+    try testSemanticTokens(
+        \\test {
+        \\    const S, const E = .{ struct {}, enum {} };
+        \\};
+    , &.{
+        .{ "test", .keyword, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+
+        .{ "const", .keyword, .{} },
+        .{ "E", .@"enum", .{ .declaration = true } },
+
+        .{ "=", .operator, .{} },
+
+        .{ "struct", .keyword, .{} },
+        .{ "enum", .keyword, .{} },
     });
 }
 

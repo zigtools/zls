@@ -1111,48 +1111,45 @@ test "var decl alias" {
     );
 }
 
-test "hover - destructuring" {
+test "var decl destructuring" {
     try testHover(
-        \\fn func() void {
-        \\    const f<cursor>oo, const bar = .{ 1, 2 };
+        \\test {
+        \\    const f<cursor>oo, const bar = .{ @as(u8, 1), @as(u16, 2), @as(u24, 3) };
         \\}
     ,
         \\```zig
         \\foo
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(u8)
         \\```
     );
     try testHover(
-        \\fn func() void {
-        \\    const foo, const b<cursor>ar, const baz = .{ 1, 2, 3 };
+        \\test {
+        \\    const foo, const b<cursor>ar, const baz = .{ @as(u8, 1), @as(u16, 2), @as(u24, 3) };
         \\}
     ,
         \\```zig
         \\bar
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(u16)
         \\```
     );
     try testHover(
-        \\fn thing() !struct {usize, isize} {
-        \\    return .{1, 2};
-        \\}
-        \\fn ex() void {
-        \\    const f<cursor>oo, const bar = try thing();
+        \\test {
+        \\    const foo, var b<cursor>ar: u32 = .{ 1, 2 };
         \\}
     ,
         \\```zig
-        \\foo
+        \\bar
         \\```
         \\```zig
-        \\(usize)
+        \\(u32)
         \\```
     );
     try testHover(
-        \\fn func() void {
+        \\test {
         \\    const foo, const b<cursor>ar: u32, const baz = undefined;
         \\}
     ,
@@ -1161,6 +1158,21 @@ test "hover - destructuring" {
         \\```
         \\```zig
         \\(u32)
+        \\```
+    );
+    try testHover(
+        \\fn thing() !struct {usize, isize} {
+        \\    return .{1, 2};
+        \\}
+        \\test {
+        \\    const f<cursor>oo, const bar = try thing();
+        \\}
+    ,
+        \\```zig
+        \\foo
+        \\```
+        \\```zig
+        \\(usize)
         \\```
     );
 }

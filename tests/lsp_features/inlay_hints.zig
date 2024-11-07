@@ -208,18 +208,7 @@ test "hide redundant parameter names" {
         .hide_redundant_param_names_last_token = true,
     });
 }
-test "inlay destructuring" {
-    try testInlayHints(
-        \\fn func() void {
-        \\    const foo<comptime_int>, const bar<comptime_int> = .{1, 2};
-        \\}
-    , .{ .kind = .Type });
-    try testInlayHints(
-        \\fn func() void {
-        \\    const foo: comptime_int, const bar<comptime_int> = .{1, 2};
-        \\}
-    , .{ .kind = .Type });
-}
+
 test "var decl" {
     try testInlayHints(
         \\const a<@Vector(2,u8)> = @Vector(2, u8){1,2};
@@ -275,6 +264,24 @@ test "var decl" {
         \\
         \\ var a<struct {...}> = thing(10, -4);
         \\ _ = a;
+    , .{ .kind = .Type });
+}
+
+test "var decl destructuring" {
+    try testInlayHints(
+        \\test {
+        \\    const foo<u32>, const bar<comptime_int> = .{@as(u32, 1), 2};
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\    const foo: comptime_int, const bar<u64> = .{1, @as(u64, 7)};
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\    const foo<u32>, const bar: u64, var baz<u32> = [_]u32{1, 2, 3};
+        \\}
     , .{ .kind = .Type });
 }
 
