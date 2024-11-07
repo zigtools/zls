@@ -40,15 +40,15 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         });
     }
 
-    if (tree.errors.len == 0) {
+    if (tree.errors.len == 0 and tree.mode == .zig) {
         try getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     }
 
-    if (server.config.enable_autofix) {
+    if (server.config.enable_autofix and tree.mode == .zig) {
         try code_actions.collectAutoDiscardDiagnostics(tree, arena, &diagnostics, server.offset_encoding);
     }
 
-    if (server.config.warn_style) {
+    if (server.config.warn_style and tree.mode == .zig) {
         var node: u32 = 0;
         while (node < tree.nodes.len) : (node += 1) {
             if (ast.isBuiltinCall(tree, node)) {
@@ -146,7 +146,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         }
     }
 
-    if (server.config.highlight_global_var_declarations) {
+    if (server.config.highlight_global_var_declarations and tree.mode == .zig) {
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
         for (ast.rootDecls(tree)) |decl| {
@@ -397,6 +397,7 @@ pub fn getAstCheckDiagnostics(
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) error{OutOfMemory}!void {
     std.debug.assert(handle.tree.errors.len == 0);
+    std.debug.assert(handle.tree.mode == .zig);
 
     if (server.config.prefer_ast_check_as_child_process and
         std.process.can_spawn and
