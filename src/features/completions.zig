@@ -347,6 +347,8 @@ fn functionTypeCompletion(
                 })});
             }
 
+            if (!use_snippets) break :blk func_name;
+
             switch (func.ast.params.len) {
                 // No arguments, leave cursor at the end
                 0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
@@ -357,12 +359,10 @@ fn functionTypeCompletion(
                     }
 
                     // Non-self parameter, leave the cursor in the parentheses
-                    if (!use_snippets) break :blk func_name;
                     break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
                 },
                 else => {
                     // At least one non-self parameter, leave the cursor in the parentheses
-                    if (!use_snippets) break :blk func_name;
                     break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
                 },
             }
@@ -478,6 +478,7 @@ fn populateSnippedCompletions(builder: *Builder, snippets: []const snipped_data.
 const FunctionCompletionFormat = enum { snippet, only_name };
 
 fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Range, FunctionCompletionFormat } {
+    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const source = builder.orig_handle.tree.source;
 
     var start_index = builder.source_index;
@@ -495,8 +496,8 @@ fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Rang
 
     var format: FunctionCompletionFormat = .only_name;
 
-    const insert_can_be_snippet = std.mem.startsWith(u8, source[insert_loc.end..], "()");
-    const replace_can_be_snippet = std.mem.startsWith(u8, source[replace_loc.end..], "()");
+    const insert_can_be_snippet = use_snippets and std.mem.startsWith(u8, source[insert_loc.end..], "()");
+    const replace_can_be_snippet = use_snippets and std.mem.startsWith(u8, source[replace_loc.end..], "()");
 
     if (insert_can_be_snippet and replace_can_be_snippet) {
         insert_loc.end += 2;
@@ -504,7 +505,7 @@ fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Rang
         format = .snippet;
     } else if (insert_can_be_snippet or replace_can_be_snippet) {
         // snippet completions would be possible but insert and replace would need different `newText`
-    } else if (!std.mem.startsWith(u8, source[end_index..], "(")) {
+    } else if (use_snippets and !std.mem.startsWith(u8, source[end_index..], "(")) {
         format = .snippet;
     }
 
@@ -525,13 +526,13 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
 
     try builder.completions.ensureUnusedCapacity(builder.arena, data.builtins.kvs.len);
     for (data.builtins.keys(), data.builtins.values()) |name, builtin| {
-        const new_text = switch (new_text_format) {
-            .only_name => name,
+        const new_text, const insertTextFormat: types.InsertTextFormat = switch (new_text_format) {
+            .only_name => .{ name, .PlainText },
             .snippet => blk: {
-                if (builtin.arguments.len == 0) break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
-                if (use_snippets and use_placeholders) break :blk builtin.snippet;
-                if (use_snippets) break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name});
-                break :blk name;
+                std.debug.assert(use_snippets);
+                if (builtin.arguments.len == 0) break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}()", .{name}), .PlainText };
+                if (use_placeholders) break :blk .{ builtin.snippet, .Snippet };
+                break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name}), .Snippet };
             },
         };
 
@@ -540,7 +541,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .kind = .Function,
             .filterText = name[1..],
             .detail = builtin.signature,
-            .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+            .insertTextFormat = insertTextFormat,
             .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
                 .{ .InsertReplaceEdit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
             else
@@ -1307,7 +1308,7 @@ fn collectContainerFields(
             .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+            .insertText = if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
                 name
             else
                 try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
