@@ -1568,7 +1568,12 @@ fn iterateChildrenTypeErased(
             try callback(context, tree, node_data[node].rhs);
         },
 
-        .root,
+        .root => {
+            for (rootDecls(tree)) |child| {
+                try callback(context, tree, child);
+            }
+        },
+
         .array_init_dot,
         .array_init_dot_comma,
         .struct_init_dot,
