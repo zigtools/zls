@@ -312,30 +312,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
-            try writeToken(builder, var_decl.visib_token, .keyword);
-            try writeToken(builder, var_decl.extern_export_token, .keyword);
-            try writeToken(builder, var_decl.threadlocal_token, .keyword);
-            try writeToken(builder, var_decl.comptime_token, .keyword);
-            try writeToken(builder, var_decl.ast.mut_token, .keyword);
-
-            if (try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle })) |decl_type| {
-                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
-            } else {
-                try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
-            }
-
-            try writeNodeTokens(builder, var_decl.ast.type_node);
-            try writeNodeTokens(builder, var_decl.ast.align_node);
-            try writeNodeTokens(builder, var_decl.ast.section_node);
-
-            if (var_decl.ast.init_node != 0) {
-                const equal_token = tree.firstToken(var_decl.ast.init_node) - 1;
-                if (token_tags[equal_token] == .equal) {
-                    try writeToken(builder, equal_token, .operator);
-                }
-            }
-
-            try writeNodeTokens(builder, var_decl.ast.init_node);
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle });
+            try writeVarDecl(builder, var_decl, resolved_type);
         },
         .@"usingnamespace" => {
             const first_token = tree.firstToken(node);
@@ -829,9 +807,14 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .assign_destructure => {
             const lhs_count = tree.extra_data[node_data[node].lhs];
             const lhs_exprs = tree.extra_data[node_data[node].lhs + 1 ..][0..lhs_count];
+            const init_expr = node_data[node].rhs;
 
-            for (lhs_exprs) |lhs_node| {
-                try writeNodeTokens(builder, lhs_node);
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .node = init_expr, .handle = handle });
+
+            for (lhs_exprs, 0..) |lhs_node, index| {
+                const var_decl = tree.fullVarDecl(lhs_node).?;
+                const field_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
+                try writeVarDecl(builder, var_decl, field_type);
             }
 
             try writeToken(builder, main_token, .operator);
@@ -986,6 +969,35 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
             try writeToken(builder, equal_token, .operator);
         }
         try writeNodeTokens(builder, container_field.ast.value_expr);
+    }
+}
+
+fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
+    const tree = builder.handle.tree;
+    const token_tags = tree.tokens.items(.tag);
+
+    try writeToken(builder, var_decl.visib_token, .keyword);
+    try writeToken(builder, var_decl.extern_export_token, .keyword);
+    try writeToken(builder, var_decl.threadlocal_token, .keyword);
+    try writeToken(builder, var_decl.comptime_token, .keyword);
+    try writeToken(builder, var_decl.ast.mut_token, .keyword);
+
+    if (resolved_type) |decl_type| {
+        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
+    } else {
+        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
+    }
+
+    try writeNodeTokens(builder, var_decl.ast.type_node);
+    try writeNodeTokens(builder, var_decl.ast.align_node);
+    try writeNodeTokens(builder, var_decl.ast.section_node);
+
+    if (var_decl.ast.init_node != 0) {
+        const equal_token = tree.firstToken(var_decl.ast.init_node) - 1;
+        if (token_tags[equal_token] == .equal) {
+            try writeToken(builder, equal_token, .operator);
+        }
+        try writeNodeTokens(builder, var_decl.ast.init_node);
     }
 }
 

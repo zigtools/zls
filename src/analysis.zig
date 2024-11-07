@@ -1108,9 +1108,18 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
     }
 }
 
-fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
+pub fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
     const scope_handle = switch (tuple.data) {
         .container => |s| s,
+        .other => |node| {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const array_init_info = node.handle.tree.fullArrayInit(&buffer, node.node) orelse return null;
+
+            const elements = array_init_info.ast.elements;
+            if (index >= elements.len) return null;
+
+            return try analyser.resolveTypeOfNode(.{ .handle = node.handle, .node = elements[index] });
+        },
         else => return null,
     };
     const node = scope_handle.toNode();
@@ -1692,26 +1701,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buffer: [2]Ast.Node.Index = undefined;
             const array_init_info = tree.fullArrayInit(&buffer, node).?;
 
-            std.debug.assert(array_init_info.ast.elements.len != 0);
-
             if (array_init_info.ast.type_expr != 0) blk: {
                 const array_ty = try analyser.resolveTypeOfNode(.{ .node = array_init_info.ast.type_expr, .handle = handle }) orelse break :blk;
                 return try array_ty.instanceTypeVal(analyser);
             }
 
-            // try to infer the array type
-            const maybe_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_init_info.ast.elements[0], .handle = handle });
-            const elem_ty = if (maybe_elem_ty) |elem_ty| elem_ty.typeOf(analyser) else try Type.typeValFromIP(analyser, .type_type);
-
-            const elem_ty_ptr = try analyser.arena.allocator().create(Type);
-            elem_ty_ptr.* = elem_ty;
-
             return Type{
-                .data = .{ .array = .{
-                    .elem_count = @intCast(array_init_info.ast.elements.len),
-                    .sentinel = .none,
-                    .elem_ty = elem_ty_ptr,
-                } },
+                .data = .{ .other = node_handle },
                 .is_type_val = false,
             };
         },
@@ -2372,6 +2368,8 @@ pub const Type = struct {
 
         /// - Error type: `Foo || Bar`, `Foo!Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
+        /// - `.{a,b}`
+        /// - `start..end`
         other: NodeWithHandle,
 
         /// - `@compileError("")`
@@ -4011,7 +4009,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
-                    .container => try analyser.resolveTupleFieldType(node, pay.index),
+                    .container, .other => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
                 };
             },

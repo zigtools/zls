@@ -181,7 +181,7 @@ test "symbol lookup on identifier named after primitive" {
     });
 }
 
-test "assign destructure" {
+test "var decl destructuring" {
     try testCompletion(
         \\test {
         \\    const foo, var bar: u32 = .{42, 7};
@@ -191,7 +191,15 @@ test "assign destructure" {
         .{ .label = "foo", .kind = .Constant, .detail = "comptime_int" },
         .{ .label = "bar", .kind = .Variable, .detail = "u32" },
     });
-    if (true) return error.SkipZigTest; // TODO
+    try testCompletion(
+        \\test {
+        \\    var foo, const bar = .{@as(u32, 42), @as(u64, 7)};
+        \\    <cursor>
+        \\}
+    , &.{
+        .{ .label = "foo", .kind = .Variable, .detail = "u32" },
+        .{ .label = "bar", .kind = .Constant, .detail = "u64" },
+    });
     try testCompletion(
         \\test {
         \\    const S, const E = .{struct{}, enum{}};
@@ -200,6 +208,16 @@ test "assign destructure" {
     , &.{
         .{ .label = "S", .kind = .Struct, .detail = "type" },
         .{ .label = "E", .kind = .Enum, .detail = "type" },
+    });
+    try testCompletion(
+        \\test {
+        \\    const foo, const bar: u64, var baz = [_]u32{1, 2, 3};
+        \\    <cursor>
+        \\}
+    , &.{
+        .{ .label = "foo", .kind = .Constant, .detail = "u32" },
+        .{ .label = "bar", .kind = .Constant, .detail = "u64" },
+        .{ .label = "baz", .kind = .Variable, .detail = "u32" },
     });
 }
 
