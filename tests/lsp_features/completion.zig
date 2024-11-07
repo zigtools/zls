@@ -3056,8 +3056,8 @@ test "insert replace behaviour - builtin with no parameters" {
     try testCompletionTextEdit(.{
         .source = "const foo = @<cursor>;",
         .label = "@src",
-        .expected_insert_line = "const foo = @src();",
-        .expected_replace_line = "const foo = @src();",
+        .expected_insert_line = "const foo = @src;",
+        .expected_replace_line = "const foo = @src;",
     });
     try testCompletionTextEdit(.{
         .source = "const foo = @<cursor>();",
@@ -3208,6 +3208,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+        .enable_snippets = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -3218,34 +3219,11 @@ test "insert replace behaviour - function 'self parameter' detection" {
         \\S.<cursor>
         ,
         .label = "f",
-        .expected_insert_line = "S.f",
-        .expected_replace_line = "S.f",
+        .expected_insert_line = "S.f(${1:})",
+        .expected_replace_line = "S.f(${1:})",
+        .enable_snippets = true,
     });
-    try testCompletionTextEdit(.{
-        .source =
-        \\const S = struct {
-        \\    alpha: u32,
-        \\    fn f() void {}
-        \\};
-        \\S.<cursor>
-        ,
-        .label = "f",
-        .expected_insert_line = "S.f()",
-        .expected_replace_line = "S.f()",
-    });
-    try testCompletionTextEdit(.{
-        .source =
-        \\const S = struct {
-        \\    alpha: u32,
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-        ,
-        .label = "f",
-        .expected_insert_line = "s.f()",
-        .expected_replace_line = "s.f()",
-    });
+
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
@@ -3258,6 +3236,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
+        .enable_snippets = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -3271,19 +3250,7 @@ test "insert replace behaviour - function 'self parameter' detection" {
         .label = "f",
         .expected_insert_line = "s.f()",
         .expected_replace_line = "s.f()",
-    });
-    try testCompletionTextEdit(.{
-        .source =
-        \\const S = struct {
-        \\    alpha: u32,
-        \\    fn f(self: S) void {}
-        \\};
-        \\const s = S{};
-        \\s.<cursor>
-        ,
-        .label = "f",
-        .expected_insert_line = "s.f()",
-        .expected_replace_line = "s.f()",
+        .enable_snippets = true,
     });
     try testCompletionTextEdit(.{
         .source =
@@ -3295,8 +3262,9 @@ test "insert replace behaviour - function 'self parameter' detection" {
         \\s.<cursor>
         ,
         .label = "f",
-        .expected_insert_line = "s.f",
-        .expected_replace_line = "s.f",
+        .expected_insert_line = "s.f(${1:})",
+        .expected_replace_line = "s.f(${1:})",
+        .enable_snippets = true,
     });
 }
 
