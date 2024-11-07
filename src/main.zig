@@ -57,7 +57,7 @@ fn logFn(
     const scope_txt: []const u8 = comptime @tagName(scope);
     const trimmed_scope = if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt;
 
-    var buffer: [1024]u8 = undefined;
+    var buffer: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
     const no_space_left = blk: {
         fbs.writer().print("{s} ({s:^6}): ", .{ level_txt, trimmed_scope }) catch break :blk true;
