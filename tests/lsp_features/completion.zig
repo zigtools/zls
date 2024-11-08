@@ -2770,7 +2770,7 @@ test "builtin fns taking an enum arg" {
     });
 }
 
-test "block" {
+test "label" {
     try testCompletion(
         \\const foo = blk: {
         \\    break :<cursor>
@@ -2925,6 +2925,21 @@ test "top-level doc comment" {
 test "filesystem" {
     try testCompletion(
         \\const foo = @import("<cursor>");
+    , &.{
+        .{
+            .label = "std",
+            .kind = .Module,
+        },
+        .{
+            .label = "builtin",
+            .kind = .Module,
+        },
+    });
+}
+
+test "filesystem string literal ends with non ASCII symbol" {
+    try testCompletion(
+        \\const foo = @import("<cursor> 🠁
     , &.{
         .{
             .label = "std",

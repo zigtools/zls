@@ -3355,45 +3355,53 @@ pub fn getFieldAccessType(
 
 pub const PositionContext = union(enum) {
     builtin: offsets.Loc,
-    comment,
     import_string_literal: offsets.Loc,
     cinclude_string_literal: offsets.Loc,
     embedfile_string_literal: offsets.Loc,
     string_literal: offsets.Loc,
     field_access: offsets.Loc,
     var_access: offsets.Loc,
-    global_error_set,
+    /// `break :blk`
+    /// `continue :blk`
+    label_access: offsets.Loc,
+    /// - `blk: {`
+    /// - `blk: for`
+    /// - `blk: while`
+    /// - `blk: switch`
+    label_decl: offsets.Loc,
     enum_literal: offsets.Loc,
     number_literal: offsets.Loc,
     char_literal: offsets.Loc,
     /// XXX: Internal use only, currently points to the loc of the first l_paren
     parens_expr: offsets.Loc,
     keyword: std.zig.Token.Tag,
-    pre_label,
-    label: bool,
+    global_error_set,
+    comment,
     other,
     empty,
 
     pub fn loc(self: PositionContext) ?offsets.Loc {
         return switch (self) {
-            .builtin => |r| r,
-            .comment => null,
-            .import_string_literal => |r| r,
-            .cinclude_string_literal => |r| r,
-            .embedfile_string_literal => |r| r,
-            .string_literal => |r| r,
-            .field_access => |r| r,
-            .var_access => |r| r,
-            .enum_literal => |r| r,
-            .number_literal => |r| r,
-            .char_literal => |r| r,
-            .parens_expr => |r| r,
-            .keyword => null,
-            .pre_label => null,
-            .label => null,
-            .other => null,
-            .empty => null,
-            .global_error_set => null,
+            .builtin,
+            .import_string_literal,
+            .cinclude_string_literal,
+            .embedfile_string_literal,
+            .string_literal,
+            .field_access,
+            .var_access,
+            .label_access,
+            .label_decl,
+            .enum_literal,
+            .number_literal,
+            .char_literal,
+            .parens_expr,
+            => |l| return l,
+            .keyword,
+            .global_error_set,
+            .comment,
+            .other,
+            .empty,
+            => return null,
         };
     }
 };
@@ -3423,67 +3431,38 @@ pub fn isSymbolChar(char: u8) bool {
 
 /// Given a byte index in a document (typically cursor offset), classify what kind of entity is at that index.
 ///
-/// Classification is based on the lexical structure -- we fetch the line containing index, tokenize it,
-/// and look at the sequence of tokens just before the cursor. Due to the nice way zig is designed (only line
-/// comments, etc) lexing just a single line is always correct.
+/// Classification is based on the lexical structure -- we fetch the line containing index, and look at the
+/// sequence of tokens just before the cursor. Due to the nice way zig is designed (only line comments, etc)
+/// lexing just a single line is always correct.
 pub fn getPositionContext(
     allocator: std.mem.Allocator,
-    text: []const u8,
-    doc_index: usize,
-    /// Should we look to the end of the current context? Yes for goto def, no for completions
+    tree: Ast,
+    source_index: usize,
+    /// Should we look beyond the `source_index`? `false` for completions, `true` otherwise (hover, goto, etc.)
     lookahead: bool,
 ) error{OutOfMemory}!PositionContext {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_index = doc_index;
-    if (lookahead) {
-        // looking for possible end of char literal
-        if (std.mem.indexOf(u8, text[doc_index..@min(doc_index + 2, text.len)], &.{'\''})) |char_index| {
-            if (text[new_index + char_index - 1] == '\\') {
-                // handles escaped single quotes '\''
-                new_index = @min(new_index + char_index + 2, text.len - 1);
-            } else {
-                new_index += char_index + 1;
-            }
-        } else if (new_index + 2 < text.len) {
-            if (text[new_index] == '@') new_index += 2;
-            while (new_index < text.len and isSymbolChar(text[new_index])) : (new_index += 1) {}
-            if (new_index < text.len) {
-                switch (text[new_index]) {
-                    ':' => { // look for `id:`, but avoid `a: T` by checking for a `{` following the ':'
-                        var b_index = new_index + 1;
-                        while (b_index < text.len and text[b_index] == ' ') : (b_index += 1) {} // eat spaces
-                        if (text[b_index] == '{') new_index += 1; // current new_index points to ':', but slc ends are exclusive => `text[0..pos_of_r_brace]`
-                    },
-                    // ';' => new_index += 1, // XXX: currently given `some;` the last letter gets cut off, ie `som`, but fixing it breaks existing logic.. ?
-                    else => {},
-                }
-            }
-        }
-    }
+    var line_loc = if (lookahead) offsets.lineLocAtIndex(tree.source, source_index) else offsets.lineLocUntilIndex(tree.source, source_index);
 
-    const prev_char = if (new_index > 0) text[new_index - 1] else 0;
-    var line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
-    const line = offsets.locToSlice(text, line_loc);
-
-    if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return .comment;
+    if (std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) return .comment;
 
     // Check if the (trimmed) line starts with a '.', ie a continuation
     while (line_loc.start > 0) {
-        while (std.mem.startsWith(u8, std.mem.trimLeft(u8, text[line_loc.start..line_loc.end], " \t\r"), ".")) {
+        while (std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t\r"), ".")) {
             if (line_loc.start > 1) {
                 line_loc.start -= 2; // jump over a (potential) preceding '\n'
             } else break;
             while (line_loc.start > 0) : (line_loc.start -= 1) {
-                if (text[line_loc.start] == '\n') {
+                if (tree.source[line_loc.start] == '\n') {
                     line_loc.start += 1; // eat the `\n`
                     break;
                 }
             } else break;
         }
-        if (line_loc.start != 0 and std.mem.startsWith(u8, std.mem.trimLeft(u8, text[line_loc.start..line_loc.end], " \t"), "//")) {
-            const prev_line_loc = offsets.lineLocAtIndex(text, line_loc.start - 1); // `- 1` => prev line's `\n`
+        if (line_loc.start != 0 and std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) {
+            const prev_line_loc = offsets.lineLocAtIndex(tree.source, line_loc.start - 1); // `- 1` => prev line's `\n`
             line_loc.start = prev_line_loc.start;
             continue;
         }
@@ -3492,188 +3471,182 @@ pub fn getPositionContext(
 
     var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
     defer stack.deinit(allocator);
+    var should_do_lookahead = lookahead;
 
-    {
-        var held_line = try allocator.dupeZ(u8, text[0..line_loc.end]);
-        defer allocator.free(held_line);
+    var current_token = offsets.sourceIndexToTokenIndex(tree, line_loc.start);
 
-        var tokenizer: std.zig.Tokenizer = .{
-            .buffer = held_line,
-            .index = line_loc.start,
+    while (true) : (current_token += 1) {
+        var tok: std.zig.Token = .{
+            .tag = tree.tokens.items(.tag)[current_token],
+            .loc = offsets.tokenToLoc(tree, current_token),
         };
+        tok.loc.end = @min(tok.loc.end, line_loc.end);
 
-        while (true) {
-            var tok = tokenizer.next();
-            // Early exits.
-            if (tok.loc.start > new_index) break;
-            if (tok.loc.start == new_index) {
-                // Tie-breaking, the cursor is exactly between two tokens, and
-                // `tok` is the latter of the two.
-                if (tok.tag != .identifier) break;
-            }
+        if (source_index < tok.loc.start) break;
+        if (source_index == tok.loc.start) {
+            // Tie-breaking, the cursor is exactly between two tokens, and
+            // `tok` is the latter of the two.
+            if (!should_do_lookahead) break;
             switch (tok.tag) {
-                .invalid => {
-                    // Single '@' do not return a builtin token so we check this on our own.
-                    if (prev_char == '@') {
-                        return PositionContext{
-                            .builtin = .{
-                                .start = line_loc.end - 1,
-                                .end = line_loc.end,
-                            },
-                        };
-                    }
-                    const s = held_line[tok.loc.start..tok.loc.end];
-                    const q = std.mem.indexOf(u8, s, "\"") orelse return .other;
-                    if (s[q -| 1] == '@') {
-                        tok.tag = .identifier;
-                    } else {
-                        tok.tag = .string_literal;
-                    }
-                },
-                .doc_comment, .container_doc_comment => return .comment,
-                .eof => break,
-                else => {},
+                .identifier, .builtin => should_do_lookahead = false,
+                else => break,
             }
+        }
 
-            // State changes
-            var curr_ctx = try peek(allocator, &stack);
-            switch (tok.tag) {
-                .string_literal, .multiline_string_literal_line => string_lit_block: {
-                    if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
-                        const perhaps_builtin = stack.items[stack.items.len - 2];
-
-                        switch (perhaps_builtin.ctx) {
-                            .builtin => |loc| {
-                                const builtin_name = tokenizer.buffer[loc.start..loc.end];
-                                if (std.mem.eql(u8, builtin_name, "@import")) {
-                                    curr_ctx.ctx = .{ .import_string_literal = tok.loc };
-                                    break :string_lit_block;
-                                } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
-                                    curr_ctx.ctx = .{ .cinclude_string_literal = tok.loc };
-                                    break :string_lit_block;
-                                } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
-                                    curr_ctx.ctx = .{ .embedfile_string_literal = tok.loc };
-                                    break :string_lit_block;
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                    curr_ctx.ctx = .{ .string_literal = tok.loc };
-                },
-                .identifier => switch (curr_ctx.ctx) {
-                    .empty,
-                    .pre_label,
-                    .var_access,
-                    .parens_expr,
-                    => curr_ctx.ctx = .{ .var_access = tok.loc },
-                    .label => |filled| if (!filled) {
-                        curr_ctx.ctx = .{ .label = true };
-                    } else {
-                        curr_ctx.ctx = .{ .var_access = tok.loc };
-                    },
-                    .enum_literal => curr_ctx.ctx = .{
-                        .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
-                    },
-                    else => {},
-                },
-                .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
-                .period, .period_asterisk => switch (curr_ctx.ctx) {
-                    .empty, .pre_label => curr_ctx.ctx = .{ .enum_literal = tok.loc },
-                    .enum_literal => curr_ctx.ctx = .empty,
-                    .field_access => {},
-                    .keyword => return .other, // no keyword can be `.`/`.*` accessed
-                    .other => {},
-                    .global_error_set => {},
-                    .label => |filled| if (filled) {
-                        curr_ctx.ctx = .{ .enum_literal = tok.loc };
-                    },
-                    else => curr_ctx.ctx = .{
-                        .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
-                    },
-                },
-                .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
-                .colon => if (curr_ctx.ctx == .pre_label) {
-                    curr_ctx.ctx = .{ .label = false };
-                } else if (curr_ctx.ctx == .var_access) {
-                    curr_ctx.ctx = .{ .label = true };
+        switch (tok.tag) {
+            .invalid => {
+                // Single '@' do not return a builtin token so we check this on our own.
+                if (tree.source[tok.loc.start] == '@') {
+                    return PositionContext{ .builtin = tok.loc };
+                }
+                const s = tree.source[tok.loc.start..tok.loc.end];
+                const q = std.mem.indexOf(u8, s, "\"") orelse return .other;
+                if (s[q -| 1] == '@') {
+                    tok.tag = .identifier;
                 } else {
-                    curr_ctx.ctx = .empty;
-                },
-                .question_mark => switch (curr_ctx.ctx) {
-                    .field_access => {},
+                    tok.tag = .string_literal;
+                }
+            },
+            .eof => break,
+            else => {},
+        }
+
+        // State changes
+        var curr_ctx = try peek(allocator, &stack);
+        switch (tok.tag) {
+            .string_literal, .multiline_string_literal_line => string_lit_block: {
+                const string_literal_slice = offsets.locToSlice(tree.source, tok.loc);
+                var string_literal_loc = tok.loc;
+
+                if (std.mem.startsWith(u8, string_literal_slice, "\"")) {
+                    string_literal_loc.start += 1;
+                    if (std.mem.endsWith(u8, string_literal_slice[1..], "\"")) {
+                        string_literal_loc.end -= 1;
+                    }
+                } else if (std.mem.startsWith(u8, string_literal_slice, "\\")) {
+                    string_literal_loc.start += 2;
+                }
+
+                if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
+                    const perhaps_builtin = stack.items[stack.items.len - 2];
+
+                    switch (perhaps_builtin.ctx) {
+                        .builtin => |loc| {
+                            const builtin_name = tree.source[loc.start..loc.end];
+                            if (std.mem.eql(u8, builtin_name, "@import")) {
+                                curr_ctx.ctx = .{ .import_string_literal = string_literal_loc };
+                                break :string_lit_block;
+                            } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
+                                curr_ctx.ctx = .{ .cinclude_string_literal = string_literal_loc };
+                                break :string_lit_block;
+                            } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
+                                curr_ctx.ctx = .{ .embedfile_string_literal = string_literal_loc };
+                                break :string_lit_block;
+                            }
+                        },
+                        else => {},
+                    }
+                }
+                curr_ctx.ctx = .{ .string_literal = string_literal_loc };
+            },
+            .identifier => switch (curr_ctx.ctx) {
+                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
+                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
+                .label_access => |loc| curr_ctx.ctx = if (loc.start == loc.end)
+                    .{ .label_access = tok.loc }
+                else
+                    .{ .var_access = tok.loc },
+                else => curr_ctx.ctx = .{ .var_access = tok.loc },
+            },
+            .builtin => switch (curr_ctx.ctx) {
+                .empty => curr_ctx.ctx = .{ .builtin = tok.loc },
+                else => {},
+            },
+            .period, .period_asterisk => switch (curr_ctx.ctx) {
+                .empty => curr_ctx.ctx = .{ .enum_literal = tok.loc },
+                .enum_literal => curr_ctx.ctx = .empty,
+                .keyword => return .other, // no keyword can be `.`/`.*` accessed
+                .other, .field_access, .global_error_set => {},
+                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
+            },
+            .question_mark => switch (curr_ctx.ctx) {
+                .field_access => {},
+                else => curr_ctx.ctx = .empty,
+            },
+            .colon => switch (curr_ctx.ctx) {
+                .keyword => |tag| switch (tag) {
+                    .keyword_break,
+                    .keyword_continue,
+                    => curr_ctx.ctx = .{ .label_access = .{ .start = tok.loc.end, .end = tok.loc.end } },
                     else => curr_ctx.ctx = .empty,
                 },
-                .l_paren => {
-                    if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
-                    try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Paren });
-                },
-                .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Bracket }),
-                .r_paren => {
-                    _ = stack.pop();
-                    if (curr_ctx.stack_id != .Paren) {
-                        (try peek(allocator, &stack)).ctx = .empty;
-                    }
-                },
-                .r_bracket => {
-                    _ = stack.pop();
-                    if (curr_ctx.stack_id != .Bracket) {
-                        (try peek(allocator, &stack)).ctx = .empty;
-                    }
-                },
-                .keyword_error => curr_ctx.ctx = .global_error_set,
-                .number_literal => {
-                    if (tok.loc.start <= doc_index and tok.loc.end >= doc_index) {
-                        return PositionContext{ .number_literal = tok.loc };
-                    }
-                },
-                .char_literal => {
-                    if (tok.loc.start <= doc_index and tok.loc.end >= doc_index) {
-                        return PositionContext{ .char_literal = tok.loc };
-                    }
-                },
-                .keyword_callconv, .keyword_addrspace => curr_ctx.ctx = .{ .keyword = tok.tag },
                 else => curr_ctx.ctx = .empty,
-            }
+            },
+            .l_paren => {
+                if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
+                try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Paren });
+            },
+            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Bracket }),
+            .r_paren => {
+                _ = stack.pop();
+                if (curr_ctx.stack_id != .Paren) {
+                    (try peek(allocator, &stack)).ctx = .empty;
+                }
+            },
+            .r_bracket => {
+                _ = stack.pop();
+                if (curr_ctx.stack_id != .Bracket) {
+                    (try peek(allocator, &stack)).ctx = .empty;
+                }
+            },
+            .keyword_error => curr_ctx.ctx = .global_error_set,
+            .number_literal => {
+                if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
+                    return .{ .number_literal = tok.loc };
+                }
+            },
+            .char_literal => {
+                if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
+                    return .{ .char_literal = tok.loc };
+                }
+            },
+            .keyword_break,
+            .keyword_continue,
+            .keyword_callconv,
+            .keyword_addrspace,
+            => curr_ctx.ctx = .{ .keyword = tok.tag },
+            .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
+            else => curr_ctx.ctx = .empty,
+        }
 
-            curr_ctx = try peek(allocator, &stack);
-            switch (curr_ctx.ctx) {
-                .field_access => |r| curr_ctx.ctx = .{
-                    .field_access = tokenLocAppend(r, tok),
-                },
-                else => {},
-            }
+        curr_ctx = try peek(allocator, &stack);
+        switch (curr_ctx.ctx) {
+            .field_access => |r| curr_ctx.ctx = .{ .field_access = tokenLocAppend(r, tok) },
+            else => {},
         }
     }
 
     if (stack.popOrNull()) |state| {
         switch (state.ctx) {
-            .empty => {},
-            .label => |filled| {
-                // We need to check this because the state could be a filled
-                // label if only a space follows it
-                if (!filled or prev_char != ' ') {
-                    return state.ctx;
-                }
-            },
             .parens_expr => |loc| return .{ .var_access = loc },
+            .var_access => |loc| {
+                if (tree.tokens.items(.tag)[current_token] == .colon) {
+                    switch (tree.tokens.items(.tag)[current_token + 1]) {
+                        .l_brace,
+                        .keyword_for,
+                        .keyword_while,
+                        .keyword_switch,
+                        => return .{ .label_decl = loc },
+                        else => {},
+                    }
+                }
+                return state.ctx;
+            },
             else => return state.ctx,
         }
     }
 
-    if (line.len == 0) return .empty;
-
-    const held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
-    defer allocator.free(held_line);
-
-    switch (line[0]) {
-        'a'...'z', 'A'...'Z', '_', '@' => {},
-        else => return .empty,
-    }
-    var tokenizer = std.zig.Tokenizer.init(held_line);
-    const tok = tokenizer.next();
-
-    return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
+    return .empty;
 }
 
 pub const TokenWithHandle = struct {

@@ -1,625 +1,499 @@
 const std = @import("std");
 const zls = @import("zls");
 
+const helper = @import("../helper.zig");
+const ErrorBuilder = @import("../ErrorBuilder.zig");
+
 const Analyser = zls.Analyser;
+const offsets = zls.offsets;
 
 const allocator = std.testing.allocator;
 
-test "var access" {
+test "var_access" {
+    try testContext(
+        \\const foo = <cursor><loc>identifier</loc>;
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\const foo = <loc>identifier</loc><cursor>;
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>iden<cursor>tifier</loc>;
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\const foo = <loc>identifier</loc><cursor>;
+    , .var_access, .{});
+    try testContext(
+        \\const foo =<cursor> identifier;
+    , .empty, .{ .lookahead = false });
+    try testContext(
+        \\const foo = identifier;<cursor>
+    , .empty, .{});
+}
+
+test "function.payload" {
+    try testContext(
+        \\    fn foo() !<cursor><loc>Str</loc> {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() !<cursor><loc>Str</loc> {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() !<loc>St<cursor>r</loc> {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() !<loc>Str</loc><cursor> {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() !<loc>Str</loc> <cursor>{
+    , .var_access, .{ .lookahead = true });
+}
+
+test "function.error_set" {
+    try testContext(
+        \\    fn foo() <cursor><loc>Err</loc>!void {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() <loc>Er<cursor>r</loc>!void {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() <loc>Err</loc><cursor>!void {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\    fn foo() Err!<cursor><loc>void</loc> {
+    , .var_access, .{ .lookahead = true });
+}
+
+test "function.parameter" {
+    try testContext(
+        \\fn foo(
+        \\    /// hello world
+        \\    <loc><cursor>a</loc>: u32,
+        \\) void {}
+    , .var_access, .{ .lookahead = true });
+}
+
+test "var_access.nested" {
+    try testContext(
+        \\if (<cursor><loc>bar</loc>.field == foo) {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\if (<loc>ba<cursor>r</loc>.field == foo) {
+    , .var_access, .{ .lookahead = true });
+    try testContext(
+        \\if (<loc>bar</loc><cursor>.field == foo) {
+    , .var_access, .{ .lookahead = true });
+}
+
+test "var_access no lookahead" {
     try testContext(
         \\const a_var =<cursor> identifier;
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{ .lookahead = false });
     try testContext(
         \\const a_var = <cursor>identifier;
-    ,
-        .var_access,
-        "identifier",
-    );
+    , .empty, .{ .lookahead = false });
     try testContext(
-        \\const a_var = iden<cursor>tifier;
-    ,
-        .var_access,
-        "identifier",
-    );
+        \\const a_var = <loc>iden</loc><cursor>tifier;
+    , .var_access, .{ .lookahead = false });
     try testContext(
-        \\const a_var = identifier<cursor>;
-    ,
-        .var_access,
-        "identifier",
-    );
+        \\const a_var = <loc>identifier</loc><cursor>;
+    , .var_access, .{ .lookahead = false });
     try testContext(
         \\const a_var = identifier;<cursor>
-    ,
-        .empty,
-        null,
-    );
-
-    try testContext(
-        \\    fn foo() !<cursor>Str {
-    ,
-        .var_access,
-        "Str",
-    );
-    try testContext(
-        \\    fn foo() !St<cursor>r {
-    ,
-        .var_access,
-        "Str",
-    );
-    try testContext(
-        \\    fn foo() !Str<cursor> {
-    ,
-        .var_access,
-        "Str",
-    );
-    try testContext(
-        \\    fn foo() !Str <cursor>{
-    ,
-        .var_access,
-        "Str",
-    );
-
-    try testContext(
-        \\    fn foo() <cursor>Err!void {
-    ,
-        .var_access,
-        "Err",
-    );
-    try testContext(
-        \\    fn foo() Er<cursor>r!void {
-    ,
-        .var_access,
-        "Err",
-    );
-    try testContext(
-        \\    fn foo() Err<cursor>!void {
-    ,
-        .var_access,
-        "Err",
-    );
-    try testContext(
-        \\    fn foo() Err!<cursor>void {
-    ,
-        .var_access,
-        "void",
-    );
-
-    try testContext(
-        \\if (<cursor>bar.field == foo) {
-    ,
-        .var_access,
-        "bar",
-    );
-    try testContext(
-        \\if (ba<cursor>r.field == foo) {
-    ,
-        .var_access,
-        "bar",
-    );
-    try testContext(
-        \\if (bar<cursor>.field == foo) {
-    ,
-        .var_access,
-        "bar",
-    );
-
-    try testContext(
-        \\if (bar[0]<cursor>.field == foo) {
-    ,
-        .var_access,
-        "bar",
-    );
+    , .empty, .{ .lookahead = false });
 }
 
 test "field access" {
     try testContext(
-        \\if (bar.<cursor>field == foo) {
-    ,
-        .field_access,
-        "bar.field",
-    );
+        \\if (<loc>bar.<cursor>field</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.fie<cursor>ld == foo) {
-    ,
-        .field_access,
-        "bar.field",
-    );
+        \\if (<loc>bar.fie<cursor>ld</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.field<cursor> == foo) {
-    ,
-        .field_access,
-        "bar.field",
-    );
+        \\if (<loc>bar.field</loc><cursor> == foo) {
+    , .field_access, .{});
 
     try testContext(
-        \\if (bar.member<cursor>.field == foo) {
-    ,
-        .field_access,
-        "bar.member",
-    );
+        \\if (<loc>bar.member</loc><cursor>.field == foo) {
+    , .field_access, .{});
     try testContext(
-        \\if (bar.member.<cursor>field == foo) {
-    ,
-        .field_access,
-        "bar.member.field",
-    );
+        \\if (<loc>bar.member.<cursor>field</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.member.fie<cursor>ld == foo) {
-    ,
-        .field_access,
-        "bar.member.field",
-    );
+        \\if (<loc>bar.member.fie<cursor>ld</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.member.field<cursor> == foo) {
-    ,
-        .field_access,
-        "bar.member.field",
-    );
+        \\if (<loc>bar.member.field</loc><cursor> == foo) {
+    , .field_access, .{});
 
     try testContext(
-        \\if (bar.*.?<cursor>.field == foo) {
-    ,
-        .field_access,
-        "bar.*.?",
-    );
+        \\if (<loc>bar.*.?</loc><cursor>.field == foo) {
+    , .field_access, .{});
     try testContext(
-        \\if (bar.*.?.<cursor>field == foo) {
-    ,
-        .field_access,
-        "bar.*.?.field",
-    );
+        \\if (<loc>bar.*.?.<cursor>field</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
 
     try testContext(
-        \\if (bar[0].<cursor>field == foo) {
-    ,
-        .field_access,
-        "bar[0].field",
-    );
+        \\if (<loc>bar[0].<cursor>field</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
 
     try testContext(
-        \\if (bar.<cursor>@"field" == foo) {
-    ,
-        .field_access,
-        "bar.@\"field",
-    );
+        \\if (<loc>bar.<cursor>@"field"</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.@"fie<cursor>ld" == foo) {
-    ,
-        .field_access,
-        "bar.@\"field",
-    );
+        \\if (<loc>bar.@"fie<cursor>ld"</loc> == foo) {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (bar.@"field"<cursor> == foo) {
-    ,
-        .field_access,
-        "bar.@\"field\"",
-    );
+        \\if (<loc>bar.@"field"</loc><cursor> == foo) {
+    , .field_access, .{ .lookahead = true });
 
     try testContext(
-        \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).<cursor>init(allocator);
-    ,
-        .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).init",
-    );
+        \\const arr = <loc>std.ArrayList(SomeStruct(a, b, c, d)).<cursor>init</loc>(allocator);
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).in<cursor>it(allocator);
-    ,
-        .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).init",
-    );
+        \\const arr = <loc>std.ArrayList(SomeStruct(a, b, c, d)).in<cursor>it</loc>(allocator);
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).init<cursor>(allocator);
-    ,
-        .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).init",
-    );
+        \\const arr = <loc>std.ArrayList(SomeStruct(a, b, c, d)).init</loc><cursor>(allocator);
+    , .field_access, .{ .lookahead = true });
 
     try testContext(
-        \\fn foo() !Foo.<cursor>bar {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() !<loc>Foo.<cursor>bar</loc> {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\fn foo() !Foo.ba<cursor>r {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() !<loc>Foo.ba<cursor>r</loc> {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\fn foo() !Foo.bar<cursor> {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() !<loc>Foo.bar</loc><cursor> {
+    , .field_access, .{});
 
     try testContext(
-        \\fn foo() Foo.<cursor>bar!void {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() <loc>Foo.<cursor>bar</loc>!void {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\fn foo() Foo.ba<cursor>r!void {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() <loc>Foo.ba<cursor>r</loc>!void {
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\fn foo() Foo.bar<cursor>!void {
-    ,
-        .field_access,
-        "Foo.bar",
-    );
+        \\fn foo() <loc>Foo.bar</loc><cursor>!void {
+    , .field_access, .{});
 
     try testContext(
-        \\if (true) foo.<cursor>bar == 3
-    ,
-        .field_access,
-        "foo.bar",
-    );
+        \\if (true) <loc>foo.<cursor>bar</loc> == 3
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (true) foo.ba<cursor>r == 3
-    ,
-        .field_access,
-        "foo.bar",
-    );
+        \\if (true) <loc>foo.ba<cursor>r</loc> == 3
+    , .field_access, .{ .lookahead = true });
     try testContext(
-        \\if (true) foo.bar<cursor> == 3
-    ,
-        .field_access,
-        "foo.bar",
-    );
+        \\if (true) <loc>foo.bar<cursor></loc> == 3
+    , .field_access, .{});
 }
 
 test "builtin" {
     try testContext(
         \\var foo = <cursor>@
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
+
     try testContext(
-        \\var foo = @<cursor>
-    ,
-        .builtin,
-        "@",
-    );
+        \\var foo = <loc>@<cursor></loc>
+    , .builtin, .{});
     try testContext(
-        \\var foo = @tag<cursor>Name
-    ,
-        .builtin,
-        "@tagName",
-    );
+        \\var foo = <loc>@tag<cursor>Name</loc>
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo = @tagName<cursor>
-    ,
-        .builtin,
-        "@tagName",
-    );
+        \\var foo = <loc>@tagName<cursor></loc>
+    , .builtin, .{});
+
     try testContext(
-        \\var foo = <cursor>@intC(u32, 5);
-    ,
-        .builtin,
-        "@intC",
-    );
+        \\var foo = <cursor><loc>@intC</loc>(u32, 5);
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo = @<cursor>intC(u32, 5);
-    ,
-        .builtin,
-        "@intC",
-    );
+        \\var foo = <loc>@<cursor>intC</loc>(u32, 5);
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo = @int<cursor>C(u32, 5);
-    ,
-        .builtin,
-        "@intC",
-    );
+        \\var foo = <loc>@int<cursor>C</loc>(u32, 5);
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo = @intC<cursor>(u32, 5);
-    ,
-        .builtin,
-        "@intC",
-    );
+        \\var foo = <loc>@intC</loc><cursor>(u32, 5);
+    , .builtin, .{});
 
     try testContext(
         \\var foo: <cursor>@
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
     try testContext(
-        \\var foo: <cursor>@Thi();
-    ,
-        .builtin,
-        "@Thi",
-    );
+        \\var foo: <loc><cursor>@Thi</loc>();
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo: @<cursor>Thi();
-    ,
-        .builtin,
-        "@Thi",
-    );
+        \\var foo: <loc>@<cursor>Thi</loc>();
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo: @Th<cursor>i();
-    ,
-        .builtin,
-        "@Thi",
-    );
+        \\var foo: <loc>@Th<cursor>i</loc>();
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\var foo: @Thi<cursor>();
-    ,
-        .builtin,
-        "@Thi",
-    );
+        \\var foo: <loc>@Thi<cursor></loc>();
+    , .builtin, .{});
 
     try testContext(
-        \\fn foo() void { <cursor>@setRuntime(false); };
-    ,
-        .builtin,
-        "@setRuntime",
-    );
+        \\fn foo() void { <cursor><loc>@setRuntime</loc>(false); };
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\fn foo() void { @<cursor>setRuntime(false); };
-    ,
-        .builtin,
-        "@setRuntime",
-    );
+        \\fn foo() void { <loc>@<cursor>setRuntime</loc>(false); };
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\fn foo() void { @set<cursor>Runtime(false); };
-    ,
-        .builtin,
-        "@setRuntime",
-    );
+        \\fn foo() void { <loc>@set<cursor>Runtime</loc>(false); };
+    , .builtin, .{ .lookahead = true });
     try testContext(
-        \\fn foo() void { @setRuntime<cursor>(false); };
-    ,
-        .builtin,
-        "@setRuntime",
-    );
+        \\fn foo() void { <loc>@setRuntime</loc><cursor>(false); };
+    , .builtin, .{});
 }
 
 test "comment" {
     try testContext(
+        \\//! i am<cursor> a test
+    , .comment, .{});
+    try testContext(
         \\// i am<cursor> a test
-    ,
-        .comment,
-        null, // report "// i am a test"
-    );
+    , .comment, .{});
     try testContext(
         \\/// i am<cursor> a test
-    ,
-        .comment,
-        null, // report /// i am a test
-    );
+    , .comment, .{});
+    // TODO
+    // try testContext(
+    //     \\const foo = // i am<cursor> a test
+    // , .comment, .{});
 }
 
 test "import/embedfile string literal" {
     try testContext(
-        \\const std = @import("s<cursor>t");
-    ,
-        .import_string_literal,
-        "\"st", // maybe report just "st"
-    );
+        \\const std = @import("<loc>s</loc><cursor>t");
+    , .import_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @import("st<cursor>");
-    ,
-        .import_string_literal,
-        "\"st", // maybe report just "st"
-    );
+        \\const std = @import("<loc>st</loc><cursor>");
+    , .import_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @embedFile("file.<cursor>");
-    ,
-        .embedfile_string_literal,
-        "\"file.", // maybe report just "file."
-    );
+        \\const std = @embedFile("<loc>file</loc><cursor>.");
+    , .embedfile_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @embedFile("file<cursor>.");
-    ,
-        .embedfile_string_literal,
-        "\"file", // maybe report just "file."
-    );
+        \\const std = @embedFile("<loc>file.</loc><cursor>");
+    , .embedfile_string_literal, .{ .lookahead = false });
 }
 
 test "string literal" {
     try testContext(
-        \\var foo = "he<cursor>llo world!";
-    ,
-        .string_literal,
-        "\"hello",
-    );
+        \\var foo = <cursor>"hello world!";
+    , .empty, .{});
+
     try testContext(
-        \\var foo = \\hell<cursor>o;
-    ,
-        .string_literal,
-        "\\\\hell", // XXX: where's the 'o'?
-    );
+        \\var foo = "<loc></loc><cursor>";
+    , .string_literal, .{});
+    // TODO
+    // try testContext(
+    //     \\var foo = "<loc>\"</loc><cursor>";
+    // , .string_literal, .{});
+
+    try testContext(
+        \\var foo = "<loc>hello</loc><cursor> world!";
+    , .string_literal, .{ .lookahead = false });
+    try testContext(
+        \\var foo = "<loc>hello<cursor> world!</loc>";
+    , .string_literal, .{ .lookahead = true });
+
+    // TODO
+    // try testContext(
+    //     \\var foo = "hello world!"<cursor>;
+    // , .empty, .{});
+}
+
+test "multi-line string literal" {
+    try testContext(
+        \\var foo = <cursor>\\hello;
+    , .empty, .{});
+
+    try testContext(
+        \\var foo = \\<loc></loc><cursor>
+    , .string_literal, .{});
+    try testContext(
+        \\var foo = \\<loc>\"</loc><cursor>
+    , .string_literal, .{});
+
+    try testContext(
+        \\var foo = \\<loc>hello</loc><cursor> world!
+    , .string_literal, .{ .lookahead = false });
+    try testContext(
+        \\var foo = \\<loc>hello<cursor> world!</loc>
+    , .string_literal, .{ .lookahead = true });
+
+    try testContext(
+        \\var foo = \\<loc>hello;</loc><cursor>
+    , .string_literal, .{});
 }
 
 test "global error set" {
     // TODO why is this a .var_access instead of a .global_error_set?
     // try testContext(
     //     \\fn foo() <cursor>error!void {
-    // ,
-    //     .global_error_set,
-    //     null,
-    // );
+    // , .global_error_set, .{});
     try testContext(
         \\fn foo() erro<cursor>r!void {
-    ,
-        .global_error_set,
-        null,
-    );
+    , .global_error_set, .{ .lookahead = true });
     try testContext(
         \\fn foo() error<cursor>!void {
-    ,
-        .global_error_set,
-        null,
-    );
+    , .global_error_set, .{});
     try testContext(
         \\fn foo() error<cursor>.!void {
-    ,
-        .global_error_set,
-        null,
-    );
+    , .global_error_set, .{});
     try testContext(
         \\fn foo() error.<cursor>!void {
-    ,
-        .global_error_set,
-        null,
-    );
+    , .global_error_set, .{});
 
     // TODO this should probably also be .global_error_set
     // try testContext(
     //     \\fn foo() error{<cursor>}!void {
-    // ,
-    //     .global_error_set,
-    //     null,
-    // );
+    // , .global_error_set, .{});
     // try testContext(
     //     \\fn foo() error{OutOfMemory, <cursor>}!void {
-    // ,
-    //     .global_error_set,
-    //     null,
-    // );
+    // , .global_error_set, .{});
 }
 
 test "enum literal" {
     try testContext(
-        \\var foo = .<cursor>tag;
-    ,
-        .enum_literal,
-        ".tag",
-    );
+        \\var foo = <loc>.<cursor>tag</loc>;
+    , .enum_literal, .{ .lookahead = true });
     try testContext(
-        \\var foo = .ta<cursor>g;
-    ,
-        .enum_literal,
-        ".ta",
-    );
+        \\var foo = <loc>.ta<cursor>g</loc>;
+    , .enum_literal, .{ .lookahead = true });
     try testContext(
-        \\var foo = .tag<cursor>;
-    ,
-        .enum_literal,
-        ".tag",
-    );
+        \\var foo = <loc>.tag</loc><cursor>;
+    , .enum_literal, .{});
     try testContext(
         \\var foo = <cursor>.;
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
     try testContext(
-        \\var foo = .<cursor>;
-    ,
-        .enum_literal,
-        ".",
-    );
+        \\var foo = <loc>.</loc><cursor>;
+    , .enum_literal, .{});
 }
 
-test "label" {
+test "label access" {
     try testContext(
-        \\var foo = blk<cursor>: { break :blk null };
-    ,
-        .label,
-        null,
-    );
+        \\var foo = blk: { break :<loc><cursor>blk</loc> null };
+    , .label_access, .{ .lookahead = true });
     try testContext(
-        \\var foo = <cursor>blk: { break :blk null };
-    ,
-        .label,
-        null,
-    );
+        \\var foo = blk: { break :<loc>blk<cursor></loc> null };
+    , .label_access, .{});
+
     try testContext(
-        \\var foo = blk: { break <cursor>:blk null };
-    ,
-        .pre_label,
-        null,
-    );
+        \\break :blk <loc>foo<cursor></loc>;
+    , .var_access, .{});
+}
+
+test "label decl" {
     try testContext(
-        \\var foo = blk: { break :<cursor>blk null };
-    ,
-        .label,
-        null,
-    );
+        \\var foo = <loc><cursor>blk</loc>: { break :blk null };
+    , .label_decl, .{ .lookahead = true });
     try testContext(
-        \\var foo = blk: { break :bl<cursor>k null };
-    ,
-        .label,
-        null,
-    );
-    try testContext(
-        \\var foo = blk: { break :blk<cursor> null };
-    ,
-        .label,
-        null,
-    );
+        \\var foo = <loc>blk<cursor></loc>: { break :blk null };
+    , .label_decl, .{});
 }
 
 test "empty" {
     try testContext(
         \\<cursor>
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
     try testContext(
         \\try foo(arg, slice[<cursor>]);
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
     try testContext(
         \\try foo(arg, slice[<cursor>..3]);
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
     try testContext(
         \\try foo(arg, slice[0..<cursor>]);
-    ,
-        .empty,
-        null,
-    );
+    , .empty, .{});
 }
 
-fn testContext(line: []const u8, tag: std.meta.Tag(Analyser.PositionContext), maybe_range: ?[]const u8) !void {
-    const cursor_idx = std.mem.indexOf(u8, line, "<cursor>").?;
-    const final_line = try std.mem.concat(allocator, u8, &.{ line[0..cursor_idx], line[cursor_idx + "<cursor>".len ..] });
-    defer allocator.free(final_line);
+const Options = struct {
+    /// `null` means both
+    lookahead: ?bool = null,
+};
 
-    const ctx = try Analyser.getPositionContext(allocator, final_line, cursor_idx, true);
+fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionContext), options: Options) !void {
+    const lookahead = options.lookahead orelse {
+        var options_copy = options;
 
-    if (std.meta.activeTag(ctx) != tag) {
-        std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(tag), @tagName(std.meta.activeTag(ctx)) });
+        options_copy.lookahead = true;
+        try testContext(source, expected_tag, options_copy);
+
+        options_copy.lookahead = false;
+        try testContext(source, expected_tag, options_copy);
+
+        return;
+    };
+
+    var phr = try helper.collectClearPlaceholders(allocator, source);
+    defer phr.deinit(allocator);
+
+    const expected_loc: ?offsets.Loc, const cursor_index: usize = blk: {
+        var expected_loc: struct { ?usize, ?usize } = .{ null, null };
+        var cursor_index: ?usize = null;
+
+        for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
+            std.debug.assert(new_loc.start == new_loc.end);
+            const str = offsets.locToSlice(source, old_loc);
+            if (std.mem.eql(u8, str, "<cursor>")) {
+                if (cursor_index != null) @panic("duplicate placeholder '<cursor>'");
+                cursor_index = new_loc.start;
+            } else if (std.mem.eql(u8, str, "<loc>")) {
+                if (expected_loc[0] != null) @panic("duplicate placeholder '<loc>'");
+                expected_loc[0] = new_loc.start;
+            } else if (std.mem.eql(u8, str, "</loc>")) {
+                if (expected_loc[1] != null) @panic("duplicate placeholder '</loc>'");
+                expected_loc[1] = new_loc.start;
+            } else std.debug.panic("unknown placeholder '{s}'", .{str});
+        }
+        break :blk .{
+            if (expected_loc[0] == null and expected_loc[1] == null)
+                null
+            else
+                .{
+                    .start = expected_loc[0] orelse @panic("missing placeholder '<loc>'"),
+                    .end = expected_loc[1] orelse @panic("missing placeholder '</loc>'"),
+                },
+            cursor_index orelse @panic("missing placeholder '<cursor>'"),
+        };
+    };
+
+    const new_source = try allocator.dupeZ(u8, phr.new_source);
+    defer allocator.free(new_source);
+
+    var tree = try std.zig.Ast.parse(allocator, new_source, .zig);
+    defer tree.deinit(allocator);
+
+    const ctx = try Analyser.getPositionContext(allocator, tree, cursor_index, lookahead);
+
+    var error_builder = ErrorBuilder.init(allocator);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
+
+    try error_builder.addFile("file.zig", phr.new_source);
+
+    try error_builder.msgAtIndex("requested position context ({s}) here", "file.zig", cursor_index, .info, .{
+        if (lookahead) "with lookahead" else "without lookahead",
+    });
+
+    if (ctx.loc()) |actual_loc| {
+        try error_builder.msgAtLoc("actual range here", "file.zig", actual_loc, .info, .{});
+    }
+
+    if (expected_loc) |expected| {
+        try error_builder.msgAtLoc("expected range here", "file.zig", expected, .info, .{});
+    }
+
+    if (std.meta.activeTag(ctx) != expected_tag) {
+        std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(expected_tag), @tagName(std.meta.activeTag(ctx)) });
         return error.DifferentTag;
     }
 
-    const actual_loc = ctx.loc() orelse if (maybe_range) |expected_range| {
-        std.debug.print("Expected `{s}`, got null range\n", .{
-            expected_range,
-        });
-        return error.DifferentRange;
-    } else return;
-
-    const expected_range = maybe_range orelse {
-        std.debug.print("Expected null range, got `{s}`\n", .{
-            final_line[actual_loc.start..actual_loc.end],
-        });
-        return error.DifferentRange;
-    };
-
-    const expected_range_start = std.mem.indexOf(u8, final_line, expected_range).?;
-    const expected_range_end = expected_range_start + expected_range.len;
-
-    if (expected_range_start != actual_loc.start or expected_range_end != actual_loc.end) {
-        std.debug.print("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
-            final_line[expected_range_start..expected_range_end], expected_range_start, expected_range_end,
-            final_line[actual_loc.start..actual_loc.end],         actual_loc.start,     actual_loc.end,
-        });
+    if (!std.meta.eql(expected_loc, ctx.loc())) {
+        std.debug.print("expected_loc: {?}\n", .{expected_loc});
+        std.debug.print("actual_loc  : {?}\n", .{ctx.loc()});
         return error.DifferentRange;
     }
 }
