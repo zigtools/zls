@@ -135,7 +135,7 @@ fn testCollectReplacePlaceholders(
     try std.testing.expectEqualSlices(offsets.Loc, expected_new_locs, result.locations.items(.new));
 }
 
-test "helper - collectReplacePlaceholders" {
+test collectReplacePlaceholders {
     try testCollectReplacePlaceholders("", "", &.{}, &.{});
     try testCollectReplacePlaceholders("text", "text", &.{}, &.{});
 

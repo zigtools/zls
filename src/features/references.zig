@@ -451,7 +451,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
+    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree, source_index, true);
 
     var analyser = Analyser.init(
         server.allocator,
@@ -473,7 +473,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
             break :z null;
         },
-        .label => try Analyser.lookupLabel(handle, name, source_index),
+        .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
         .enum_literal => try analyser.getSymbolEnumLiteral(arena, handle, source_index, name),
         else => null,
     } orelse return null;

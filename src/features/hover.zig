@@ -181,14 +181,14 @@ fn hoverDefinitionLabel(
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     pos_index: usize,
+    loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, loc);
     const decl = (try Analyser.lookupLabel(handle, name, pos_index)) orelse return null;
 
     return .{
@@ -198,7 +198,7 @@ fn hoverDefinitionLabel(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, loc, offset_encoding),
     };
 }
 
@@ -448,13 +448,13 @@ pub fn hover(
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) !?types.Hover {
-    const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => |loc| try hoverDefinitionBuiltin(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .var_access => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
-        .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind, offset_encoding),
+        .label_access, .label_decl => |loc| try hoverDefinitionLabel(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .number_literal, .char_literal => try hoverDefinitionNumberLiteral(arena, handle, source_index, markup_kind, offset_encoding),
         else => null,
