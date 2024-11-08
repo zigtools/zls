@@ -1011,10 +1011,8 @@ fn walkBlockNodeKeepOpen(
     start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!ScopeContext.PushedScope {
     const node_tags = tree.nodes.items(.tag);
-    const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
 
-    const first_token = tree.firstToken(node_idx);
     const last_token = ast.lastToken(tree, node_idx);
 
     const scope = try context.startScope(
@@ -1023,11 +1021,10 @@ fn walkBlockNodeKeepOpen(
         locToSmallLoc(offsets.tokensToLoc(tree, start_token, last_token)),
     );
 
-    // if labeled block
-    if (token_tags[first_token] == .identifier) {
+    if (ast.blockLabel(tree, node_idx)) |label_token| {
         try scope.pushDeclaration(
-            first_token,
-            .{ .label = .{ .identifier = first_token, .block = node_idx } },
+            label_token,
+            .{ .label = .{ .identifier = label_token, .block = node_idx } },
             .label,
         );
     }

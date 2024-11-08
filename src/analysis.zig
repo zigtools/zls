@@ -2054,10 +2054,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return Type{ .data = .{ .ip_index = .{ .index = .void_value } }, .is_type_val = false };
             }
 
-            const first_token = tree.firstToken(node);
-            if (token_tags[first_token] != .identifier) return null;
-
-            const block_label = offsets.identifierTokenToNameSlice(tree, first_token);
+            const label_token = ast.blockLabel(tree, node) orelse return null;
+            const block_label = offsets.identifierTokenToNameSlice(tree, label_token);
 
             // TODO: peer type resolution based on all `break` statements
             var context = FindBreaks{

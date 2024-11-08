@@ -1258,6 +1258,18 @@ pub fn builtinCallParams(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Inde
     };
 }
 
+pub fn blockLabel(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    const token_tags = tree.tokens.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
+
+    const main_token = main_tokens[node];
+
+    if (main_token < 2) return null;
+    if (token_tags[main_token - 1] != .colon) return null;
+    if (token_tags[main_token - 2] != .identifier) return null;
+    return main_token - 2;
+}
+
 /// returns a list of statements
 pub fn blockStatements(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index) ?[]const Node.Index {
     const node_data = tree.nodes.items(.data);

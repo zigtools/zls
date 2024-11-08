@@ -1816,6 +1816,9 @@ test "weird code" {
         .{ "@\"a\"", .enumMember, .{ .declaration = true } },
         .{ "@b", .enumMember, .{ .declaration = true } },
     });
+    try testSemanticTokensOptions(
+        \\{}
+    , &.{}, .{ .mode = .zon });
 }
 
 const TokenData = struct {

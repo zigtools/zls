@@ -295,8 +295,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .block_two,
         .block_two_semicolon,
         => {
-            if (token_tags[main_token - 1] == .colon and token_tags[main_token - 2] == .identifier) {
-                try writeTokenMod(builder, main_token - 2, .label, .{ .declaration = true });
+            if (ast.blockLabel(tree, node)) |label_token| {
+                try writeTokenMod(builder, label_token, .label, .{ .declaration = true });
             }
 
             var buffer: [2]Ast.Node.Index = undefined;
