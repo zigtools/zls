@@ -2495,6 +2495,21 @@ test "@FieldType" {
     });
 }
 
+test "@extern" {
+    try testCompletion(
+        \\test {
+        \\    const S = struct {
+        \\        alpha: u32,
+        \\    };
+        \\    const foo = @extern(*S, .{});
+        \\    foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "builtin fns return type" {
     try testCompletion(
         \\pub const chip_mod = struct {
