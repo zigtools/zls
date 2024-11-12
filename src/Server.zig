@@ -551,7 +551,9 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     server.status = .initializing;
 
     if (request.initializationOptions) |initialization_options| {
-        if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{})) |new_cfg| {
+        if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{
+            .ignore_unknown_fields = true,
+        })) |new_cfg| {
             try server.updateConfiguration2(new_cfg, .{});
         } else |err| {
             log.err("failed to read initialization_options: {}", .{err});
