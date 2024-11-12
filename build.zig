@@ -373,11 +373,9 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         .target = b.graph.host,
         .root_source_file = b.path("src/tools/publish_http_form.zig"),
     });
-    _ = publish_exe;
 
-    // workaround: https://github.com/ziglang/zig/issues/21747
-    var publish_artifacts = b.addSystemCommand(&.{"curl"});
-    // var publish_artifacts = b.addRunArtifact(publish_exe);
+    // var publish_artifacts = b.addSystemCommand("curl")
+    var publish_artifacts = b.addRunArtifact(publish_exe);
     publish_step.dependOn(&publish_artifacts.step);
 
     publish_artifacts.addArgs(&.{
