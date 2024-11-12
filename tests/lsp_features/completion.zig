@@ -2529,7 +2529,7 @@ test "@extern" {
     });
 }
 
-test "@orelse with return" {
+test "@orelse with block" {
     try testCompletion(
         \\test {
         \\    const S = struct {
