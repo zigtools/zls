@@ -1222,7 +1222,16 @@ fn resolveConfiguration(
             break :blk;
         };
         const build_runner_source = build_runner_version.getBuildRunnerFile();
-        const build_runner_hash = build_runner_version.getBuildRunnerFileHash();
+        const build_runner_config_source = @embedFile("build_runner/BuildConfig.zig");
+
+        const build_runner_hash = get_hash: {
+            const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
+
+            var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
+            hasher.update(build_runner_source);
+            hasher.update(build_runner_config_source);
+            break :get_hash hasher.finalResult();
+        };
 
         const cache_path = try std.fs.path.join(allocator, &.{ global_cache_path, "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
         defer allocator.free(cache_path);
@@ -1236,7 +1245,7 @@ fn resolveConfiguration(
 
         cache_dir.writeFile(.{
             .sub_path = "BuildConfig.zig",
-            .data = @embedFile("build_runner/BuildConfig.zig"),
+            .data = build_runner_config_source,
         }) catch |err| {
             log.err("failed to write file '{s}/BuildConfig.zig': {}", .{ cache_path, err });
             break :blk;

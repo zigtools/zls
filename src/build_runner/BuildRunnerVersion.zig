@@ -28,18 +28,6 @@ pub const BuildRunnerVersion = enum {
             .@"0.12.0" => @embedFile("0.12.0.zig"),
         };
     }
-
-    pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
-    pub const Hash = [Hasher.mac_length]u8;
-
-    pub fn getBuildRunnerFileHash(version: BuildRunnerVersion) Hash {
-        const source = version.getBuildRunnerFile();
-        var hash: Hash = undefined;
-        var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
-        hasher.update(source);
-        hasher.final(&hash);
-        return hash;
-    }
 };
 
 fn selectVersionInternal(
