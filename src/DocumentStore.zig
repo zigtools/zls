@@ -279,7 +279,7 @@ pub const Handle = struct {
         return try self.getZirCold();
     }
 
-    pub fn getZirStatus(self: Handle) ZirStatus {
+    pub fn getZirStatus(self: *const Handle) ZirStatus {
         const status = self.getStatus();
         if (!status.has_zir) return .none;
         return if (status.zir_outdated) .outdated else .done;
@@ -452,11 +452,11 @@ pub const Handle = struct {
         return self.impl.zir;
     }
 
-    fn getStatus(self: Handle) Status {
+    fn getStatus(self: *const Handle) Status {
         return @bitCast(self.impl.status.load(.acquire));
     }
 
-    pub fn isOpen(self: Handle) bool {
+    pub fn isOpen(self: *const Handle) bool {
         return self.getStatus().open;
     }
 
