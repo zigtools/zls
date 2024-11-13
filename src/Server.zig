@@ -1639,7 +1639,7 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
 
 fn scheduleBuildOnSave(server: *Server) void {
     if (!std.process.can_spawn) return;
-    if (server.config.enable_build_on_save != false) return;
+    if (server.config.enable_build_on_save == false) return;
     if (!server.client_capabilities.supports_publish_diagnostics) return;
 
     for (server.workspaces.items) |*workspace| {
