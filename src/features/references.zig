@@ -113,17 +113,16 @@ const Builder = struct {
             .identifier,
             .test_decl,
             => |tag| {
-                const name_token, const name = switch (tag) {
-                    .identifier => blk: {
-                        const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse return;
-                        break :blk .{
-                            name_token,
-                            offsets.identifierTokenToNameSlice(tree, name_token),
-                        };
+                const name_token = switch (tag) {
+                    .identifier => ast.identifierTokenFromIdentifierNode(tree, node) orelse return,
+                    .test_decl => blk: {
+                        const name_token = ast.testDeclNameToken(tree, node) orelse return;
+                        if (tree.tokens.items(.tag)[name_token] != .identifier) return;
+                        break :blk name_token;
                     },
-                    .test_decl => ast.testDeclNameAndToken(tree, node) orelse return,
                     else => unreachable,
                 };
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
