@@ -141,7 +141,7 @@ pub fn build(b: *Build) !void {
             .root_source_file = b.path("src/main.zig"),
             .version = resolved_zls_version,
             .optimize = optimize,
-            .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_500_000_000,
+            .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_600_000_000,
             .single_threaded = single_threaded,
             .pic = pie,
             .use_llvm = use_llvm,
