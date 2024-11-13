@@ -252,7 +252,7 @@ pub fn generateBuildOnSaveDiagnostics(
     blk: {
         store.lock.lockShared();
         defer store.lock.unlockShared();
-        const build_file = store.build_files.get(build_zig_path) orelse break :blk;
+        const build_file = store.build_files.get(build_zig_uri) orelse break :blk;
 
         no_build_config: {
             const build_associated_config = build_file.build_associated_config orelse break :no_build_config;
