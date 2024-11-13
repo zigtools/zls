@@ -267,7 +267,7 @@ test "var decl" {
     , .{ .kind = .Type });
 }
 
-test "var decl destructuring" {
+test "assign destructure" {
     try testInlayHints(
         \\test {
         \\    const foo<u32>, const bar<comptime_int> = .{@as(u32, 1), 2};
@@ -281,6 +281,13 @@ test "var decl destructuring" {
     try testInlayHints(
         \\test {
         \\    const foo<u32>, const bar: u64, var baz<u32> = [_]u32{1, 2, 3};
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\    var foo: u32 = undefined;
+        \\    var bar: u64 = undefined;
+        \\    foo, bar = .{ 3, 4 };
         \\}
     , .{ .kind = .Type });
 }

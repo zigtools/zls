@@ -812,9 +812,27 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .node = init_expr, .handle = handle });
 
             for (lhs_exprs, 0..) |lhs_node, index| {
-                const var_decl = tree.fullVarDecl(lhs_node).?;
-                const field_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
-                try writeVarDecl(builder, var_decl, field_type);
+                switch (node_tags[lhs_node]) {
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => {
+                        const var_decl = tree.fullVarDecl(lhs_node).?;
+                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
+                        try writeVarDecl(builder, var_decl, field_type);
+                    },
+                    .identifier => {
+                        const name_token = main_tokens[lhs_node];
+                        const maybe_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
+                        const ty = maybe_type orelse {
+                            try writeIdentifier(builder, name_token);
+                            continue;
+                        };
+                        try colorIdentifierBasedOnType(builder, ty, name_token, false, .{});
+                    },
+                    else => {},
+                }
             }
 
             try writeToken(builder, main_token, .operator);

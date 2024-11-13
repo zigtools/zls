@@ -1111,7 +1111,7 @@ test "var decl alias" {
     );
 }
 
-test "var decl destructuring" {
+test "assign destructure" {
     try testHover(
         \\test {
         \\    const f<cursor>oo, const bar = .{ @as(u8, 1), @as(u16, 2), @as(u24, 3) };
@@ -1173,6 +1173,20 @@ test "var decl destructuring" {
         \\```
         \\```zig
         \\(usize)
+        \\```
+    );
+    try testHover(
+        \\test {
+        \\    var foo: u32 = undefined;
+        \\    var bar: u64 = undefined;
+        \\    foo, bar<cursor> = .{ 3, 4 };
+        \\};
+    ,
+        \\```zig
+        \\var bar: u64 = undefined
+        \\```
+        \\```zig
+        \\(u64)
         \\```
     );
 }

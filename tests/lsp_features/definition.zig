@@ -66,10 +66,18 @@ test "local variable" {
 
 test "assign destructure" {
     try testDefinition(
-        \\comptime {
+        \\test {
         \\    const foo, const <def><decl>bar</decl></def>: <tdef>u32</tdef> = .{ 1, 2 };
         \\    _ = foo;
         \\    _ = <>bar;
+        \\}
+    );
+    try testDefinition(
+        \\test {
+        \\    var <def><decl>foo</decl></def>: <tdef>u32</tdef> = undefined;
+        \\    foo, const bar: u32 = .{ 1, 2 };
+        \\    _ = <>foo;
+        \\    _ = bar;
         \\}
     );
 }

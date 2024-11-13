@@ -183,7 +183,7 @@ test "var decl" {
     });
 }
 
-test "var decl destructure" {
+test "assign destructure" {
     try testSemanticTokens(
         \\test {
         \\    var alpha: bool, var beta = .{ 1, 2 };
@@ -219,6 +219,34 @@ test "var decl destructure" {
 
         .{ "struct", .keyword, .{} },
         .{ "enum", .keyword, .{} },
+    });
+    try testSemanticTokens(
+        \\test {
+        \\    var foo: u32 = undefined;
+        \\    var bar: u64 = undefined;
+        \\    foo, bar = .{ 3, 4 };
+        \\};
+    , &.{
+        .{ "test", .keyword, .{} },
+
+        .{ "var", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+
+        .{ "var", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true } },
+        .{ "u64", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+
+        .{ "foo", .variable, .{} },
+        .{ "bar", .variable, .{} },
+        .{ "=", .operator, .{} },
+
+        .{ "3", .number, .{} },
+        .{ "4", .number, .{} },
     });
 }
 

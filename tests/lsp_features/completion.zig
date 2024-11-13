@@ -181,7 +181,7 @@ test "symbol lookup on identifier named after primitive" {
     });
 }
 
-test "var decl destructuring" {
+test "assign destructure" {
     try testCompletion(
         \\test {
         \\    const foo, var bar: u32 = .{42, 7};
@@ -211,11 +211,12 @@ test "var decl destructuring" {
     });
     try testCompletion(
         \\test {
-        \\    const foo, const bar: u64, var baz = [_]u32{1, 2, 3};
+        \\    var foo: u32 = undefined;
+        \\    foo, const bar: u64, var baz = [_]u32{1, 2, 3};
         \\    <cursor>
         \\}
     , &.{
-        .{ .label = "foo", .kind = .Constant, .detail = "u32" },
+        .{ .label = "foo", .kind = .Variable, .detail = "u32" },
         .{ .label = "bar", .kind = .Constant, .detail = "u64" },
         .{ .label = "baz", .kind = .Variable, .detail = "u32" },
     });
