@@ -2529,6 +2529,24 @@ test "@extern" {
     });
 }
 
+test "@orelse with block" {
+    try testCompletion(
+        \\test {
+        \\    const S = struct {
+        \\        alpha: u32,
+        \\    };
+        \\    const v: ?*const S = &S{ .alpha = 5 };
+        \\    const foo = v orelse {
+        \\        return;
+        \\    };
+        \\    foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "builtin fns return type" {
     try testCompletion(
         \\pub const chip_mod = struct {

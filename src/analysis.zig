@@ -1610,7 +1610,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .unwrap_optional => try analyser.resolveOptionalUnwrap(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
                 .@"orelse" => {
-                    const type_right = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return null;
+                    const type_right = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return try analyser.resolveOptionalUnwrap(base_type);
                     return try analyser.resolveOrelseType(base_type, type_right);
                 },
                 .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .payload),
