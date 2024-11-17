@@ -18,9 +18,6 @@ enable_build_on_save: ?bool = null,
 /// If the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.
 build_on_save_args: []const []const u8 = &.{},
 
-/// Whether to automatically fix errors on save. Currently supports adding and removing discards.
-enable_autofix: bool = false,
-
 /// Set level of semantic tokens. `partial` only includes information that requires semantic analysis.
 semantic_tokens: enum {
     none,
@@ -48,6 +45,9 @@ inlay_hints_hide_redundant_param_names: bool = false,
 
 /// Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)
 inlay_hints_hide_redundant_param_names_last_token: bool = false,
+
+/// Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.
+force_autofix: bool = false,
 
 /// Enables warnings for style guideline mismatches
 warn_style: bool = false,

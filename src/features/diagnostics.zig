@@ -53,7 +53,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
         }
     }
 
-    if (server.config.enable_autofix and tree.mode == .zig) {
+    if (server.getAutofixMode() != .none and tree.mode == .zig) {
         try code_actions.collectAutoDiscardDiagnostics(tree, arena, &diagnostics, server.offset_encoding);
     }
 
