@@ -413,9 +413,16 @@ pub fn main() !void {
         seed,
     );
 
-    const watch_suported = comptime switch (builtin.os.tag) {
-        .linux => builtin.zig_version.order(file_watch_version) != .lt,
-        .windows => builtin.zig_version.order(file_watch_windows_version) != .lt,
+    const watch_suported = switch (builtin.os.tag) {
+        .linux => blk: {
+            if (comptime builtin.zig_version.order(file_watch_version) == .lt) break :blk false;
+
+            // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
+            const utsname = std.posix.uname();
+            const version = std.SemanticVersion.parse(&utsname.release) catch break :blk true;
+            break :blk version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt;
+        },
+        .windows => comptime builtin.zig_version.order(file_watch_windows_version) != .lt,
         else => false,
     };
     if (!watch_suported) return;
