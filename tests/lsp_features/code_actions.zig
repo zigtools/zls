@@ -663,7 +663,6 @@ fn testDiagnostic(
 ) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
-    ctx.server.config.enable_autofix = true;
     ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
 
     const uri = try ctx.addDocument(.{ .source = before });

@@ -332,15 +332,19 @@ fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
     );
 }
 
-fn getAutofixMode(server: *Server) enum {
-    on_save,
+pub fn getAutofixMode(server: *Server) enum {
+    /// Autofix is implemented by providing `source.fixall` code actions.
+    @"source.fixall",
+    /// Autofix is implemented using `textDocument/willSaveWaitUntil`.
+    /// Requires `force_autofix` to be enabled.
     will_save_wait_until,
-    fixall,
+    /// Autofix is implemented by send a `workspace/applyEdit` request after receiving a `textDocument/didSave` notification.
+    /// Requires `force_autofix` to be enabled.
+    on_save,
     none,
 } {
-    if (!server.config.enable_autofix) return .none;
-    // TODO https://github.com/zigtools/zls/issues/1093
-    // if (server.client_capabilities.supports_code_action_fixall) return .fixall;
+    if (server.client_capabilities.supports_code_action_fixall) return .@"source.fixall";
+    if (!server.config.force_autofix) return .none;
     if (server.client_capabilities.supports_apply_edits) {
         if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
         return .on_save;
@@ -397,11 +401,11 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
             server.client_capabilities.max_detail_length = 256;
-            // TODO investigate why fixall doesn't work in sublime text
+        } else if (std.mem.startsWith(u8, clientInfo.name, "emacs")) {
+            // Assumes that `emacs` means `emacs-lsp/lsp-mode`. Eglot uses `Eglot`.
+
+            // https://github.com/emacs-lsp/lsp-mode/issues/1842
             server.client_capabilities.supports_code_action_fixall = false;
-            skip_set_fixall = true;
-        } else if (std.mem.eql(u8, clientInfo.name, "Visual Studio Code")) {
-            server.client_capabilities.supports_code_action_fixall = true;
             skip_set_fixall = true;
         }
     }
@@ -479,16 +483,12 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             server.client_capabilities.supports_will_save = synchronization.willSave orelse false;
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
-        if (textDocument.codeAction) |codeaction| {
-            if (codeaction.codeActionLiteralSupport) |literalSupport| {
-                if (!skip_set_fixall) {
-                    for (literalSupport.codeActionKind.valueSet) |code_action_kind| {
-                        if (code_action_kind.eql(.@"source.fixAll")) {
-                            server.client_capabilities.supports_code_action_fixall = true;
-                            break;
-                        }
-                    }
-                }
+        if (textDocument.codeAction) |_| {
+            if (!skip_set_fixall) {
+                // Some clients do not specify `source.fixAll` in
+                // `textDocument.codeAction.?.codeActionLiteralSupport.?.codeActionKind.valueSet`
+                // so we assume they support it if they support code actions in general.
+                server.client_capabilities.supports_code_action_fixall = true;
             }
         }
         if (textDocument.definition) |definition| {
@@ -531,6 +531,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     if (request.clientInfo) |clientInfo| {
         log.info("Client Info:      {s}-{s}", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
     }
+    log.info("Autofix Mode:     {s}", .{@tagName(server.getAutofixMode())});
     log.debug("Offset Encoding:  {s}", .{@tagName(server.offset_encoding)});
 
     if (request.workspaceFolders) |workspace_folders| {
@@ -879,6 +880,7 @@ pub fn updateConfiguration(
     const new_build_runner_path =
         new_config.build_runner_path != null and
         (server.config.build_runner_path == null or !std.mem.eql(u8, server.config.build_runner_path.?, new_config.build_runner_path.?));
+    const new_force_autofix = new_config.force_autofix != null and server.config.force_autofix != new_config.force_autofix.?;
 
     inline for (std.meta.fields(Config)) |field| {
         if (@field(new_cfg, field.name)) |new_value| {
@@ -1013,8 +1015,10 @@ pub fn updateConfiguration(
         }
     }
 
-    if (server.config.enable_autofix and server.getAutofixMode() == .none) {
-        log.warn("`enable_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+    if (server.config.force_autofix and server.getAutofixMode() == .none) {
+        log.warn("`force_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+    } else if (new_force_autofix) {
+        log.info("Autofix Mode: {s}", .{@tagName(server.getAutofixMode())});
     }
 }
 

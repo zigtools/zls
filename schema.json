@@ -27,11 +27,6 @@
             },
             "default": []
         },
-        "enable_autofix": {
-            "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
-            "type": "boolean",
-            "default": false
-        },
         "semantic_tokens": {
             "description": "Set level of semantic tokens. `partial` only includes information that requires semantic analysis.",
             "type": "string",
@@ -74,6 +69,11 @@
         },
         "inlay_hints_hide_redundant_param_names_last_token": {
             "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)",
+            "type": "boolean",
+            "default": false
+        },
+        "force_autofix": {
+            "description": "Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.",
             "type": "boolean",
             "default": false
         },
