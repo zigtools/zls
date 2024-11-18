@@ -369,6 +369,9 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
+        .only_kinds = std.EnumSet(std.meta.Tag(types.CodeActionKind)).init(.{
+            .@"source.fixAll" = true,
+        }),
     };
 
     var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
@@ -377,10 +380,9 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     for (actions.items) |action| {
         std.debug.assert(action.kind != null);
+        std.debug.assert(action.kind.? == .@"source.fixAll");
         std.debug.assert(action.edit != null);
         std.debug.assert(action.edit.?.changes != null);
-
-        if (action.kind.? != .@"source.fixAll") continue;
 
         const changes = action.edit.?.changes.?.map;
         if (changes.count() != 1) continue;
@@ -1632,18 +1634,24 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
+    const only_kinds = if (request.context.only) |kinds| blk: {
+        var set = std.EnumSet(std.meta.Tag(types.CodeActionKind)).initEmpty();
+        for (kinds) |kind| {
+            set.setPresent(kind, true);
+        }
+        break :blk set;
+    } else null;
+
     var builder: code_actions.Builder = .{
         .arena = arena,
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
+        .only_kinds = only_kinds,
     };
 
     var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
     try builder.generateCodeAction(error_bundle, &actions);
-
-    // Always generate code action organizeImports
-    try builder.generateOrganizeImportsAction(&actions);
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
