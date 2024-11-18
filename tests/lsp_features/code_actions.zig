@@ -685,7 +685,10 @@ fn testDiagnostic(
             .start = .{ .line = 0, .character = 0 },
             .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
         },
-        .context = .{ .diagnostics = diagnostics },
+        .context = .{
+            .diagnostics = diagnostics,
+            .only = if (options.filter_kind) |kind| &.{kind} else null,
+        },
     };
 
     @setEvalBranchQuota(5000);
@@ -700,8 +703,13 @@ fn testDiagnostic(
     for (response) |action| {
         const code_action: types.CodeAction = action.CodeAction;
 
-        if (options.filter_kind) |kind| if (!code_action.kind.?.eql(kind)) continue;
-        if (options.filter_title) |title| if (!std.mem.eql(u8, title, code_action.title)) continue;
+        if (options.filter_kind) |kind| {
+            // check that `types.CodeActionContext.only` is being respected
+            try std.testing.expectEqual(code_action.kind.?, kind);
+        }
+        if (options.filter_title) |title| {
+            if (!std.mem.eql(u8, title, code_action.title)) continue;
+        }
 
         const workspace_edit = code_action.edit.?;
         const changes = workspace_edit.changes.?.map;
