@@ -752,8 +752,11 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     var new_config: configuration.Configuration = .{};
 
     inline for (fields, result) |field, json_value| {
+        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
+        runtime_known_field_name = field.name;
+
         const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
-            log.err("failed to parse configuration option '{s}': {}", .{ field.name, err });
+            log.err("failed to parse configuration option '{s}': {}", .{ runtime_known_field_name, err });
             break :blk null;
         };
         if (maybe_new_value) |new_value| {
@@ -906,7 +909,9 @@ pub fn updateConfiguration(
             };
 
             if (override_value) {
-                log.info("Set config option '{s}' to {}", .{ field.name, std.json.fmt(new_value, .{}) });
+                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
+                runtime_known_field_name = field.name;
+                log.info("Set config option '{s}' to {}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
                         const copy = try config_arena.alloc([]const u8, new_value.len);
@@ -1027,6 +1032,9 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
     defer tracy_zone.end();
 
     inline for (comptime std.meta.fieldNames(Config)) |field_name| {
+        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
+        runtime_known_field_name = field_name;
+
         const FileCheckInfo = struct {
             kind: enum { file, directory },
             is_accessible: bool,
@@ -1057,7 +1065,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
             if (path.len == 0) break :ok false;
 
             if (!std.fs.path.isAbsolute(path)) {
-                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ field_name, path });
+                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ runtime_known_field_name, path });
                 break :ok false;
             }
 
@@ -1065,7 +1073,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                 .file => {
                     const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
                         if (file_info.is_accessible) {
-                            server.showMessage(.Warning, "config option '{s}': invalid file path '{s}': {}", .{ field_name, path, err });
+                            server.showMessage(.Warning, "config option '{s}': invalid file path '{s}': {}", .{ runtime_known_field_name, path, err });
                             break :ok false;
                         }
                         break :ok true;
@@ -1078,7 +1086,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                     };
                     switch (stat.kind) {
                         .directory => {
-                            server.showMessage(.Warning, "config option '{s}': expected file path but '{s}' is a directory", .{ field_name, path });
+                            server.showMessage(.Warning, "config option '{s}': expected file path but '{s}' is a directory", .{ runtime_known_field_name, path });
                             break :ok false;
                         },
                         .file => {},
@@ -1091,7 +1099,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                 .directory => {
                     var dir = std.fs.openDirAbsolute(path, .{}) catch |err| {
                         if (file_info.is_accessible) {
-                            server.showMessage(.Warning, "config option '{s}': invalid directory path '{s}': {}", .{ field_name, path, err });
+                            server.showMessage(.Warning, "config option '{s}': invalid directory path '{s}': {}", .{ runtime_known_field_name, path, err });
                             break :ok false;
                         }
                         break :ok true;
@@ -1103,7 +1111,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                     };
                     switch (stat.kind) {
                         .file => {
-                            server.showMessage(.Warning, "config option '{s}': expected directory path but '{s}' is a file", .{ field_name, path });
+                            server.showMessage(.Warning, "config option '{s}': expected directory path but '{s}' is a file", .{ runtime_known_field_name, path });
                             break :ok false;
                         },
                         .directory => {},

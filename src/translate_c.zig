@@ -181,17 +181,7 @@ pub fn translate(
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Pipe;
 
-    errdefer |err| if (!zig_builtin.is_test) blk: {
-        const joined = std.mem.join(allocator, " ", argv.items) catch break :blk;
-        defer allocator.free(joined);
-        if (process.stderr) |stderr| {
-            const stderr_output = stderr.readToEndAlloc(allocator, std.math.maxInt(usize)) catch break :blk;
-            defer allocator.free(stderr_output);
-            log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{}\n", .{ joined, stderr_output, err });
-        } else {
-            log.err("failed zig translate-c command:\n{s}\nerror:{}\n", .{ joined, err });
-        }
-    };
+    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(allocator, process.stderr, argv.items, @errorName(err));
 
     process.spawn() catch |err| {
         log.err("failed to spawn zig translate-c process, error: {}", .{err});
@@ -255,6 +245,18 @@ pub fn translate(
                 zcs.pooler.fifo(.in).discard(header.bytes_len);
             },
         }
+    }
+}
+
+fn reportTranslateError(allocator: std.mem.Allocator, stderr: ?std.fs.File, argv: []const []const u8, err_name: []const u8) void {
+    const joined = std.mem.join(allocator, " ", argv) catch return;
+    defer allocator.free(joined);
+    if (stderr) |file| {
+        const stderr_output = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch return;
+        defer allocator.free(stderr_output);
+        log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{s}\n", .{ joined, stderr_output, err_name });
+    } else {
+        log.err("failed zig translate-c command:\n{s}\nerror:{s}\n", .{ joined, err_name });
     }
 }
 
