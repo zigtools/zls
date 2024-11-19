@@ -1912,7 +1912,10 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    return switch (comptime std.meta.stringToEnum(std.meta.Tag(HandledRequestParams), method) orelse return null) {
+    const Params = std.meta.Tag(HandledRequestParams);
+    if (!@hasField(Params, method)) return null;
+
+    return switch (@field(Params, method)) {
         .initialize => try server.initializeHandler(arena, params),
         .shutdown => try server.shutdownHandler(arena, params),
         .@"textDocument/willSaveWaitUntil" => try server.willSaveWaitUntilHandler(arena, params),
@@ -1944,7 +1947,10 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
-    return switch (comptime std.meta.stringToEnum(std.meta.Tag(HandledNotificationParams), method) orelse return) {
+    const Params = std.meta.Tag(HandledNotificationParams);
+    if (!@hasField(Params, method)) return null;
+
+    return switch (@field(Params, method)) {
         .initialized => try server.initializedHandler(arena, params),
         .exit => try server.exitHandler(arena, params),
         .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
