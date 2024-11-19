@@ -252,7 +252,7 @@ fn reportTranslateError(allocator: std.mem.Allocator, stderr: ?std.fs.File, argv
     const joined = std.mem.join(allocator, " ", argv) catch return;
     defer allocator.free(joined);
     if (stderr) |file| {
-        const stderr_output = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch return;
+        const stderr_output = file.readToEndAlloc(allocator, 16 * 1024 * 1024) catch return;
         defer allocator.free(stderr_output);
         log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{s}\n", .{ joined, stderr_output, err_name });
     } else {

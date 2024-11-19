@@ -927,7 +927,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     var config_file = try std.fs.cwd().openFile(config_file_path, .{});
     defer config_file.close();
 
-    const file_buf = try config_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const file_buf = try config_file.readToEndAlloc(allocator, 16 * 1024 * 1024);
     defer allocator.free(file_buf);
 
     return try std.json.parseFromSlice(
@@ -994,7 +994,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
             .allocator = self.allocator,
             .argv = args,
             .cwd = std.fs.path.dirname(build_file_path).?,
-            .max_output_bytes = 1024 * 1024,
+            .max_output_bytes = 16 * 1024 * 1024,
         });
     };
     defer self.allocator.free(zig_run_result.stdout);

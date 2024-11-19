@@ -313,7 +313,7 @@ pub fn generateBuildOnSaveDiagnostics(
         .allocator = allocator,
         .argv = argv.items,
         .cwd = workspace_path,
-        .max_output_bytes = 1024 * 1024,
+        .max_output_bytes = 16 * 1024 * 1024,
     }) catch |err| {
         const joined = std.mem.join(allocator, " ", argv.items) catch return;
         defer allocator.free(joined);
@@ -483,7 +483,7 @@ fn getErrorBundleFromAstCheck(
 
         process.stdin = null;
 
-        const stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, std.math.maxInt(u32));
+        const stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, 16 * 1024 * 1024);
         errdefer allocator.free(stderr_bytes);
 
         const term = process.wait() catch |err| {

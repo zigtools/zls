@@ -1291,7 +1291,7 @@ fn resolveConfiguration(
         const run_result = std.process.Child.run(.{
             .allocator = allocator,
             .argv = &argv,
-            .max_output_bytes = 1024 * 1024 * 50,
+            .max_output_bytes = 16 * 1024 * 1024,
         }) catch |err| {
             const args = std.mem.join(allocator, " ", &argv) catch break :blk;
             log.err("failed to run command '{s}': {}", .{ args, err });
