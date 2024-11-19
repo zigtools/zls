@@ -29,6 +29,9 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 
     try diagnostics.ensureUnusedCapacity(arena, tree.errors.len);
     for (tree.errors) |err| {
+        const tracy_zone2 = tracy.traceNamed(@src(), "parse");
+        defer tracy_zone2.end();
+
         var buffer: std.ArrayListUnmanaged(u8) = .{};
         try tree.renderError(err, buffer.writer(arena));
 
@@ -42,6 +45,9 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     if (tree.errors.len == 0 and tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
+        defer tracy_zone2.end();
+
         var error_bundle = try getAstCheckDiagnostics(server, handle);
         defer error_bundle.deinit(server.allocator);
         var diagnostics_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
@@ -54,10 +60,16 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     if (server.getAutofixMode() != .none and tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "autofix");
+        defer tracy_zone2.end();
+
         try code_actions.collectAutoDiscardDiagnostics(tree, arena, &diagnostics, server.offset_encoding);
     }
 
     if (server.config.warn_style and tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "warn style errors");
+        defer tracy_zone2.end();
+
         var node: u32 = 0;
         while (node < tree.nodes.len) : (node += 1) {
             if (ast.isBuiltinCall(tree, node)) {
@@ -131,6 +143,9 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
+        const tracy_zone2 = tracy.traceNamed(@src(), "cImport");
+        defer tracy_zone2.end();
+
         const result = blk: {
             server.document_store.lock.lock();
             defer server.document_store.lock.unlock();
@@ -157,6 +172,9 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
     }
 
     if (server.config.highlight_global_var_declarations and tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "highlight global var");
+        defer tracy_zone2.end();
+
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
         for (ast.rootDecls(tree)) |decl| {
@@ -404,6 +422,9 @@ pub fn generateBuildOnSaveDiagnostics(
 
 /// caller owns the returned ErrorBundle
 pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) error{OutOfMemory}!std.zig.ErrorBundle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(handle.tree.errors.len == 0);
     std.debug.assert(handle.tree.mode == .zig);
 

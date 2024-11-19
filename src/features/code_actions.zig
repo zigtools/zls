@@ -22,6 +22,9 @@ pub const Builder = struct {
         error_bundle: std.zig.ErrorBundle,
         actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
         var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .{};
 
         if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
