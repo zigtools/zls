@@ -4214,15 +4214,30 @@ pub const EnclosingScopeIterator = struct {
 
     pub fn next(self: *EnclosingScopeIterator) Scope.OptionalIndex {
         const current_scope = self.current_scope.unwrap() orelse return .none;
+        const scopes = self.document_scope.getScopeChildScopesConst(current_scope);
+        const scope_locs = self.document_scope.scopes.items(.loc);
+        const result = self.current_scope;
 
-        defer self.current_scope = for (self.document_scope.getScopeChildScopesConst(current_scope)) |child_scope| {
-            const child_loc = self.document_scope.scopes.items(.loc)[@intFromEnum(child_scope)];
-            if (child_loc.start <= self.source_index and self.source_index <= child_loc.end) {
-                break child_scope.toOptional();
+        const Context = struct {
+            scope_locs: []const DocumentScope.Scope.SmallLoc,
+            source_index: usize,
+
+            fn compare(ctx: @This(), scope_index: Scope.Index) std.math.Order {
+                const child_scope = ctx.scope_locs[@intFromEnum(scope_index)];
+                if (ctx.source_index < child_scope.start) return .lt;
+                if (child_scope.end < ctx.source_index) return .gt;
+                return .eq;
             }
-        } else .none;
+        };
 
-        return self.current_scope;
+        self.current_scope = if (std.sort.binarySearch(
+            Scope.Index,
+            scopes,
+            Context{ .scope_locs = scope_locs, .source_index = self.source_index },
+            Context.compare,
+        )) |scope_index| scopes[scope_index].toOptional() else .none;
+
+        return result;
     }
 };
 
