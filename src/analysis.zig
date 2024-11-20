@@ -3530,6 +3530,8 @@ pub fn getPositionContext(
                     string_literal_loc.start += 2;
                 }
 
+                if (!(string_literal_loc.start <= source_index and source_index <= string_literal_loc.end)) break :string_lit_block;
+
                 if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
                     const perhaps_builtin = stack.items[stack.items.len - 2];
 

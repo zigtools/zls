@@ -275,11 +275,21 @@ test "import/embedfile string literal" {
     try testContext(
         \\const std = @embedFile("<loc>file.</loc><cursor>");
     , .embedfile_string_literal, .{ .lookahead = false });
+
+    try testContext(
+        \\const std = @import("std"<cursor>);
+    , .empty, .{});
+    try testContext(
+        \\const std = @import(<cursor>"std");
+    , .empty, .{});
 }
 
 test "string literal" {
     try testContext(
         \\var foo = <cursor>"hello world!";
+    , .empty, .{});
+    try testContext(
+        \\var foo = "hello world!"<cursor>;
     , .empty, .{});
 
     try testContext(
