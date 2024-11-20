@@ -188,6 +188,23 @@ test "field access" {
     , .field_access, .{});
 }
 
+test "field access across multiple lines" {
+    // ErrorBuilder doesn't support locs across multiple lines so don't let the test fail :)
+    try testContext(
+        \\test {
+        \\    <loc>item
+        \\        .foo()
+        \\        .bar()
+        \\        .baz<cursor></loc>();
+        \\}
+    , .field_access, .{});
+
+    try testContext(
+        \\/// some comment
+        \\    .<loc>foo</loc><cursor>()
+    , .var_access, .{});
+}
+
 test "builtin" {
     try testContext(
         \\var foo = <cursor>@
@@ -506,20 +523,20 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
         if (lookahead) "with lookahead" else "without lookahead",
     });
 
-    if (ctx.loc()) |actual_loc| {
-        try error_builder.msgAtLoc("actual range here", "file.zig", actual_loc, .info, .{});
-    }
-
-    if (expected_loc) |expected| {
-        try error_builder.msgAtLoc("expected range here", "file.zig", expected, .info, .{});
-    }
-
     if (std.meta.activeTag(ctx) != expected_tag) {
         std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(expected_tag), @tagName(std.meta.activeTag(ctx)) });
         return error.DifferentTag;
     }
 
     if (!std.meta.eql(expected_loc, ctx.loc())) {
+        if (ctx.loc()) |actual_loc| {
+            try error_builder.msgAtLoc("actual range here", "file.zig", actual_loc, .info, .{});
+        }
+
+        if (expected_loc) |expected| {
+            try error_builder.msgAtLoc("expected range here", "file.zig", expected, .info, .{});
+        }
+
         std.debug.print("expected_loc: {?}\n", .{expected_loc});
         std.debug.print("actual_loc  : {?}\n", .{ctx.loc()});
         return error.DifferentRange;

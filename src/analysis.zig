@@ -3570,9 +3570,9 @@ pub fn getPositionContext(
             .period, .period_asterisk => switch (curr_ctx.ctx) {
                 .empty => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                 .enum_literal => curr_ctx.ctx = .empty,
-                .keyword => return .other, // no keyword can be `.`/`.*` accessed
-                .other, .field_access, .global_error_set => {},
-                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
+                .keyword => curr_ctx.ctx = .other, // no keyword can be `.`/`.*` accessed
+                .comment, .other, .field_access, .global_error_set => {},
+                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc() orelse tok.loc, tok) },
             },
             .question_mark => switch (curr_ctx.ctx) {
                 .field_access => {},
