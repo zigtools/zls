@@ -3488,7 +3488,10 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             switch (tok.tag) {
-                .identifier, .builtin => should_do_lookahead = false,
+                .identifier,
+                .builtin,
+                .number_literal,
+                => should_do_lookahead = false,
                 else => break,
             }
         }

@@ -354,6 +354,24 @@ test "global error set" {
     // , .global_error_set, .{});
 }
 
+test "number literal" {
+    try testContext(
+        \\var foo = <loc>5<cursor></loc>;
+    , .number_literal, .{});
+    try testContext(
+        \\var foo = <loc><cursor>5</loc>;
+    , .number_literal, .{ .lookahead = true });
+}
+
+test "char literal" {
+    try testContext(
+        \\var foo = <loc>'5<cursor>'</loc>;
+    , .char_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = <loc>'<cursor>5'</loc>;
+    , .char_literal, .{ .lookahead = true });
+}
+
 test "enum literal" {
     try testContext(
         \\var foo = <loc>.<cursor>tag</loc>;
