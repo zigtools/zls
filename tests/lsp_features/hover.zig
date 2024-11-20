@@ -186,6 +186,16 @@ test "integer literal" {
         \\| DEC  | -42       |
         \\| HEX  | -0x2A     |
     );
+    try testHover(
+        \\const foo = 0x<cursor>0;
+    ,
+        \\| Base | Value |
+        \\| ---- | ----- |
+        \\| BIN  | 0b0   |
+        \\| OCT  | 0o0   |
+        \\| DEC  | 0     |
+        \\| HEX  | 0x0   |
+    );
     try testHoverWithOptions(
         \\const foo = 4<cursor>2;
     ,
