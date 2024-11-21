@@ -1260,7 +1260,8 @@ fn resolveConfiguration(
         cache_dir.writeFile(.{
             .sub_path = "BuildConfig.zig",
             .data = build_runner_config_source,
-        }) catch |err| {
+            .flags = .{ .exclusive = true },
+        }) catch |err| if (err != error.PathAlreadyExists) {
             log.err("failed to write file '{s}/BuildConfig.zig': {}", .{ cache_path, err });
             break :blk;
         };
@@ -1268,7 +1269,8 @@ fn resolveConfiguration(
         cache_dir.writeFile(.{
             .sub_path = "build_runner.zig",
             .data = build_runner_source,
-        }) catch |err| {
+            .flags = .{ .exclusive = true },
+        }) catch |err| if (err != error.PathAlreadyExists) {
             log.err("failed to write file '{s}/build_runner.zig': {}", .{ cache_path, err });
             break :blk;
         };
