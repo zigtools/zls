@@ -488,6 +488,7 @@ pub const Handle = struct {
         return tree;
     }
 
+    /// Takes ownership of `new_text`.
     fn setSource(self: *Handle, new_text: [:0]const u8) error{OutOfMemory}!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
@@ -622,11 +623,14 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         @alignOf(u8),
         0,
     ) catch |err| {
-        log.err("failed to load document '{s}': {}", .{ file_path, err });
+        log.err("failed to read document '{s}': {}", .{ file_path, err });
         return null;
     };
 
-    return self.createAndStoreDocument(uri, file_contents, false) catch return null;
+    return self.createAndStoreDocument(uri, file_contents) catch |err| {
+        log.err("failed to store document '{s}': {}", .{ file_path, err });
+        return null;
+    };
 }
 
 /// **Thread safe** takes a shared lock
@@ -675,26 +679,35 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     return new_build_file;
 }
 
-/// **Thread safe** takes an exclusive lock
+/// **Not thread safe**
+/// Assumes that no other thread is currently accessing the given document
 pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
-
-        if (self.handles.get(uri)) |handle| {
-            _ = handle;
-            // if (!handle.setOpen(true)) {
-            //     log.warn("Document already open: {s}", .{uri});
-            // }
-            return;
-        }
-    }
+    const handle_ptr: *Handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle_ptr);
 
     const duped_text = try self.allocator.dupeZ(u8, text);
-    _ = try self.createAndStoreDocument(uri, duped_text, true);
+    handle_ptr.* = try self.createDocument(uri, duped_text, true);
+    errdefer handle_ptr.deinit();
+
+    const gop = try self.handles.getOrPut(self.allocator, handle_ptr.uri);
+    if (gop.found_existing) {
+        if (gop.value_ptr.*.isOpen()) {
+            log.warn("Document already open: {s}", .{uri});
+        }
+        std.mem.swap([]const u8, &gop.value_ptr.*.uri, &handle_ptr.uri);
+        gop.value_ptr.*.deinit();
+        self.allocator.destroy(gop.value_ptr.*);
+    }
+    gop.value_ptr.* = handle_ptr;
+
+    if (isBuildFile(uri)) {
+        log.debug("Opened document '{s}' (build file)", .{uri});
+    } else {
+        log.debug("Opened document '{s}'", .{uri});
+    }
 }
 
 /// **Thread safe** takes a shared lock, takes an exclusive lock (with `tryLock`)
@@ -1227,11 +1240,11 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
 /// takes ownership of the `text` passed in.
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
-fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!*Handle {
+fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{OutOfMemory}!*Handle {
     const handle_ptr: *Handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle_ptr);
 
-    handle_ptr.* = try self.createDocument(uri, text, open);
+    handle_ptr.* = try self.createDocument(uri, text, false);
     errdefer handle_ptr.deinit();
 
     const gop = blk: {
