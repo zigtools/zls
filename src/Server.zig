@@ -1056,15 +1056,15 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
         is_accessible: bool,
     };
 
+    // zig fmt: off
     const checks: []const FileCheckInfo = &.{
-        // zig fmt: off
         .{ .field_name = "zig_exe_path",      .value = &config.zig_exe_path,      .kind = .file,      .is_accessible = true },
         .{ .field_name = "builtin_path",      .value = &config.builtin_path,      .kind = .file,      .is_accessible = true },
         .{ .field_name = "build_runner_path", .value = &config.build_runner_path, .kind = .file,      .is_accessible = true },
         .{ .field_name = "zig_lib_path",      .value = &config.zig_lib_path,      .kind = .directory, .is_accessible = true },
         .{ .field_name = "global_cache_path", .value = &config.global_cache_path, .kind = .directory, .is_accessible = false },
-        // zig fmt: on
     };
+    // zig fmt: on
 
     for (checks) |check| {
         const is_ok = if (check.value.*) |path| ok: {
