@@ -18,14 +18,14 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 const minimum_build_zig_version = "0.14.0-dev.2472+cc82620b2";
 
 /// Specify the minimum Zig version that is required to run ZLS:
-/// Release 0.12.0
+/// Build Runner: Implement File System Watching for kqueue
 ///
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.12.0";
+const minimum_runtime_zig_version = "0.14.0-dev.2046+b8795b4d0";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
@@ -485,6 +485,8 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 }
 
 const Build = blk: {
+    @setEvalBranchQuota(10_000);
+
     const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
 
