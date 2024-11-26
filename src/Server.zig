@@ -69,7 +69,6 @@ workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 const Workspace = struct {
     uri: types.URI,
-    is_build_on_save_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     fn deinit(self: *Workspace, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
@@ -942,8 +941,6 @@ pub fn updateConfiguration(
             result.deinit(server.document_store.allocator);
         }
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
-
-        server.scheduleBuildOnSave();
     }
 
     if (server.status == .initialized) {
@@ -1374,8 +1371,6 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         server.document_store.invalidateBuildFile(uri);
     }
 
-    server.scheduleBuildOnSave();
-
     if (server.getAutofixMode() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
         var text_edits = try server.autofix(arena, handle);
@@ -1686,59 +1681,6 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
-}
-
-fn scheduleBuildOnSave(server: *Server) void {
-    if (!std.process.can_spawn) return;
-    if (server.config.enable_build_on_save == false) return;
-    if (!server.client_capabilities.supports_publish_diagnostics) return;
-
-    for (server.workspaces.items) |*workspace| {
-        if (zig_builtin.single_threaded) {
-            server.runBuildOnSave(workspace);
-        } else {
-            // TODO race-condition: `server.workspaces` may be modified
-            server.thread_pool.spawn(runBuildOnSave, .{ server, workspace }) catch {
-                server.runBuildOnSave(workspace);
-            };
-        }
-    }
-}
-
-fn runBuildOnSave(server: *Server, workspace: *Workspace) void {
-    comptime std.debug.assert(std.process.can_spawn);
-
-    const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
-    if (was_build_on_save_running) return;
-
-    defer workspace.is_build_on_save_running.store(false, .release);
-
-    var diagnostic_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
-
-    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-    defer arena_allocator.deinit();
-
-    diagnostics_gen.generateBuildOnSaveDiagnostics(
-        server.allocator,
-        &server.document_store,
-        // TODO data-race on server.config
-        server.config,
-        workspace.uri,
-        arena_allocator.allocator(),
-        &diagnostic_set,
-    ) catch |err| {
-        log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
-        return;
-    };
-
-    for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
-        std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-        const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-            .uri = document_uri,
-            .diagnostics = diagnostics.items,
-        }) catch return;
-        server.allocator.free(json_message);
-    }
 }
 
 const HandledRequestParams = union(enum) {
