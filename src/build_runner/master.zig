@@ -781,7 +781,8 @@ fn validateSystemLibraryOptions(b: *std.Build) void {
 //
 //
 
-const BuildConfig = @import("BuildConfig.zig");
+const shared = @import("shared.zig");
+const BuildConfig = shared.BuildConfig;
 
 const Packages = struct {
     allocator: std.mem.Allocator,

@@ -1243,7 +1243,7 @@ fn resolveConfiguration(
             break :blk;
         };
         const build_runner_source = build_runner_version.getBuildRunnerFile();
-        const build_runner_config_source = @embedFile("build_runner/BuildConfig.zig");
+        const build_runner_config_source = @embedFile("build_runner/shared.zig");
 
         const build_runner_hash = get_hash: {
             const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
@@ -1265,11 +1265,11 @@ fn resolveConfiguration(
         defer cache_dir.close();
 
         cache_dir.writeFile(.{
-            .sub_path = "BuildConfig.zig",
+            .sub_path = "shared.zig",
             .data = build_runner_config_source,
             .flags = .{ .exclusive = true },
         }) catch |err| if (err != error.PathAlreadyExists) {
-            log.err("failed to write file '{s}/BuildConfig.zig': {}", .{ cache_path, err });
+            log.err("failed to write file '{s}/shared.zig': {}", .{ cache_path, err });
             break :blk;
         };
 
