@@ -7,8 +7,11 @@ const ast = @import("ast.zig");
 const tracy = @import("tracy");
 const Ast = std.zig.Ast;
 const URI = @import("uri.zig");
-const ZCS = @import("ZigCompileServer.zig");
 const log = std.log.scoped(.zls_translate_c);
+
+const ZCSTransport = @import("build_runner/shared.zig").Transport;
+const OutMessage = std.zig.Client.Message;
+const InMessage = std.zig.Server.Message;
 
 /// converts a `@cInclude` node into an equivalent c header file
 /// which can then be handed over to `zig translate-c`
@@ -195,54 +198,61 @@ pub fn translate(
         };
     };
 
-    var zcs = ZCS.init(.{
+    var zcs = ZCSTransport.init(.{
         .gpa = allocator,
         .in = process.stdout.?,
         .out = process.stdin.?,
     });
     defer zcs.deinit();
 
-    try zcs.serveMessage(.{ .tag = .update, .bytes_len = 0 }, &.{});
-    try zcs.serveMessage(.{ .tag = .exit, .bytes_len = 0 }, &.{});
+    try zcs.serveMessage(.{ .tag = @intFromEnum(OutMessage.Tag.update), .bytes_len = 0 }, &.{});
+    try zcs.serveMessage(.{ .tag = @intFromEnum(OutMessage.Tag.exit), .bytes_len = 0 }, &.{});
 
     while (true) {
-        const header = try zcs.receiveMessage();
+        const header = try zcs.receiveMessage(20 * std.time.ns_per_s);
         // log.debug("received header: {}", .{header});
 
-        switch (header.tag) {
+        switch (@as(InMessage.Tag, @enumFromInt(header.tag))) {
             .zig_version => {
                 // log.debug("zig-version: {s}", .{zcs.receive_fifo.readableSliceOfLen(header.bytes_len)});
-                zcs.pooler.fifo(.in).discard(header.bytes_len);
+                zcs.discard(header.bytes_len);
             },
             .emit_digest => {
-                const body_size = @sizeOf(std.zig.Server.Message.EmitDigest);
-                if (header.bytes_len <= body_size) return error.InvalidResponse;
+                const expected_size: usize = @sizeOf(std.zig.Server.Message.EmitDigest) + 16;
+                if (header.bytes_len != expected_size) return error.InvalidResponse;
 
-                _ = try zcs.receiveEmitDigest();
+                zcs.discard(@sizeOf(InMessage.EmitDigest));
 
-                const trailing_size = header.bytes_len - body_size;
-                const bin_result_path = zcs.pooler.fifo(.in).readableSliceOfLen(trailing_size);
-                const hex_result_path = std.Build.Cache.binToHex(bin_result_path[0..16].*);
+                const bin_result_path = try zcs.reader().readBytesNoEof(16);
+                const hex_result_path = std.Build.Cache.binToHex(bin_result_path);
                 const result_path = try std.fs.path.join(allocator, &.{ global_cache_path, "o", &hex_result_path, "cimport.zig" });
                 defer allocator.free(result_path);
 
-                return Result{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
+                return .{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
             },
             .error_bundle => {
-                const error_bundle_header = try zcs.receiveErrorBundle();
+                if (header.bytes_len < @sizeOf(InMessage.ErrorBundle)) return error.InvalidResponse;
 
-                const extra = try zcs.receiveIntArray(allocator, error_bundle_header.extra_len);
+                const error_bundle_header: InMessage.ErrorBundle = .{
+                    .extra_len = try zcs.reader().readInt(u32, .little),
+                    .string_bytes_len = try zcs.reader().readInt(u32, .little),
+                };
+
+                const expected_size = @sizeOf(InMessage.ErrorBundle) + error_bundle_header.extra_len * @sizeOf(u32) + error_bundle_header.string_bytes_len;
+                if (header.bytes_len != expected_size) return error.InvalidResponse;
+
+                const extra = try zcs.receiveSlice(allocator, u32, error_bundle_header.extra_len);
                 errdefer allocator.free(extra);
 
                 const string_bytes = try zcs.receiveBytes(allocator, error_bundle_header.string_bytes_len);
                 errdefer allocator.free(string_bytes);
 
-                const error_bundle = std.zig.ErrorBundle{ .string_bytes = string_bytes, .extra = extra };
+                const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
 
-                return Result{ .failure = error_bundle };
+                return .{ .failure = error_bundle };
             },
             else => {
-                zcs.pooler.fifo(.in).discard(header.bytes_len);
+                zcs.discard(header.bytes_len);
             },
         }
     }
