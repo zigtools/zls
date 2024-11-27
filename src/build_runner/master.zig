@@ -121,6 +121,7 @@ pub fn main() !void {
     var seed: u32 = 0;
     var output_tmp_nonce: ?[16]u8 = null;
     var debounce_interval_ms: u16 = 50;
+    var watch = false;
 
     while (nextArg(args, &arg_idx)) |arg| {
         if (mem.startsWith(u8, arg, "-Z")) {
@@ -243,8 +244,7 @@ pub fn main() !void {
             } else if (mem.eql(u8, arg, "--prominent-compile-errors")) {
                 // prominent_compile_errors = true;
             } else if (mem.eql(u8, arg, "--watch")) {
-                // watch mode will always be enabled if supported
-                // watch = true;
+                watch = true;
             } else if (mem.eql(u8, arg, "-fwine")) {
                 builder.enable_wine = true;
             } else if (mem.eql(u8, arg, "-fno-wine")) {
@@ -349,6 +349,9 @@ pub fn main() !void {
         .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
+
+        .transport = null,
+        .cycle = 0,
     };
 
     if (run.max_rss == 0) {
@@ -359,30 +362,44 @@ pub fn main() !void {
     try run.thread_pool.init(thread_pool_options);
     defer run.thread_pool.deinit();
 
-    const gpa = arena;
-    try extractBuildInformation(
-        gpa,
-        builder,
-        arena,
-        main_progress_node,
-        &run,
-        seed,
-    );
+    if (!watch) {
+        try extractBuildInformation(
+            arena,
+            builder,
+            arena,
+            main_progress_node,
+            &run,
+            seed,
+        );
+        return;
+    }
 
     if (!Watch.have_impl) return;
     var w = try Watch.init();
 
+    const gpa = arena;
+    var transport = Transport.init(.{
+        .gpa = gpa,
+        .in = std.io.getStdIn(),
+        .out = std.io.getStdOut(),
+    });
+    defer transport.deinit();
+
+    run.transport = &transport;
+
     var step_stack = try stepNamesToStepStack(gpa, builder, targets.items);
+    if (step_stack.count() == 0) {
+        // This means that `enable_build_on_save == null` and the project contains no "check" step.
+        return;
+    }
 
     prepare(gpa, builder, &step_stack, &run, seed) catch |err| switch (err) {
         error.UncleanExit => process.exit(1),
         else => return err,
     };
 
-    // TODO watch mode is currently always disabled until ZLS supports it
-    rebuild: while (false) {
+    rebuild: while (true) : (run.cycle += 1) {
         runSteps(
-            gpa,
             builder,
             step_stack.keys(),
             main_progress_node,
@@ -435,6 +452,9 @@ const Run = struct {
     thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
+
+    transport: ?*Transport,
+    cycle: u32,
 };
 
 fn stepNamesToStepStack(
@@ -446,8 +466,12 @@ fn stepNamesToStepStack(
     errdefer step_stack.deinit(gpa);
 
     if (step_names.len == 0) {
-        const default_step = if (b.top_level_steps.get("check")) |tls| &tls.step else b.default_step;
-        try step_stack.put(gpa, default_step, {});
+        if (b.top_level_steps.get("check")) |tls| {
+            try step_stack.put(gpa, &tls.step, {});
+        } else {
+            // TODO remove once ZLS respects `enable_build_on_save` and `build_on_save_args`
+            try step_stack.put(gpa, b.default_step, {});
+        }
     } else {
         try step_stack.ensureUnusedCapacity(gpa, step_names.len);
         for (0..step_names.len) |i| {
@@ -533,6 +557,16 @@ fn runSteps(
         thread_pool.spawn(workerMakeOneStep, .{
             &wait_group, b, step, step_prog, run,
         }) catch @panic("OOM");
+    }
+
+    if (run.transport) |transport| {
+        for (steps) |step| {
+            // missing fields:
+            // - result_error_msgs
+            // - result_stderr
+            // TODO step_id
+            serveWatchErrorBundle(transport, 0, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
+        }
     }
 }
 
@@ -652,12 +686,12 @@ fn workerMakeOneStep(
         .watch = true,
     });
 
-    const show_error_msgs = s.result_error_msgs.items.len > 0;
-    const show_compile_errors = s.result_error_bundle.errorMessageCount() > 0;
-
-    if (show_error_msgs or show_compile_errors) {
-        // s.result_stderr
-        // TODO send to ZLS
+    if (run.transport) |transport| {
+        // missing fields:
+        // - result_error_msgs
+        // - result_stderr
+        // TODO step_id
+        serveWatchErrorBundle(transport, 0, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
     }
 
     handle_result: {
@@ -782,6 +816,7 @@ fn validateSystemLibraryOptions(b: *std.Build) void {
 //
 
 const shared = @import("shared.zig");
+const Transport = shared.Transport;
 const BuildConfig = shared.BuildConfig;
 
 const Packages = struct {
@@ -1282,3 +1317,26 @@ const copied_from_zig = struct {
         }
     }
 };
+
+fn serveWatchErrorBundle(
+    transport: *Transport,
+    step_id: u32,
+    cycle: u32,
+    error_bundle: std.zig.ErrorBundle,
+) !void {
+    const eb_hdr: shared.ServerToClient.ErrorBundle = .{
+        .step_id = step_id,
+        .cycle = cycle,
+        .extra_len = @intCast(error_bundle.extra.len),
+        .string_bytes_len = @intCast(error_bundle.string_bytes.len),
+    };
+    const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + 4 * error_bundle.extra.len + error_bundle.string_bytes.len;
+    try transport.serveMessage(.{
+        .tag = @intFromEnum(shared.ServerToClient.Tag.watch_error_bundle),
+        .bytes_len = @intCast(bytes_len),
+    }, &.{
+        std.mem.asBytes(&eb_hdr),
+        std.mem.sliceAsBytes(error_bundle.extra),
+        error_bundle.string_bytes,
+    });
+}

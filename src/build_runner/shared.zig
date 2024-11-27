@@ -124,3 +124,23 @@ pub const Transport = struct {
         try client.out.writevAll(iovecs[0 .. bufs.len + 1]);
     }
 };
+
+pub const ServerToClient = struct {
+    pub const Tag = enum(u32) {
+        /// Body is an ErrorBundle.
+        watch_error_bundle,
+
+        _,
+    };
+
+    /// Trailing:
+    /// * extra: [extra_len]u32,
+    /// * string_bytes: [string_bytes_len]u8,
+    /// See `std.zig.ErrorBundle`.
+    pub const ErrorBundle = extern struct {
+        step_id: u32,
+        cycle: u32,
+        extra_len: u32,
+        string_bytes_len: u32,
+    };
+};
