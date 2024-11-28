@@ -174,6 +174,7 @@ pub const BuildFile = struct {
 /// Represents a Zig source file.
 pub const Handle = struct {
     uri: Uri,
+    version: u32 = 0,
     tree: Ast,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
@@ -515,6 +516,8 @@ pub const Handle = struct {
         self.cimports = .{};
         self.impl.document_scope = undefined;
         self.impl.zir = undefined;
+
+        self.version += 1;
 
         self.impl.lock.unlock();
 

@@ -5,7 +5,6 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_diag);
 
 const Server = @import("../Server.zig");
-const Config = @import("../Config.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("lsp").types;
 const Analyser = @import("../analysis.zig");
@@ -14,142 +13,189 @@ const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
 const code_actions = @import("code_actions.zig");
 const tracy = @import("tracy");
+const DiagnosticsCollection = @import("../DiagnosticsCollection.zig");
 
 const Zir = std.zig.Zir;
 
-pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
+pub fn generateDiagnostics(
+    server: *Server,
+    handle: *DocumentStore.Handle,
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const transport = server.transport orelse return;
+
+    {
+        var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
+        errdefer arena_allocator.deinit();
+        const arena = arena_allocator.allocator();
+
+        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
+
+        try collectParseDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+
+        if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
+            try code_actions.collectAutoDiscardDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+        }
+
+        if (server.config.warn_style and handle.tree.mode == .zig) {
+            try collectWarnStyleDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+        }
+
+        if (server.config.highlight_global_var_declarations and handle.tree.mode == .zig) {
+            try collectGlobalVarDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+        }
+
+        try server.diagnostics_collection.pushLspDiagnostics(.parse, handle.uri, arena_allocator.state, diagnostics.items);
+    }
+
+    if (handle.tree.errors.len == 0 and handle.tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
+        defer tracy_zone2.end();
+
+        var error_bundle = try getAstCheckDiagnostics(server, handle);
+        defer error_bundle.deinit(server.allocator);
+
+        try server.diagnostics_collection.pushErrorBundle(.parse, handle.version, null, error_bundle);
+    }
+
+    {
+        var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
+        errdefer arena_allocator.deinit();
+        const arena = arena_allocator.allocator();
+
+        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
+        try collectCimportDiagnostics(&server.document_store, handle, arena, &diagnostics, server.offset_encoding);
+        try server.diagnostics_collection.pushLspDiagnostics(.cimport, handle.uri, arena_allocator.state, diagnostics.items);
+    }
+
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
+    server.diagnostics_collection.publishDiagnostics(transport, server.offset_encoding) catch |err| {
+        log.err("failed to publish diagnostics: {}", .{err});
+    };
+}
 
-    const tree = handle.tree;
-
-    var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
+fn collectParseDiagnostics(
+    tree: Ast,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
     try diagnostics.ensureUnusedCapacity(arena, tree.errors.len);
     for (tree.errors) |err| {
-        const tracy_zone2 = tracy.traceNamed(@src(), "parse");
-        defer tracy_zone2.end();
-
         var buffer: std.ArrayListUnmanaged(u8) = .{};
         try tree.renderError(err, buffer.writer(arena));
 
         diagnostics.appendAssumeCapacity(.{
-            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
+            .range = offsets.tokenToRange(tree, err.token, offset_encoding),
             .severity = .Error,
             .code = .{ .string = @tagName(err.tag) },
             .source = "zls",
             .message = try buffer.toOwnedSlice(arena),
         });
     }
+}
 
-    if (tree.errors.len == 0 and tree.mode == .zig) {
-        const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
-        defer tracy_zone2.end();
+fn collectWarnStyleDiagnostics(
+    tree: Ast,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-        var error_bundle = try getAstCheckDiagnostics(server, handle);
-        defer error_bundle.deinit(server.allocator);
-        var diagnostics_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
-        try errorBundleToDiagnostics(error_bundle, arena, &diagnostics_set, "ast-check", server.offset_encoding);
-        switch (diagnostics_set.count()) {
-            0 => {},
-            1 => try diagnostics.appendSlice(arena, diagnostics_set.values()[0].items),
-            else => unreachable, // ast-check diagnostics only affect a single file
-        }
-    }
+    var node: u32 = 0;
+    while (node < tree.nodes.len) : (node += 1) {
+        if (ast.isBuiltinCall(tree, node)) {
+            const builtin_token = tree.nodes.items(.main_token)[node];
+            const call_name = tree.tokenSlice(builtin_token);
 
-    if (server.getAutofixMode() != .none and tree.mode == .zig) {
-        const tracy_zone2 = tracy.traceNamed(@src(), "autofix");
-        defer tracy_zone2.end();
+            if (!std.mem.eql(u8, call_name, "@import")) continue;
 
-        try code_actions.collectAutoDiscardDiagnostics(tree, arena, &diagnostics, server.offset_encoding);
-    }
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-    if (server.config.warn_style and tree.mode == .zig) {
-        const tracy_zone2 = tracy.traceNamed(@src(), "warn style errors");
-        defer tracy_zone2.end();
+            if (params.len != 1) continue;
 
-        var node: u32 = 0;
-        while (node < tree.nodes.len) : (node += 1) {
-            if (ast.isBuiltinCall(tree, node)) {
-                const builtin_token = tree.nodes.items(.main_token)[node];
-                const call_name = tree.tokenSlice(builtin_token);
+            const import_str_token = tree.nodes.items(.main_token)[params[0]];
+            const import_str = tree.tokenSlice(import_str_token);
 
-                if (!std.mem.eql(u8, call_name, "@import")) continue;
-
-                var buffer: [2]Ast.Node.Index = undefined;
-                const params = ast.builtinCallParams(tree, node, &buffer).?;
-
-                if (params.len != 1) continue;
-
-                const import_str_token = tree.nodes.items(.main_token)[params[0]];
-                const import_str = tree.tokenSlice(import_str_token);
-
-                if (std.mem.startsWith(u8, import_str, "\"./")) {
-                    try diagnostics.append(arena, .{
-                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding),
-                        .severity = .Hint,
-                        .code = .{ .string = "dot_slash_import" },
-                        .source = "zls",
-                        .message = "A ./ is not needed in imports",
-                    });
-                }
+            if (std.mem.startsWith(u8, import_str, "\"./")) {
+                try diagnostics.append(arena, .{
+                    .range = offsets.tokenToRange(tree, import_str_token, offset_encoding),
+                    .severity = .Hint,
+                    .code = .{ .string = "dot_slash_import" },
+                    .source = "zls",
+                    .message = "A ./ is not needed in imports",
+                });
             }
         }
+    }
 
-        // TODO: style warnings for types, values and declarations below root scope
-        if (tree.errors.len == 0) {
-            for (tree.rootDecls()) |decl_idx| {
-                const decl = tree.nodes.items(.tag)[decl_idx];
-                switch (decl) {
-                    .fn_proto,
-                    .fn_proto_multi,
-                    .fn_proto_one,
-                    .fn_proto_simple,
-                    .fn_decl,
-                    => blk: {
-                        var buf: [1]Ast.Node.Index = undefined;
-                        const func = tree.fullFnProto(&buf, decl_idx).?;
-                        if (func.extern_export_inline_token != null) break :blk;
+    // TODO: style warnings for types, values and declarations below root scope
+    if (tree.errors.len == 0) {
+        for (tree.rootDecls()) |decl_idx| {
+            const decl = tree.nodes.items(.tag)[decl_idx];
+            switch (decl) {
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => blk: {
+                    var buf: [1]Ast.Node.Index = undefined;
+                    const func = tree.fullFnProto(&buf, decl_idx).?;
+                    if (func.extern_export_inline_token != null) break :blk;
 
-                        if (func.name_token) |name_token| {
-                            const is_type_function = Analyser.isTypeFunction(tree, func);
+                    if (func.name_token) |name_token| {
+                        const is_type_function = Analyser.isTypeFunction(tree, func);
 
-                            const func_name = tree.tokenSlice(name_token);
-                            if (!is_type_function and !Analyser.isCamelCase(func_name)) {
-                                try diagnostics.append(arena, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
-                                    .severity = .Hint,
-                                    .code = .{ .string = "bad_style" },
-                                    .source = "zls",
-                                    .message = "Functions should be camelCase",
-                                });
-                            } else if (is_type_function and !Analyser.isPascalCase(func_name)) {
-                                try diagnostics.append(arena, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
-                                    .severity = .Hint,
-                                    .code = .{ .string = "bad_style" },
-                                    .source = "zls",
-                                    .message = "Type functions should be PascalCase",
-                                });
-                            }
+                        const func_name = tree.tokenSlice(name_token);
+                        if (!is_type_function and !Analyser.isCamelCase(func_name)) {
+                            try diagnostics.append(arena, .{
+                                .range = offsets.tokenToRange(tree, name_token, offset_encoding),
+                                .severity = .Hint,
+                                .code = .{ .string = "bad_style" },
+                                .source = "zls",
+                                .message = "Functions should be camelCase",
+                            });
+                        } else if (is_type_function and !Analyser.isPascalCase(func_name)) {
+                            try diagnostics.append(arena, .{
+                                .range = offsets.tokenToRange(tree, name_token, offset_encoding),
+                                .severity = .Hint,
+                                .code = .{ .string = "bad_style" },
+                                .source = "zls",
+                                .message = "Type functions should be PascalCase",
+                            });
                         }
-                    },
-                    else => {},
-                }
+                    }
+                },
+                else => {},
             }
         }
     }
+}
+
+fn collectCimportDiagnostics(
+    document_store: *DocumentStore,
+    handle: *DocumentStore.Handle,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
-        const tracy_zone2 = tracy.traceNamed(@src(), "cImport");
-        defer tracy_zone2.end();
-
         const result = blk: {
-            server.document_store.lock.lock();
-            defer server.document_store.lock.unlock();
-            break :blk server.document_store.cimports.get(hash) orelse continue;
+            document_store.lock.lock();
+            defer document_store.lock.unlock();
+            break :blk document_store.cimports.get(hash) orelse continue;
         };
         const error_bundle: std.zig.ErrorBundle = switch (result) {
             .success => continue,
@@ -162,7 +208,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
             const err_msg = error_bundle.getErrorMessage(err_msg_index);
 
             diagnostics.appendAssumeCapacity(.{
-                .range = offsets.nodeToRange(tree, node, server.offset_encoding),
+                .range = offsets.nodeToRange(handle.tree, node, offset_encoding),
                 .severity = .Error,
                 .code = .{ .string = "cImport" },
                 .source = "zls",
@@ -170,43 +216,43 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
             });
         }
     }
+}
 
-    if (server.config.highlight_global_var_declarations and tree.mode == .zig) {
-        const tracy_zone2 = tracy.traceNamed(@src(), "highlight global var");
-        defer tracy_zone2.end();
+fn collectGlobalVarDiagnostics(
+    tree: Ast,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-        const main_tokens = tree.nodes.items(.main_token);
-        const tags = tree.tokens.items(.tag);
-        for (tree.rootDecls()) |decl| {
-            const decl_tag = tree.nodes.items(.tag)[decl];
-            const decl_main_token = tree.nodes.items(.main_token)[decl];
+    const main_tokens = tree.nodes.items(.main_token);
+    const tags = tree.tokens.items(.tag);
+    for (tree.rootDecls()) |decl| {
+        const decl_tag = tree.nodes.items(.tag)[decl];
+        const decl_main_token = tree.nodes.items(.main_token)[decl];
 
-            switch (decl_tag) {
-                .simple_var_decl,
-                .aligned_var_decl,
-                .local_var_decl,
-                .global_var_decl,
-                => {
-                    if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
-                    // uncomment this to get a list :)
-                    //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
-                    try diagnostics.append(arena, .{
-                        .range = offsets.tokenToRange(tree, decl_main_token, server.offset_encoding),
-                        .severity = .Hint,
-                        .code = .{ .string = "highlight_global_var_declarations" },
-                        .source = "zls",
-                        .message = "Global var declaration",
-                    });
-                },
-                else => {},
-            }
+        switch (decl_tag) {
+            .simple_var_decl,
+            .aligned_var_decl,
+            .local_var_decl,
+            .global_var_decl,
+            => {
+                if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
+                // uncomment this to get a list :)
+                //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
+                try diagnostics.append(arena, .{
+                    .range = offsets.tokenToRange(tree, decl_main_token, offset_encoding),
+                    .severity = .Hint,
+                    .code = .{ .string = "highlight_global_var_declarations" },
+                    .source = "zls",
+                    .message = "Global var declaration",
+                });
+            },
+            else => {},
         }
     }
-
-    return .{
-        .uri = handle.uri,
-        .diagnostics = diagnostics.items,
-    };
 }
 
 /// caller owns the returned ErrorBundle
@@ -216,6 +262,12 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
 
     std.debug.assert(handle.tree.errors.len == 0);
     std.debug.assert(handle.tree.mode == .zig);
+
+    const file_path = URI.parse(server.allocator, handle.uri) catch |err| {
+        log.err("failed to parse invalid uri '{s}': {}", .{ handle.uri, err });
+        return .empty;
+    };
+    defer server.allocator.free(file_path);
 
     var eb: std.zig.ErrorBundle.Wip = undefined;
     try eb.init(server.allocator);
@@ -229,6 +281,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             server.allocator,
             server.config.zig_exe_path.?,
             &server.zig_ast_check_lock,
+            file_path,
             handle.tree.source,
             &eb,
         ) catch |err| {
@@ -239,7 +292,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
         std.debug.assert(handle.getZirStatus() == .done);
 
         if (zir.hasCompileErrors()) {
-            try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
+            try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, file_path);
         }
     }
 
@@ -250,6 +303,7 @@ fn getErrorBundleFromAstCheck(
     allocator: std.mem.Allocator,
     zig_exe_path: []const u8,
     zig_ast_check_lock: *std.Thread.Mutex,
+    file_path: []const u8,
     source: [:0]const u8,
     error_bundle: *std.zig.ErrorBundle.Wip,
 ) !void {
@@ -293,6 +347,8 @@ fn getErrorBundleFromAstCheck(
     var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .{};
     defer notes.deinit(allocator);
 
+    const eb_file_path = try error_bundle.addString(file_path);
+
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
     while (line_iterator.next()) |line| {
         var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
@@ -319,7 +375,7 @@ fn getErrorBundleFromAstCheck(
         }
 
         const src_loc = try error_bundle.addSourceLocation(.{
-            .src_path = 0,
+            .src_path = eb_file_path,
             .line = utf8_position.line,
             .column = utf8_position.character,
             .span_start = @intCast(loc.start),
@@ -361,73 +417,4 @@ fn getErrorBundleFromAstCheck(
         const notes_start = try error_bundle.reserveNotes(em.notes_len);
         @memcpy(error_bundle.extra.items[notes_start..][0..em.notes_len], @as([]const u32, @ptrCast(notes.items)));
     }
-}
-
-pub fn errorBundleToDiagnostics(
-    error_bundle: std.zig.ErrorBundle,
-    arena: std.mem.Allocator,
-    diagnostics: *std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)),
-    code: []const u8,
-    /// The diagnostic's code, which usually appear in the user interface.
-    offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
-    if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
-    for (error_bundle.getMessages()) |msg_index| {
-        const err = error_bundle.getErrorMessage(msg_index);
-        if (err.src_loc == .none) continue;
-
-        const src_loc = error_bundle.getSourceLocation(err.src_loc);
-        const src_path = error_bundle.nullTerminatedString(src_loc.src_path);
-        const src_range = errorBundleSourceLocationToRange(error_bundle, src_loc, offset_encoding);
-
-        const eb_notes = error_bundle.getNotes(msg_index);
-        const lsp_notes = try arena.alloc(types.DiagnosticRelatedInformation, eb_notes.len);
-        for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
-            const eb_note = error_bundle.getErrorMessage(eb_note_index);
-            if (eb_note.src_loc == .none) continue;
-
-            const note_src_loc = error_bundle.getSourceLocation(eb_note.src_loc);
-            const note_src_path = error_bundle.nullTerminatedString(src_loc.src_path);
-            const note_src_range = errorBundleSourceLocationToRange(error_bundle, note_src_loc, offset_encoding);
-
-            lsp_note.* = .{
-                .location = .{
-                    .uri = try URI.fromPath(arena, note_src_path),
-                    .range = note_src_range,
-                },
-                .message = try arena.dupe(u8, error_bundle.nullTerminatedString(eb_note.msg)),
-            };
-        }
-
-        const uri = try URI.fromPath(arena, src_path);
-
-        const gop = try diagnostics.getOrPutValue(arena, uri, .{});
-        try gop.value_ptr.append(arena, .{
-            .range = src_range,
-            .severity = .Error,
-            .code = .{ .string = code },
-            .source = "zls",
-            .message = try arena.dupe(u8, error_bundle.nullTerminatedString(err.msg)),
-            .relatedInformation = lsp_notes,
-        });
-    }
-}
-
-fn errorBundleSourceLocationToRange(
-    error_bundle: std.zig.ErrorBundle,
-    src_loc: std.zig.ErrorBundle.SourceLocation,
-    offset_encoding: offsets.Encoding,
-) types.Range {
-    const source_line = error_bundle.nullTerminatedString(src_loc.source_line);
-
-    const source_line_range_utf8: types.Range = .{
-        .start = .{ .line = 0, .character = src_loc.column - (src_loc.span_main - src_loc.span_start) },
-        .end = .{ .line = 0, .character = src_loc.column + (src_loc.span_end - src_loc.span_main) },
-    };
-    const source_line_range = offsets.convertRangeEncoding(source_line, source_line_range_utf8, .@"utf-8", offset_encoding);
-
-    return .{
-        .start = .{ .line = src_loc.line, .character = source_line_range.start.character },
-        .end = .{ .line = src_loc.line, .character = source_line_range.end.character },
-    };
 }

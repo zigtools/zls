@@ -18,6 +18,7 @@ const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const diff = @import("diff.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
+const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const known_folders = @import("known-folders");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
@@ -63,6 +64,7 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 /// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
+diagnostics_collection: DiagnosticsCollection,
 workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
@@ -1788,6 +1790,7 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
+        .diagnostics_collection = .{ .allocator = allocator },
     };
 
     if (zig_builtin.single_threaded) {
@@ -1817,6 +1820,7 @@ pub fn destroy(server: *Server) void {
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
     server.workspaces.deinit(server.allocator);
+    server.diagnostics_collection.deinit();
     server.client_capabilities.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
@@ -2034,11 +2038,7 @@ fn processJob(server: *Server, job: Job) void {
         },
         .generate_diagnostics => |uri| {
             const handle = server.document_store.getHandle(uri) orelse return;
-            var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-            defer arena_allocator.deinit();
-            const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle) catch return;
-            const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
-            server.allocator.free(json_message);
+            diagnostics_gen.generateDiagnostics(server, handle) catch return;
         },
     }
 }
