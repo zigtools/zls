@@ -179,6 +179,25 @@ pub fn build(b: *Build) !void {
     exe.root_module.addImport("zls", zls_module);
     b.installArtifact(exe);
 
+    {
+        const exe_check = b.addExecutable(.{
+            .name = "zls",
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .single_threaded = single_threaded,
+        });
+        exe_check.root_module.addImport("exe_options", exe_options_module);
+        exe_check.root_module.addImport("tracy", tracy_module);
+        exe_check.root_module.addImport("diffz", diffz_module);
+        exe_check.root_module.addImport("lsp", lsp_module);
+        exe_check.root_module.addImport("known-folders", known_folders_module);
+        exe_check.root_module.addImport("zls", zls_module);
+
+        const check = b.step("check", "Check if ZLS compiles");
+        check.dependOn(&exe_check.step);
+    }
+
     const test_step = b.step("test", "Run all the tests");
 
     const tests = b.addTest(.{
