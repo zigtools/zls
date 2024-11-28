@@ -877,18 +877,9 @@ pub fn updateConfiguration(
     //                        apply changes
     // <---------------------------------------------------------->
 
-    const new_zig_exe_path =
-        new_config.zig_exe_path != null and
-        (server.config.zig_exe_path == null or !std.mem.eql(u8, server.config.zig_exe_path.?, new_config.zig_exe_path.?));
-    const new_zig_lib_path =
-        new_config.zig_lib_path != null and
-        (server.config.zig_lib_path == null or !std.mem.eql(u8, server.config.zig_lib_path.?, new_config.zig_lib_path.?));
-    const new_build_runner_path =
-        new_config.build_runner_path != null and
-        (server.config.build_runner_path == null or !std.mem.eql(u8, server.config.build_runner_path.?, new_config.build_runner_path.?));
-    const new_force_autofix = new_config.force_autofix != null and server.config.force_autofix != new_config.force_autofix.?;
+    var has_changed: [std.meta.fields(Config).len]bool = .{false} ** std.meta.fields(Config).len;
 
-    inline for (std.meta.fields(Config)) |field| {
+    inline for (std.meta.fields(Config), 0..) |field, field_index| {
         if (@field(new_config, field.name)) |new_value| {
             const old_value_maybe_optional = @field(server.config, field.name);
 
@@ -915,6 +906,7 @@ pub fn updateConfiguration(
                 var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
                 runtime_known_field_name = field.name;
                 log.info("Set config option '{s}' to {}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
+                has_changed[field_index] = true;
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
                         const copy = try config_arena.alloc([]const u8, new_value.len);
@@ -927,6 +919,11 @@ pub fn updateConfiguration(
             }
         }
     }
+
+    const new_zig_exe_path = has_changed[std.meta.fieldIndex(Config, "zig_exe_path").?];
+    const new_zig_lib_path = has_changed[std.meta.fieldIndex(Config, "zig_lib_path").?];
+    const new_build_runner_path = has_changed[std.meta.fieldIndex(Config, "build_runner_path").?];
+    const new_force_autofix = has_changed[std.meta.fieldIndex(Config, "force_autofix").?];
 
     server.document_store.config = DocumentStore.Config.fromMainConfig(server.config);
 
@@ -965,9 +962,11 @@ pub fn updateConfiguration(
     //  don't modify config options after here, only show messages
     // <---------------------------------------------------------->
 
+    // TODO there should a way to suppress this message
     if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
-        // TODO there should a way to suppress this message
         server.showMessage(.Warning, "zig executable could not be found", .{});
+    } else if (std.process.can_spawn and server.status == .initialized and server.config.zig_lib_path == null) {
+        server.showMessage(.Warning, "zig standard library directory could not be resolved", .{});
     }
 
     switch (resolve_result.build_runner_version) {
@@ -1007,17 +1006,19 @@ pub fn updateConfiguration(
         if (!std.process.can_spawn) {
             log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
+            log.warn("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
     }
 
     if (server.config.enable_build_on_save orelse false) {
         if (!std.process.can_spawn) {
             log.info("'enable_build_on_save' is ignored because your OS can't spawn a child process", .{});
-        } else if (server.status == .initialized and server.config.zig_exe_path == null) {
-            log.info("'enable_build_on_save' is ignored because Zig could not be found", .{});
+        } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
+            log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
-            log.info("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+            log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+        } else if (server.status == .initialized and resolve_result.build_runner_version != .resolved) {
+            log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
         }
     }
 
