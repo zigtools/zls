@@ -245,6 +245,10 @@ pub fn main() !void {
                 // prominent_compile_errors = true;
             } else if (mem.eql(u8, arg, "--watch")) {
                 watch = true;
+            } else if (mem.eql(u8, arg, "-fincremental")) {
+                graph.incremental = true;
+            } else if (mem.eql(u8, arg, "-fno-incremental")) {
+                graph.incremental = false;
             } else if (mem.eql(u8, arg, "-fwine")) {
                 builder.enable_wine = true;
             } else if (mem.eql(u8, arg, "-fno-wine")) {
