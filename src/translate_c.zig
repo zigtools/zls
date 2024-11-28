@@ -191,11 +191,8 @@ pub fn translate(
         return null;
     };
 
-    defer _ = process.wait() catch |wait_err| blk: {
+    defer _ = process.wait() catch |wait_err| {
         log.err("zig translate-c process did not terminate, error: {}", .{wait_err});
-        break :blk process.kill() catch |kill_err| {
-            std.debug.panic("failed to terminate zig translate-c process, error: {}", .{kill_err});
-        };
     };
 
     var zcs = ZCSTransport.init(.{
