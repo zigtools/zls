@@ -765,7 +765,10 @@ const Workspace = struct {
     uri: types.URI,
     build_on_save: if (build_on_save_supported) ?diagnostics_gen.BuildOnSave else void,
 
-    pub const build_on_save_supported = std.process.can_spawn and !zig_builtin.single_threaded;
+    pub const build_on_save_supported =
+        std.process.can_spawn and
+        !zig_builtin.single_threaded and
+        std.Build.Watch.have_impl;
 
     fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
         const duped_uri = try server.allocator.dupe(u8, uri);
