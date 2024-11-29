@@ -122,6 +122,7 @@ pub fn main() !void {
     var output_tmp_nonce: ?[16]u8 = null;
     var debounce_interval_ms: u16 = 50;
     var watch = false;
+    var check_step_only = false;
 
     while (nextArg(args, &arg_idx)) |arg| {
         if (mem.startsWith(u8, arg, "-Z")) {
@@ -245,6 +246,8 @@ pub fn main() !void {
                 // prominent_compile_errors = true;
             } else if (mem.eql(u8, arg, "--watch")) {
                 watch = true;
+            } else if (mem.eql(u8, arg, "--check-only")) { // ZLS only
+                check_step_only = true;
             } else if (mem.eql(u8, arg, "-fincremental")) {
                 graph.incremental = true;
             } else if (mem.eql(u8, arg, "-fno-incremental")) {
@@ -391,7 +394,7 @@ pub fn main() !void {
 
     run.transport = &transport;
 
-    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items);
+    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items, check_step_only);
     if (step_stack.count() == 0) {
         // This means that `enable_build_on_save == null` and the project contains no "check" step.
         return;
@@ -401,6 +404,14 @@ pub fn main() !void {
         error.UncleanExit => process.exit(1),
         else => return err,
     };
+
+    const suicide_thread = try std.Thread.spawn(.{ .allocator = gpa }, struct {
+        fn do(t: *Transport) void {
+            const header = t.receiveMessage(null) catch process.exit(1);
+            process.exit(if (header.tag == 0) 0 else 1);
+        }
+    }.do, .{&transport});
+    suicide_thread.detach();
 
     rebuild: while (true) : (run.cycle += 1) {
         runSteps(
@@ -465,6 +476,7 @@ fn stepNamesToStepStack(
     gpa: Allocator,
     b: *std.Build,
     step_names: []const []const u8,
+    check_step_only: bool,
 ) !std.AutoArrayHashMapUnmanaged(*Step, void) {
     var step_stack: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
     errdefer step_stack.deinit(gpa);
@@ -472,8 +484,7 @@ fn stepNamesToStepStack(
     if (step_names.len == 0) {
         if (b.top_level_steps.get("check")) |tls| {
             try step_stack.put(gpa, &tls.step, {});
-        } else {
-            // TODO remove once ZLS respects `enable_build_on_save` and `build_on_save_args`
+        } else if (!check_step_only) {
             try step_stack.put(gpa, b.default_step, {});
         }
     } else {

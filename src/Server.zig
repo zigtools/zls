@@ -69,14 +69,6 @@ workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
-const Workspace = struct {
-    uri: types.URI,
-
-    fn deinit(self: *Workspace, allocator: std.mem.Allocator) void {
-        allocator.free(self.uri);
-    }
-};
-
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_apply_edits: bool = false,
@@ -769,11 +761,76 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 }
 
-fn addWorkspace(server: *Server, uri: types.URI) !void {
+const Workspace = struct {
+    uri: types.URI,
+    build_on_save: if (build_on_save_supported) ?diagnostics_gen.BuildOnSave else void,
+
+    pub const build_on_save_supported = std.process.can_spawn and !zig_builtin.single_threaded;
+
+    fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
+        const duped_uri = try server.allocator.dupe(u8, uri);
+        errdefer server.allocator.free(duped_uri);
+
+        return .{
+            .uri = duped_uri,
+            .build_on_save = if (build_on_save_supported) null else {},
+        };
+    }
+
+    fn deinit(workspace: *Workspace, allocator: std.mem.Allocator) void {
+        if (build_on_save_supported) {
+            if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
+        }
+        allocator.free(workspace.uri);
+    }
+
+    fn startOrRestartBuildOnSave(workspace: *Workspace, server: *Server) error{OutOfMemory}!void {
+        comptime std.debug.assert(build_on_save_supported);
+
+        if (workspace.build_on_save) |*build_on_save| {
+            build_on_save.deinit();
+            workspace.build_on_save = null;
+        }
+
+        const enable_build_on_save = server.config.enable_build_on_save orelse true;
+        if (!enable_build_on_save) return;
+
+        const zig_exe_path = server.config.zig_exe_path orelse return;
+        const zig_lib_path = server.config.zig_lib_path orelse return;
+        const build_runner_path = server.config.build_runner_path orelse return;
+        const transport = server.transport orelse return;
+
+        const workspace_path = @import("uri.zig").parse(server.allocator, workspace.uri) catch |err| {
+            log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
+            return;
+        };
+        defer server.allocator.free(workspace_path);
+
+        workspace.build_on_save = @as(diagnostics_gen.BuildOnSave, undefined);
+        workspace.build_on_save.?.init(.{
+            .allocator = server.allocator,
+            .workspace_path = workspace_path,
+            .build_on_save_args = server.config.build_on_save_args,
+            .check_step_only = server.config.enable_build_on_save == null,
+            .zig_exe_path = zig_exe_path,
+            .zig_lib_path = zig_lib_path,
+            .build_runner_path = build_runner_path,
+            .collection = &server.diagnostics_collection,
+            .lsp_transport = transport,
+            .offset_encoding = server.offset_encoding,
+        }) catch |err| {
+            workspace.build_on_save = null;
+            log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
+            return;
+        };
+
+        log.info("started Build-On-Save for '{s}'", .{workspace.uri});
+    }
+};
+
+fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
-    server.workspaces.appendAssumeCapacity(.{
-        .uri = try server.allocator.dupe(u8, uri),
-    });
+    server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
     log.info("added Workspace Folder: {s}", .{uri});
 }
 
@@ -923,6 +980,8 @@ pub fn updateConfiguration(
     const new_zig_exe_path = has_changed[std.meta.fieldIndex(Config, "zig_exe_path").?];
     const new_zig_lib_path = has_changed[std.meta.fieldIndex(Config, "zig_lib_path").?];
     const new_build_runner_path = has_changed[std.meta.fieldIndex(Config, "build_runner_path").?];
+    const new_enable_build_on_save = has_changed[std.meta.fieldIndex(Config, "enable_build_on_save").?];
+    const new_build_on_save_args = has_changed[std.meta.fieldIndex(Config, "build_on_save_args").?];
     const new_force_autofix = has_changed[std.meta.fieldIndex(Config, "force_autofix").?];
 
     server.document_store.config = DocumentStore.Config.fromMainConfig(server.config);
@@ -932,6 +991,18 @@ pub fn updateConfiguration(
 
         for (server.document_store.build_files.keys()) |build_file_uri| {
             server.document_store.invalidateBuildFile(build_file_uri);
+        }
+    }
+
+    if (Workspace.build_on_save_supported and
+        (new_zig_exe_path or
+        new_zig_lib_path or
+        new_build_runner_path or
+        new_enable_build_on_save or
+        new_build_on_save_args))
+    {
+        for (server.workspaces.items) |*workspace| {
+            try workspace.startOrRestartBuildOnSave(server);
         }
     }
 
