@@ -500,13 +500,8 @@ pub const BuildOnSave = struct {
     }
 
     pub fn deinit(self: *BuildOnSave) void {
-        var transport = Transport.init(.{
-            .gpa = self.allocator,
-            .in = self.child_process.stdout.?,
-            .out = self.child_process.stdin.?,
-        });
-
-        transport.serveMessage(.{ .tag = 0, .bytes_len = 0 }, &.{}) catch |err| {
+        // this write tells the child process to exit
+        self.child_process.stdin.?.writeAll("\xaa") catch |err| {
             log.warn("failed to send message to zig build runner: {}", .{err});
             return;
         };
@@ -558,9 +553,12 @@ pub const BuildOnSave = struct {
         defer transport.deinit();
 
         while (true) {
-            const header = transport.receiveMessage(null) catch |err| {
-                log.err("failed to receive message from build runner: {}", .{err});
-                return;
+            const header = transport.receiveMessage(null) catch |err| switch (err) {
+                error.EndOfStream => return,
+                else => {
+                    log.err("failed to receive message from build runner: {}", .{err});
+                    return;
+                },
             };
 
             switch (@as(ServerToClient.Tag, @enumFromInt(header.tag))) {
