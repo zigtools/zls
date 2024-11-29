@@ -6,7 +6,8 @@ const log = std.log.scoped(.zls_diag);
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
-const types = @import("lsp").types;
+const lsp = @import("lsp");
+const types = lsp.types;
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
@@ -418,3 +419,196 @@ fn getErrorBundleFromAstCheck(
         @memcpy(error_bundle.extra.items[notes_start..][0..em.notes_len], @as([]const u32, @ptrCast(notes.items)));
     }
 }
+
+/// This struct is not relocatable after initilization.
+pub const BuildOnSave = struct {
+    allocator: std.mem.Allocator,
+    child_process: std.process.Child,
+    thread: std.Thread,
+
+    const shared = @import("../build_runner/shared.zig");
+    const Transport = shared.Transport;
+    const ServerToClient = shared.ServerToClient;
+
+    pub const InitOptions = struct {
+        allocator: std.mem.Allocator,
+        workspace_path: []const u8,
+        build_on_save_args: []const []const u8,
+        check_step_only: bool,
+        zig_exe_path: []const u8,
+        zig_lib_path: []const u8,
+        build_runner_path: []const u8,
+
+        collection: *DiagnosticsCollection,
+        lsp_transport: lsp.AnyTransport,
+        offset_encoding: offsets.Encoding,
+    };
+
+    pub fn init(self: *BuildOnSave, options: InitOptions) !void {
+        self.* = undefined;
+
+        const base_args: []const []const u8 = &.{
+            options.zig_exe_path,
+            "build",
+            "--build-runner",
+            options.build_runner_path,
+            "--zig-lib-dir",
+            options.zig_lib_path,
+            "--watch",
+        };
+        var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(
+            options.allocator,
+            base_args.len + options.build_on_save_args.len + @intFromBool(options.check_step_only),
+        );
+        defer argv.deinit(options.allocator);
+
+        argv.appendSliceAssumeCapacity(base_args);
+        if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
+        argv.appendSliceAssumeCapacity(options.build_on_save_args);
+
+        var child_process = std.process.Child.init(argv.items, options.allocator);
+        child_process.stdin_behavior = .Pipe;
+        child_process.stdout_behavior = .Pipe;
+        child_process.stderr_behavior = .Pipe;
+        child_process.cwd = options.workspace_path;
+
+        child_process.spawn() catch |err| {
+            log.err("failed to spawn zig build process: {}", .{err});
+            return;
+        };
+
+        errdefer _ = child_process.kill() catch |err| {
+            std.debug.panic("failed to terminate build runner process, error: {}", .{err});
+        };
+
+        self.* = .{
+            .allocator = options.allocator,
+            .child_process = child_process,
+            .thread = undefined, // set below
+        };
+
+        const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
+        errdefer options.allocator.free(duped_workspace_path);
+
+        self.thread = try std.Thread.spawn(.{ .allocator = options.allocator }, loop, .{
+            self,
+            options.collection,
+            options.lsp_transport,
+            options.offset_encoding,
+            duped_workspace_path,
+        });
+    }
+
+    pub fn deinit(self: *BuildOnSave) void {
+        var transport = Transport.init(.{
+            .gpa = self.allocator,
+            .in = self.child_process.stdout.?,
+            .out = self.child_process.stdin.?,
+        });
+
+        transport.serveMessage(.{ .tag = 0, .bytes_len = 0 }, &.{}) catch |err| {
+            log.warn("failed to send message to zig build runner: {}", .{err});
+            return;
+        };
+
+        const stderr_file = self.child_process.stderr.?;
+        const stderr = stderr_file.readToEndAlloc(self.allocator, 16 * 1024 * 1024) catch "";
+        defer self.allocator.free(stderr);
+
+        const term = self.child_process.wait() catch |err| {
+            log.warn("Failed to await zig build runner: {}", .{err});
+            return;
+        };
+
+        switch (term) {
+            .Exited => |code| if (code != 0) {
+                if (stderr.len != 0) {
+                    log.warn("zig build runner exited with non-zero status: {}\nstderr:\n{s}", .{ code, stderr });
+                } else {
+                    log.warn("zig build runner exited with non-zero status: {}", .{code});
+                }
+            },
+            else => {
+                if (stderr.len != 0) {
+                    log.warn("zig build runner exitied abnormally: {s}\nstderr:\n{s}", .{ @tagName(term), stderr });
+                } else {
+                    log.warn("zig build runner exitied abnormally: {s}", .{@tagName(term)});
+                }
+            },
+        }
+
+        self.thread.join();
+        self.* = undefined;
+    }
+
+    fn loop(
+        self: *BuildOnSave,
+        collection: *DiagnosticsCollection,
+        lsp_transport: lsp.AnyTransport,
+        offset_encoding: offsets.Encoding,
+        workspace_path: []const u8,
+    ) void {
+        defer self.allocator.free(workspace_path);
+
+        var transport = Transport.init(.{
+            .gpa = self.allocator,
+            .in = self.child_process.stdout.?,
+            .out = self.child_process.stdin.?,
+        });
+        defer transport.deinit();
+
+        while (true) {
+            const header = transport.receiveMessage(null) catch |err| {
+                log.err("failed to receive message from build runner: {}", .{err});
+                return;
+            };
+
+            switch (@as(ServerToClient.Tag, @enumFromInt(header.tag))) {
+                .watch_error_bundle => {
+                    handleWatchErrorBundle(
+                        self,
+                        &transport,
+                        collection,
+                        lsp_transport,
+                        offset_encoding,
+                        workspace_path,
+                    ) catch |err| {
+                        log.err("failed to handle error bundle message from build runner: {}", .{err});
+                        return;
+                    };
+                },
+                else => |tag| {
+                    log.warn("received unexpected message from build runner: {}", .{tag});
+                },
+            }
+        }
+    }
+
+    fn handleWatchErrorBundle(
+        self: *BuildOnSave,
+        transport: *Transport,
+        collection: *DiagnosticsCollection,
+        lsp_transport: lsp.AnyTransport,
+        offset_encoding: offsets.Encoding,
+        workspace_path: []const u8,
+    ) !void {
+        const header = try transport.reader().readStructEndian(ServerToClient.ErrorBundle, .little);
+
+        const extra = try transport.receiveSlice(self.allocator, u32, header.extra_len);
+        defer self.allocator.free(extra);
+
+        const string_bytes = try transport.receiveBytes(self.allocator, header.string_bytes_len);
+        defer self.allocator.free(string_bytes);
+
+        const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
+
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(workspace_path);
+        std.hash.autoHash(&hasher, header.step_id);
+
+        const diagnostic_tag: DiagnosticsCollection.Tag = @enumFromInt(@as(u32, @truncate(hasher.final())));
+
+        try collection.pushErrorBundle(diagnostic_tag, header.cycle, workspace_path, error_bundle);
+        try collection.publishDiagnostics(lsp_transport, offset_encoding);
+    }
+};
