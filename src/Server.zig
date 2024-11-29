@@ -649,8 +649,15 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
         try server.registerCapability("workspace/didChangeConfiguration");
     }
 
-    if (server.client_capabilities.supports_configuration)
+    if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
+    } else {
+        if (Workspace.build_on_save_supported) {
+            for (server.workspaces.items) |*workspace| {
+                try workspace.startOrRestartBuildOnSave(server);
+            }
+        }
+    }
 
     if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
         server.showMessage(.Warning, "HELP ME, I AM STUCK INSIDE AN LSP!", .{});
@@ -998,6 +1005,7 @@ pub fn updateConfiguration(
     }
 
     if (Workspace.build_on_save_supported and
+        server.status == .initialized and
         (new_zig_exe_path or
         new_zig_lib_path or
         new_build_runner_path or
