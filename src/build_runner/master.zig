@@ -381,6 +381,14 @@ pub fn main() !void {
         return;
     }
 
+    const suicide_thread = try std.Thread.spawn(.{}, struct {
+        fn do() void {
+            _ = std.io.getStdIn().reader().readByte() catch process.exit(1);
+            process.exit(0);
+        }
+    }.do, .{});
+    suicide_thread.detach();
+
     if (!Watch.have_impl) return;
     var w = try Watch.init();
 
@@ -404,14 +412,6 @@ pub fn main() !void {
         error.UncleanExit => process.exit(1),
         else => return err,
     };
-
-    const suicide_thread = try std.Thread.spawn(.{ .allocator = gpa }, struct {
-        fn do(t: *Transport) void {
-            const header = t.receiveMessage(null) catch process.exit(1);
-            process.exit(if (header.tag == 0) 0 else 1);
-        }
-    }.do, .{&transport});
-    suicide_thread.detach();
 
     rebuild: while (true) : (run.cycle += 1) {
         runSteps(
