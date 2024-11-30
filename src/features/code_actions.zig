@@ -75,6 +75,29 @@ pub const Builder = struct {
         return only_kinds.contains(kind);
     }
 
+    pub fn generateCodeActionsInRange(
+        builder: *Builder,
+        range: types.Range,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+    ) error{OutOfMemory}!void {
+        const tree = builder.handle.tree;
+        const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
+
+        const token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
+        const token_tags = tree.tokens.items(.tag);
+        const position_token = token_tags[token_idx];
+
+        const ctx = try Analyser.getPositionContext(builder.arena, builder.handle.tree, source_index, true);
+
+        switch (ctx) {
+            .string_literal => switch (position_token) {
+                .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
+                else => {},
+            },
+            else => {},
+        }
+    }
+
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
@@ -92,6 +115,46 @@ pub const Builder = struct {
         return workspace_edit;
     }
 };
+
+pub fn generateStringLiteralCodeActions(
+    builder: *Builder,
+    token: Ast.TokenIndex,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+) !void {
+    const tags = builder.handle.tree.tokens.items(.tag);
+    switch (tags[token -| 1]) {
+        // Not covered by position context
+        .keyword_test, .keyword_extern => return,
+        else => {},
+    }
+
+    const token_text = offsets.tokenToSlice(builder.handle.tree, token); // Includes quotes
+    const parsed = std.zig.string_literal.parseAlloc(builder.arena, token_text) catch |err| switch (err) {
+        error.InvalidLiteral => return,
+        else => |other| return other,
+    };
+    // Check for disallowed characters
+    for (parsed) |c| {
+        switch (c) {
+            0x01...0x09, 0x0b...0x0c, 0x0e...0x1f, 0x7f => return,
+            else => {},
+        }
+    }
+    const with_slashes = try std.mem.replaceOwned(u8, builder.arena, parsed, "\n", "\n    \\\\"); // Hardcoded 4 spaces
+
+    var result = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, with_slashes.len + 3);
+    result.appendSliceAssumeCapacity("\\\\");
+    result.appendSliceAssumeCapacity(with_slashes);
+    result.appendAssumeCapacity('\n');
+
+    const loc = offsets.tokenToLoc(builder.handle.tree, token);
+    try actions.append(builder.arena, .{
+        .title = "convert to a multiline string literal",
+        .kind = .{ .custom_value = "refactor.convertStringLiteral" },
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, result.items)}),
+    });
+}
 
 /// To report server capabilities
 pub const supported_code_actions: []const types.CodeActionKind = &.{

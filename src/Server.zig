@@ -1660,6 +1660,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
     try builder.generateCodeAction(error_bundle, &actions);
+    try builder.generateCodeActionsInRange(request.range, &actions);
 
     const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
     const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
