@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
+const Token = std.zig.Token;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
@@ -91,6 +92,7 @@ pub const Builder = struct {
 
         switch (ctx) {
             .string_literal => switch (position_token) {
+                .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
                 .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
                 else => {},
             },
@@ -156,6 +158,64 @@ pub fn generateStringLiteralCodeActions(
     });
 }
 
+pub fn generateMultilineStringCodeActions(
+    builder: *Builder,
+    token: Ast.TokenIndex,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+) !void {
+    const token_tags = builder.handle.tree.tokens.items(.tag);
+    std.debug.assert(.multiline_string_literal_line == token_tags[token]);
+    // Collect (exclusive) token range of the literal (one token per literal line)
+    const start = if (std.mem.lastIndexOfNone(Token.Tag, token_tags[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
+    const end = std.mem.indexOfNonePos(Token.Tag, token_tags, token, &.{.multiline_string_literal_line}) orelse token_tags.len;
+
+    // collect the text in the literal
+    var str_escaped = std.ArrayListUnmanaged(u8){};
+    try str_escaped.append(builder.arena, '"');
+    for (start..end) |i| {
+        std.debug.assert(token_tags[i] == .multiline_string_literal_line);
+        const string_part = offsets.tokenToSlice(builder.handle.tree, @intCast(i));
+        // Iterate without the leading \\
+        for (string_part[2..]) |c| {
+            const chunk = switch (c) {
+                '\\' => "\\\\",
+                '"' => "\\\"",
+                '\n' => "\\n",
+                0x01...0x09, 0x0b...0x0c, 0x0e...0x1f, 0x7f => unreachable,
+                else => &.{c},
+            };
+            try str_escaped.appendSlice(builder.arena, chunk);
+        }
+        if (i != end - 1) {
+            try str_escaped.appendSlice(builder.arena, "\\n");
+        }
+    }
+    try str_escaped.append(builder.arena, '"');
+
+    // Get Loc of the whole literal to delete it
+    // Multiline string literal ends before the \n or \r, but it must be deleted too
+    const first_token_start = builder.handle.tree.tokens.items(.start)[start];
+    const last_token_end = blk: {
+        var i = offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1;
+        const source = builder.handle.tree.source;
+        while (i < source.len) : (i += 1) {
+            switch (source[i]) {
+                '\n', '\r' => {},
+                else => break,
+            }
+        }
+        break :blk i;
+    };
+    const remove_loc = offsets.Loc{ .start = first_token_start, .end = last_token_end };
+
+    try actions.append(builder.arena, .{
+        .title = "convert to a string literal",
+        .kind = .{ .custom_value = "refactor.convertStringLiteral" },
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
+    });
+}
+
 /// To report server capabilities
 pub const supported_code_actions: []const types.CodeActionKind = &.{
     .quickfix,
@@ -183,7 +243,7 @@ pub fn collectAutoDiscardDiagnostics(
     var i: usize = 0;
     while (i < tree.tokens.len) {
         const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
-            std.zig.Token.Tag,
+            Token.Tag,
             token_tags,
             i,
             &.{ .identifier, .equal, .identifier, .semicolon },
@@ -397,7 +457,7 @@ fn handleUnusedCapture(
 
     const identifier_name = offsets.locToSlice(source, loc);
 
-    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(std.zig.Token.Tag, token_tags, identifier_token, .pipe) orelse return);
+    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(Token.Tag, token_tags, identifier_token, .pipe) orelse return);
 
     var lbrace_token = capture_end + 1;
 
@@ -527,7 +587,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         try writer.writeByte('\n');
 
         const tokens = tree.tokens.items(.tag);
-        const first_token = std.mem.indexOfNone(std.zig.Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
+        const first_token = std.mem.indexOfNone(Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
         const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
 
         try edits.append(builder.arena, .{
