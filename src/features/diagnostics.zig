@@ -25,8 +25,6 @@ pub fn generateDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const transport = server.transport orelse return;
-
     {
         var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
         errdefer arena_allocator.deinit();
@@ -61,18 +59,8 @@ pub fn generateDiagnostics(
         try server.diagnostics_collection.pushErrorBundle(.parse, handle.version, null, error_bundle);
     }
 
-    {
-        var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
-        errdefer arena_allocator.deinit();
-        const arena = arena_allocator.allocator();
-
-        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-        try collectCimportDiagnostics(&server.document_store, handle, arena, &diagnostics, server.offset_encoding);
-        try server.diagnostics_collection.pushLspDiagnostics(.cimport, handle.uri, arena_allocator.state, diagnostics.items);
-    }
-
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-    server.diagnostics_collection.publishDiagnostics(transport, server.offset_encoding) catch |err| {
+    server.diagnostics_collection.publishDiagnostics() catch |err| {
         log.err("failed to publish diagnostics: {}", .{err});
     };
 }
@@ -178,43 +166,6 @@ fn collectWarnStyleDiagnostics(
                 },
                 else => {},
             }
-        }
-    }
-}
-
-fn collectCimportDiagnostics(
-    document_store: *DocumentStore,
-    handle: *DocumentStore.Handle,
-    arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
-    offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
-        const result = blk: {
-            document_store.lock.lock();
-            defer document_store.lock.unlock();
-            break :blk document_store.cimports.get(hash) orelse continue;
-        };
-        const error_bundle: std.zig.ErrorBundle = switch (result) {
-            .success => continue,
-            .failure => |bundle| bundle,
-        };
-
-        if (error_bundle.errorMessageCount() == 0) continue; // `getMessages` can't be called on an empty ErrorBundle
-        try diagnostics.ensureUnusedCapacity(arena, error_bundle.errorMessageCount());
-        for (error_bundle.getMessages()) |err_msg_index| {
-            const err_msg = error_bundle.getErrorMessage(err_msg_index);
-
-            diagnostics.appendAssumeCapacity(.{
-                .range = offsets.nodeToRange(handle.tree, node, offset_encoding),
-                .severity = .Error,
-                .code = .{ .string = "cImport" },
-                .source = "zls",
-                .message = try arena.dupe(u8, error_bundle.nullTerminatedString(err_msg.msg)),
-            });
         }
     }
 }
@@ -440,8 +391,6 @@ pub const BuildOnSave = struct {
         build_runner_path: []const u8,
 
         collection: *DiagnosticsCollection,
-        lsp_transport: lsp.AnyTransport,
-        offset_encoding: offsets.Encoding,
     };
 
     pub fn init(self: *BuildOnSave, options: InitOptions) !void {
@@ -493,8 +442,6 @@ pub const BuildOnSave = struct {
         self.thread = try std.Thread.spawn(.{ .allocator = options.allocator }, loop, .{
             self,
             options.collection,
-            options.lsp_transport,
-            options.offset_encoding,
             duped_workspace_path,
         });
     }
@@ -539,8 +486,6 @@ pub const BuildOnSave = struct {
     fn loop(
         self: *BuildOnSave,
         collection: *DiagnosticsCollection,
-        lsp_transport: lsp.AnyTransport,
-        offset_encoding: offsets.Encoding,
         workspace_path: []const u8,
     ) void {
         defer self.allocator.free(workspace_path);
@@ -567,8 +512,6 @@ pub const BuildOnSave = struct {
                         self,
                         &transport,
                         collection,
-                        lsp_transport,
-                        offset_encoding,
                         workspace_path,
                     ) catch |err| {
                         log.err("failed to handle error bundle message from build runner: {}", .{err});
@@ -586,8 +529,6 @@ pub const BuildOnSave = struct {
         self: *BuildOnSave,
         transport: *Transport,
         collection: *DiagnosticsCollection,
-        lsp_transport: lsp.AnyTransport,
-        offset_encoding: offsets.Encoding,
         workspace_path: []const u8,
     ) !void {
         const header = try transport.reader().readStructEndian(ServerToClient.ErrorBundle, .little);
@@ -607,6 +548,6 @@ pub const BuildOnSave = struct {
         const diagnostic_tag: DiagnosticsCollection.Tag = @enumFromInt(@as(u32, @truncate(hasher.final())));
 
         try collection.pushErrorBundle(diagnostic_tag, header.cycle, workspace_path, error_bundle);
-        try collection.publishDiagnostics(lsp_transport, offset_encoding);
+        try collection.publishDiagnostics();
     }
 };

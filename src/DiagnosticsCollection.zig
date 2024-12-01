@@ -15,6 +15,8 @@ tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
     }) = .{},
 }) = .{},
 outdated_files: std.StringArrayHashMapUnmanaged(void) = .{},
+transport: ?lsp.AnyTransport = null,
+offset_encoding: ?offsets.Encoding = null,
 
 const DiagnosticsCollection = @This();
 
@@ -55,7 +57,7 @@ pub fn pushLspDiagnostics(
     document_uri: []const u8,
     diagnostics_arena_state: std.heap.ArenaAllocator.State,
     diagnostics: []lsp.types.Diagnostic,
-) !void {
+) error{OutOfMemory}!void {
     collection.mutex.lock();
     defer collection.mutex.unlock();
 
@@ -93,7 +95,7 @@ pub fn pushErrorBundle(
     /// The current implementation assumes that the base path is always the same for the same tag.
     src_base_path: ?[]const u8,
     error_bundle: std.zig.ErrorBundle,
-) !void {
+) error{OutOfMemory}!void {
     var new_error_bundle: std.zig.ErrorBundle.Wip = undefined;
     try new_error_bundle.init(collection.allocator);
     defer new_error_bundle.deinit();
@@ -145,7 +147,7 @@ fn collectUrisFromErrorBundle(
     error_bundle: std.zig.ErrorBundle,
     src_base_path: ?[]const u8,
     uri_set: *std.StringArrayHashMapUnmanaged(void),
-) std.mem.Allocator.Error!void {
+) error{OutOfMemory}!void {
     if (error_bundle.errorMessageCount() == 0) return;
     for (error_bundle.getMessages()) |msg_index| {
         const err = error_bundle.getErrorMessage(msg_index);
@@ -172,11 +174,10 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
     return try URI.fromPath(allocator, absolute_src_path);
 }
 
-pub fn publishDiagnostics(
-    collection: *DiagnosticsCollection,
-    transport: lsp.AnyTransport,
-    offset_encoding: offsets.Encoding,
-) (std.mem.Allocator.Error || lsp.AnyTransport.WriteError)!void {
+pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || lsp.AnyTransport.WriteError)!void {
+    const transport = collection.transport orelse return;
+    const offset_encoding = collection.offset_encoding orelse return;
+
     var arena_allocator = std.heap.ArenaAllocator.init(collection.allocator);
     defer arena_allocator.deinit();
 

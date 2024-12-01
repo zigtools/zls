@@ -45,6 +45,7 @@ config: Config = .{},
 /// will default to lookup in the system and user configuration folder provided by known-folders.
 config_path: ?[]const u8 = null,
 document_store: DocumentStore,
+/// Use `setTransport` to set the Transport.
 transport: ?lsp.AnyTransport = null,
 message_tracing: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
@@ -426,6 +427,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         } else {
             server.offset_encoding = .@"utf-16";
         }
+        server.diagnostics_collection.offset_encoding = server.offset_encoding;
     }
 
     if (request.capabilities.textDocument) |textDocument| {
@@ -808,7 +810,6 @@ const Workspace = struct {
         const zig_exe_path = server.config.zig_exe_path orelse return;
         const zig_lib_path = server.config.zig_lib_path orelse return;
         const build_runner_path = server.config.build_runner_path orelse return;
-        const transport = server.transport orelse return;
 
         const workspace_path = @import("uri.zig").parse(server.allocator, workspace.uri) catch |err| {
             log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
@@ -826,8 +827,6 @@ const Workspace = struct {
             .zig_lib_path = zig_lib_path,
             .build_runner_path = build_runner_path,
             .collection = &server.diagnostics_collection,
-            .lsp_transport = transport,
-            .offset_encoding = server.offset_encoding,
         }) catch |err| {
             workspace.build_on_save = null;
             log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
@@ -1869,6 +1868,7 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
             .allocator = allocator,
             .config = DocumentStore.Config.fromMainConfig(Config{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
+            .diagnostics_collection = &server.diagnostics_collection,
         },
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
@@ -1907,6 +1907,11 @@ pub fn destroy(server: *Server) void {
     server.client_capabilities.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
+}
+
+pub fn setTransport(server: *Server, transport: lsp.AnyTransport) void {
+    server.transport = transport;
+    server.diagnostics_collection.transport = transport;
 }
 
 pub fn keepRunning(server: Server) bool {

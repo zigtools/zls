@@ -182,7 +182,7 @@ pub fn translate(
     var process = std.process.Child.init(argv.items, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
-    process.stderr_behavior = .Pipe;
+    process.stderr_behavior = .Ignore;
 
     errdefer |err| if (!zig_builtin.is_test) reportTranslateError(allocator, process.stderr, argv.items, @errorName(err));
 
