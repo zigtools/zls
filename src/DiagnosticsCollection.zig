@@ -279,12 +279,22 @@ fn errorBundleSourceLocationToRange(
     src_loc: std.zig.ErrorBundle.SourceLocation,
     offset_encoding: offsets.Encoding,
 ) lsp.types.Range {
-    const source_line = error_bundle.nullTerminatedString(src_loc.source_line);
-
+    // We assume that the span is inside of the source line
     const source_line_range_utf8: lsp.types.Range = .{
         .start = .{ .line = 0, .character = src_loc.column - (src_loc.span_main - src_loc.span_start) },
         .end = .{ .line = 0, .character = src_loc.column + (src_loc.span_end - src_loc.span_main) },
     };
+
+    if (src_loc.source_line == 0) {
+        // Without the source line it is not possible to figure out the precise character value
+        // The result will be incorrect if the line contains non-ascii characters
+        return .{
+            .start = .{ .line = src_loc.line, .character = source_line_range_utf8.start.character },
+            .end = .{ .line = src_loc.line, .character = source_line_range_utf8.end.character },
+        };
+    }
+
+    const source_line = error_bundle.nullTerminatedString(src_loc.source_line);
     const source_line_range = offsets.convertRangeEncoding(source_line, source_line_range_utf8, .@"utf-8", offset_encoding);
 
     return .{
