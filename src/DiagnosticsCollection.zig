@@ -303,6 +303,49 @@ fn errorBundleSourceLocationToRange(
     };
 }
 
+test errorBundleSourceLocationToRange {
+    var eb = try createTestingErrorBundle(&.{
+        .{
+            .message = "First Error",
+            .source_location = .{
+                .src_path = "",
+                .line = 2,
+                .column = 6,
+                .span_start = 14,
+                .span_main = 14,
+                .span_end = 17,
+                .source_line = "const foo = 5",
+            },
+        },
+        .{
+            .message = "Second Error",
+            .source_location = .{
+                .src_path = "",
+                .line = 1,
+                .column = 4,
+                .span_start = 20,
+                .span_main = 23,
+                .span_end = 25,
+                .source_line = null,
+            },
+        },
+    });
+    defer eb.deinit(std.testing.allocator);
+
+    const src_loc0 = eb.getSourceLocation(eb.getErrorMessage(eb.getMessages()[0]).src_loc);
+    const src_loc1 = eb.getSourceLocation(eb.getErrorMessage(eb.getMessages()[1]).src_loc);
+
+    try std.testing.expectEqual(lsp.types.Range{
+        .start = .{ .line = 2, .character = 6 },
+        .end = .{ .line = 2, .character = 9 },
+    }, errorBundleSourceLocationToRange(eb, src_loc0, .@"utf-8"));
+
+    try std.testing.expectEqual(lsp.types.Range{
+        .start = .{ .line = 1, .character = 1 },
+        .end = .{ .line = 1, .character = 6 },
+    }, errorBundleSourceLocationToRange(eb, src_loc1, .@"utf-8"));
+}
+
 test {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
@@ -321,13 +364,16 @@ test {
     var eb3 = try createTestingErrorBundle(&.{.{ .message = "As" }});
     defer eb3.deinit(std.testing.allocator);
 
+    const uri = try URI.fromPath(std.testing.allocator, testing_src_path);
+    defer std.testing.allocator.free(uri);
+
     {
         try collection.pushErrorBundle(.parse, 1, null, eb1);
         try std.testing.expectEqual(1, collection.outdated_files.count());
-        try std.testing.expectEqualStrings("file:///sample.zig", collection.outdated_files.keys()[0]);
+        try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
 
         var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
-        try collection.collectLspDiagnosticsForDocument("file:///sample.zig", .@"utf-8", arena, &diagnostics);
+        try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
         try std.testing.expectEqual(lsp.types.DiagnosticSeverity.Error, diagnostics.items[0].severity);
@@ -339,7 +385,7 @@ test {
         try collection.pushErrorBundle(.parse, 0, null, eb2);
 
         var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
-        try collection.collectLspDiagnosticsForDocument("file:///sample.zig", .@"utf-8", arena, &diagnostics);
+        try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
         try std.testing.expectEqualStrings("Living For The City", diagnostics.items[0].message);
@@ -349,7 +395,7 @@ test {
         try collection.pushErrorBundle(.parse, 2, null, eb2);
 
         var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
-        try collection.collectLspDiagnosticsForDocument("file:///sample.zig", .@"utf-8", arena, &diagnostics);
+        try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
         try std.testing.expectEqualStrings("You Haven't Done Nothin'", diagnostics.items[0].message);
@@ -359,11 +405,28 @@ test {
         try collection.pushErrorBundle(.parse, 3, null, .empty);
 
         var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
-        try collection.collectLspDiagnosticsForDocument("file:///sample.zig", .@"utf-8", arena, &diagnostics);
+        try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(0, diagnostics.items.len);
     }
+
+    {
+        try collection.pushErrorBundle(@enumFromInt(16), 4, null, eb2);
+        try collection.pushErrorBundle(@enumFromInt(17), 4, null, eb3);
+
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(2, diagnostics.items.len);
+        try std.testing.expectEqualStrings("You Haven't Done Nothin'", diagnostics.items[0].message);
+        try std.testing.expectEqualStrings("As", diagnostics.items[1].message);
+    }
 }
+
+const testing_src_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\sample.zig",
+    else => "/sample.zig",
+};
 
 fn createTestingErrorBundle(messages: []const struct {
     message: []const u8,
@@ -375,8 +438,8 @@ fn createTestingErrorBundle(messages: []const struct {
         span_start: u32,
         span_main: u32,
         span_end: u32,
-        source_line: []const u8,
-    } = .{ .src_path = "/sample.zig", .line = 0, .column = 0, .span_start = 0, .span_main = 0, .span_end = 0, .source_line = "" },
+        source_line: ?[]const u8,
+    } = .{ .src_path = testing_src_path, .line = 0, .column = 0, .span_start = 0, .span_main = 0, .span_end = 0, .source_line = "" },
 }) error{OutOfMemory}!std.zig.ErrorBundle {
     var eb: std.zig.ErrorBundle.Wip = undefined;
     try eb.init(std.testing.allocator);
@@ -393,7 +456,7 @@ fn createTestingErrorBundle(messages: []const struct {
                 .span_start = msg.source_location.span_start,
                 .span_main = msg.source_location.span_main,
                 .span_end = msg.source_location.span_end,
-                .source_line = try eb.addString(msg.source_location.source_line),
+                .source_line = if (msg.source_location.source_line) |source_line| try eb.addString(source_line) else 0,
             }),
         });
     }
