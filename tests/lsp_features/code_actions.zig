@@ -811,7 +811,7 @@ fn testOrganizeImports(before: []const u8, after: []const u8) !void {
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
-    try testDiagnostic(before, after, .{ .filter_kind = types.CodeActionKind{ .custom_value = "refactor.convertStringLiteral" } });
+    try testDiagnostic(before, after, .{ .filter_kind = types.CodeActionKind.refactor });
 }
 
 fn testDiagnostic(

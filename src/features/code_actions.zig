@@ -129,6 +129,8 @@ pub fn generateStringLiteralCodeActions(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (!builder.wantKind(.refactor)) return;
+
     const tags = builder.handle.tree.tokens.items(.tag);
     switch (tags[token -| 1]) {
         // Not covered by position context
@@ -157,7 +159,7 @@ pub fn generateStringLiteralCodeActions(
     const loc = offsets.tokenToLoc(builder.handle.tree, token);
     try actions.append(builder.arena, .{
         .title = "convert to a multiline string literal",
-        .kind = .{ .custom_value = "refactor.convertStringLiteral" },
+        .kind = .refactor,
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, result.items)}),
     });
@@ -170,6 +172,8 @@ pub fn generateMultilineStringCodeActions(
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
 
     const token_tags = builder.handle.tree.tokens.items(.tag);
     std.debug.assert(.multiline_string_literal_line == token_tags[token]);
@@ -214,7 +218,7 @@ pub fn generateMultilineStringCodeActions(
 
     try actions.append(builder.arena, .{
         .title = "convert to a string literal",
-        .kind = .{ .custom_value = "refactor.convertStringLiteral" },
+        .kind = .refactor,
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
     });
