@@ -697,7 +697,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
 
-    var string_content_loc = pos_context.loc().?;
+    var string_content_loc = pos_context.content_loc(source).?;
 
     // the position context is without lookahead so we have to do it ourself
     while (string_content_loc.end < source.len) : (string_content_loc.end += 1) {

@@ -3404,6 +3404,33 @@ pub const PositionContext = union(enum) {
             => return null,
         };
     }
+
+    /// Expects that `self` is one of the following:
+    ///  - `.import_string_literal`
+    ///  - `.cinclude_string_literal`
+    ///  - `.embedfile_string_literal`
+    ///  - `.string_literal`
+    pub fn content_loc(self: PositionContext, source: []const u8) ?offsets.Loc {
+        var location = switch (self) {
+            .import_string_literal,
+            .cinclude_string_literal,
+            .embedfile_string_literal,
+            .string_literal,
+            => |l| l,
+            else => return null,
+        };
+
+        const string_literal_slice = offsets.locToSlice(source, location);
+        if (std.mem.startsWith(u8, string_literal_slice, "\"")) {
+            location.start += 1;
+            if (std.mem.endsWith(u8, string_literal_slice[1..], "\"")) {
+                location.end -= 1;
+            }
+        } else if (std.mem.startsWith(u8, string_literal_slice, "\\")) {
+            location.start += 2;
+        }
+        return location;
+    }
 };
 
 const StackState = struct {
@@ -3488,10 +3515,7 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             switch (tok.tag) {
-                .identifier,
-                .builtin,
-                .number_literal,
-                => should_do_lookahead = false,
+                .identifier, .builtin, .number_literal, .string_literal, .multiline_string_literal_line => should_do_lookahead = false,
                 else => break,
             }
         }
@@ -3518,19 +3542,11 @@ pub fn getPositionContext(
         var curr_ctx = try peek(allocator, &stack);
         switch (tok.tag) {
             .string_literal, .multiline_string_literal_line => string_lit_block: {
-                const string_literal_slice = offsets.locToSlice(tree.source, tok.loc);
-                var string_literal_loc = tok.loc;
+                const string_literal_loc = tok.loc;
 
-                if (std.mem.startsWith(u8, string_literal_slice, "\"")) {
-                    string_literal_loc.start += 1;
-                    if (std.mem.endsWith(u8, string_literal_slice[1..], "\"")) {
-                        string_literal_loc.end -= 1;
-                    }
-                } else if (std.mem.startsWith(u8, string_literal_slice, "\\")) {
-                    string_literal_loc.start += 2;
-                }
-
-                if (!(string_literal_loc.start <= source_index and source_index <= string_literal_loc.end)) break :string_lit_block;
+                if (string_literal_loc.start > source_index or source_index > string_literal_loc.end) break :string_lit_block;
+                if (tok.tag != .multiline_string_literal_line and lookahead and source_index == string_literal_loc.end) break :string_lit_block;
+                curr_ctx.ctx = .{ .string_literal = string_literal_loc };
 
                 if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
                     const perhaps_builtin = stack.items[stack.items.len - 2];
@@ -3540,19 +3556,15 @@ pub fn getPositionContext(
                             const builtin_name = tree.source[loc.start..loc.end];
                             if (std.mem.eql(u8, builtin_name, "@import")) {
                                 curr_ctx.ctx = .{ .import_string_literal = string_literal_loc };
-                                break :string_lit_block;
                             } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
                                 curr_ctx.ctx = .{ .cinclude_string_literal = string_literal_loc };
-                                break :string_lit_block;
                             } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
                                 curr_ctx.ctx = .{ .embedfile_string_literal = string_literal_loc };
-                                break :string_lit_block;
                             }
                         },
                         else => {},
                     }
                 }
-                curr_ctx.ctx = .{ .string_literal = string_literal_loc };
             },
             .identifier => switch (curr_ctx.ctx) {
                 .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
