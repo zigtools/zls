@@ -81,6 +81,9 @@ pub const Builder = struct {
         range: types.Range,
         actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
         const tree = builder.handle.tree;
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
@@ -123,6 +126,9 @@ pub fn generateStringLiteralCodeActions(
     token: Ast.TokenIndex,
     actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const tags = builder.handle.tree.tokens.items(.tag);
     switch (tags[token -| 1]) {
         // Not covered by position context
@@ -162,6 +168,9 @@ pub fn generateMultilineStringCodeActions(
     token: Ast.TokenIndex,
     actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const token_tags = builder.handle.tree.tokens.items(.tag);
     std.debug.assert(.multiline_string_literal_line == token_tags[token]);
     // Collect (exclusive) token range of the literal (one token per literal line)
@@ -169,8 +178,9 @@ pub fn generateMultilineStringCodeActions(
     const end = std.mem.indexOfNonePos(Token.Tag, token_tags, token, &.{.multiline_string_literal_line}) orelse token_tags.len;
 
     // collect the text in the literal
-    var str_escaped = std.ArrayListUnmanaged(u8){};
-    try str_escaped.append(builder.arena, '"');
+    const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
+    var str_escaped = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, 2 * (loc.end - loc.start));
+    str_escaped.appendAssumeCapacity('"');
     for (start..end) |i| {
         std.debug.assert(token_tags[i] == .multiline_string_literal_line);
         const string_part = offsets.tokenToSlice(builder.handle.tree, @intCast(i));
@@ -183,28 +193,23 @@ pub fn generateMultilineStringCodeActions(
                 0x01...0x09, 0x0b...0x0c, 0x0e...0x1f, 0x7f => unreachable,
                 else => &.{c},
             };
-            try str_escaped.appendSlice(builder.arena, chunk);
+            str_escaped.appendSliceAssumeCapacity(chunk);
         }
         if (i != end - 1) {
-            try str_escaped.appendSlice(builder.arena, "\\n");
+            str_escaped.appendSliceAssumeCapacity("\\n");
         }
     }
-    try str_escaped.append(builder.arena, '"');
+    str_escaped.appendAssumeCapacity('"');
 
     // Get Loc of the whole literal to delete it
     // Multiline string literal ends before the \n or \r, but it must be deleted too
     const first_token_start = builder.handle.tree.tokens.items(.start)[start];
-    const last_token_end = blk: {
-        var i = offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1;
-        const source = builder.handle.tree.source;
-        while (i < source.len) : (i += 1) {
-            switch (source[i]) {
-                '\n', '\r' => {},
-                else => break,
-            }
-        }
-        break :blk i;
-    };
+    const last_token_end = std.mem.indexOfNonePos(
+        u8,
+        builder.handle.tree.source,
+        offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1,
+        "\n\r",
+    ) orelse builder.handle.tree.source.len;
     const remove_loc = offsets.Loc{ .start = first_token_start, .end = last_token_end };
 
     try actions.append(builder.arena, .{

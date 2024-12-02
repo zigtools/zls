@@ -827,8 +827,11 @@ fn testDiagnostic(
     defer ctx.deinit();
     ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
 
-    const placeholders = try helper.collectPlaceholderLocs(allocator, before);
-    defer allocator.free(placeholders);
+    var phr = try helper.collectClearPlaceholders(allocator, before);
+    defer phr.deinit(allocator);
+    const placeholders = phr.locations.items(.new);
+    const source = phr.new_source;
+
     const range: types.Range = switch (placeholders.len) {
         0 => .{
             .start = .{ .line = 0, .character = 0 },
@@ -840,8 +843,6 @@ fn testDiagnostic(
         },
         else => unreachable,
     };
-    const source = try helper.clearPlaceholders(allocator, before);
-    defer allocator.free(source);
 
     const uri = try ctx.addDocument(.{ .source = source });
     const handle = ctx.server.document_store.getHandle(uri).?;
