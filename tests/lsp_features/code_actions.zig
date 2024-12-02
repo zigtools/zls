@@ -763,6 +763,12 @@ test "convert string literal to multiline - invalid" {
     ,
         \\const foo = "Smile: \u{1F9131}";
     );
+    // Invalid utf-8
+    try testConvertString(
+        \\const foo = "<cursor>\xaa";
+    ,
+        \\const foo = "\xaa";
+    );
     // Hex escaped unprintable character
     try testConvertString(
         \\const foo = "<cursor>\x7f";

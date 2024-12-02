@@ -135,13 +135,12 @@ pub fn generateStringLiteralCodeActions(
         error.InvalidLiteral => return,
         else => |other| return other,
     };
-    // Check for disallowed characters
+    // Check for disallowed characters and utf-8 validity
     for (parsed) |c| {
-        switch (c) {
-            0x01...0x09, 0x0b...0x0c, 0x0e...0x1f, 0x7f => return,
-            else => {},
-        }
+        if (c == '\n' or c == '\r') continue;
+        if (std.ascii.isControl(c)) return;
     }
+    if (!std.unicode.utf8ValidateSlice(parsed)) return;
     const with_slashes = try std.mem.replaceOwned(u8, builder.arena, parsed, "\n", "\n    \\\\"); // Hardcoded 4 spaces
 
     var result = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, with_slashes.len + 3);
