@@ -715,6 +715,32 @@ test "convert string literal to multiline" {
     );
 }
 
+test "convert string literal to multiline - cursor outside of string literal" {
+    try testConvertString(
+        \\const foo = <cursor> "hello";
+    ,
+        \\const foo =  "hello";
+    );
+    try testConvertString(
+        \\const foo = <cursor>"hello";
+    ,
+        \\const foo = \\hello
+        \\;
+    );
+    try testConvertString(
+        \\const foo = "hello"<cursor>;
+    ,
+        \\const foo = \\hello
+        \\;
+    );
+    // TODO
+    // try testConvertString(
+    //     \\const foo = "hello" <cursor>;
+    // ,
+    //     \\const foo = "hello" <cursor>;
+    // );
+}
+
 test "convert string literal to multiline - escapes" {
     // Hex escapes
     try testConvertString(
