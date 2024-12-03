@@ -294,34 +294,24 @@ test "import/embedfile string literal" {
     , .embedfile_string_literal, .{ .lookahead = false });
 
     try testContext(
-        \\const std = @import("std"<cursor>);
-    , .empty, .{ .lookahead = true });
-    // TODO
-    // try testContext(
-    //     \\const std = @import("std"<cursor>);
-    // , .empty, .{ .lookahead = false });
+        \\const std = @import(<loc>"std"</loc><cursor>);
+    , .string_literal, .{});
     try testContext(
         \\const std = @import(<cursor><loc>"std"</loc>);
-    , .import_string_literal, .{ .lookahead = true });
+    , .string_literal, .{ .lookahead = true });
 }
 
 test "string literal" {
     try testContext(
+        \\var foo = <cursor>"hello world!";
+    , .empty, .{ .lookahead = false });
+    try testContext(
         \\var foo = <cursor><loc>"hello world!"</loc>;
     , .string_literal, .{ .lookahead = true });
+
     try testContext(
-        \\var foo = <loc>"hello world!<cursor>"</loc>;
-    , .string_literal, .{ .lookahead = true });
-    try testContext(
-        \\var foo = <loc>"hello world!</loc><cursor>";
-    , .string_literal, .{ .lookahead = false });
-    // TODO
-    // try testContext(
-    //     \\var foo = "hello world!"<cursor>;
-    // , .empty, .{ .lookahead = false });
-    try testContext(
-        \\var foo = "hello world!"<cursor>;
-    , .empty, .{ .lookahead = true });
+        \\var foo = <loc>"hello world!"</loc><cursor>;
+    , .string_literal, .{});
 
     try testContext(
         \\var foo = <loc>"<cursor></loc>";
@@ -331,8 +321,8 @@ test "string literal" {
     , .string_literal, .{ .lookahead = true });
     // TODO
     // try testContext(
-    //     \\var foo = "<loc>\"</loc><cursor>";
-    // , .string_literal, .{});
+    //     \\var foo = <loc>"\"<cursor>"</loc>;
+    // , .string_literal, .{ .lookahead = true });
 
     try testContext(
         \\var foo = <loc>"hello</loc><cursor> world!";
@@ -344,10 +334,10 @@ test "string literal" {
 
 test "multi-line string literal" {
     try testContext(
-        \\var foo = <cursor>\\hello;
+        \\var foo = <cursor>\\hello
     , .empty, .{ .lookahead = false });
     try testContext(
-        \\var foo = <cursor><loc>\\hello;</loc>
+        \\var foo = <cursor><loc>\\hello</loc>
     , .string_literal, .{ .lookahead = true });
 
     try testContext(

@@ -687,7 +687,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     try globalSetCompletions(builder, .enum_set);
 }
 
-/// Expects that `pos_context` is one of the following:
+/// Asserts that `pos_context` is one of the following:
 ///  - `.import_string_literal`
 ///  - `.cinclude_string_literal`
 ///  - `.embedfile_string_literal`
@@ -697,17 +697,14 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
 
-    var string_content_loc = pos_context.content_loc(source).?;
+    if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
+
+    var string_content_loc = pos_context.stringLiteralContentLoc(source);
 
     // the position context is without lookahead so we have to do it ourself
-    while (string_content_loc.end < source.len) : (string_content_loc.end += 1) {
-        switch (source[string_content_loc.end]) {
-            0, '\n', '\r', '\"' => break,
-            else => continue,
-        }
-    }
+    string_content_loc.end = std.mem.indexOfAnyPos(u8, source, string_content_loc.end, &.{ 0, '\n', '\r', '\"' }) orelse source.len;
 
-    if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
+    if (builder.source_index < string_content_loc.start or string_content_loc.end < builder.source_index) return;
 
     const previous_separator_index: ?usize = blk: {
         var index: usize = builder.source_index;

@@ -85,20 +85,24 @@ pub const Builder = struct {
         defer tracy_zone.end();
 
         const tree = builder.handle.tree;
+        const token_tags = tree.tokens.items(.tag);
+
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
-        const token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
-        const token_tags = tree.tokens.items(.tag);
-        const position_token = token_tags[token_idx];
-
         const ctx = try Analyser.getPositionContext(builder.arena, builder.handle.tree, source_index, true);
+        if (ctx != .string_literal) return;
 
-        switch (ctx) {
-            .string_literal => switch (position_token) {
-                .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
-                .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
-                else => {},
-            },
+        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
+
+        // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
+        switch (token_tags[token_idx]) {
+            .string_literal, .multiline_string_literal_line => {},
+            else => token_idx -|= 1,
+        }
+
+        switch (token_tags[token_idx]) {
+            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
+            .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
             else => {},
         }
     }

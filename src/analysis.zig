@@ -3405,19 +3405,19 @@ pub const PositionContext = union(enum) {
         };
     }
 
-    /// Expects that `self` is one of the following:
+    /// Asserts that `self` is one of the following:
     ///  - `.import_string_literal`
     ///  - `.cinclude_string_literal`
     ///  - `.embedfile_string_literal`
     ///  - `.string_literal`
-    pub fn content_loc(self: PositionContext, source: []const u8) ?offsets.Loc {
+    pub fn stringLiteralContentLoc(self: PositionContext, source: []const u8) offsets.Loc {
         var location = switch (self) {
             .import_string_literal,
             .cinclude_string_literal,
             .embedfile_string_literal,
             .string_literal,
             => |l| l,
-            else => return null,
+            else => unreachable,
         };
 
         const string_literal_slice = offsets.locToSlice(source, location);
@@ -3515,7 +3515,12 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             switch (tok.tag) {
-                .identifier, .builtin, .number_literal, .string_literal, .multiline_string_literal_line => should_do_lookahead = false,
+                .identifier,
+                .builtin,
+                .number_literal,
+                .string_literal,
+                .multiline_string_literal_line,
+                => should_do_lookahead = false,
                 else => break,
             }
         }
@@ -3542,24 +3547,35 @@ pub fn getPositionContext(
         var curr_ctx = try peek(allocator, &stack);
         switch (tok.tag) {
             .string_literal, .multiline_string_literal_line => string_lit_block: {
-                const string_literal_loc = tok.loc;
+                curr_ctx.ctx = .{ .string_literal = tok.loc };
+                if (tok.tag != .string_literal) break :string_lit_block;
 
-                if (string_literal_loc.start > source_index or source_index > string_literal_loc.end) break :string_lit_block;
-                if (tok.tag != .multiline_string_literal_line and lookahead and source_index == string_literal_loc.end) break :string_lit_block;
-                curr_ctx.ctx = .{ .string_literal = string_literal_loc };
+                const string_literal_slice = offsets.locToSlice(tree.source, tok.loc);
+                var content_loc = tok.loc;
 
-                if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
+                if (std.mem.startsWith(u8, string_literal_slice, "\"")) {
+                    content_loc.start += 1;
+                    if (std.mem.endsWith(u8, string_literal_slice[1..], "\"")) {
+                        content_loc.end -= 1;
+                    }
+                }
+
+                if (source_index < content_loc.start or content_loc.end < source_index) break :string_lit_block;
+
+                if (curr_ctx.stack_id == .Paren and
+                    stack.items.len >= 2)
+                {
                     const perhaps_builtin = stack.items[stack.items.len - 2];
 
                     switch (perhaps_builtin.ctx) {
                         .builtin => |loc| {
                             const builtin_name = tree.source[loc.start..loc.end];
                             if (std.mem.eql(u8, builtin_name, "@import")) {
-                                curr_ctx.ctx = .{ .import_string_literal = string_literal_loc };
+                                curr_ctx.ctx = .{ .import_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
-                                curr_ctx.ctx = .{ .cinclude_string_literal = string_literal_loc };
+                                curr_ctx.ctx = .{ .cinclude_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
-                                curr_ctx.ctx = .{ .embedfile_string_literal = string_literal_loc };
+                                curr_ctx.ctx = .{ .embedfile_string_literal = tok.loc };
                             }
                         },
                         else => {},
