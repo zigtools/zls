@@ -31,12 +31,12 @@ test "global variable" {
     );
 
     try testDefinition(
-        \\const S = <tdef>struct</tdef> { alpha: u32 };
+        \\const <tdef>S</tdef> = struct { alpha: u32 };
         \\const <>s: S  = S{ .alpha = 5 };
     );
 
     try testDefinition(
-        \\const S = <tdef>struct</tdef> { alpha: u32 };
+        \\const <tdef>S</tdef> = struct { alpha: u32 };
         \\const <>s = S{ .alpha = 5 };
     );
 }
@@ -107,8 +107,8 @@ test "struct init" {
 
 test "decl literal on generic type" {
     try testDefinition(
-        \\fn Box(comptime T: type) type {
-        \\    return <tdef>struct</tdef> {
+        \\fn <tdef>Box</tdef>(comptime T: type) type {
+        \\    return struct {
         \\        item: T,
         \\        const <def><decl>init</decl></def>: @This() = undefined;
         \\    };
@@ -122,7 +122,7 @@ test "decl literal on generic type" {
 test "capture" {
     try testDefinition(
         \\test {
-        \\    const S = <tdef>struct</tdef> {};
+        \\    const <tdef>S</tdef> = struct {};
         \\    var maybe: ?S = 5;
         \\    if (maybe) |<>some| {}
         \\}
@@ -239,6 +239,14 @@ test "non labeled break" {
         \\return while (true) {
         \\    break num<>;
         \\};
+    );
+}
+
+test "function references" {
+    try testDefinition(
+        \\const <tdef>A</tdef> = struct {};
+        \\const <tdef>B</tdef> = struct {};
+        \\fn fo<>o(_: A) B {}
     );
 }
 

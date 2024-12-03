@@ -5600,6 +5600,13 @@ fn addReferencedTypes(
         },
 
         .ip_index, .compile_error => {},
-        .either => {}, // TODO
+        .either => |either| {
+            for (either) |entry| {
+                try analyser.addReferencedTypes(
+                    .{ .data = entry.type_data, .is_type_val = ty.is_type_val },
+                    .{ .referenced_types = referenced_types },
+                );
+            }
+        },
     }
 }
