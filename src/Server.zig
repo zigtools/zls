@@ -943,7 +943,7 @@ pub fn updateConfiguration(
     //                        apply changes
     // <---------------------------------------------------------->
 
-    var has_changed: [std.meta.fields(Config).len]bool = .{false} ** std.meta.fields(Config).len;
+    var has_changed: [std.meta.fields(Config).len]bool = @splat(false);
 
     inline for (std.meta.fields(Config), 0..) |field, field_index| {
         if (@field(new_config, field.name)) |new_value| {
@@ -1052,16 +1052,16 @@ pub fn updateConfiguration(
 
     switch (resolve_result.build_runner_version) {
         .resolved, .unresolved_dont_error => {},
-        .unresolved => {
+        .unresolved => blk: {
+            if (!options.resolve) break :blk;
+
             const zig_version = resolve_result.zig_runtime_version.?;
             const zls_version = build_options.version;
 
             const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
             const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
 
-            if (zig_builtin.is_test) {
-                // This has test coverage in `src/build_runner/BuildRunnerVersion.zig`
-            } else if (zig_version_is_tagged) {
+            if (zig_version_is_tagged) {
                 server.showMessage(
                     .Warning,
                     "Zig {} should be used with ZLS {}.{}.* but ZLS {} is being used.",
@@ -1092,13 +1092,14 @@ pub fn updateConfiguration(
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!std.process.can_spawn) {
-            log.info("'enable_build_on_save' is ignored because your OS can't spawn a child process", .{});
+        if (!Workspace.build_on_save_supported) {
+            // This message is not very helpful but it relatively uncommon to happen anyway.
+            log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
         } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
             log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-        } else if (server.status == .initialized and resolve_result.build_runner_version != .resolved) {
+        } else if (server.status == .initialized and server.config.build_runner_path == null and options.resolve and resolve_result.build_runner_version != .resolved) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
         }
     }
