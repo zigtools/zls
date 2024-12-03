@@ -653,12 +653,7 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
 
     if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
-    } else {
-        if (Workspace.build_on_save_supported) {
-            for (server.workspaces.items) |*workspace| {
-                try workspace.startOrRestartBuildOnSave(server);
-            }
-        }
+        // TODO if the `workspace/configuration` request fails to be handled, build on save will not be started
     }
 
     if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
@@ -796,15 +791,20 @@ const Workspace = struct {
         allocator.free(workspace.uri);
     }
 
-    fn startOrRestartBuildOnSave(workspace: *Workspace, server: *Server) error{OutOfMemory}!void {
+    fn refreshBuildOnSave(workspace: *Workspace, server: *Server, options: struct {
+        /// Whether the build on save process should be restated if it is already running.
+        restart: bool,
+    }) error{OutOfMemory}!void {
         comptime std.debug.assert(build_on_save_supported);
 
+        const enable_build_on_save = server.config.enable_build_on_save orelse true;
+
         if (workspace.build_on_save) |*build_on_save| {
+            if (enable_build_on_save and !options.restart) return;
             build_on_save.deinit();
             workspace.build_on_save = null;
         }
 
-        const enable_build_on_save = server.config.enable_build_on_save orelse true;
         if (!enable_build_on_save) return;
 
         const zig_exe_path = server.config.zig_exe_path orelse return;
@@ -1004,15 +1004,22 @@ pub fn updateConfiguration(
     }
 
     if (Workspace.build_on_save_supported and
-        server.status == .initialized and
-        (new_zig_exe_path or
-        new_zig_lib_path or
-        new_build_runner_path or
-        new_enable_build_on_save or
-        new_build_on_save_args))
+        // If the client supports the `workspace/configuration` request, defer
+        // build on save initialization until after we have received workspace
+        // configuration from the server
+        (!server.client_capabilities.supports_configuration or server.status == .initialized))
     {
+        const should_restart =
+            new_zig_exe_path or
+            new_zig_lib_path or
+            new_build_runner_path or
+            new_enable_build_on_save or
+            new_build_on_save_args;
+
         for (server.workspaces.items) |*workspace| {
-            try workspace.startOrRestartBuildOnSave(server);
+            try workspace.refreshBuildOnSave(server, .{
+                .restart = should_restart,
+            });
         }
     }
 
