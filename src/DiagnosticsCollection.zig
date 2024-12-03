@@ -16,7 +16,7 @@ tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
 }) = .{},
 outdated_files: std.StringArrayHashMapUnmanaged(void) = .{},
 transport: ?lsp.AnyTransport = null,
-offset_encoding: ?offsets.Encoding = null,
+offset_encoding: offsets.Encoding = .@"utf-16",
 
 const DiagnosticsCollection = @This();
 
@@ -176,7 +176,6 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
 
 pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || lsp.AnyTransport.WriteError)!void {
     const transport = collection.transport orelse return;
-    const offset_encoding = collection.offset_encoding orelse return;
 
     var arena_allocator = std.heap.ArenaAllocator.init(collection.allocator);
     defer arena_allocator.deinit();
@@ -193,7 +192,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             _ = arena_allocator.reset(.retain_capacity);
 
             var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
-            try collection.collectLspDiagnosticsForDocument(document_uri, offset_encoding, arena_allocator.allocator(), &diagnostics);
+            try collection.collectLspDiagnosticsForDocument(document_uri, collection.offset_encoding, arena_allocator.allocator(), &diagnostics);
 
             const params: lsp.types.PublishDiagnosticsParams = .{
                 .uri = document_uri,
