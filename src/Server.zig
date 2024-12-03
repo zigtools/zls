@@ -427,8 +427,8 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         } else {
             server.offset_encoding = .@"utf-16";
         }
-        server.diagnostics_collection.offset_encoding = server.offset_encoding;
     }
+    server.diagnostics_collection.offset_encoding = server.offset_encoding;
 
     if (request.capabilities.textDocument) |textDocument| {
         server.client_capabilities.supports_publish_diagnostics = textDocument.publishDiagnostics != null;
