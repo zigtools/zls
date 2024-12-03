@@ -807,6 +807,12 @@ test "convert string literal to multiline - invalid" {
     ,
         \\const foo = "\tWe use tabs";
     );
+    // A Multi-Line String Literals can't contain carriage returns
+    try testConvertString(
+        \\const foo = "<cursor>\r";
+    ,
+        \\const foo = "\r";
+    );
     // Not in @import
     try testConvertString(
         \\const std = @import("<cursor>std");

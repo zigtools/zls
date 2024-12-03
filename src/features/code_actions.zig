@@ -149,7 +149,7 @@ pub fn generateStringLiteralCodeActions(
     };
     // Check for disallowed characters and utf-8 validity
     for (parsed) |c| {
-        if (c == '\n' or c == '\r') continue;
+        if (c == '\n') continue;
         if (std.ascii.isControl(c)) return;
     }
     if (!std.unicode.utf8ValidateSlice(parsed)) return;
