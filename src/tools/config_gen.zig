@@ -257,7 +257,6 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         .type = "string",
         .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`. The string \"zls\" means lookup ZLS in PATH.",
         .format = "path",
-        .default = null,
     });
 
     for (config.options) |option| {
@@ -269,15 +268,20 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
         errdefer allocator.free(name);
 
-        const default: ?std.json.Value = if (option.default != .null) option.default else null;
+        const default: ?std.json.Value = if (std.mem.eql(u8, option.name, "enable_build_on_save"))
+            // "enable_build_on_save" need to be explicitly set to 'null' so that it doesn't default to 'false'
+            .null
+        else if (option.default != .null)
+            option.default
+        else
+            null;
 
         configuration.map.putAssumeCapacityNoClobber(name, .{
             .type = try option.getTypescriptType(),
             .description = option.description,
             .@"enum" = option.@"enum",
             .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
-            // "enable_build_on_save" need to be explicitly set to 'null' so that it doesn't default to 'false'
-            .default = default orelse .null,
+            .default = default,
         });
     }
 
