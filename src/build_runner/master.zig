@@ -390,6 +390,15 @@ pub fn main() !void {
     suicide_thread.detach();
 
     if (!Watch.have_impl) return;
+
+    if (builtin.os.tag == .linux) blk: {
+        // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
+        const utsname = std.posix.uname();
+        const version = std.SemanticVersion.parse(&utsname.release) catch break :blk;
+        if (version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt) break :blk;
+        return;
+    }
+
     var w = try Watch.init();
 
     const gpa = arena;
