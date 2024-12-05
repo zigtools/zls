@@ -499,7 +499,15 @@ pub const BuildOnSave = struct {
 
         while (true) {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
-                error.EndOfStream => return,
+                error.EndOfStream => {
+                    const stderr = self.child_process.stderr.?.readToEndAlloc(self.allocator, 16 * 1024 * 1024) catch "";
+                    defer self.allocator.free(stderr);
+
+                    if (stderr.len != 0) {
+                        log.err("zig build runner exited with stderr:\n{s}", .{stderr});
+                    }
+                    return;
+                },
                 else => {
                     log.err("failed to receive message from build runner: {}", .{err});
                     return;
