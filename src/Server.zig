@@ -607,7 +607,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .renameProvider = .{ .bool = true },
             .completionProvider = .{
                 .resolveProvider = false,
-                .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]", "/" },
+                .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]", "\"", "/" },
                 .completionItem = .{ .labelDetailsSupport = true },
             },
             .documentHighlightProvider = .{ .bool = true },
