@@ -425,7 +425,7 @@ pub fn main() !void {
     rebuild: while (true) : (run.cycle += 1) {
         runSteps(
             builder,
-            step_stack.keys(),
+            &step_stack,
             main_progress_node,
             &run,
         ) catch |err| switch (err) {
@@ -559,11 +559,12 @@ fn prepare(
 
 fn runSteps(
     b: *std.Build,
-    steps: []const *Step,
+    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     parent_prog_node: std.Progress.Node,
     run: *Run,
 ) error{ OutOfMemory, UncleanExit }!void {
     const thread_pool = &run.thread_pool;
+    const steps = steps_stack.keys();
 
     var step_prog = parent_prog_node.start("steps", steps.len);
     defer step_prog.end();
@@ -579,17 +580,17 @@ fn runSteps(
 
         wait_group.start();
         thread_pool.spawn(workerMakeOneStep, .{
-            &wait_group, b, step, step_prog, run,
+            &wait_group, b, steps_stack, step, step_prog, run,
         }) catch @panic("OOM");
     }
 
     if (run.transport) |transport| {
         for (steps) |step| {
+            const step_id: u32 = @intCast(steps_stack.getIndex(step).?);
             // missing fields:
             // - result_error_msgs
             // - result_stderr
-            // TODO step_id
-            serveWatchErrorBundle(transport, 0, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
+            serveWatchErrorBundle(transport, step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
         }
     }
 }
@@ -647,6 +648,7 @@ fn constructGraphAndCheckForDependencyLoop(
 fn workerMakeOneStep(
     wg: *std.Thread.WaitGroup,
     b: *std.Build,
+    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
     prog_node: std.Progress.Node,
     run: *Run,
@@ -711,11 +713,11 @@ fn workerMakeOneStep(
     });
 
     if (run.transport) |transport| {
+        const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
         // missing fields:
         // - result_error_msgs
         // - result_stderr
-        // TODO step_id
-        serveWatchErrorBundle(transport, 0, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
+        serveWatchErrorBundle(transport, step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
     }
 
     handle_result: {
@@ -733,7 +735,7 @@ fn workerMakeOneStep(
         for (s.dependants.items) |dep| {
             wg.start();
             thread_pool.spawn(workerMakeOneStep, .{
-                wg, b, dep, prog_node, run,
+                wg, b, steps_stack, dep, prog_node, run,
             }) catch @panic("OOM");
         }
     }
@@ -759,7 +761,7 @@ fn workerMakeOneStep(
 
                 wg.start();
                 thread_pool.spawn(workerMakeOneStep, .{
-                    wg, b, dep, prog_node, run,
+                    wg, b, steps_stack, dep, prog_node, run,
                 }) catch @panic("OOM");
             } else {
                 run.memory_blocked_steps.items[i] = dep;
@@ -1040,7 +1042,7 @@ fn extractBuildInformation(
     // run all steps that are dependencies
     try runSteps(
         b,
-        step_dependencies.keys(),
+        &step_dependencies,
         main_progress_node,
         run,
     );
