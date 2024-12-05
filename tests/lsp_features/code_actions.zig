@@ -2,6 +2,7 @@ const std = @import("std");
 const zls = @import("zls");
 
 const Context = @import("../context.zig").Context;
+const helper = @import("../helper.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
@@ -643,6 +644,195 @@ test "organize imports - edge cases" {
     );
 }
 
+test "convert multiline string literal" {
+    try testConvertString(
+        \\const foo = \\Hell<cursor>o
+        \\            \\World
+        \\;
+    ,
+        \\const foo = "Hello\nWorld";
+    );
+    // Empty
+    try testConvertString(
+        \\const foo = \\<cursor>
+        \\;
+    ,
+        \\const foo = "";
+    );
+    // Multi-byte characters
+    try testConvertString(
+        \\const foo = \\He😂ll<cursor>o
+        \\            \\Wo🤓rld
+        \\;
+    ,
+        \\const foo = "He😂llo\nWo🤓rld";
+    );
+    // Quotes
+    try testConvertString(
+        \\const foo = \\The<cursor> "cure"
+        \\;
+    ,
+        \\const foo = "The \"cure\"";
+    );
+    try testConvertString(
+        \\const foo = \\<cursor>\x49 \u{0033}
+        \\            \\\n'
+        \\            \\
+        \\;
+    ,
+        \\const foo = "\\x49 \\u{0033}\n\\n'\n";
+    );
+    // The control characters TAB and CR are rejected by the grammar inside multi-line string literals,
+    // except if CR is directly before NL.
+    try testConvertString( // (force format)
+        "const foo = \\\\<cursor>Hello\r\n;",
+        \\const foo = "Hello";
+    );
+}
+
+test "convert string literal to multiline" {
+    try testConvertString(
+        \\const foo = "He<cursor>llo\nWorld";
+    ,
+        \\const foo = \\Hello
+        \\    \\World
+        \\;
+    );
+    // Empty
+    try testConvertString(
+        \\const foo = "<cursor>";
+    ,
+        \\const foo = \\
+        \\;
+    );
+    // In function
+    try testConvertString(
+        \\const x = foo("<cursor>bar\nbaz");
+    ,
+        \\const x = foo(\\bar
+        \\    \\baz
+        \\);
+    );
+}
+
+test "convert string literal to multiline - cursor outside of string literal" {
+    try testConvertString(
+        \\const foo = <cursor> "hello";
+    ,
+        \\const foo =  "hello";
+    );
+    try testConvertString(
+        \\const foo = <cursor>"hello";
+    ,
+        \\const foo = \\hello
+        \\;
+    );
+    try testConvertString(
+        \\const foo = "hello"<cursor>;
+    ,
+        \\const foo = \\hello
+        \\;
+    );
+    // TODO
+    // try testConvertString(
+    //     \\const foo = "hello" <cursor>;
+    // ,
+    //     \\const foo = "hello" <cursor>;
+    // );
+}
+
+test "convert string literal to multiline - escapes" {
+    // Hex escapes
+    try testConvertString(
+        \\const foo = "<cursor>\x41\x42\x43";
+    ,
+        \\const foo = \\ABC
+        \\;
+    );
+    // Hex escapes that form a unicode character in utf-8
+    try testConvertString(
+        \\const foo = "<cursor>\xE2\x9C\x85";
+    ,
+        \\const foo = \\✅
+        \\;
+    );
+    // Newlines
+    try testConvertString(
+        \\const foo = "<cursor>\nhello\n\n";
+    ,
+        \\const foo = \\
+        \\    \\hello
+        \\    \\
+        \\    \\
+        \\;
+    );
+    // Quotes and slashes
+    try testConvertString(
+        \\const foo = "<cursor>A slash: \'\\\'";
+    ,
+        \\const foo = \\A slash: '\'
+        \\;
+    );
+    // Unicode
+    try testConvertString(
+        \\const foo = "<cursor>Smile: \u{1F913}";
+    ,
+        \\const foo = \\Smile: 🤓
+        \\;
+    );
+}
+
+test "convert string literal to multiline - invalid" {
+    // Invalid unicode
+    try testConvertString(
+        \\const foo = "<cursor>Smile: \u{1F9131}";
+    ,
+        \\const foo = "Smile: \u{1F9131}";
+    );
+    // Invalid utf-8
+    try testConvertString(
+        \\const foo = "<cursor>\xaa";
+    ,
+        \\const foo = "\xaa";
+    );
+    // Hex escaped unprintable character
+    try testConvertString(
+        \\const foo = "<cursor>\x7f";
+    ,
+        \\const foo = "\x7f";
+    );
+    // Tabs are invalid too
+    try testConvertString(
+        \\const foo = "<cursor>\tWe use tabs";
+    ,
+        \\const foo = "\tWe use tabs";
+    );
+    // A Multi-Line String Literals can't contain carriage returns
+    try testConvertString(
+        \\const foo = "<cursor>\r";
+    ,
+        \\const foo = "\r";
+    );
+    // Not in @import
+    try testConvertString(
+        \\const std = @import("<cursor>std");
+    ,
+        \\const std = @import("std");
+    );
+    // Not in test
+    try testConvertString(
+        \\test "<cursor>addition" { }
+    ,
+        \\test "addition" { }
+    );
+    // Not in extern
+    try testConvertString(
+        \\pub extern "<cursor>c" fn printf(format: [*:0]const u8) c_int;
+    ,
+        \\pub extern "c" fn printf(format: [*:0]const u8) c_int;
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from our AstGen fork
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
@@ -650,6 +840,10 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
 
 fn testOrganizeImports(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports" });
+}
+
+fn testConvertString(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = types.CodeActionKind.refactor });
 }
 
 fn testDiagnostic(
@@ -665,7 +859,24 @@ fn testDiagnostic(
     defer ctx.deinit();
     ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
 
-    const uri = try ctx.addDocument(.{ .source = before });
+    var phr = try helper.collectClearPlaceholders(allocator, before);
+    defer phr.deinit(allocator);
+    const placeholders = phr.locations.items(.new);
+    const source = phr.new_source;
+
+    const range: types.Range = switch (placeholders.len) {
+        0 => .{
+            .start = .{ .line = 0, .character = 0 },
+            .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
+        },
+        1 => blk: {
+            const point = offsets.indexToPosition(before, placeholders[0].start, ctx.server.offset_encoding);
+            break :blk .{ .start = point, .end = point };
+        },
+        else => unreachable,
+    };
+
+    const uri = try ctx.addDocument(.{ .source = source });
     const handle = ctx.server.document_store.getHandle(uri).?;
 
     var error_bundle = try zls.diagnostics.getAstCheckDiagnostics(ctx.server, handle);
@@ -681,10 +892,7 @@ fn testDiagnostic(
 
     const params: types.CodeActionParams = .{
         .textDocument = .{ .uri = uri },
-        .range = .{
-            .start = .{ .line = 0, .character = 0 },
-            .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
-        },
+        .range = range,
         .context = .{
             .diagnostics = diagnostics,
             .only = if (options.filter_kind) |kind| &.{kind} else null,
@@ -719,7 +927,7 @@ fn testDiagnostic(
         try text_edits.appendSlice(allocator, changes.get(uri).?);
     }
 
-    const actual = try zls.diff.applyTextEdits(allocator, before, text_edits.items, ctx.server.offset_encoding);
+    const actual = try zls.diff.applyTextEdits(allocator, source, text_edits.items, ctx.server.offset_encoding);
     defer allocator.free(actual);
     try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
 

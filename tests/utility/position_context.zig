@@ -281,76 +281,81 @@ test "comment" {
 
 test "import/embedfile string literal" {
     try testContext(
-        \\const std = @import("<loc>s</loc><cursor>t");
+        \\const std = @import(<loc>"s</loc><cursor>t");
     , .import_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @import("<loc>st</loc><cursor>");
+        \\const std = @import(<loc>"st</loc><cursor>");
     , .import_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @embedFile("<loc>file</loc><cursor>.");
+        \\const std = @embedFile(<loc>"file</loc><cursor>.");
     , .embedfile_string_literal, .{ .lookahead = false });
     try testContext(
-        \\const std = @embedFile("<loc>file.</loc><cursor>");
+        \\const std = @embedFile(<loc>"file.</loc><cursor>");
     , .embedfile_string_literal, .{ .lookahead = false });
 
     try testContext(
-        \\const std = @import("std"<cursor>);
-    , .empty, .{});
+        \\const std = @import(<loc>"std"</loc><cursor>);
+    , .string_literal, .{});
     try testContext(
-        \\const std = @import(<cursor>"std");
-    , .empty, .{});
+        \\const std = @import(<cursor><loc>"std"</loc>);
+    , .string_literal, .{ .lookahead = true });
 }
 
 test "string literal" {
     try testContext(
         \\var foo = <cursor>"hello world!";
-    , .empty, .{});
+    , .empty, .{ .lookahead = false });
     try testContext(
-        \\var foo = "hello world!"<cursor>;
-    , .empty, .{});
-
-    try testContext(
-        \\var foo = "<loc></loc><cursor>";
-    , .string_literal, .{});
-    // TODO
-    // try testContext(
-    //     \\var foo = "<loc>\"</loc><cursor>";
-    // , .string_literal, .{});
-
-    try testContext(
-        \\var foo = "<loc>hello</loc><cursor> world!";
-    , .string_literal, .{ .lookahead = false });
-    try testContext(
-        \\var foo = "<loc>hello<cursor> world!</loc>";
+        \\var foo = <cursor><loc>"hello world!"</loc>;
     , .string_literal, .{ .lookahead = true });
 
+    try testContext(
+        \\var foo = <loc>"hello world!"</loc><cursor>;
+    , .string_literal, .{});
+
+    try testContext(
+        \\var foo = <loc>"<cursor></loc>";
+    , .string_literal, .{ .lookahead = false });
+    try testContext(
+        \\var foo = <loc>"<cursor>"</loc>;
+    , .string_literal, .{ .lookahead = true });
     // TODO
     // try testContext(
-    //     \\var foo = "hello world!"<cursor>;
-    // , .empty, .{});
+    //     \\var foo = <loc>"\"<cursor>"</loc>;
+    // , .string_literal, .{ .lookahead = true });
+
+    try testContext(
+        \\var foo = <loc>"hello</loc><cursor> world!";
+    , .string_literal, .{ .lookahead = false });
+    try testContext(
+        \\var foo = <loc>"hello<cursor> world!"</loc>;
+    , .string_literal, .{ .lookahead = true });
 }
 
 test "multi-line string literal" {
     try testContext(
-        \\var foo = <cursor>\\hello;
-    , .empty, .{});
-
+        \\var foo = <cursor>\\hello
+    , .empty, .{ .lookahead = false });
     try testContext(
-        \\var foo = \\<loc></loc><cursor>
-    , .string_literal, .{});
-    try testContext(
-        \\var foo = \\<loc>\"</loc><cursor>
-    , .string_literal, .{});
-
-    try testContext(
-        \\var foo = \\<loc>hello</loc><cursor> world!
-    , .string_literal, .{ .lookahead = false });
-    try testContext(
-        \\var foo = \\<loc>hello<cursor> world!</loc>
+        \\var foo = <cursor><loc>\\hello</loc>
     , .string_literal, .{ .lookahead = true });
 
     try testContext(
-        \\var foo = \\<loc>hello;</loc><cursor>
+        \\var foo = <loc>\\</loc><cursor>
+    , .string_literal, .{});
+    try testContext(
+        \\var foo = <loc>\\\"</loc><cursor>
+    , .string_literal, .{});
+
+    try testContext(
+        \\var foo = <loc>\\hello</loc><cursor> world!
+    , .string_literal, .{ .lookahead = false });
+    try testContext(
+        \\var foo = <loc>\\hello<cursor> world!</loc>
+    , .string_literal, .{ .lookahead = true });
+
+    try testContext(
+        \\var foo = <loc>\\hello;</loc><cursor>
     , .string_literal, .{});
 }
 

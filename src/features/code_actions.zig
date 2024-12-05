@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
+const Token = std.zig.Token;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
@@ -75,6 +76,37 @@ pub const Builder = struct {
         return only_kinds.contains(kind);
     }
 
+    pub fn generateCodeActionsInRange(
+        builder: *Builder,
+        range: types.Range,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+    ) error{OutOfMemory}!void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const tree = builder.handle.tree;
+        const token_tags = tree.tokens.items(.tag);
+
+        const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
+
+        const ctx = try Analyser.getPositionContext(builder.arena, builder.handle.tree, source_index, true);
+        if (ctx != .string_literal) return;
+
+        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
+
+        // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
+        switch (token_tags[token_idx]) {
+            .string_literal, .multiline_string_literal_line => {},
+            else => token_idx -|= 1,
+        }
+
+        switch (token_tags[token_idx]) {
+            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
+            .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
+            else => {},
+        }
+    }
+
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
@@ -92,6 +124,109 @@ pub const Builder = struct {
         return workspace_edit;
     }
 };
+
+pub fn generateStringLiteralCodeActions(
+    builder: *Builder,
+    token: Ast.TokenIndex,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
+
+    const tags = builder.handle.tree.tokens.items(.tag);
+    switch (tags[token -| 1]) {
+        // Not covered by position context
+        .keyword_test, .keyword_extern => return,
+        else => {},
+    }
+
+    const token_text = offsets.tokenToSlice(builder.handle.tree, token); // Includes quotes
+    const parsed = std.zig.string_literal.parseAlloc(builder.arena, token_text) catch |err| switch (err) {
+        error.InvalidLiteral => return,
+        else => |other| return other,
+    };
+    // Check for disallowed characters and utf-8 validity
+    for (parsed) |c| {
+        if (c == '\n') continue;
+        if (std.ascii.isControl(c)) return;
+    }
+    if (!std.unicode.utf8ValidateSlice(parsed)) return;
+    const with_slashes = try std.mem.replaceOwned(u8, builder.arena, parsed, "\n", "\n    \\\\"); // Hardcoded 4 spaces
+
+    var result = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, with_slashes.len + 3);
+    result.appendSliceAssumeCapacity("\\\\");
+    result.appendSliceAssumeCapacity(with_slashes);
+    result.appendAssumeCapacity('\n');
+
+    const loc = offsets.tokenToLoc(builder.handle.tree, token);
+    try actions.append(builder.arena, .{
+        .title = "convert to a multiline string literal",
+        .kind = .refactor,
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, result.items)}),
+    });
+}
+
+pub fn generateMultilineStringCodeActions(
+    builder: *Builder,
+    token: Ast.TokenIndex,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
+
+    const token_tags = builder.handle.tree.tokens.items(.tag);
+    std.debug.assert(.multiline_string_literal_line == token_tags[token]);
+    // Collect (exclusive) token range of the literal (one token per literal line)
+    const start = if (std.mem.lastIndexOfNone(Token.Tag, token_tags[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
+    const end = std.mem.indexOfNonePos(Token.Tag, token_tags, token, &.{.multiline_string_literal_line}) orelse token_tags.len;
+
+    // collect the text in the literal
+    const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
+    var str_escaped = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, 2 * (loc.end - loc.start));
+    str_escaped.appendAssumeCapacity('"');
+    for (start..end) |i| {
+        std.debug.assert(token_tags[i] == .multiline_string_literal_line);
+        const string_part = offsets.tokenToSlice(builder.handle.tree, @intCast(i));
+        // Iterate without the leading \\
+        for (string_part[2..]) |c| {
+            const chunk = switch (c) {
+                '\\' => "\\\\",
+                '"' => "\\\"",
+                '\n' => "\\n",
+                0x01...0x09, 0x0b...0x0c, 0x0e...0x1f, 0x7f => unreachable,
+                else => &.{c},
+            };
+            str_escaped.appendSliceAssumeCapacity(chunk);
+        }
+        if (i != end - 1) {
+            str_escaped.appendSliceAssumeCapacity("\\n");
+        }
+    }
+    str_escaped.appendAssumeCapacity('"');
+
+    // Get Loc of the whole literal to delete it
+    // Multiline string literal ends before the \n or \r, but it must be deleted too
+    const first_token_start = builder.handle.tree.tokens.items(.start)[start];
+    const last_token_end = std.mem.indexOfNonePos(
+        u8,
+        builder.handle.tree.source,
+        offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1,
+        "\n\r",
+    ) orelse builder.handle.tree.source.len;
+    const remove_loc = offsets.Loc{ .start = first_token_start, .end = last_token_end };
+
+    try actions.append(builder.arena, .{
+        .title = "convert to a string literal",
+        .kind = .refactor,
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
+    });
+}
 
 /// To report server capabilities
 pub const supported_code_actions: []const types.CodeActionKind = &.{
@@ -120,7 +255,7 @@ pub fn collectAutoDiscardDiagnostics(
     var i: usize = 0;
     while (i < tree.tokens.len) {
         const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
-            std.zig.Token.Tag,
+            Token.Tag,
             token_tags,
             i,
             &.{ .identifier, .equal, .identifier, .semicolon },
@@ -334,7 +469,7 @@ fn handleUnusedCapture(
 
     const identifier_name = offsets.locToSlice(source, loc);
 
-    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(std.zig.Token.Tag, token_tags, identifier_token, .pipe) orelse return);
+    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(Token.Tag, token_tags, identifier_token, .pipe) orelse return);
 
     var lbrace_token = capture_end + 1;
 
@@ -464,7 +599,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         try writer.writeByte('\n');
 
         const tokens = tree.tokens.items(.tag);
-        const first_token = std.mem.indexOfNone(std.zig.Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
+        const first_token = std.mem.indexOfNone(Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
         const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
 
         try edits.append(builder.arena, .{
