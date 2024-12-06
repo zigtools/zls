@@ -40,7 +40,6 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
         for (entry.diagnostics_set.keys(), entry.diagnostics_set.values()) |uri, lsp_diagnostic| {
             collection.allocator.free(uri);
             lsp_diagnostic.arena.promote(collection.allocator).deinit();
-            collection.allocator.free(lsp_diagnostic.diagnostics);
         }
         entry.diagnostics_set.deinit(collection.allocator);
     }
