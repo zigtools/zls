@@ -1090,7 +1090,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     errdefer build_config.deinit();
 
     for (build_config.value.packages) |*pkg| {
-        pkg.path = try std.fs.path.resolve(build_config.arena.allocator(), &[_][]const u8{ build_file_path, "..", pkg.path });
+        pkg.path = try std.fs.path.resolve(build_config.arena.allocator(), &.{ build_file_path, "..", pkg.path });
     }
 
     return build_config;
@@ -1150,7 +1150,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var build_file = BuildFile{
+    var build_file: BuildFile = .{
         .uri = try self.allocator.dupe(u8, uri),
     };
 

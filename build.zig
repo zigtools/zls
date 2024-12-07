@@ -359,9 +359,9 @@ fn getTracyModule(
 
     // On mingw, we need to opt into windows 7+ to get some features required by tracy.
     const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
-        &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
+        &.{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
     else
-        &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
+        &.{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
     tracy_module.addIncludePath(tracy_dependency.path(""));
     tracy_module.addCSourceFile(.{

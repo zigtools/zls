@@ -109,16 +109,16 @@ pub const Builder = struct {
 
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
         const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
-        return types.TextEdit{ .range = range, .newText = new_text };
+        return .{ .range = range, .newText = new_text };
     }
 
     pub fn createTextEditPos(self: *Builder, index: usize, new_text: []const u8) types.TextEdit {
         const position = offsets.indexToPosition(self.handle.tree.source, index, self.offset_encoding);
-        return types.TextEdit{ .range = .{ .start = position, .end = position }, .newText = new_text };
+        return .{ .range = .{ .start = position, .end = position }, .newText = new_text };
     }
 
     pub fn createWorkspaceEdit(self: *Builder, edits: []const types.TextEdit) error{OutOfMemory}!types.WorkspaceEdit {
-        var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+        var workspace_edit: types.WorkspaceEdit = .{ .changes = .{} };
         try workspace_edit.changes.?.map.putNoClobber(self.arena, self.handle.uri, try self.arena.dupe(types.TextEdit, edits));
 
         return workspace_edit;
@@ -218,7 +218,7 @@ pub fn generateMultilineStringCodeActions(
         offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1,
         "\n\r",
     ) orelse builder.handle.tree.source.len;
-    const remove_loc = offsets.Loc{ .start = first_token_start, .end = last_token_end };
+    const remove_loc: offsets.Loc = .{ .start = first_token_start, .end = last_token_end };
 
     try actions.append(builder.arena, .{
         .title = "convert to a string literal",
@@ -296,7 +296,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const new_text = try createCamelcaseText(builder.arena, identifier_name);
 
-    const action1 = types.CodeAction{
+    const action1: types.CodeAction = .{
         .title = "make function name camelCase",
         .kind = .quickfix,
         .isPreferred = true,
@@ -1064,15 +1064,15 @@ const DiagnosticKind = union(enum) {
         const msg = diagnostic_message;
 
         if (std.mem.startsWith(u8, msg, "unused ")) {
-            return DiagnosticKind{
+            return .{
                 .unused = parseEnum(IdCat, msg["unused ".len..]) orelse return null,
             };
         } else if (std.mem.startsWith(u8, msg, "pointless discard of ")) {
-            return DiagnosticKind{
+            return .{
                 .pointless_discard = parseEnum(IdCat, msg["pointless discard of ".len..]) orelse return null,
             };
         } else if (std.mem.startsWith(u8, msg, "discard of ")) {
-            return DiagnosticKind{
+            return .{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
         } else if (std.mem.startsWith(u8, msg, "Functions should be camelCase")) {
@@ -1156,7 +1156,7 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         }
     };
 
-    return offsets.Loc{
+    return .{
         .start = start_position,
         .end = autofix_comment_end,
     };

@@ -599,7 +599,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .renameProvider = .{ .bool = true },
             .completionProvider = .{
                 .resolveProvider = false,
-                .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]", "\"", "/" },
+                .triggerCharacters = &.{ ".", ":", "@", "]", "\"", "/" },
                 .completionItem = .{ .labelDetailsSupport = true },
             },
             .documentHighlightProvider = .{ .bool = true },
@@ -690,7 +690,7 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
         .{ .string = id },
         "client/registerCapability",
         types.RegistrationParams{ .registrations = &.{
-            types.Registration{
+            .{
                 .id = id,
                 .method = method,
             },
@@ -1320,7 +1320,7 @@ fn resolveConfiguration(
         };
         defer allocator.free(cache_dir_path);
 
-        config.global_cache_path = try std.fs.path.join(config_arena, &[_][]const u8{ cache_dir_path, "zls" });
+        config.global_cache_path = try std.fs.path.join(config_arena, &.{ cache_dir_path, "zls" });
 
         std.fs.cwd().makePath(config.global_cache_path.?) catch |err| {
             log.warn("failed to create directory '{s}': {}", .{ config.global_cache_path.?, err });
@@ -1473,7 +1473,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         const handle = server.document_store.getHandle(uri) orelse return;
         var text_edits = try server.autofix(arena, handle);
 
-        var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+        var workspace_edit: types.WorkspaceEdit = .{ .changes = .{} };
         try workspace_edit.changes.?.map.putNoClobber(arena, uri, try text_edits.toOwnedSlice(arena));
 
         const json_message = try server.sendToClientRequest(
@@ -1885,12 +1885,12 @@ fn isBlockingMessage(msg: Message) bool {
 pub fn create(allocator: std.mem.Allocator) !*Server {
     const server = try allocator.create(Server);
     errdefer server.destroy();
-    server.* = Server{
+    server.* = .{
         .allocator = allocator,
         .config = .{},
         .document_store = .{
             .allocator = allocator,
-            .config = .fromMainConfig(Config{}),
+            .config = .fromMainConfig(.{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
         },
@@ -2114,7 +2114,7 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
         }
 
         switch (message) {
-            .request => |request| return server.sendToClientResponseError(request.id, lsp.JsonRPCMessage.Response.Error{
+            .request => |request| return server.sendToClientResponseError(request.id, .{
                 .code = @enumFromInt(switch (err) {
                     error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
                     error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),

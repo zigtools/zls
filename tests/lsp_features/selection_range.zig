@@ -42,7 +42,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     const params: types.SelectionRangeParams = .{
         .textDocument = .{ .uri = test_uri },
-        .positions = &[_]types.Position{position},
+        .positions = &.{position},
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/selectionRange", params);
 

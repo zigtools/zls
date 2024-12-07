@@ -723,7 +723,7 @@ pub fn locIntersect(a: Loc, b: Loc) bool {
 }
 
 test locIntersect {
-    const a = Loc{ .start = 2, .end = 5 };
+    const a: Loc = .{ .start = 2, .end = 5 };
     try std.testing.expect(locIntersect(a, .{ .start = 0, .end = 2 }) == false);
     try std.testing.expect(locIntersect(a, .{ .start = 1, .end = 3 }) == true);
     try std.testing.expect(locIntersect(a, .{ .start = 2, .end = 4 }) == true);
@@ -739,7 +739,7 @@ pub fn locInside(inner: Loc, outer: Loc) bool {
 }
 
 test locInside {
-    const outer = Loc{ .start = 2, .end = 5 };
+    const outer: Loc = .{ .start = 2, .end = 5 };
     try std.testing.expect(locInside(.{ .start = 0, .end = 2 }, outer) == false);
     try std.testing.expect(locInside(.{ .start = 1, .end = 3 }, outer) == false);
     try std.testing.expect(locInside(.{ .start = 2, .end = 4 }, outer) == true);
@@ -758,7 +758,7 @@ pub fn locMerge(a: Loc, b: Loc) Loc {
 }
 
 test locMerge {
-    const a = Loc{ .start = 2, .end = 5 };
+    const a: Loc = .{ .start = 2, .end = 5 };
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 0, .end = 2 }), Loc{ .start = 0, .end = 5 });
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 1, .end = 3 }), Loc{ .start = 1, .end = 5 });
     try std.testing.expectEqualDeep(locMerge(a, .{ .start = 2, .end = 4 }), Loc{ .start = 2, .end = 5 });
