@@ -30,13 +30,13 @@
           dontConfigure = true;
           dontInstall = true;
           doCheck = true;
+          NO_COLOR = 1; # prevent escape codes from messing up the `nix log`
+          PACKAGE_DIR = pkgs.callPackage ./deps.nix { zig = zig; };
           buildPhase = ''
-            mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { zig = zig; }} .cache/p
-            zig build install --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
+            zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
           '';
           checkPhase = ''
-            zig build test --cache-dir $(pwd)/.zig-cache --global-cache-dir $(pwd)/.cache -Dcpu=baseline
+            zig build test --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dcpu=baseline
           '';
         };
       }
