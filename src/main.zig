@@ -348,7 +348,7 @@ pub fn main() !u8 {
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();
-    server.transport = transport.any();
+    server.setTransport(transport.any());
     server.config_path = result.config_path;
     server.message_tracing = result.enable_message_tracing;
 
