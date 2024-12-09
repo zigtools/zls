@@ -847,7 +847,7 @@ pub fn updateConfiguration2(
 
 pub fn updateConfiguration(
     server: *Server,
-    new_config: configuration.Configuration,
+    param_new_config: configuration.Configuration,
     options: UpdateConfigurationOptions,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -857,17 +857,20 @@ pub fn updateConfiguration(
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
 
-    var new_cfg: configuration.Configuration = .{};
-    inline for (std.meta.fields(Config)) |field| {
-        @field(new_cfg, field.name) = if (@field(new_config, field.name)) |new_value| new_value else @field(server.config, field.name);
-    }
+    var new_config: configuration.Configuration = param_new_config;
+    server.validateConfiguration(&new_config);
 
-    server.validateConfiguration(&new_cfg);
+    inline for (std.meta.fields(Config)) |field| {
+        @field(new_config, field.name) = if (@field(new_config, field.name)) |new_value|
+            new_value
+        else
+            @field(server.config, field.name);
+    }
 
     const resolve_result: ResolveConfigurationResult = blk: {
         if (!options.resolve) break :blk ResolveConfigurationResult.unresolved;
-        const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_cfg);
-        server.validateConfiguration(&new_cfg);
+        const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_config);
+        server.validateConfiguration(&new_config);
         break :blk resolve_result;
     };
     defer resolve_result.deinit();
@@ -888,7 +891,7 @@ pub fn updateConfiguration(
     const new_force_autofix = new_config.force_autofix != null and server.config.force_autofix != new_config.force_autofix.?;
 
     inline for (std.meta.fields(Config)) |field| {
-        if (@field(new_cfg, field.name)) |new_value| {
+        if (@field(new_config, field.name)) |new_value| {
             const old_value_maybe_optional = @field(server.config, field.name);
 
             const override_value = blk: {
@@ -1070,7 +1073,12 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
 
     for (checks) |check| {
         const is_ok = if (check.value.*) |path| ok: {
-            if (path.len == 0) break :ok false;
+            // Convert `""` to `null`
+            if (path.len == 0) {
+                // Thank you Visual Studio Trash Code
+                check.value.* = null;
+                break :ok true;
+            }
 
             if (!std.fs.path.isAbsolute(path)) {
                 server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ check.field_name, path });
