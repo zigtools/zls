@@ -20,6 +20,7 @@ const diff = @import("diff.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const known_folders = @import("known-folders");
+const build_runner_shared = @import("build_runner/shared.zig");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
 const signature_help = @import("features/signature_help.zig");
@@ -767,12 +768,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
 const Workspace = struct {
     uri: types.URI,
-    build_on_save: if (build_on_save_supported) ?diagnostics_gen.BuildOnSave else void,
-
-    pub const build_on_save_supported =
-        std.process.can_spawn and
-        !zig_builtin.single_threaded and
-        std.Build.Watch.have_impl;
+    build_on_save: if (build_runner_shared.isBuildOnSaveSupportedComptime()) ?diagnostics_gen.BuildOnSave else void,
 
     fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
         const duped_uri = try server.allocator.dupe(u8, uri);
@@ -780,53 +776,59 @@ const Workspace = struct {
 
         return .{
             .uri = duped_uri,
-            .build_on_save = if (build_on_save_supported) null else {},
+            .build_on_save = if (build_runner_shared.isBuildOnSaveSupportedComptime()) null else {},
         };
     }
 
     fn deinit(workspace: *Workspace, allocator: std.mem.Allocator) void {
-        if (build_on_save_supported) {
+        if (build_runner_shared.isBuildOnSaveSupportedComptime()) {
             if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
         }
         allocator.free(workspace.uri);
     }
 
-    fn refreshBuildOnSave(workspace: *Workspace, server: *Server, options: struct {
-        /// Whether the build on save process should be restated if it is already running.
+    fn refreshBuildOnSave(workspace: *Workspace, args: struct {
+        server: *Server,
+        /// If null, build on save will be disabled
+        runtime_zig_version: ?std.SemanticVersion,
+        /// Whether the build on save process should be restarted if it is already running.
         restart: bool,
     }) error{OutOfMemory}!void {
-        comptime std.debug.assert(build_on_save_supported);
+        comptime std.debug.assert(build_runner_shared.isBuildOnSaveSupportedComptime());
+        comptime std.debug.assert(build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // Update `isBuildOnSaveSupportedRuntime` and build runner
 
-        const enable_build_on_save = server.config.enable_build_on_save orelse true;
+        const build_on_save_supported = if (args.runtime_zig_version) |version| build_runner_shared.isBuildOnSaveSupportedRuntime(version) else false;
+        const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
+        const enable = build_on_save_supported and build_on_save_wanted;
 
         if (workspace.build_on_save) |*build_on_save| {
-            if (enable_build_on_save and !options.restart) return;
+            if (enable and !args.restart) return;
             build_on_save.deinit();
             workspace.build_on_save = null;
         }
 
-        if (!enable_build_on_save) return;
+        if (!enable) return;
 
-        const zig_exe_path = server.config.zig_exe_path orelse return;
-        const zig_lib_path = server.config.zig_lib_path orelse return;
-        const build_runner_path = server.config.build_runner_path orelse return;
+        const zig_exe_path = args.server.config.zig_exe_path orelse return;
+        const zig_lib_path = args.server.config.zig_lib_path orelse return;
+        const build_runner_path = args.server.config.build_runner_path orelse return;
 
-        const workspace_path = @import("uri.zig").parse(server.allocator, workspace.uri) catch |err| {
+        const workspace_path = @import("uri.zig").parse(args.server.allocator, workspace.uri) catch |err| {
             log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
             return;
         };
-        defer server.allocator.free(workspace_path);
+        defer args.server.allocator.free(workspace_path);
 
         workspace.build_on_save = @as(diagnostics_gen.BuildOnSave, undefined);
         workspace.build_on_save.?.init(.{
-            .allocator = server.allocator,
+            .allocator = args.server.allocator,
             .workspace_path = workspace_path,
-            .build_on_save_args = server.config.build_on_save_args,
-            .check_step_only = server.config.enable_build_on_save == null,
+            .build_on_save_args = args.server.config.build_on_save_args,
+            .check_step_only = args.server.config.enable_build_on_save == null,
             .zig_exe_path = zig_exe_path,
             .zig_lib_path = zig_lib_path,
             .build_runner_path = build_runner_path,
-            .collection = &server.diagnostics_collection,
+            .collection = &args.server.diagnostics_collection,
         }) catch |err| {
             workspace.build_on_save = null;
             log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
@@ -1003,7 +1005,8 @@ pub fn updateConfiguration(
         }
     }
 
-    if (Workspace.build_on_save_supported and
+    if (build_runner_shared.isBuildOnSaveSupportedComptime() and
+        options.resolve and
         // If the client supports the `workspace/configuration` request, defer
         // build on save initialization until after we have received workspace
         // configuration from the server
@@ -1017,7 +1020,9 @@ pub fn updateConfiguration(
             new_build_on_save_args;
 
         for (server.workspaces.items) |*workspace| {
-            try workspace.refreshBuildOnSave(server, .{
+            try workspace.refreshBuildOnSave(.{
+                .server = server,
+                .runtime_zig_version = resolve_result.zig_runtime_version,
                 .restart = should_restart,
             });
         }
@@ -1099,15 +1104,18 @@ pub fn updateConfiguration(
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!Workspace.build_on_save_supported) {
+        if (!build_runner_shared.isBuildOnSaveSupportedComptime()) {
             // This message is not very helpful but it relatively uncommon to happen anyway.
             log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
         } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
             log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-        } else if (server.status == .initialized and server.config.build_runner_path == null and options.resolve and resolve_result.build_runner_version != .resolved) {
+        } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
+        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !build_runner_shared.isBuildOnSaveSupportedRuntime(resolve_result.zig_runtime_version.?)) {
+            // There is one edge-case where build on save is not supported because of Linux pre 5.17
+            log.warn("'enable_build_on_save' is not supported by Zig {}", .{resolve_result.zig_runtime_version.?});
         }
     }
 
@@ -1236,8 +1244,10 @@ const ResolveConfigurationResult = struct {
     zig_env: ?std.json.Parsed(configuration.Env),
     zig_runtime_version: ?std.SemanticVersion,
     build_runner_version: union(enum) {
-        /// no suitable build runner could be resolved based on the `zig_runtime_version`
+        /// If returned, guarantees `zig_runtime_version != null`.
         resolved: BuildRunnerVersion,
+        /// no suitable build runner could be resolved based on the `zig_runtime_version`
+        /// If returned, guarantees `zig_runtime_version != null`.
         unresolved,
         unresolved_dont_error,
     },
