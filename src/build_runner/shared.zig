@@ -144,3 +144,46 @@ pub const ServerToClient = struct {
         string_bytes_len: u32,
     };
 };
+
+const windows_support_version = std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
+const kqueue_support_version = std.SemanticVersion.parse("0.14.0-dev.2046+b8795b4d0") catch unreachable;
+/// The Zig version which added `std.Build.Watch.have_impl`
+const have_impl_flag_version = kqueue_support_version;
+
+/// Returns true if is comptime known that build on save is supported.
+pub inline fn isBuildOnSaveSupportedComptime() bool {
+    if (!std.process.can_spawn) return false;
+    if (builtin.single_threaded) return false;
+    return true;
+}
+
+pub fn isBuildOnSaveSupportedRuntime(runtime_zig_version: std.SemanticVersion) bool {
+    if (!isBuildOnSaveSupportedComptime()) return false;
+
+    if (builtin.os.tag == .linux) blk: {
+        // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
+        const utsname = std.posix.uname();
+        const version = std.SemanticVersion.parse(&utsname.release) catch break :blk;
+        if (version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt) break :blk;
+        return false;
+    }
+
+    // This code path is present to support runtime Zig version before `0.14.0-dev.2046+b8795b4d0`.
+    // The main motivation is to keep support for the latest mach nominated zig version which is `0.14.0-dev.1911+3bf89f55c`.
+    return switch (builtin.os.tag) {
+        .linux => true,
+        .windows => runtime_zig_version.order(windows_support_version) != .lt,
+        .dragonfly,
+        .freebsd,
+        .netbsd,
+        .openbsd,
+        .ios,
+        .macos,
+        .tvos,
+        .visionos,
+        .watchos,
+        .haiku,
+        => runtime_zig_version.order(kqueue_support_version) != .lt,
+        else => false,
+    };
+}
