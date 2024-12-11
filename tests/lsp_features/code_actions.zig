@@ -834,7 +834,7 @@ test "convert string literal to multiline - invalid" {
 }
 
 fn testAutofix(before: []const u8, after: []const u8) !void {
-    try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from our AstGen fork
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
 }
 

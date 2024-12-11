@@ -436,6 +436,15 @@ fn handleUnusedCapture(
 
     const source = tree.source;
 
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start);
+    if (token_tags[identifier_token] != .identifier) return;
+
+    const identifier_name = offsets.locToSlice(source, loc);
+
+    // Zig can report incorrect "unused capture" errors
+    // https://github.com/ziglang/zig/pull/22209
+    if (std.mem.eql(u8, identifier_name, "_")) return;
+
     try actions.ensureUnusedCapacity(builder.arena, 3);
 
     if (builder.wantKind(.quickfix)) {
@@ -463,11 +472,6 @@ fn handleUnusedCapture(
     }
 
     if (!builder.wantKind(.@"source.fixAll")) return;
-
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start);
-    if (token_tags[identifier_token] != .identifier) return;
-
-    const identifier_name = offsets.locToSlice(source, loc);
 
     const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(Token.Tag, token_tags, identifier_token, .pipe) orelse return);
 
