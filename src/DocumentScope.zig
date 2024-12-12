@@ -557,7 +557,19 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
         .doc_scope = &document_scope,
     };
     defer context.deinit();
-    try walkContainerDecl(&context, tree, 0);
+    switch (tree.mode) {
+        .zig => try walkContainerDecl(&context, tree, 0),
+        .zon => {
+            const root_node = tree.nodes.items(.data)[0].lhs;
+            const new_scope = try context.startScope(
+                .other,
+                .{ .ast_node = root_node },
+                .{ .start = 0, .end = @intCast(tree.source.len) },
+            );
+            try walkNode(&context, tree, root_node);
+            try new_scope.finalize();
+        },
+    }
 
     return document_scope;
 }
