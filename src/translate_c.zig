@@ -7,7 +7,7 @@ const ast = @import("ast.zig");
 const tracy = @import("tracy");
 const Ast = std.zig.Ast;
 const URI = @import("uri.zig");
-const log = std.log.scoped(.zls_translate_c);
+const log = std.log.scoped(.translate_c);
 
 const ZCSTransport = @import("build_runner/shared.zig").Transport;
 const OutMessage = std.zig.Client.Message;
