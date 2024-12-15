@@ -19,7 +19,6 @@ const usage =
     \\
     \\General Options:
     \\  --config-path [path]      Set path to the 'zls.json' configuration file
-    \\  --enable-message-tracing  Enable message tracing
     \\  --log-file [path]         Set path to the 'zls.log' log file
     \\  --log-level [enum]        The Log Level to be used.
     \\                              Supported Values:
@@ -189,7 +188,6 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
 
 const ParseArgsResult = struct {
     config_path: ?[]const u8 = null,
-    enable_message_tracing: bool = false,
     log_level: ?std.log.Level = null,
     log_file_path: ?[]const u8 = null,
     zls_exe_path: []const u8 = "",
@@ -267,7 +265,8 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
             if (result.config_path) |old_config_path| allocator.free(old_config_path);
             result.config_path = try allocator.dupe(u8, path);
         } else if (std.mem.eql(u8, arg, "--enable-message-tracing")) { // --enable-message-tracing
-            result.enable_message_tracing = true;
+            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
+            log.warn("--enable-message-tracing has been deprecated.", .{});
         } else if (std.mem.eql(u8, arg, "--log-file")) { // --log-file
             const path = args_it.next() orelse {
                 log.err("Expected configuration file path after --log-file argument.", .{});
@@ -334,7 +333,6 @@ pub fn main() !u8 {
     const resolved_log_level = result.log_level orelse runtime_log_level;
 
     log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
-    log.info("Message Tracing:  {}", .{result.enable_message_tracing});
     log.info("Log Level:        {s}", .{@tagName(resolved_log_level)});
     log.info("Log File:         {?s}", .{log_file_path});
 
@@ -350,7 +348,6 @@ pub fn main() !u8 {
     defer server.destroy();
     server.setTransport(transport.any());
     server.config_path = result.config_path;
-    server.message_tracing = result.enable_message_tracing;
 
     try server.loop();
 

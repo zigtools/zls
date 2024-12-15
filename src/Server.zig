@@ -37,7 +37,6 @@ const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
 const log = std.log.scoped(.zls_server);
-const message_logger = std.log.scoped(.message);
 
 // public fields
 allocator: std.mem.Allocator,
@@ -48,7 +47,6 @@ config_path: ?[]const u8 = null,
 document_store: DocumentStore,
 /// Use `setTransport` to set the Transport.
 transport: ?lsp.AnyTransport = null,
-message_tracing: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
@@ -272,8 +270,6 @@ fn sendToClientInternal(
     if (server.transport) |transport| {
         const tracy_zone_transport = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
         defer tracy_zone_transport.end();
-
-        if (server.message_tracing) message_logger.debug("sent: {s}", .{buffer.items});
 
         transport.writeJsonMessage(buffer.items) catch |err| {
             log.err("failed to write response: {}", .{err});
@@ -517,13 +513,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
-    if (request.trace) |trace| {
-        // To support --enable-message-tracing, only allow turning this on here
-        if (trace != .off) {
-            server.message_tracing = true;
-        }
-    }
-
     if (request.clientInfo) |clientInfo| {
         log.info("Client Info:      {s}-{s}", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
     }
@@ -679,10 +668,6 @@ fn cancelRequestHandler(server: *Server, _: std.mem.Allocator, request: types.Ca
     _ = server;
     _ = request;
     // TODO implement $/cancelRequest
-}
-
-fn setTraceHandler(server: *Server, _: std.mem.Allocator, request: types.SetTraceParams) Error!void {
-    server.message_tracing = request.value != .off;
 }
 
 fn registerCapability(server: *Server, method: []const u8) Error!void {
@@ -1815,7 +1800,6 @@ const HandledNotificationParams = union(enum) {
     initialized: types.InitializedParams,
     exit,
     @"$/cancelRequest": types.CancelParams,
-    @"$/setTrace": types.SetTraceParams,
     @"textDocument/didOpen": types.DidOpenTextDocumentParams,
     @"textDocument/didChange": types.DidChangeTextDocumentParams,
     @"textDocument/didSave": types.DidSaveTextDocumentParams,
@@ -1862,7 +1846,6 @@ fn isBlockingMessage(msg: Message) bool {
             .@"$/cancelRequest" => return false,
             .initialized,
             .exit,
-            .@"$/setTrace",
             .@"textDocument/didOpen",
             .@"textDocument/didChange",
             .@"textDocument/didSave",
@@ -1953,7 +1936,6 @@ pub fn loop(server: *Server) !void {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
 
-        if (server.message_tracing) message_logger.debug("received: {s}", .{json_message});
         try server.sendJsonMessage(json_message);
 
         while (server.job_queue.readItem()) |job| {
@@ -2045,7 +2027,6 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .initialized => try server.initializedHandler(arena, params),
         .exit => try server.exitHandler(arena, params),
         .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
-        .@"$/setTrace" => try server.setTraceHandler(arena, params),
         .@"textDocument/didOpen" => try server.openDocumentHandler(arena, params),
         .@"textDocument/didChange" => try server.changeDocumentHandler(arena, params),
         .@"textDocument/didSave" => try server.saveDocumentHandler(arena, params),
