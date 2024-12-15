@@ -248,12 +248,17 @@ pub fn build(b: *Build) !void {
 fn getVersion(b: *Build) std.SemanticVersion {
     if (zls_version.pre == null and zls_version.build == null) return zls_version;
 
+    const argv: []const []const u8 = &.{
+        "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags",
+    };
     var code: u8 = undefined;
-    const git_describe_untrimmed = b.runAllowFail(
-        &.{ "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags" },
-        &code,
-        .Ignore,
-    ) catch return zls_version;
+    const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
+        const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
+        std.log.warn("Failed to run git describe to resolve ZLS version: {}\ncommand: {s}", .{
+            err, argv_joined,
+        });
+        return zls_version;
+    };
 
     const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
 
