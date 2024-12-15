@@ -79,7 +79,6 @@ const Workspace = struct {
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_apply_edits: bool = false,
-    supports_will_save: bool = false,
     supports_will_save_wait_until: bool = false,
     supports_publish_diagnostics: bool = false,
     supports_code_action_fixall: bool = false,
@@ -482,7 +481,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             }
         }
         if (textDocument.synchronization) |synchronization| {
-            server.client_capabilities.supports_will_save = synchronization.willSave orelse false;
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
         if (textDocument.codeAction) |_| {
@@ -600,7 +598,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                     .openClose = true,
                     .change = .Incremental,
                     .save = .{ .bool = true },
-                    .willSave = true,
                     .willSaveWaitUntil = true,
                 },
             },
