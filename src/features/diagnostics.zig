@@ -426,9 +426,14 @@ pub const BuildOnSave = struct {
             return;
         };
 
-        errdefer _ = child_process.kill() catch |err| {
-            std.debug.panic("failed to terminate build runner process, error: {}", .{err});
-        };
+        errdefer {
+            _ = terminateChildProcessReportError(
+                &child_process,
+                options.allocator,
+                "zig build runner",
+                .kill,
+            );
+        }
 
         self.* = .{
             .allocator = options.allocator,
@@ -453,31 +458,13 @@ pub const BuildOnSave = struct {
             return;
         };
 
-        const stderr_file = self.child_process.stderr.?;
-        const stderr = stderr_file.readToEndAlloc(self.allocator, 16 * 1024 * 1024) catch "";
-        defer self.allocator.free(stderr);
-
-        const term = self.child_process.wait() catch |err| {
-            log.warn("Failed to await zig build runner: {}", .{err});
-            return;
-        };
-
-        switch (term) {
-            .Exited => |code| if (code != 0) {
-                if (stderr.len != 0) {
-                    log.warn("zig build runner exited with non-zero status: {}\nstderr:\n{s}", .{ code, stderr });
-                } else {
-                    log.warn("zig build runner exited with non-zero status: {}", .{code});
-                }
-            },
-            else => {
-                if (stderr.len != 0) {
-                    log.warn("zig build runner exitied abnormally: {s}\nstderr:\n{s}", .{ @tagName(term), stderr });
-                } else {
-                    log.warn("zig build runner exitied abnormally: {s}", .{@tagName(term)});
-                }
-            },
-        }
+        const success = terminateChildProcessReportError(
+            &self.child_process,
+            self.allocator,
+            "zig build runner",
+            .wait,
+        );
+        if (!success) return;
 
         self.thread.join();
         self.* = undefined;
@@ -499,15 +486,7 @@ pub const BuildOnSave = struct {
 
         while (true) {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
-                error.EndOfStream => {
-                    const stderr = self.child_process.stderr.?.readToEndAlloc(self.allocator, 16 * 1024 * 1024) catch "";
-                    defer self.allocator.free(stderr);
-
-                    if (stderr.len != 0) {
-                        log.err("zig build runner exited with stderr:\n{s}", .{stderr});
-                    }
-                    return;
-                },
+                error.EndOfStream => return,
                 else => {
                     log.err("failed to receive message from build runner: {}", .{err});
                     return;
@@ -559,3 +538,43 @@ pub const BuildOnSave = struct {
         try collection.publishDiagnostics();
     }
 };
+
+fn terminateChildProcessReportError(
+    child_process: *std.process.Child,
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    kind: enum { wait, kill },
+) bool {
+    const stderr = if (child_process.stderr) |stderr|
+        stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+    else
+        "";
+    defer allocator.free(stderr);
+
+    const term = (switch (kind) {
+        .wait => child_process.wait(),
+        .kill => child_process.kill(),
+    }) catch |err| {
+        log.warn("Failed to await {s}: {}", .{ name, err });
+        return false;
+    };
+
+    switch (term) {
+        .Exited => |code| if (code != 0) {
+            if (stderr.len != 0) {
+                log.warn("{s} exited with non-zero status: {}\nstderr:\n{s}", .{ name, code, stderr });
+            } else {
+                log.warn("{s} exited with non-zero status: {}", .{ name, code });
+            }
+        },
+        else => {
+            if (stderr.len != 0) {
+                log.warn("{s} exitied abnormally: {s}\nstderr:\n{s}", .{ name, @tagName(term), stderr });
+            } else {
+                log.warn("{s} exitied abnormally: {s}", .{ name, @tagName(term) });
+            }
+        },
+    }
+
+    return true;
+}
