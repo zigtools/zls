@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// compiler: remove anonymous struct types, unify all tuples
+/// Sema: disallow unsafe in-memory coercions #22243
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 /// ```
 ///
 /// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.2088+3f7fac5ff";
+const minimum_build_zig_version = "0.14.0-dev.2506+32354d119";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.12.0

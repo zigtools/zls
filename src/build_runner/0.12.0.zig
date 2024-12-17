@@ -41,6 +41,8 @@ const live_rebuild_processes =
     std.SemanticVersion.parse("0.14.0-dev.310+9d38e82b5") catch unreachable;
 const file_watch_windows_version =
     std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
+const child_type_coercion_version =
+    std.SemanticVersion.parse("0.14.0-dev.2506+32354d119") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -775,20 +777,25 @@ fn workerMakeOneStep(
     }
 }
 
-fn nextArg(args: [][:0]const u8, idx: *usize) ?[:0]const u8 {
+const ArgsType = if (builtin.zig_version.order(child_type_coercion_version) == .lt)
+    [][:0]const u8
+else
+    []const [:0]const u8;
+
+fn nextArg(args: ArgsType, idx: *usize) ?[:0]const u8 {
     if (idx.* >= args.len) return null;
     defer idx.* += 1;
     return args[idx.*];
 }
 
-fn nextArgOrFatal(args: [][:0]const u8, idx: *usize) [:0]const u8 {
+fn nextArgOrFatal(args: ArgsType, idx: *usize) [:0]const u8 {
     return nextArg(args, idx) orelse {
         std.debug.print("expected argument after '{s}'\n  access the help menu with 'zig build -h'\n", .{args[idx.* - 1]});
         process.exit(1);
     };
 }
 
-fn argsRest(args: [][:0]const u8, idx: usize) ?[][:0]const u8 {
+fn argsRest(args: ArgsType, idx: usize) ?ArgsType {
     if (idx >= args.len) return null;
     return args[idx..];
 }
