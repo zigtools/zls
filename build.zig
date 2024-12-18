@@ -72,9 +72,10 @@ pub fn build(b: *Build) !void {
     const test_options = b.addOptions();
     test_options.step.name = "ZLS test options";
     const test_options_module = test_options.createModule();
-    test_options.addOption([]const u8, "zig_exe_path", b.graph.zig_exe);
-    test_options.addOption([]const u8, "zig_lib_path", b.graph.zig_lib_directory.path.?);
-    test_options.addOption([]const u8, "global_cache_path", b.graph.global_cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM"));
+    test_options.addOptionPath("zig_exe_path", .{ .cwd_relative = b.graph.zig_exe });
+    // TODO these paths may be relative
+    test_options.addOptionPath("zig_lib_path", .{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
+    test_options.addOptionPath("global_cache_path", .{ .cwd_relative = b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM") });
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
