@@ -1077,13 +1077,13 @@ pub fn updateConfiguration(
             if (zig_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "Zig {} should be used with ZLS {}.{}.* but ZLS {} is being used.",
-                    .{ zig_version, zig_version.major, zig_version.minor, zls_version },
+                    "ZLS {} does not support Zig {}. A ZLS {}.{} release should be used instead.",
+                    .{ zls_version, zig_version, zig_version.major, zig_version.minor },
                 );
             } else if (zls_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "ZLS {} should be used with Zig {}.{}.* but found Zig {}.",
+                    "ZLS {} should be used with a Zig {}.{} release but found Zig {}.",
                     .{ zls_version, zls_version.major, zls_version.minor, zig_version },
                 );
             } else {
