@@ -803,6 +803,7 @@ const Workspace = struct {
 
         if (workspace.build_on_save) |*build_on_save| {
             if (enable and !args.restart) return;
+            log.debug("stopped Build-On-Save for '{s}'", .{workspace.uri});
             build_on_save.deinit();
             workspace.build_on_save = null;
         }
@@ -835,7 +836,7 @@ const Workspace = struct {
             return;
         };
 
-        log.info("started Build-On-Save for '{s}'", .{workspace.uri});
+        log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri});
     }
 };
 

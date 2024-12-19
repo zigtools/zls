@@ -454,7 +454,15 @@ pub const BuildOnSave = struct {
     pub fn deinit(self: *BuildOnSave) void {
         // this write tells the child process to exit
         self.child_process.stdin.?.writeAll("\xaa") catch |err| {
-            log.warn("failed to send message to zig build runner: {}", .{err});
+            if (err != error.BrokenPipe) {
+                log.warn("failed to send message to zig build runner: {}", .{err});
+            }
+            _ = terminateChildProcessReportError(
+                &self.child_process,
+                self.allocator,
+                "zig build runner",
+                .kill,
+            );
             return;
         };
 
@@ -486,9 +494,12 @@ pub const BuildOnSave = struct {
 
         while (true) {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
-                error.EndOfStream => return,
+                error.EndOfStream => {
+                    log.debug("zig build runner process has exited", .{});
+                    return;
+                },
                 else => {
-                    log.err("failed to receive message from build runner: {}", .{err});
+                    log.err("failed to receive message from zig build runner: {}", .{err});
                     return;
                 },
             };
@@ -501,12 +512,12 @@ pub const BuildOnSave = struct {
                         collection,
                         workspace_path,
                     ) catch |err| {
-                        log.err("failed to handle error bundle message from build runner: {}", .{err});
+                        log.err("failed to handle error bundle message from zig build runner: {}", .{err});
                         return;
                     };
                 },
                 else => |tag| {
-                    log.warn("received unexpected message from build runner: {}", .{tag});
+                    log.warn("received unexpected message from zig build runner: {}", .{tag});
                 },
             }
         }
