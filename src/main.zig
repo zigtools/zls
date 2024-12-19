@@ -27,6 +27,10 @@ const usage =
     \\                                info (default)
     \\                                debug
     \\
+    \\Advanced Options:
+    \\  --enable-stderr-logs      Write log message to stderr
+    \\  --disable-lsp-logs        Disable LSP 'window/logMessage' messages
+    \\
 ;
 
 pub const std_options: std.Options = .{
@@ -36,7 +40,9 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-var runtime_log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
+var log_transport: ?zls.lsp.AnyTransport = null;
+var log_stderr: bool = true;
+var log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
 var log_file: ?std.fs.File = null;
 
 fn logFn(
@@ -45,7 +51,22 @@ fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (@intFromEnum(level) > @intFromEnum(runtime_log_level)) return;
+    var buffer: [4096]u8 = undefined;
+    comptime std.debug.assert(buffer.len >= zls.lsp.minimum_logging_buffer_size);
+
+    if (log_transport) |transport| {
+        const lsp_message_type: zls.lsp.types.MessageType = switch (level) {
+            .err => .Error,
+            .warn => .Warning,
+            .info => .Info,
+            .debug => .Debug,
+        };
+        const json_message = zls.lsp.bufPrintLogMessage(&buffer, lsp_message_type, format, args);
+        transport.writeJsonMessage(json_message) catch {};
+    }
+
+    if (@intFromEnum(level) > @intFromEnum(log_level)) return;
+    if (!log_stderr and log_file == null) return;
 
     const level_txt: []const u8 = switch (level) {
         .err => "error",
@@ -55,7 +76,6 @@ fn logFn(
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
 
-    var buffer: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
     const no_space_left = blk: {
         fbs.writer().print("{s} ({s:^6}): ", .{ level_txt, scope_txt }) catch break :blk true;
@@ -70,7 +90,9 @@ fn logFn(
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
 
-    std.io.getStdErr().writeAll(fbs.getWritten()) catch {};
+    if (log_stderr) {
+        std.io.getStdErr().writeAll(fbs.getWritten()) catch {};
+    }
 
     if (log_file) |file| {
         file.seekFromEnd(0) catch {};
@@ -190,6 +212,8 @@ const ParseArgsResult = struct {
     log_level: ?std.log.Level = null,
     log_file_path: ?[]const u8 = null,
     zls_exe_path: []const u8 = "",
+    enable_stderr_logs: bool = false,
+    disable_lsp_logs: bool = false,
 
     fn deinit(self: ParseArgsResult, allocator: std.mem.Allocator) void {
         defer if (self.config_path) |path| allocator.free(path);
@@ -282,6 +306,10 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
                 log.err("Invalid --log-level argument. Expected one of {{'debug', 'info', 'warn', 'err'}} but got '{s}'", .{log_level_name});
                 std.process.exit(1);
             };
+        } else if (std.mem.eql(u8, arg, "--enable-stderr-logs")) { // --enable-stderr-logs
+            result.enable_stderr_logs = true;
+        } else if (std.mem.eql(u8, arg, "--disable-lsp-logs")) { // --disable-lsp-logs
+            result.disable_lsp_logs = true;
         } else if (std.mem.eql(u8, arg, "--enable-debug-log")) { // --enable-debug-log
             comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
             log.warn("--enable-debug-log has been deprecated. Use --log-level instead!", .{});
@@ -329,19 +357,18 @@ pub fn main() !u8 {
         log_file = null;
     };
 
-    const resolved_log_level = result.log_level orelse runtime_log_level;
-
-    log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
-    log.info("Log Level:        {s}", .{@tagName(resolved_log_level)});
-    log.info("Log File:         {?s}", .{log_file_path});
-
-    runtime_log_level = resolved_log_level;
-
     var transport: zls.lsp.ThreadSafeTransport(.{
         .ChildTransport = zls.lsp.TransportOverStdio,
         .thread_safe_read = false,
         .thread_safe_write = true,
     }) = .{ .child_transport = zls.lsp.TransportOverStdio.init(std.io.getStdIn(), std.io.getStdOut()) };
+
+    log_transport = if (result.disable_lsp_logs) null else transport.any();
+    log_stderr = result.enable_stderr_logs;
+    log_level = result.log_level orelse log_level;
+
+    log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
+    log.info("Log File:         {?s} ({s})", .{ log_file_path, @tagName(log_level) });
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();
