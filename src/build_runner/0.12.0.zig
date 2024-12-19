@@ -43,6 +43,8 @@ const file_watch_windows_version =
     std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
 const child_type_coercion_version =
     std.SemanticVersion.parse("0.14.0-dev.2506+32354d119") catch unreachable;
+const accept_root_module_version =
+    std.SemanticVersion.parse("0.14.0-dev.2534+12d64c456") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -922,34 +924,6 @@ fn extractBuildInformation(
         }
     }
 
-    var dependency_iterator: std.Build.Module.DependencyIterator = .{
-        .allocator = gpa,
-        .index = 0,
-        .set = .{},
-        .chase_dyn_libs = true,
-    };
-    defer dependency_iterator.deinit();
-
-    // collect root modules of `Step.Compile`
-    for (steps.keys()) |step| {
-        const compile = step.cast(Step.Compile) orelse continue;
-
-        dependency_iterator.set.ensureUnusedCapacity(arena, compile.root_module.import_table.count() + 1) catch @panic("OOM");
-        dependency_iterator.set.putAssumeCapacity(.{
-            .module = &compile.root_module,
-            .compile = compile,
-        }, "root");
-    }
-
-    // collect public modules
-    for (b.modules.values()) |module| {
-        dependency_iterator.set.ensureUnusedCapacity(gpa, module.import_table.count() + 1) catch @panic("OOM");
-        dependency_iterator.set.putAssumeCapacity(.{
-            .module = module,
-            .compile = null,
-        }, "root");
-    }
-
     const helper = struct {
         fn addStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
             const lazy_path_updated_version = comptime std.SemanticVersion.parse("0.13.0-dev.79+6bc0cef60") catch unreachable;
@@ -1002,13 +976,71 @@ fn extractBuildInformation(
     var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
     defer step_dependencies.deinit(gpa);
 
-    var dependency_items: std.ArrayListUnmanaged(std.Build.Module.DependencyIterator.Item) = .{};
-    defer dependency_items.deinit(gpa);
+    const DependencyItem = struct {
+        compile: ?*std.Build.Step.Compile,
+        module: *std.Build.Module,
+    };
 
-    // collect all dependencies
-    while (dependency_iterator.next()) |item| {
-        try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
-        try dependency_items.append(gpa, item);
+    var dependency_set: std.AutoArrayHashMapUnmanaged(DependencyItem, []const u8) = .{};
+    defer dependency_set.deinit(gpa);
+
+    if (comptime builtin.zig_version.order(accept_root_module_version) != .lt) {
+        // collect root modules of `Step.Compile`
+        for (steps.keys()) |step| {
+            const compile = step.cast(Step.Compile) orelse continue;
+            const graph = compile.root_module.getGraph();
+
+            try dependency_set.ensureUnusedCapacity(arena, graph.modules.len);
+            _ = dependency_set.fetchPutAssumeCapacity(.{ .module = compile.root_module, .compile = compile }, "root");
+            for (graph.modules[1..], graph.names[1..]) |module, name| {
+                _ = dependency_set.fetchPutAssumeCapacity(.{ .module = module, .compile = null }, name);
+            }
+        }
+
+        // collect all dependencies
+        for (dependency_set.keys()) |item| {
+            try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
+        }
+    } else {
+        var dependency_iterator: std.Build.Module.DependencyIterator = .{
+            .allocator = gpa,
+            .index = 0,
+            .set = .{},
+            .chase_dyn_libs = true,
+        };
+        defer dependency_iterator.deinit();
+
+        // collect root modules of `Step.Compile`
+        for (steps.keys()) |step| {
+            const compile = step.cast(Step.Compile) orelse continue;
+
+            dependency_iterator.set.ensureUnusedCapacity(arena, compile.root_module.import_table.count() + 1) catch @panic("OOM");
+            dependency_iterator.set.putAssumeCapacity(.{
+                .module = &compile.root_module,
+                .compile = compile,
+            }, "root");
+        }
+
+        // collect public modules
+        for (b.modules.values()) |module| {
+            dependency_iterator.set.ensureUnusedCapacity(gpa, module.import_table.count() + 1) catch @panic("OOM");
+            dependency_iterator.set.putAssumeCapacity(.{
+                .module = module,
+                .compile = null,
+            }, "root");
+        }
+
+        var dependency_items: std.ArrayListUnmanaged(std.Build.Module.DependencyIterator.Item) = .{};
+        defer dependency_items.deinit(gpa);
+
+        // collect all dependencies
+        while (dependency_iterator.next()) |item| {
+            try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
+            _ = try dependency_set.fetchPut(gpa, .{
+                .module = item.module,
+                .compile = item.compile,
+            }, item.name);
+        }
     }
 
     prepare(gpa, b, &step_dependencies, run, seed) catch |err| switch (err) {
@@ -1030,14 +1062,16 @@ fn extractBuildInformation(
     defer packages.deinit();
 
     // extract packages and include paths
-    for (dependency_items.items) |item| {
+    for (dependency_set.keys(), dependency_set.values()) |item, name| {
         if (item.module.root_source_file) |root_source_file| {
-            _ = try packages.addPackage(item.name, root_source_file.getPath(item.module.owner));
+            _ = try packages.addPackage(name, root_source_file.getPath(item.module.owner));
         }
 
-        for (item.module.import_table.keys(), item.module.import_table.values()) |name, import| {
-            if (import.root_source_file) |root_source_file| {
-                _ = try packages.addPackage(name, root_source_file.getPath(item.module.owner));
+        if (comptime builtin.zig_version.order(accept_root_module_version) == .lt) {
+            for (item.module.import_table.keys(), item.module.import_table.values()) |import_name, import| {
+                if (import.root_source_file) |root_source_file| {
+                    _ = try packages.addPackage(import_name, root_source_file.getPath(item.module.owner));
+                }
             }
         }
 
