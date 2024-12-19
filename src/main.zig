@@ -140,17 +140,17 @@ const Env = struct {
     ///
     version: []const u8,
     global_cache_dir: ?[]const u8,
-    /// Path to where a global `zls.json` could be located.
-    /// Not `null` unless `known-folders` was unable to find a global configuration directory.
+    /// Path to a global configuration directory relative to which ZLS configuration files will be searched.
+    /// Not `null` unless [known-folders](https://github.com/ziglibs/known-folders) was unable to find a global configuration directory.
     global_config_dir: ?[]const u8,
-    /// Path to where a local `zls.json` could be located.
-    /// Not `null` unless `known-folders` was unable to find a local configuration directory.
+    /// Path to a user specific configuration directory relative to which configuration files will be searched.
+    /// Not `null` unless [known-folders](https://github.com/ziglibs/known-folders) was unable to find a local configuration directory.
     local_config_dir: ?[]const u8,
-    /// Path to a `zls.json` config file. Will be resolved by looking in the local configuration directory and then falling back to global directory.
+    /// Path to a `zls.json` config file. Will be resolved by looking in the local configuration directory and then falling back to the global directory.
     /// Can be null if no `zls.json` was found in the global/local config directory.
     config_file: ?[]const u8,
-    /// Path to a `zls.log` where ZLS will attempt to append logging output.
-    /// Not `null` unless `known-folders` was unable to find a cache directory.
+    /// Path to a `zls.log` file where ZLS will append logging output. The file may be truncated or cleared by ZLS.
+    /// Not `null` unless [known-folders](https://github.com/ziglibs/known-folders) was unable to find a cache directory.
     log_file: ?[]const u8,
 };
 
