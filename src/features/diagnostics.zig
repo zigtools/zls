@@ -100,7 +100,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 
         // TODO: style warnings for types, values and declarations below root scope
         if (tree.errors.len == 0) {
-            for (ast.rootDecls(tree)) |decl_idx| {
+            for (tree.rootDecls()) |decl_idx| {
                 const decl = tree.nodes.items(.tag)[decl_idx];
                 switch (decl) {
                     .fn_proto,
@@ -177,7 +177,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *D
 
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
-        for (ast.rootDecls(tree)) |decl| {
+        for (tree.rootDecls()) |decl| {
             const decl_tag = tree.nodes.items(.tag)[decl];
             const decl_main_token = tree.nodes.items(.main_token)[decl];
 

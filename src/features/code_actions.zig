@@ -786,7 +786,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
     const node_data = tree.nodes.items(.data);
     const node_tokens = tree.nodes.items(.main_token);
 
-    const root_decls = ast.rootDecls(tree);
+    const root_decls = tree.rootDecls();
 
     var skip_set = try std.DynamicBitSetUnmanaged.initEmpty(allocator, root_decls.len);
     defer skip_set.deinit(allocator);
