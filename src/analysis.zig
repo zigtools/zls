@@ -811,7 +811,8 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     return findReturnStatementInternal(tree, body, &already_found);
 }
 
-pub fn resolveReturnType(analyser: *Analyser, func_type: Type) error{OutOfMemory}!?Type {
+pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOfMemory}!?Type {
+    const func_type = try analyser.resolveFuncProtoOfCallable(func_type_param) orelse return null;
     const func_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
     const tree = func_node_handle.handle.tree;
     const func_node = func_node_handle.node;
@@ -2654,18 +2655,23 @@ pub const Type = struct {
         return self.data == .container;
     }
 
-    fn isContainerKind(self: Type, container_kind_tok: std.zig.Token.Tag) bool {
+    fn getContainerKind(self: Type) ?std.zig.Token.Tag {
         const scope_handle = switch (self.data) {
             .container => |s| s,
-            else => return false,
+            else => return null,
         };
+        if (scope_handle.scope == .root) return .keyword_struct;
 
         const node = scope_handle.toNode();
 
         const tree = scope_handle.handle.tree;
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
-        return tags[main_tokens[node]] == container_kind_tok;
+        return tags[main_tokens[node]];
+    }
+
+    fn isContainerKind(self: Type, container_kind_tok: std.zig.Token.Tag) bool {
+        return self.getContainerKind() == container_kind_tok;
     }
 
     pub fn isStructType(self: Type) bool {
@@ -2719,6 +2725,17 @@ pub const Type = struct {
         switch (self.data) {
             .ip_index => |payload| return analyser.ip.typeOf(payload.index) == .enum_literal_type,
             else => return false,
+        }
+    }
+
+    pub fn resolveDeclLiteralResultType(ty: Type) Type {
+        var result_type = ty;
+        while (true) {
+            result_type = switch (result_type.data) {
+                .optional => |child_ty| child_ty.*,
+                .error_union => |info| info.payload.*,
+                else => return result_type,
+            };
         }
     }
 
@@ -4465,7 +4482,7 @@ pub fn lookupSymbolFieldInit(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     field_name: []const u8,
-    nodes: []Ast.Node.Index,
+    nodes: []const Ast.Node.Index,
 ) error{OutOfMemory}!?DeclWithHandle {
     if (nodes.len == 0) return null;
 
@@ -4475,29 +4492,53 @@ pub fn lookupSymbolFieldInit(
         nodes[1..],
     )) orelse return null;
 
+    const is_struct_init = switch (handle.tree.nodes.items(.tag)[nodes[0]]) {
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init,
+        .struct_init_comma,
+        => true,
+        else => false,
+    };
+
     if (try analyser.resolveUnwrapErrorUnionType(container_type, .payload)) |unwrapped|
         container_type = unwrapped;
 
     if (try analyser.resolveOptionalUnwrap(container_type)) |unwrapped|
         container_type = unwrapped;
 
-    const container_scope_handle = switch (container_type.data) {
+    const container_scope = switch (container_type.data) {
         .container => |s| s,
         else => return null,
     };
+    if (is_struct_init) {
+        return try analyser.lookupSymbolContainer(container_scope, field_name, .field);
+    }
 
-    return analyser.lookupSymbolContainer(
-        container_scope_handle,
-        field_name,
-        .field,
-    );
+    // Assume we are doing decl literals
+    switch (container_type.getContainerKind() orelse return null) {
+        .keyword_struct => {
+            const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
+            var resolved_type = try decl.resolveType(analyser) orelse return null;
+            resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+            resolved_type = resolved_type.resolveDeclLiteralResultType();
+            if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
+            return null;
+        },
+        .keyword_enum, .keyword_union => return try analyser.lookupSymbolContainer(container_scope, field_name, .field),
+        else => return null,
+    }
 }
 
 pub fn resolveExpressionType(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
-    ancestors: []Ast.Node.Index,
+    ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?Type {
     return (try analyser.resolveExpressionTypeFromAncestors(
         handle,
@@ -4513,7 +4554,7 @@ pub fn resolveExpressionTypeFromAncestors(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
-    ancestors: []Ast.Node.Index,
+    ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?Type {
     if (ancestors.len == 0) return null;
 
@@ -4677,6 +4718,15 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             var buffer: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&buffer, ancestors[0]).?;
+
+            if (call.ast.fn_expr == node) {
+                return try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[0],
+                    ancestors[1..],
+                );
+            }
+
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
             const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
@@ -4767,6 +4817,13 @@ pub fn resolveExpressionTypeFromAncestors(
                 handle,
                 ancestors[index],
                 ancestors[index + 1 ..],
+            );
+        },
+        .@"try" => {
+            return try analyser.resolveExpressionType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
             );
         },
 

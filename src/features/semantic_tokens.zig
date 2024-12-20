@@ -608,7 +608,12 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const call = tree.fullCall(&params, node).?;
 
             try writeToken(builder, call.async_token, .keyword);
-            try writeNodeTokens(builder, call.ast.fn_expr);
+            if (node_tags[call.ast.fn_expr] == .enum_literal) {
+                // TODO actually try to resolve the decl literal
+                try writeToken(builder, main_tokens[call.ast.fn_expr], .function);
+            } else {
+                try writeNodeTokens(builder, call.ast.fn_expr);
+            }
 
             for (call.ast.params) |param| try writeNodeTokens(builder, param);
         },
