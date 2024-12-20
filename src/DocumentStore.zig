@@ -8,12 +8,13 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.zls_store);
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
-const BuildConfig = @import("build_runner/BuildConfig.zig");
+const BuildConfig = @import("build_runner/shared.zig").BuildConfig;
 const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
 const DocumentScope = @import("DocumentScope.zig");
+const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 
 const DocumentStore = @This();
 
@@ -25,6 +26,7 @@ thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
+diagnostics_collection: *DiagnosticsCollection,
 
 pub const Uri = []const u8;
 
@@ -174,6 +176,7 @@ pub const BuildFile = struct {
 /// Represents a Zig source file.
 pub const Handle = struct {
     uri: Uri,
+    version: u32 = 0,
     tree: Ast,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
@@ -515,6 +518,8 @@ pub const Handle = struct {
         self.cimports = .{};
         self.impl.document_scope = undefined;
         self.impl.zir = undefined;
+
+        self.version += 1;
 
         self.impl.lock.unlock();
 
@@ -1514,6 +1519,10 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         }
     }
 
+    self.publishCimportDiagnostics(handle) catch |err| {
+        log.err("failed to publish cImport diagnostics: {}", .{err});
+    };
+
     switch (result) {
         .success => |uri| {
             log.debug("Translated cImport into {s}", .{uri});
@@ -1521,6 +1530,65 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         },
         .failure => return null,
     }
+}
+
+fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
+    const file_path = URI.parse(self.allocator, handle.uri) catch |err| {
+        log.err("failed to parse URI '{s}': {}", .{ handle.uri, err });
+        return;
+    };
+    defer self.allocator.free(file_path);
+
+    var wip: std.zig.ErrorBundle.Wip = undefined;
+    try wip.init(self.allocator);
+    defer wip.deinit();
+
+    const src_path = try wip.addString(file_path);
+
+    for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
+        const result = blk: {
+            self.lock.lock();
+            defer self.lock.unlock();
+            break :blk self.cimports.get(hash) orelse continue;
+        };
+        const error_bundle: std.zig.ErrorBundle = switch (result) {
+            .success => continue,
+            .failure => |bundle| bundle,
+        };
+
+        if (error_bundle.errorMessageCount() == 0) continue;
+
+        const loc = offsets.nodeToLoc(handle.tree, node);
+        const source_loc = std.zig.findLineColumn(handle.tree.source, loc.start);
+
+        comptime std.debug.assert(max_document_size <= std.math.maxInt(u32));
+
+        const src_loc = try wip.addSourceLocation(.{
+            .src_path = src_path,
+            .line = @intCast(source_loc.line),
+            .column = @intCast(source_loc.column),
+            .span_start = @intCast(loc.start),
+            .span_main = @intCast(loc.start),
+            .span_end = @intCast(loc.end),
+            .source_line = try wip.addString(source_loc.source_line),
+        });
+
+        for (error_bundle.getMessages()) |err_msg_index| {
+            const err_msg = error_bundle.getErrorMessage(err_msg_index);
+            const msg = error_bundle.nullTerminatedString(err_msg.msg);
+
+            try wip.addRootErrorMessage(.{
+                .msg = try wip.addString(msg),
+                .src_loc = src_loc,
+            });
+        }
+    }
+
+    var error_bundle = try wip.toOwnedBundle("");
+    defer error_bundle.deinit(self.allocator);
+
+    try self.diagnostics_collection.pushErrorBundle(.cimport, handle.version, null, error_bundle);
+    try self.diagnostics_collection.publishDiagnostics();
 }
 
 /// takes the string inside a @import() node (without the quotation marks)

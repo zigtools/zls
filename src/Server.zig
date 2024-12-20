@@ -18,7 +18,9 @@ const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const diff = @import("diff.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
+const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const known_folders = @import("known-folders");
+const build_runner_shared = @import("build_runner/shared.zig");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
 const signature_help = @import("features/signature_help.zig");
@@ -44,6 +46,7 @@ config: Config = .{},
 /// will default to lookup in the system and user configuration folder provided by known-folders.
 config_path: ?[]const u8 = null,
 document_store: DocumentStore,
+/// Use `setTransport` to set the Transport.
 transport: ?lsp.AnyTransport = null,
 message_tracing: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
@@ -63,18 +66,10 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 /// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
+diagnostics_collection: DiagnosticsCollection,
 workspaces: std.ArrayListUnmanaged(Workspace) = .{},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
-
-const Workspace = struct {
-    uri: types.URI,
-    is_build_on_save_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-
-    fn deinit(self: *Workspace, allocator: std.mem.Allocator) void {
-        allocator.free(self.uri);
-    }
-};
 
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
@@ -434,6 +429,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             server.offset_encoding = .@"utf-16";
         }
     }
+    server.diagnostics_collection.offset_encoding = server.offset_encoding;
 
     if (request.capabilities.textDocument) |textDocument| {
         server.client_capabilities.supports_publish_diagnostics = textDocument.publishDiagnostics != null;
@@ -656,8 +652,10 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
         try server.registerCapability("workspace/didChangeConfiguration");
     }
 
-    if (server.client_capabilities.supports_configuration)
+    if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
+        // TODO if the `workspace/configuration` request fails to be handled, build on save will not be started
+    }
 
     if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
         server.showMessage(.Warning, "HELP ME, I AM STUCK INSIDE AN LSP!", .{});
@@ -768,11 +766,83 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 }
 
-fn addWorkspace(server: *Server, uri: types.URI) !void {
+const Workspace = struct {
+    uri: types.URI,
+    build_on_save: if (build_runner_shared.isBuildOnSaveSupportedComptime()) ?diagnostics_gen.BuildOnSave else void,
+
+    fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
+        const duped_uri = try server.allocator.dupe(u8, uri);
+        errdefer server.allocator.free(duped_uri);
+
+        return .{
+            .uri = duped_uri,
+            .build_on_save = if (build_runner_shared.isBuildOnSaveSupportedComptime()) null else {},
+        };
+    }
+
+    fn deinit(workspace: *Workspace, allocator: std.mem.Allocator) void {
+        if (build_runner_shared.isBuildOnSaveSupportedComptime()) {
+            if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
+        }
+        allocator.free(workspace.uri);
+    }
+
+    fn refreshBuildOnSave(workspace: *Workspace, args: struct {
+        server: *Server,
+        /// If null, build on save will be disabled
+        runtime_zig_version: ?std.SemanticVersion,
+        /// Whether the build on save process should be restarted if it is already running.
+        restart: bool,
+    }) error{OutOfMemory}!void {
+        comptime std.debug.assert(build_runner_shared.isBuildOnSaveSupportedComptime());
+        comptime std.debug.assert(build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // Update `isBuildOnSaveSupportedRuntime` and build runner
+
+        const build_on_save_supported = if (args.runtime_zig_version) |version| build_runner_shared.isBuildOnSaveSupportedRuntime(version) else false;
+        const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
+        const enable = build_on_save_supported and build_on_save_wanted;
+
+        if (workspace.build_on_save) |*build_on_save| {
+            if (enable and !args.restart) return;
+            log.debug("stopped Build-On-Save for '{s}'", .{workspace.uri});
+            build_on_save.deinit();
+            workspace.build_on_save = null;
+        }
+
+        if (!enable) return;
+
+        const zig_exe_path = args.server.config.zig_exe_path orelse return;
+        const zig_lib_path = args.server.config.zig_lib_path orelse return;
+        const build_runner_path = args.server.config.build_runner_path orelse return;
+
+        const workspace_path = @import("uri.zig").parse(args.server.allocator, workspace.uri) catch |err| {
+            log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
+            return;
+        };
+        defer args.server.allocator.free(workspace_path);
+
+        workspace.build_on_save = @as(diagnostics_gen.BuildOnSave, undefined);
+        workspace.build_on_save.?.init(.{
+            .allocator = args.server.allocator,
+            .workspace_path = workspace_path,
+            .build_on_save_args = args.server.config.build_on_save_args,
+            .check_step_only = args.server.config.enable_build_on_save == null,
+            .zig_exe_path = zig_exe_path,
+            .zig_lib_path = zig_lib_path,
+            .build_runner_path = build_runner_path,
+            .collection = &args.server.diagnostics_collection,
+        }) catch |err| {
+            workspace.build_on_save = null;
+            log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
+            return;
+        };
+
+        log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri});
+    }
+};
+
+fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
-    server.workspaces.appendAssumeCapacity(.{
-        .uri = try server.allocator.dupe(u8, uri),
-    });
+    server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
     log.info("added Workspace Folder: {s}", .{uri});
 }
 
@@ -876,18 +946,9 @@ pub fn updateConfiguration(
     //                        apply changes
     // <---------------------------------------------------------->
 
-    const new_zig_exe_path =
-        new_config.zig_exe_path != null and
-        (server.config.zig_exe_path == null or !std.mem.eql(u8, server.config.zig_exe_path.?, new_config.zig_exe_path.?));
-    const new_zig_lib_path =
-        new_config.zig_lib_path != null and
-        (server.config.zig_lib_path == null or !std.mem.eql(u8, server.config.zig_lib_path.?, new_config.zig_lib_path.?));
-    const new_build_runner_path =
-        new_config.build_runner_path != null and
-        (server.config.build_runner_path == null or !std.mem.eql(u8, server.config.build_runner_path.?, new_config.build_runner_path.?));
-    const new_force_autofix = new_config.force_autofix != null and server.config.force_autofix != new_config.force_autofix.?;
+    var has_changed: [std.meta.fields(Config).len]bool = @splat(false);
 
-    inline for (std.meta.fields(Config)) |field| {
+    inline for (std.meta.fields(Config), 0..) |field, field_index| {
         if (@field(new_config, field.name)) |new_value| {
             const old_value_maybe_optional = @field(server.config, field.name);
 
@@ -914,6 +975,7 @@ pub fn updateConfiguration(
                 var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
                 runtime_known_field_name = field.name;
                 log.info("Set config option '{s}' to {}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
+                has_changed[field_index] = true;
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
                         const copy = try config_arena.alloc([]const u8, new_value.len);
@@ -927,6 +989,13 @@ pub fn updateConfiguration(
         }
     }
 
+    const new_zig_exe_path = has_changed[std.meta.fieldIndex(Config, "zig_exe_path").?];
+    const new_zig_lib_path = has_changed[std.meta.fieldIndex(Config, "zig_lib_path").?];
+    const new_build_runner_path = has_changed[std.meta.fieldIndex(Config, "build_runner_path").?];
+    const new_enable_build_on_save = has_changed[std.meta.fieldIndex(Config, "enable_build_on_save").?];
+    const new_build_on_save_args = has_changed[std.meta.fieldIndex(Config, "build_on_save_args").?];
+    const new_force_autofix = has_changed[std.meta.fieldIndex(Config, "force_autofix").?];
+
     server.document_store.config = DocumentStore.Config.fromMainConfig(server.config);
 
     if (new_zig_exe_path or new_build_runner_path) blk: {
@@ -937,13 +1006,34 @@ pub fn updateConfiguration(
         }
     }
 
+    if (build_runner_shared.isBuildOnSaveSupportedComptime() and
+        options.resolve and
+        // If the client supports the `workspace/configuration` request, defer
+        // build on save initialization until after we have received workspace
+        // configuration from the server
+        (!server.client_capabilities.supports_configuration or server.status == .initialized))
+    {
+        const should_restart =
+            new_zig_exe_path or
+            new_zig_lib_path or
+            new_build_runner_path or
+            new_enable_build_on_save or
+            new_build_on_save_args;
+
+        for (server.workspaces.items) |*workspace| {
+            try workspace.refreshBuildOnSave(.{
+                .server = server,
+                .runtime_zig_version = resolve_result.zig_runtime_version,
+                .restart = should_restart,
+            });
+        }
+    }
+
     if (new_zig_exe_path or new_zig_lib_path) {
         for (server.document_store.cimports.values()) |*result| {
             result.deinit(server.document_store.allocator);
         }
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
-
-        server.scheduleBuildOnSave();
     }
 
     if (server.status == .initialized) {
@@ -966,32 +1056,34 @@ pub fn updateConfiguration(
     //  don't modify config options after here, only show messages
     // <---------------------------------------------------------->
 
+    // TODO there should a way to suppress this message
     if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
-        // TODO there should a way to suppress this message
         server.showMessage(.Warning, "zig executable could not be found", .{});
+    } else if (std.process.can_spawn and server.status == .initialized and server.config.zig_lib_path == null) {
+        server.showMessage(.Warning, "zig standard library directory could not be resolved", .{});
     }
 
     switch (resolve_result.build_runner_version) {
         .resolved, .unresolved_dont_error => {},
-        .unresolved => {
+        .unresolved => blk: {
+            if (!options.resolve) break :blk;
+
             const zig_version = resolve_result.zig_runtime_version.?;
             const zls_version = build_options.version;
 
             const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
             const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
 
-            if (zig_builtin.is_test) {
-                // This has test coverage in `src/build_runner/BuildRunnerVersion.zig`
-            } else if (zig_version_is_tagged) {
+            if (zig_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "Zig {} should be used with ZLS {}.{}.* but ZLS {} is being used.",
-                    .{ zig_version, zig_version.major, zig_version.minor, zls_version },
+                    "ZLS {} does not support Zig {}. A ZLS {}.{} release should be used instead.",
+                    .{ zls_version, zig_version, zig_version.major, zig_version.minor },
                 );
             } else if (zls_version_is_tagged) {
                 server.showMessage(
                     .Warning,
-                    "ZLS {} should be used with Zig {}.{}.* but found Zig {}.",
+                    "ZLS {} should be used with a Zig {}.{} release but found Zig {}.",
                     .{ zls_version, zls_version.major, zls_version.minor, zig_version },
                 );
             } else {
@@ -1008,17 +1100,23 @@ pub fn updateConfiguration(
         if (!std.process.can_spawn) {
             log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
+            log.warn("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!std.process.can_spawn) {
-            log.info("'enable_build_on_save' is ignored because your OS can't spawn a child process", .{});
-        } else if (server.status == .initialized and server.config.zig_exe_path == null) {
-            log.info("'enable_build_on_save' is ignored because Zig could not be found", .{});
+        if (!build_runner_shared.isBuildOnSaveSupportedComptime()) {
+            // This message is not very helpful but it relatively uncommon to happen anyway.
+            log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
+        } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
+            log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
-            log.info("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+            log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+        } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
+            log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
+        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !build_runner_shared.isBuildOnSaveSupportedRuntime(resolve_result.zig_runtime_version.?)) {
+            // There is one edge-case where build on save is not supported because of Linux pre 5.17
+            log.warn("'enable_build_on_save' is not supported by Zig {}", .{resolve_result.zig_runtime_version.?});
         }
     }
 
@@ -1147,8 +1245,10 @@ const ResolveConfigurationResult = struct {
     zig_env: ?std.json.Parsed(configuration.Env),
     zig_runtime_version: ?std.SemanticVersion,
     build_runner_version: union(enum) {
-        /// no suitable build runner could be resolved based on the `zig_runtime_version`
+        /// If returned, guarantees `zig_runtime_version != null`.
         resolved: BuildRunnerVersion,
+        /// no suitable build runner could be resolved based on the `zig_runtime_version`
+        /// If returned, guarantees `zig_runtime_version != null`.
         unresolved,
         unresolved_dont_error,
     },
@@ -1243,7 +1343,7 @@ fn resolveConfiguration(
             break :blk;
         };
         const build_runner_source = build_runner_version.getBuildRunnerFile();
-        const build_runner_config_source = @embedFile("build_runner/BuildConfig.zig");
+        const build_runner_config_source = @embedFile("build_runner/shared.zig");
 
         const build_runner_hash = get_hash: {
             const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
@@ -1265,11 +1365,11 @@ fn resolveConfiguration(
         defer cache_dir.close();
 
         cache_dir.writeFile(.{
-            .sub_path = "BuildConfig.zig",
+            .sub_path = "shared.zig",
             .data = build_runner_config_source,
             .flags = .{ .exclusive = true },
         }) catch |err| if (err != error.PathAlreadyExists) {
-            log.err("failed to write file '{s}/BuildConfig.zig': {}", .{ cache_path, err });
+            log.err("failed to write file '{s}/shared.zig': {}", .{ cache_path, err });
             break :blk;
         };
 
@@ -1373,8 +1473,6 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
     if (std.process.can_spawn and DocumentStore.isBuildFile(uri)) {
         server.document_store.invalidateBuildFile(uri);
     }
-
-    server.scheduleBuildOnSave();
 
     if (server.getAutofixMode() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
@@ -1688,59 +1786,6 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-fn scheduleBuildOnSave(server: *Server) void {
-    if (!std.process.can_spawn) return;
-    if (server.config.enable_build_on_save == false) return;
-    if (!server.client_capabilities.supports_publish_diagnostics) return;
-
-    for (server.workspaces.items) |*workspace| {
-        if (zig_builtin.single_threaded) {
-            server.runBuildOnSave(workspace);
-        } else {
-            // TODO race-condition: `server.workspaces` may be modified
-            server.thread_pool.spawn(runBuildOnSave, .{ server, workspace }) catch {
-                server.runBuildOnSave(workspace);
-            };
-        }
-    }
-}
-
-fn runBuildOnSave(server: *Server, workspace: *Workspace) void {
-    comptime std.debug.assert(std.process.can_spawn);
-
-    const was_build_on_save_running = workspace.is_build_on_save_running.swap(true, .acq_rel);
-    if (was_build_on_save_running) return;
-
-    defer workspace.is_build_on_save_running.store(false, .release);
-
-    var diagnostic_set: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)) = .{};
-
-    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-    defer arena_allocator.deinit();
-
-    diagnostics_gen.generateBuildOnSaveDiagnostics(
-        server.allocator,
-        &server.document_store,
-        // TODO data-race on server.config
-        server.config,
-        workspace.uri,
-        arena_allocator.allocator(),
-        &diagnostic_set,
-    ) catch |err| {
-        log.err("failed to run build on save on {s}: {}", .{ workspace.uri, err });
-        return;
-    };
-
-    for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
-        std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-        const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-            .uri = document_uri,
-            .diagnostics = diagnostics.items,
-        }) catch return;
-        server.allocator.free(json_message);
-    }
-}
-
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1842,10 +1887,12 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
             .allocator = allocator,
             .config = DocumentStore.Config.fromMainConfig(Config{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
+            .diagnostics_collection = &server.diagnostics_collection,
         },
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
+        .diagnostics_collection = .{ .allocator = allocator },
     };
 
     if (zig_builtin.single_threaded) {
@@ -1875,9 +1922,15 @@ pub fn destroy(server: *Server) void {
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
     server.workspaces.deinit(server.allocator);
+    server.diagnostics_collection.deinit();
     server.client_capabilities.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
+}
+
+pub fn setTransport(server: *Server, transport: lsp.AnyTransport) void {
+    server.transport = transport;
+    server.diagnostics_collection.transport = transport;
 }
 
 pub fn keepRunning(server: Server) bool {
@@ -2092,11 +2145,7 @@ fn processJob(server: *Server, job: Job) void {
         },
         .generate_diagnostics => |uri| {
             const handle = server.document_store.getHandle(uri) orelse return;
-            var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-            defer arena_allocator.deinit();
-            const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle) catch return;
-            const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
-            server.allocator.free(json_message);
+            diagnostics_gen.generateDiagnostics(server, handle) catch return;
         },
     }
 }

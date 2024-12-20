@@ -18,14 +18,14 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .p
 const minimum_build_zig_version = "0.14.0-dev.2472+cc82620b2";
 
 /// Specify the minimum Zig version that is required to run ZLS:
-/// Release 0.12.0
+/// make zig compiler processes live across rebuilds
 ///
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.12.0";
+const minimum_runtime_zig_version = "0.14.0-dev.310+9d38e82b5";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
@@ -178,6 +178,25 @@ pub fn build(b: *Build) !void {
     exe.root_module.addImport("known-folders", known_folders_module);
     exe.root_module.addImport("zls", zls_module);
     b.installArtifact(exe);
+
+    {
+        const exe_check = b.addExecutable(.{
+            .name = "zls",
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .single_threaded = single_threaded,
+        });
+        exe_check.root_module.addImport("exe_options", exe_options_module);
+        exe_check.root_module.addImport("tracy", tracy_module);
+        exe_check.root_module.addImport("diffz", diffz_module);
+        exe_check.root_module.addImport("lsp", lsp_module);
+        exe_check.root_module.addImport("known-folders", known_folders_module);
+        exe_check.root_module.addImport("zls", zls_module);
+
+        const check = b.step("check", "Check if ZLS compiles");
+        check.dependOn(&exe_check.step);
+    }
 
     const test_step = b.step("test", "Run all the tests");
 
@@ -485,6 +504,8 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 }
 
 const Build = blk: {
+    @setEvalBranchQuota(10_000);
+
     const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
 

@@ -1,19 +1,17 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
 //! This build runner is targeting compatibility with the following Zig versions:
-//!   - Zig 0.12.0
-//!   - Zig 0.13.0
-//!   - master
+//!   - master (0.14.0-dev.2046+b8795b4d0 and later)
 //!
 //! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
-//! As an example, see how `writeFile2_removed_version` or `std_progress_rework_version` are used to deal with breaking changes.
+//! As an example, see how `child_type_coercion_version` is used to deal with breaking changes.
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
-//! `zig build --build-runner src/build_runner/0.12.0.zig`
+//! `zig build --build-runner src/build_runner/master.zig`
 //!
 //! You can also test the build runner on any other `build.zig` with the following command:
-//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/0.12.0.zig`
-//! `zig build --build-runner /path/to/zls/src/build_runner/0.12.0.zig` (if the cwd contains build.zig)
+//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/master.zig`
+//! `zig build --build-runner /path/to/zls/src/build_runner/master.zig` (if the cwd contains build.zig)
 //!
 
 const root = @import("@build");
@@ -31,27 +29,12 @@ pub const dependencies = @import("@dependencies");
 
 // ----------- List of Zig versions that introduced breaking changes -----------
 
-const writeFile2_removed_version =
-    std.SemanticVersion.parse("0.13.0-dev.68+b86c4bde6") catch unreachable;
-const std_progress_rework_version =
-    std.SemanticVersion.parse("0.13.0-dev.336+963ffe9d5") catch unreachable;
-const file_watch_version =
-    std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
-const live_rebuild_processes =
-    std.SemanticVersion.parse("0.14.0-dev.310+9d38e82b5") catch unreachable;
-const file_watch_windows_version =
-    std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
 const child_type_coercion_version =
     std.SemanticVersion.parse("0.14.0-dev.2506+32354d119") catch unreachable;
 const accept_root_module_version =
     std.SemanticVersion.parse("0.14.0-dev.2534+12d64c456") catch unreachable;
 
 // -----------------------------------------------------------------------------
-
-const ProgressNode = if (builtin.zig_version.order(std_progress_rework_version) == .lt)
-    *std.Progress.Node
-else
-    std.Progress.Node;
 
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
@@ -73,19 +56,15 @@ pub fn main() !void {
     var arg_idx: usize = 1;
 
     const zig_exe = nextArg(args, &arg_idx) orelse fatal("missing zig compiler path", .{});
-    const zig_lib_directory = if (comptime builtin.zig_version.order(file_watch_version).compare(.gte)) blk: {
-        const zig_lib_dir = nextArg(args, &arg_idx) orelse fatal("missing zig lib directory path", .{});
-
-        const zig_lib_directory: std.Build.Cache.Directory = .{
-            .path = zig_lib_dir,
-            .handle = try std.fs.cwd().openDir(zig_lib_dir, .{}),
-        };
-
-        break :blk zig_lib_directory;
-    } else {};
+    const zig_lib_dir = nextArg(args, &arg_idx) orelse fatal("missing zig lib directory path", .{});
     const build_root = nextArg(args, &arg_idx) orelse fatal("missing build root directory path", .{});
     const cache_root = nextArg(args, &arg_idx) orelse fatal("missing cache root directory path", .{});
     const global_cache_root = nextArg(args, &arg_idx) orelse fatal("missing global cache root directory path", .{});
+
+    const zig_lib_directory: std.Build.Cache.Directory = .{
+        .path = zig_lib_dir,
+        .handle = try std.fs.cwd().openDir(zig_lib_dir, .{}),
+    };
 
     const build_root_directory: std.Build.Cache.Directory = .{
         .path = build_root,
@@ -102,7 +81,7 @@ pub fn main() !void {
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var graph: std.Build.Graph = if (comptime builtin.zig_version.order(file_watch_version).compare(.gte)) .{
+    var graph: std.Build.Graph = .{
         .arena = arena,
         .cache = .{
             .gpa = arena,
@@ -112,19 +91,6 @@ pub fn main() !void {
         .env_map = try process.getEnvMap(arena),
         .global_cache_root = global_cache_directory,
         .zig_lib_directory = zig_lib_directory,
-        .host = .{
-            .query = .{},
-            .result = try std.zig.system.resolveTargetQuery(.{}),
-        },
-    } else .{
-        .arena = arena,
-        .cache = .{
-            .gpa = arena,
-            .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
-        },
-        .zig_exe = zig_exe,
-        .env_map = try process.getEnvMap(arena),
-        .global_cache_root = global_cache_directory,
         .host = .{
             .query = .{},
             .result = try std.zig.system.resolveTargetQuery(.{}),
@@ -155,6 +121,8 @@ pub fn main() !void {
     var seed: u32 = 0;
     var output_tmp_nonce: ?[16]u8 = null;
     var debounce_interval_ms: u16 = 50;
+    var watch = false;
+    var check_step_only = false;
 
     while (nextArg(args, &arg_idx)) |arg| {
         if (mem.startsWith(u8, arg, "-Z")) {
@@ -228,8 +196,6 @@ pub fn main() !void {
                 const next_arg = nextArg(args, &arg_idx) orelse
                     fatal("expected [all|new|failures|none] after '{s}'", .{arg});
                 _ = next_arg;
-            } else if ((comptime builtin.zig_version.order(file_watch_version) == .lt) and mem.eql(u8, arg, "--zig-lib-dir")) {
-                builder.zig_lib_dir = .{ .cwd_relative = nextArgOrFatal(args, &arg_idx) };
             } else if (mem.eql(u8, arg, "--seed")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
                     fatal("expected u32 after '{s}'", .{arg});
@@ -238,7 +204,7 @@ pub fn main() !void {
                         next_arg, @errorName(err),
                     });
                 };
-            } else if ((builtin.zig_version.order(file_watch_version) != .lt) and mem.eql(u8, arg, "--debounce")) {
+            } else if (mem.eql(u8, arg, "--debounce")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
                     fatal("expected u16 after '{s}'", .{arg});
                 debounce_interval_ms = std.fmt.parseUnsigned(u16, next_arg, 0) catch |err| {
@@ -278,9 +244,14 @@ pub fn main() !void {
                 builder.verbose_llvm_cpu_features = true;
             } else if (mem.eql(u8, arg, "--prominent-compile-errors")) {
                 // prominent_compile_errors = true;
-            } else if ((builtin.zig_version.order(file_watch_version) != .lt) and mem.eql(u8, arg, "--watch")) {
-                // watch mode will always be enabled if supported
-                // watch = true;
+            } else if (mem.eql(u8, arg, "--watch")) {
+                watch = true;
+            } else if (mem.eql(u8, arg, "--check-only")) { // ZLS only
+                check_step_only = true;
+            } else if (mem.eql(u8, arg, "-fincremental")) {
+                graph.incremental = true;
+            } else if (mem.eql(u8, arg, "-fno-incremental")) {
+                graph.incremental = false;
             } else if (mem.eql(u8, arg, "-fwine")) {
                 builder.enable_wine = true;
             } else if (mem.eql(u8, arg, "-fno-wine")) {
@@ -335,16 +306,9 @@ pub fn main() !void {
         }
     }
 
-    var progress = if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt)
-        std.Progress{ .terminal = null }
-    else {};
-
-    const main_progress_node = if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt)
-        progress.start("", 0)
-    else
-        std.Progress.start(.{
-            .disable_printing = true,
-        });
+    const main_progress_node = std.Progress.start(.{
+        .disable_printing = true,
+    });
     defer main_progress_node.end();
 
     builder.debug_log_scopes = debug_log_scopes.items;
@@ -364,12 +328,7 @@ pub fn main() !void {
         const s = std.fs.path.sep_str;
         const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse fatal("missing -Z arg", .{}));
 
-        const writeFileFn = if (comptime builtin.zig_version.order(writeFile2_removed_version) == .lt)
-            std.fs.Dir.writeFile2
-        else
-            std.fs.Dir.writeFile;
-
-        writeFileFn(local_cache_directory.handle, .{
+        std.fs.Dir.writeFile(local_cache_directory.handle, .{
             .sub_path = tmp_sub_path,
             .data = buffer.items,
             .flags = .{ .exclusive = true },
@@ -397,6 +356,9 @@ pub fn main() !void {
         .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
+
+        .transport = null,
+        .cycle = 0,
     };
 
     if (run.max_rss == 0) {
@@ -407,44 +369,56 @@ pub fn main() !void {
     try run.thread_pool.init(thread_pool_options);
     defer run.thread_pool.deinit();
 
-    const gpa = arena;
-    try extractBuildInformation(
-        gpa,
-        builder,
-        arena,
-        main_progress_node,
-        &run,
-        seed,
-    );
+    if (!watch) {
+        try extractBuildInformation(
+            arena,
+            builder,
+            arena,
+            main_progress_node,
+            &run,
+            seed,
+        );
+        return;
+    }
 
-    const watch_suported = switch (builtin.os.tag) {
-        .linux => blk: {
-            if (comptime builtin.zig_version.order(file_watch_version) == .lt) break :blk false;
+    const suicide_thread = try std.Thread.spawn(.{}, struct {
+        fn do() void {
+            _ = std.io.getStdIn().reader().readByte() catch process.exit(1);
+            process.exit(0);
+        }
+    }.do, .{});
+    suicide_thread.detach();
 
-            // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
-            const utsname = std.posix.uname();
-            const version = std.SemanticVersion.parse(&utsname.release) catch break :blk true;
-            break :blk version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt;
-        },
-        .windows => comptime builtin.zig_version.order(file_watch_windows_version) != .lt,
-        else => false,
-    };
-    if (!watch_suported) return;
+    if (!shared.isBuildOnSaveSupportedComptime()) return;
+    if (!shared.isBuildOnSaveSupportedRuntime(builtin.zig_version)) return;
+
     var w = try Watch.init();
 
-    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items);
+    const gpa = arena;
+    var transport = Transport.init(.{
+        .gpa = gpa,
+        .in = std.io.getStdIn(),
+        .out = std.io.getStdOut(),
+    });
+    defer transport.deinit();
+
+    run.transport = &transport;
+
+    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items, check_step_only);
+    if (step_stack.count() == 0) {
+        // This means that `enable_build_on_save == null` and the project contains no "check" step.
+        return;
+    }
 
     prepare(gpa, builder, &step_stack, &run, seed) catch |err| switch (err) {
         error.UncleanExit => process.exit(1),
         else => return err,
     };
 
-    // TODO watch mode is currently always disabled until ZLS supports it
-    rebuild: while (false) {
+    rebuild: while (true) : (run.cycle += 1) {
         runSteps(
-            gpa,
             builder,
-            step_stack.keys(),
+            &step_stack,
             main_progress_node,
             &run,
         ) catch |err| switch (err) {
@@ -495,19 +469,26 @@ const Run = struct {
     thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
+
+    transport: ?*Transport,
+    cycle: u32,
 };
 
 fn stepNamesToStepStack(
     gpa: Allocator,
     b: *std.Build,
     step_names: []const []const u8,
+    check_step_only: bool,
 ) !std.AutoArrayHashMapUnmanaged(*Step, void) {
     var step_stack: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
     errdefer step_stack.deinit(gpa);
 
     if (step_names.len == 0) {
-        const default_step = if (b.top_level_steps.get("check")) |tls| &tls.step else b.default_step;
-        try step_stack.put(gpa, default_step, {});
+        if (b.top_level_steps.get("check")) |tls| {
+            try step_stack.put(gpa, &tls.step, {});
+        } else if (!check_step_only) {
+            try step_stack.put(gpa, b.default_step, {});
+        }
     } else {
         try step_stack.ensureUnusedCapacity(gpa, step_names.len);
         for (0..step_names.len) |i| {
@@ -570,37 +551,41 @@ fn prepare(
 }
 
 fn runSteps(
-    gpa: std.mem.Allocator,
     b: *std.Build,
-    steps: []const *Step,
-    parent_prog_node: ProgressNode,
+    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    parent_prog_node: std.Progress.Node,
     run: *Run,
 ) error{ OutOfMemory, UncleanExit }!void {
     const thread_pool = &run.thread_pool;
+    const steps = steps_stack.keys();
 
-    {
-        var step_prog = parent_prog_node.start("steps", steps.len);
-        defer step_prog.end();
+    var step_prog = parent_prog_node.start("steps", steps.len);
+    defer step_prog.end();
 
-        var wait_group: std.Thread.WaitGroup = .{};
-        defer wait_group.wait();
+    var wait_group: std.Thread.WaitGroup = .{};
+    defer wait_group.wait();
 
-        // Here we spawn the initial set of tasks with a nice heuristic -
-        // dependency order. Each worker when it finishes a step will then
-        // check whether it should run any dependants.
+    // Here we spawn the initial set of tasks with a nice heuristic -
+    // dependency order. Each worker when it finishes a step will then
+    // check whether it should run any dependants.
+    for (steps) |step| {
+        if (step.state == .skipped_oom) continue;
+
+        wait_group.start();
+        thread_pool.spawn(workerMakeOneStep, .{
+            &wait_group, b, steps_stack, step, step_prog, run,
+        }) catch @panic("OOM");
+    }
+
+    if (run.transport) |transport| {
         for (steps) |step| {
-            if (step.state == .skipped_oom) continue;
-
-            wait_group.start();
-            thread_pool.spawn(workerMakeOneStep, .{
-                &wait_group, b, step, if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) &step_prog else step_prog, run,
-            }) catch @panic("OOM");
+            const step_id: u32 = @intCast(steps_stack.getIndex(step).?);
+            // missing fields:
+            // - result_error_msgs
+            // - result_stderr
+            serveWatchErrorBundle(transport, step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
         }
     }
-    assert(run.memory_blocked_steps.items.len == 0);
-
-    _ = gpa;
-    // TODO collect std.zig.ErrorBundle's and stderr from failed steps and send them to ZLS
 }
 
 /// Traverse the dependency graph depth-first and make it undirected by having
@@ -656,8 +641,9 @@ fn constructGraphAndCheckForDependencyLoop(
 fn workerMakeOneStep(
     wg: *std.Thread.WaitGroup,
     b: *std.Build,
+    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
-    prog_node: ProgressNode,
+    prog_node: std.Progress.Node,
     run: *Run,
 ) void {
     defer wg.finish();
@@ -711,21 +697,21 @@ fn workerMakeOneStep(
     }
 
     var sub_prog_node = prog_node.start(s.name, 0);
-    if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt) sub_prog_node.activate();
     defer sub_prog_node.end();
 
-    const make_result = s.make(
-        if (comptime builtin.zig_version.order(std_progress_rework_version) == .lt)
-            &sub_prog_node
-        else if (comptime builtin.zig_version.order(live_rebuild_processes) == .lt)
-            sub_prog_node
-        else
-            .{
-                .progress_node = sub_prog_node,
-                .thread_pool = thread_pool,
-                .watch = false,
-            },
-    );
+    const make_result = s.make(.{
+        .progress_node = sub_prog_node,
+        .thread_pool = thread_pool,
+        .watch = true,
+    });
+
+    if (run.transport) |transport| {
+        const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
+        // missing fields:
+        // - result_error_msgs
+        // - result_stderr
+        serveWatchErrorBundle(transport, step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
+    }
 
     handle_result: {
         if (make_result) |_| {
@@ -742,7 +728,7 @@ fn workerMakeOneStep(
         for (s.dependants.items) |dep| {
             wg.start();
             thread_pool.spawn(workerMakeOneStep, .{
-                wg, b, dep, prog_node, run,
+                wg, b, steps_stack, dep, prog_node, run,
             }) catch @panic("OOM");
         }
     }
@@ -768,7 +754,7 @@ fn workerMakeOneStep(
 
                 wg.start();
                 thread_pool.spawn(workerMakeOneStep, .{
-                    wg, b, dep, prog_node, run,
+                    wg, b, steps_stack, dep, prog_node, run,
                 }) catch @panic("OOM");
             } else {
                 run.memory_blocked_steps.items[i] = dep;
@@ -806,9 +792,7 @@ fn argsRest(args: ArgsType, idx: usize) ?ArgsType {
 /// --debug-build-runner-leaks which would make this function return instead of
 /// calling exit.
 fn cleanExit() void {
-    if (comptime builtin.zig_version.order(std_progress_rework_version) != .lt) {
-        std.debug.lockStdErr();
-    }
+    std.debug.lockStdErr();
     process.exit(0);
 }
 
@@ -816,9 +800,7 @@ fn cleanExit() void {
 /// --debug-build-runner-leaks which would make this function return instead of
 /// calling exit.
 fn uncleanExit() error{UncleanExit} {
-    if (comptime builtin.zig_version.order(std_progress_rework_version) != .lt) {
-        std.debug.lockStdErr();
-    }
+    std.debug.lockStdErr();
     process.exit(1);
 }
 
@@ -852,7 +834,9 @@ fn validateSystemLibraryOptions(b: *std.Build) void {
 //
 //
 
-const BuildConfig = @import("BuildConfig.zig");
+const shared = @import("shared.zig");
+const Transport = shared.Transport;
+const BuildConfig = shared.BuildConfig;
 
 const Packages = struct {
     allocator: std.mem.Allocator,
@@ -899,7 +883,7 @@ fn extractBuildInformation(
     gpa: Allocator,
     b: *std.Build,
     arena: Allocator,
-    main_progress_node: ProgressNode,
+    main_progress_node: std.Progress.Node,
     run: *Run,
     seed: u32,
 ) !void {
@@ -1050,9 +1034,8 @@ fn extractBuildInformation(
 
     // run all steps that are dependencies
     try runSteps(
-        gpa,
         b,
-        step_dependencies.keys(),
+        &step_dependencies,
         main_progress_node,
         run,
     );
@@ -1353,3 +1336,26 @@ const copied_from_zig = struct {
         }
     }
 };
+
+fn serveWatchErrorBundle(
+    transport: *Transport,
+    step_id: u32,
+    cycle: u32,
+    error_bundle: std.zig.ErrorBundle,
+) !void {
+    const eb_hdr: shared.ServerToClient.ErrorBundle = .{
+        .step_id = step_id,
+        .cycle = cycle,
+        .extra_len = @intCast(error_bundle.extra.len),
+        .string_bytes_len = @intCast(error_bundle.string_bytes.len),
+    };
+    const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + 4 * error_bundle.extra.len + error_bundle.string_bytes.len;
+    try transport.serveMessage(.{
+        .tag = @intFromEnum(shared.ServerToClient.Tag.watch_error_bundle),
+        .bytes_len = @intCast(bytes_len),
+    }, &.{
+        std.mem.asBytes(&eb_hdr),
+        std.mem.sliceAsBytes(error_bundle.extra),
+        error_bundle.string_bytes,
+    });
+}

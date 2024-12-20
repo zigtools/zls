@@ -8,9 +8,7 @@ const build_options = @import("build_options");
 ///
 /// The GitHub matrix in `.github\workflows\build_runner.yml` should be updated to check Zig master with the latest build runner file.
 pub const BuildRunnerVersion = enum {
-    // master,
-    @"0.13.0",
-    @"0.12.0",
+    master,
 
     pub fn isTaggedRelease(version: BuildRunnerVersion) bool {
         return !@hasField(BuildRunnerVersion, "master") or version != .master;
@@ -23,9 +21,7 @@ pub const BuildRunnerVersion = enum {
 
     pub fn getBuildRunnerFile(version: BuildRunnerVersion) [:0]const u8 {
         return switch (version) {
-            // .master => @embedFile("master.zig"),
-            .@"0.13.0" => @embedFile("0.12.0.zig"), // The Zig 0.12.0 build runner is also compatible with Zig 0.13.0
-            .@"0.12.0" => @embedFile("0.12.0.zig"),
+            inline else => |tag| @embedFile(@tagName(tag) ++ ".zig"),
         };
     }
 };
@@ -106,13 +102,17 @@ test selectVersionInternal {
             const build_runner = BuildRunnerVersion.selectBuildRunnerVersion(build_options.version);
             try expect(build_runner != null);
             try expect(build_runner.?.isTaggedRelease());
-        } else {
-            // A development build of ZLS should support the latest tagged release of Zig
-            // Example: ZLS 0.13.0-dev.1+aaaaaaaaa should support Zig 0.12.0
-            const build_runner = BuildRunnerVersion.selectBuildRunnerVersion(.{ .major = build_options.version.major, .minor = build_options.version.minor - 1, .patch = 0 });
-            try expect(build_runner != null);
-            try expect(build_runner.?.isTaggedRelease());
         }
+
+        // nah, not supported
+        //
+        // if (!is_zls_version_tagged_release) {
+        //     // A development build of ZLS should support the latest tagged release of Zig
+        //     // Example: ZLS 0.13.0-dev.1+aaaaaaaaa should support Zig 0.12.0
+        //     const build_runner = BuildRunnerVersion.selectBuildRunnerVersion(.{ .major = build_options.version.major, .minor = build_options.version.minor - 1, .patch = 0 });
+        //     try expect(build_runner != null);
+        //     try expect(build_runner.?.isTaggedRelease());
+        // }
     }
 
     {
