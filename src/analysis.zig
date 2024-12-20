@@ -811,28 +811,36 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     return findReturnStatementInternal(tree, body, &already_found);
 }
 
-pub fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, fn_body: ?Ast.Node.Index) error{OutOfMemory}!?Type {
-    const tree = handle.tree;
-    if (isTypeFunction(tree, fn_decl) and fn_body != null) {
+pub fn resolveReturnType(analyser: *Analyser, func_type: Type) error{OutOfMemory}!?Type {
+    const func_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
+    const tree = func_node_handle.handle.tree;
+    const func_node = func_node_handle.node;
+
+    var buf: [1]Ast.Node.Index = undefined;
+    const fn_proto = tree.fullFnProto(&buf, func_node).?;
+    const has_body = tree.nodes.items(.tag)[func_node] == .fn_decl;
+
+    if (isTypeFunction(tree, fn_proto) and has_body) {
+        const body = tree.nodes.items(.data)[func_node].rhs;
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(tree, fn_body.?) orelse return null;
+        const ret = findReturnStatement(tree, body) orelse return null;
         const data = tree.nodes.items(.data)[ret];
         if (data.lhs != 0) {
-            return try analyser.resolveTypeOfNodeInternal(.{ .node = data.lhs, .handle = handle });
+            return try analyser.resolveTypeOfNodeInternal(.{ .node = data.lhs, .handle = func_node_handle.handle });
         }
 
         return null;
     }
 
-    if (fn_decl.ast.return_type == 0) return null;
-    const return_type = fn_decl.ast.return_type;
-    const ret: NodeWithHandle = .{ .node = return_type, .handle = handle };
+    if (fn_proto.ast.return_type == 0) return null;
+    const return_type = fn_proto.ast.return_type;
+    const ret: NodeWithHandle = .{ .node = return_type, .handle = func_node_handle.handle };
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
     if (!child_type.is_type_val) return null;
 
-    if (ast.hasInferredError(tree, fn_decl)) {
+    if (ast.hasInferredError(tree, fn_proto)) {
         const child_type_ptr = try analyser.arena.allocator().create(Type);
         child_type_ptr.* = child_type;
         return Type{
@@ -1542,11 +1550,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 }, argument_type);
             }
 
-            const has_body = func_tree.nodes.items(.tag)[func_node] == .fn_decl;
-            const body = func_tree.nodes.items(.data)[func_node].rhs;
-            if (try analyser.resolveReturnType(fn_proto, func_handle, if (has_body) body else null)) |ret| {
-                return ret;
-            }
+            return try analyser.resolveReturnType(func_ty);
         },
         .container_field,
         .container_field_init,
@@ -2646,6 +2650,10 @@ pub const Type = struct {
         }
     }
 
+    pub fn isContainerType(self: Type) bool {
+        return self.data == .container;
+    }
+
     fn isContainerKind(self: Type, container_kind_tok: std.zig.Token.Tag) bool {
         const scope_handle = switch (self.data) {
             .container => |s| s,
@@ -3231,22 +3239,9 @@ pub fn getFieldAccessType(
 
                 // Can't call a function type, we need a function type instance.
                 if (current_type.?.is_type_val) return null;
-                // this assumes that function types can only be Ast nodes
-                const current_type_node_handle = ty.data.other;
-                const current_type_node = current_type_node_handle.node;
-                const current_type_handle = current_type_node_handle.handle;
-
-                const cur_tree = current_type_handle.tree;
-                var buf: [1]Ast.Node.Index = undefined;
-                const func = cur_tree.fullFnProto(&buf, current_type_node).?;
-                // Check if the function has a body and if so, pass it
-                // so the type can be resolved if it's a generic function returning
-                // an anonymous struct
-                const has_body = cur_tree.nodes.items(.tag)[current_type_node] == .fn_decl;
-                const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
 
                 // TODO Actually bind params here when calling functions instead of just skipping args.
-                current_type = try analyser.resolveReturnType(func, current_type_handle, if (has_body) body else null) orelse return null;
+                current_type = try analyser.resolveReturnType(ty) orelse return null;
 
                 if (do_unwrap_error_payload) {
                     if (try analyser.resolveUnwrapErrorUnionType(current_type.?, .payload)) |unwrapped| current_type = unwrapped;
@@ -4689,27 +4684,16 @@ pub fn resolveExpressionTypeFromAncestors(
             if (fn_type.is_type_val) return null;
 
             const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
-            const fn_node = fn_node_handle.node;
-            const fn_handle = fn_node_handle.handle;
-            const fn_tree = fn_handle.tree;
+            const param_decl: Declaration.Param = .{
+                .param_index = @truncate(arg_index + @intFromBool(try analyser.hasSelfParam(fn_type))),
+                .func = fn_node_handle.node,
+            };
+            const param = param_decl.get(fn_node_handle.handle.tree) orelse return null;
 
-            var fn_buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node).?;
-
-            var param_iter = fn_proto.iterate(&fn_tree);
-            if (try analyser.isInstanceCall(handle, call, fn_type)) {
-                _ = ast.nextFnParam(&param_iter);
-            }
-
-            var param_index: usize = 0;
-            while (ast.nextFnParam(&param_iter)) |param| : (param_index += 1) {
-                if (param_index == arg_index) {
-                    return try analyser.resolveTypeOfNode(.{
-                        .node = param.type_expr,
-                        .handle = fn_handle,
-                    });
-                }
-            }
+            return try analyser.resolveTypeOfNode(.{
+                .node = param.type_expr,
+                .handle = fn_node_handle.handle,
+            });
         },
         .assign => {
             if (node == datas[ancestors[0]].rhs) {
