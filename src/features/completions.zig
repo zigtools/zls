@@ -1073,7 +1073,7 @@ fn getEnumLiteralContext(
     switch (token_tags[token_index]) {
         .equal => {
             token_index -= 1;
-            if ((token_tags[token_index] == .r_paren)) return null; // `..) = .`, ie lhs is a fn call
+            dot_context.need_ret_type = token_tags[token_index] == .r_paren;
             dot_context.likely = .enum_assignment;
             dot_context.identifier_token_index = token_index;
         },
@@ -1270,39 +1270,79 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const scope_handle = switch (container.data) {
         .container => |s| s,
         else => return,
     };
-    const node = scope_handle.toNode();
-    const handle = scope_handle.handle;
-    var buffer: [2]Ast.Node.Index = undefined;
-    const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
-    for (container_decl.ast.members) |member| {
-        const field = handle.tree.fullContainerField(member) orelse continue;
-        const name = handle.tree.tokenSlice(field.ast.main_token);
+
+    const document_scope = try scope_handle.handle.getDocumentScope();
+    const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
+
+    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    for (scope_decls) |decl_index| {
+        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+        if (decl != .ast_node) continue;
+        const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle };
+        const tree = scope_handle.handle.tree;
+
+        const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
-        if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
-            try builder.completions.append(builder.arena, .{
-                .label = name,
-                .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-                .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-                .insertText = if (use_snippets)
-                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+
+        const completion_item: types.CompletionItem = switch (tree.nodes.items(.tag)[decl.ast_node]) {
+            .container_field_init,
+            .container_field_align,
+            .container_field,
+            => blk: {
+                const field = tree.fullContainerField(decl.ast_node).?;
+
+                const insert_text = if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like)
+                    if (use_snippets)
+                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+                    else
+                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name})
+                else if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+                    name
                 else
-                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
-                .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
-            });
-        } else try builder.completions.append(builder.arena, .{
-            .label = name,
-            .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-            .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
-                name
-            else
-                try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
-        });
+                    try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
+
+                break :blk .{
+                    .label = name,
+                    .kind = if (field.ast.tuple_like) .EnumMember else .Field,
+                    .detail = Analyser.getContainerFieldSignature(tree, field),
+                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+                    .insertText = insert_text,
+                };
+            },
+            .global_var_decl,
+            .local_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            => {
+                if (likely != .enum_assignment) continue;
+                // decl literal
+                var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                if (!expected_ty.eql(container)) continue;
+                try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
+                continue;
+            },
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            .fn_decl,
+            => blk: {
+                if (likely != .enum_assignment) continue;
+                // decl literal
+                const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                expected_ty = expected_ty.resolveDeclLiteralResultType();
+                if (!expected_ty.eql(container) and !expected_ty.typeOf(builder.analyser).eql(container)) continue;
+                break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
+            },
+            else => continue,
+        };
+        try builder.completions.append(builder.arena, completion_item);
     }
 }
 
