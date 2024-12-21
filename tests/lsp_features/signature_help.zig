@@ -235,6 +235,17 @@ test "nested function call" {
     , "fn bar(c: bool) bool", 0);
 }
 
+test "decl literal" {
+    try testSignatureHelp(
+        \\const S = struct {
+        \\    fn foo(a: u32, b: u32) S {}
+        \\};
+        \\test {
+        \\    const s: S = .foo(<cursor>);
+        \\}
+    , "fn foo(a: u32, b: u32) S", 0);
+}
+
 test "builtin" {
     try testSignatureHelp(
         \\test {

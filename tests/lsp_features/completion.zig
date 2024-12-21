@@ -1540,6 +1540,53 @@ test "enum" {
     });
 }
 
+test "decl literal" {
+    try testCompletion(
+        \\const S = struct {
+        \\    field: u32,
+        \\
+        \\    pub const foo: error{OutOfMemory}!S = .{};
+        \\    var bar: @This() = .{};
+        \\    var baz: u32 = .{};
+        \\
+        \\    fn init() ?S {}
+        \\    fn func() void {}
+        \\};
+        \\const s: S = .<cursor>;
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+        .{ .label = "foo", .kind = .Constant },
+        .{ .label = "bar", .kind = .Struct },
+        .{ .label = "init", .kind = .Function, .detail = "fn () ?S" },
+    });
+}
+
+test "decl literal function" {
+    try testCompletion(
+        \\const Inner = struct {
+        \\    fn init() Inner {}
+        \\};
+        \\const Outer = struct {
+        \\    inner: Inner,
+        \\};
+        \\const foo: Outer = .{
+        \\    .inner = .in<cursor>it(),
+        \\};
+    , &.{
+        .{ .label = "init", .kind = .Function, .detail = "fn () Inner" },
+    });
+    try testCompletion(
+        \\fn Empty() type {
+        \\    return struct {
+        \\        fn init() @This() {}
+        \\    };
+        \\}
+        \\const foo: Empty() = .in<cursor>it();
+    , &.{
+        .{ .label = "init", .kind = .Function, .detail = "fn () @This()" },
+    });
+}
+
 test "enum literal" {
     try testCompletion(
         \\const literal = .foo;
@@ -3512,6 +3559,20 @@ test "insert replace behaviour - function alias" {
         .expected_replace_line = "const foo = alias();",
         .enable_snippets = true,
         .enable_argument_placeholders = true,
+    });
+}
+
+test "insert replace behaviour - decl literal function" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct {
+        \\    fn init() S {}
+        \\};
+        \\const foo: S = .<cursor>;
+        ,
+        .label = "init",
+        .expected_insert_line = "const foo: S = .init;",
+        .expected_replace_line = "const foo: S = .init;",
     });
 }
 

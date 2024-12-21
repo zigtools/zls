@@ -1073,7 +1073,7 @@ fn getEnumLiteralContext(
     switch (token_tags[token_index]) {
         .equal => {
             token_index -= 1;
-            if ((token_tags[token_index] == .r_paren)) return null; // `..) = .`, ie lhs is a fn call
+            dot_context.need_ret_type = token_tags[token_index] == .r_paren;
             dot_context.likely = .enum_assignment;
             dot_context.identifier_token_index = token_index;
         },
@@ -1270,39 +1270,79 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const scope_handle = switch (container.data) {
         .container => |s| s,
         else => return,
     };
-    const node = scope_handle.toNode();
-    const handle = scope_handle.handle;
-    var buffer: [2]Ast.Node.Index = undefined;
-    const container_decl = Ast.fullContainerDecl(handle.tree, &buffer, node) orelse return;
-    for (container_decl.ast.members) |member| {
-        const field = handle.tree.fullContainerField(member) orelse continue;
-        const name = handle.tree.tokenSlice(field.ast.main_token);
+
+    const document_scope = try scope_handle.handle.getDocumentScope();
+    const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
+
+    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    for (scope_decls) |decl_index| {
+        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+        if (decl != .ast_node) continue;
+        const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle };
+        const tree = scope_handle.handle.tree;
+
+        const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
-        if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
-            try builder.completions.append(builder.arena, .{
-                .label = name,
-                .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-                .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-                .insertText = if (use_snippets)
-                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+
+        const completion_item: types.CompletionItem = switch (tree.nodes.items(.tag)[decl.ast_node]) {
+            .container_field_init,
+            .container_field_align,
+            .container_field,
+            => blk: {
+                const field = tree.fullContainerField(decl.ast_node).?;
+
+                const insert_text = if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like)
+                    if (use_snippets)
+                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+                    else
+                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name})
+                else if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+                    name
                 else
-                    try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
-                .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
-            });
-        } else try builder.completions.append(builder.arena, .{
-            .label = name,
-            .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-            .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-            .insertText = if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
-                name
-            else
-                try std.fmt.allocPrint(builder.arena, "{s} = ", .{name}),
-        });
+                    try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
+
+                break :blk .{
+                    .label = name,
+                    .kind = if (field.ast.tuple_like) .EnumMember else .Field,
+                    .detail = Analyser.getContainerFieldSignature(tree, field),
+                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+                    .insertText = insert_text,
+                };
+            },
+            .global_var_decl,
+            .local_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            => {
+                if (likely != .enum_assignment) continue;
+                // decl literal
+                var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                if (!expected_ty.eql(container)) continue;
+                try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
+                continue;
+            },
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            .fn_decl,
+            => blk: {
+                if (likely != .enum_assignment) continue;
+                // decl literal
+                const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                expected_ty = expected_ty.resolveDeclLiteralResultType();
+                if (!expected_ty.eql(container) and !expected_ty.typeOf(builder.analyser).eql(container)) continue;
+                break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
+            },
+            else => continue,
+        };
+        try builder.completions.append(builder.arena, completion_item);
     }
 }
 
@@ -1467,30 +1507,25 @@ fn collectVarAccessContainerNodes(
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
     const result = try symbol_decl.resolveType(analyser) orelse return;
     const type_expr = try analyser.resolveDerefType(result) orelse result;
-    if (type_expr.isFunc()) {
-        const fn_proto_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
-        const fn_proto_node = fn_proto_node_handle.node;
-        const fn_proto_handle = fn_proto_node_handle.handle;
-        if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
-            var buf: [1]Ast.Node.Index = undefined;
-            const full_fn_proto = fn_proto_handle.tree.fullFnProto(&buf, fn_proto_node).?;
-            const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
-            const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
-            var node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse return;
-            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
-            return;
-        }
-        const fn_param_decl = Analyser.Declaration{ .function_parameter = .{
-            .func = fn_proto_node,
-            .param_index = @intCast(dot_context.fn_arg_index),
-        } };
-        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = fn_proto_handle };
-        const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
-        try types_with_handles.append(arena, param_type);
+    if (!type_expr.isFunc()) {
+        try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
     }
-    try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+
+    if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
+        var node_type = try analyser.resolveReturnType(type_expr) orelse return;
+        if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+        try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        return;
+    }
+    const func_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
+    const fn_param_decl: Analyser.Declaration = .{ .function_parameter = .{
+        .func = func_node_handle.node,
+        .param_index = @intCast(dot_context.fn_arg_index),
+    } };
+    const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = func_node_handle.handle };
+    const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
+    try types_with_handles.append(arena, param_type);
 }
 
 fn collectFieldAccessContainerNodes(
@@ -1528,50 +1563,47 @@ fn collectFieldAccessContainerNodes(
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
             if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
         }
-        if (node_type.isFunc()) {
-            const fn_proto_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
-            const fn_proto_node = fn_proto_node_handle.node;
-            const fn_proto_handle = fn_proto_node_handle.handle;
-            var buf: [1]Ast.Node.Index = undefined;
-            const full_fn_proto = fn_proto_handle.tree.fullFnProto(&buf, fn_proto_node).?;
-            if (dot_context.need_ret_type) { // => we need f()'s return type
-                const has_body = fn_proto_handle.tree.nodes.items(.tag)[fn_proto_node] == .fn_decl;
-                const body = fn_proto_handle.tree.nodes.items(.data)[fn_proto_node].rhs;
-                node_type = try analyser.resolveReturnType(full_fn_proto, fn_proto_handle, if (has_body) body else null) orelse continue;
-                if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-                try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
-                continue;
-            }
-            var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
-            var fn_param_iter = full_fn_proto.iterate(&fn_proto_handle.tree);
-            // don't have the luxury of referencing an `Ast.full.Call`
-            // check if the first symbol is a `T` or an instance_of_T
-            const additional_index: usize = blk: {
-                // `loc` points to offsets within `handle`, not `node_type.decl.handle`
-                const field_access_slice = handle.tree.source[loc.start..loc.end];
-                if (field_access_slice[0] == '@') break :blk 1; // assume `@import("..").some.Other{.}`
-                var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
-                const first_symbol = symbol_iter.next() orelse continue;
-                const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-                const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
-                if (!symbol_type.is_type_val) { // then => instance_of_T
-                    if (try analyser.hasSelfParam(node_type)) break :blk 2;
-                }
-                break :blk 1; // is `T`, no SelfParam
-            };
-            for (dot_context.fn_arg_index + additional_index) |_| maybe_fn_param = ast.nextFnParam(&fn_param_iter);
-            const param = maybe_fn_param orelse continue;
-            if (param.type_expr == 0) continue;
-            const param_rcts = try collectContainerNodes(
-                builder,
-                fn_proto_handle,
-                offsets.nodeToLoc(fn_proto_handle.tree, param.type_expr).end,
-                dot_context,
-            );
-            for (param_rcts) |prct| try types_with_handles.append(arena, prct);
+        if (!node_type.isFunc()) {
+            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             continue;
         }
-        try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+
+        if (dot_context.need_ret_type) { // => we need f()'s return type
+            node_type = try analyser.resolveReturnType(node_type) orelse continue;
+            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            continue;
+        }
+        // don't have the luxury of referencing an `Ast.full.Call`
+        // check if the first symbol is a `T` or an instance_of_T
+        const additional_index: usize = blk: {
+            // `loc` points to offsets within `handle`, not `node_type.decl.handle`
+            const field_access_slice = handle.tree.source[loc.start..loc.end];
+            if (field_access_slice[0] == '@') break :blk 0; // assume `@import("..").some.Other{.}`
+            var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
+            const first_symbol = symbol_iter.next() orelse continue;
+            const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
+            const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
+            if (!symbol_type.is_type_val) { // then => instance_of_T
+                if (try analyser.hasSelfParam(node_type)) break :blk 1;
+            }
+            break :blk 0; // is `T`, no SelfParam
+        };
+        const fn_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
+        const param_decl: Analyser.Declaration.Param = .{
+            .param_index = @truncate(dot_context.fn_arg_index + additional_index),
+            .func = fn_node_handle.node,
+        };
+        const param = param_decl.get(fn_node_handle.handle.tree) orelse continue;
+
+        if (param.type_expr == 0) continue;
+        const param_rcts = try collectContainerNodes(
+            builder,
+            fn_node_handle.handle,
+            offsets.nodeToLoc(fn_node_handle.handle.tree, param.type_expr).end,
+            dot_context,
+        );
+        for (param_rcts) |prct| try types_with_handles.append(arena, prct);
     }
 }
 

@@ -417,6 +417,78 @@ test "struct" {
     );
 }
 
+test "decl literal" {
+    try testHover(
+        \\const S = struct {
+        \\    const foo: S = .{};
+        \\};
+        \\const s: S = .foo<cursor>;
+    ,
+        \\```zig
+        \\const foo: S = .{}
+        \\```
+        \\```zig
+        \\(S)
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+    try testHover(
+        \\const S = struct {
+        \\    bar: u32,
+        \\    const foo: S = .{};
+        \\};
+        \\const s: S = .bar<cursor>;
+    , "");
+}
+
+test "decl literal function" {
+    try testHover(
+        \\const S = struct {
+        \\    fn foo() S {}
+        \\};
+        \\const s: S = .foo<cursor>;
+    ,
+        \\```zig
+        \\fn foo() S
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+
+    try testHover(
+        \\const S = struct {
+        \\    fn foo() !S {}
+        \\};
+        \\test {
+        \\    const s: S = try .foo<cursor>();
+        \\}
+    ,
+        \\```zig
+        \\fn foo() !S
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+    try testHover(
+        \\const Inner = struct {
+        \\    fn init() Inner {}
+        \\};
+        \\const Outer = struct {
+        \\    inner: Inner,
+        \\};
+        \\const foo: Outer = .{
+        \\    .inner = .in<cursor>it(),
+        \\};
+    ,
+        \\```zig
+        \\fn init() Inner
+        \\```
+        \\
+        \\Go to [Inner](file:///test.zig#L1)
+    );
+}
+
 test "enum" {
     try testHover(
         \\const My<cursor>Enum = enum {
@@ -1365,6 +1437,7 @@ fn testHoverWithOptions(
     };
 
     const response: types.Hover = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/hover", params) orelse {
+        if (expected.len == 0) return;
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };

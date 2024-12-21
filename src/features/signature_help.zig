@@ -238,9 +238,21 @@ pub fn getSignatureInfo(
                     continue;
                 }
 
-                const loc = offsets.tokensToLoc(tree, expr_first_token, expr_last_token);
+                var loc = offsets.tokensToLoc(tree, expr_first_token, expr_last_token);
 
-                var ty = try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue;
+                var ty = switch (tree.tokens.items(.tag)[expr_first_token]) {
+                    .period => blk: { // decl literal
+                        loc.start += 1;
+                        const decl = try analyser.getSymbolEnumLiteral(
+                            arena,
+                            handle,
+                            loc.start,
+                            offsets.locToSlice(tree.source, loc),
+                        ) orelse continue;
+                        break :blk try decl.resolveType(analyser) orelse continue;
+                    },
+                    else => try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue,
+                };
 
                 if (try analyser.resolveFuncProtoOfCallable(ty)) |func_type| {
                     return try fnProtoToSignatureInfo(

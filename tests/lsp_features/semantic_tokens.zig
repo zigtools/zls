@@ -608,6 +608,30 @@ test "enum literal" {
     });
 }
 
+test "decl literal" {
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    fn foo() S {}
+        \\};
+        \\const foo: S = .foo();
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "S", .namespace, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "S", .namespace, .{} },
+        .{ "=", .operator, .{} },
+        .{ "foo", .function, .{} },
+    });
+}
+
 test "error literal" {
     try testSemanticTokens(
         \\var alpha = error.OutOfMemory;

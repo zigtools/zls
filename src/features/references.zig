@@ -161,8 +161,7 @@ const Builder = struct {
                     const name_loc = offsets.tokenToLoc(tree, name_token);
                     const name = offsets.locToSlice(tree.source, name_loc);
 
-                    var nodes = [_]Ast.Node.Index{datas[node].lhs};
-                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, &nodes) orelse continue;
+                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, &.{node}) orelse continue;
 
                     if (builder.decl_handle.eql(lookup)) {
                         try builder.add(handle, name_token);
