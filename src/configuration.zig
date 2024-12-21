@@ -8,7 +8,7 @@ const known_folders = @import("known-folders");
 
 const Config = @import("Config.zig");
 
-const logger = std.log.scoped(.zls_config);
+const logger = std.log.scoped(.config);
 
 pub fn getLocalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
     const folder_path = try known_folders.getPath(allocator, .local_configuration) orelse return null;

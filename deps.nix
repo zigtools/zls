@@ -60,11 +60,11 @@ in linkFarm name [
     };
   }
   {
-    name = "122054fe123b819c1cca154f0f89dd799832a639d432287a2371499bcaf7b9dcb7a0";
+    name = "1220da2b6693fe17fa8c856c507a763a4ee379648ae657ff88271ace38c61daf7d6d";
     path = fetchZigArtifact {
       name = "lsp-codegen";
-      url = "https://github.com/zigtools/zig-lsp-codegen/archive/6b34887189def7c859307f4a9fc436bc5f2f04c9.tar.gz";
-      hash = "sha256-Q1Lm0YornfymWeryFdKe0AXsOJxhxHH72U1IcMxiVtA=";
+      url = "https://github.com/zigtools/zig-lsp-codegen/archive/25b7b6676e00edb803c2b8398821b70f0f827c92.tar.gz";
+      hash = "sha256-6arY6DILaK+C9SY/6uMOBNUDQ0W0+zAA/WRcNg08FH8=";
     };
   }
   {

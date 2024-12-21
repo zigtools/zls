@@ -5,7 +5,7 @@
 //! - [`textDocument/implementation`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_implementation) (same behaviour as `textDocument/definition`)
 
 const std = @import("std");
-const log = std.log.scoped(.zls_goto);
+const log = std.log.scoped(.goto);
 
 const Server = @import("../Server.zig");
 const lsp = @import("lsp");

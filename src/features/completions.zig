@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
-const log = std.log.scoped(.zls_completions);
+const log = std.log.scoped(.completions);
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
