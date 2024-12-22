@@ -387,11 +387,21 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
     var skip_set_fixall = false;
+    var support_full_semantic_tokens = true;
 
     if (request.clientInfo) |clientInfo| {
         server.client_capabilities.client_name = try server.allocator.dupe(u8, clientInfo.name);
 
-        if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
+        if (std.mem.startsWith(u8, clientInfo.name, "Visual Studio Code") or
+            std.mem.startsWith(u8, clientInfo.name, "VSCodium") or
+            std.mem.startsWith(u8, clientInfo.name, "Code - OSS"))
+        {
+            // VS Code doesn't really utilize `textDocument/semanticTokens/range`.
+            // This will cause some visual artifacts when scrolling through the
+            // document quickly but will considerably improve performance
+            // especially on large files.
+            support_full_semantic_tokens = false;
+        } else if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) {
             server.client_capabilities.max_detail_length = 256;
         } else if (std.mem.startsWith(u8, clientInfo.name, "emacs")) {
             // Assumes that `emacs` means `emacs-lsp/lsp-mode`. Eglot uses `Eglot`.
@@ -615,7 +625,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             },
             .semanticTokensProvider = .{
                 .SemanticTokensOptions = .{
-                    .full = .{ .bool = true },
+                    .full = .{ .bool = support_full_semantic_tokens },
                     .range = .{ .bool = true },
                     .legend = .{
                         .tokenTypes = std.meta.fieldNames(semantic_tokens.TokenType),
