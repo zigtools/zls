@@ -25,6 +25,7 @@ const Builder = struct {
     orig_handle: *DocumentStore.Handle,
     source_index: usize,
     completions: std.ArrayListUnmanaged(types.CompletionItem),
+    cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
 };
 
 fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!void {
@@ -469,8 +470,11 @@ fn populateSnippedCompletions(builder: *Builder, snippets: []const snipped_data.
 }
 
 const FunctionCompletionFormat = enum { snippet, only_name };
+const PrepareFunctionCompletionResult = struct { types.Range, types.Range, FunctionCompletionFormat };
 
-fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Range, FunctionCompletionFormat } {
+fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult {
+    if (builder.cached_prepare_function_completion_result) |result| return result;
+
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const source = builder.orig_handle.tree.source;
 
@@ -505,7 +509,8 @@ fn prepareFunctionCompletion(builder: *Builder) struct { types.Range, types.Rang
     const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
     const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
 
-    return .{ insert_range, replace_range, format };
+    builder.cached_prepare_function_completion_result = .{ insert_range, replace_range, format };
+    return builder.cached_prepare_function_completion_result.?;
 }
 
 fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
