@@ -504,6 +504,33 @@ pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc 
     return .{ .start = start, .end = start + relative_end };
 }
 
+test rangeToSlice {
+    try std.testing.expectEqualStrings("", rangeToSlice(
+        "",
+        .{
+            .start = .{ .line = 0, .character = 0 },
+            .end = .{ .line = 0, .character = 0 },
+        },
+        .@"utf-8",
+    ));
+    try std.testing.expectEqualStrings("-A-", rangeToSlice(
+        "Peek-A-Boo",
+        .{
+            .start = .{ .line = 0, .character = 4 },
+            .end = .{ .line = 0, .character = 7 },
+        },
+        .@"utf-8",
+    ));
+    try std.testing.expectEqualStrings("ek\nA\nB", rangeToSlice(
+        "Peek\nA\nBoo",
+        .{
+            .start = .{ .line = 0, .character = 2 },
+            .end = .{ .line = 2, .character = 1 },
+        },
+        .@"utf-8",
+    ));
+}
+
 pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
     return tokensToLoc(tree, tree.firstToken(node), ast.lastToken(tree, node));
 }
