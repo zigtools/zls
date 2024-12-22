@@ -3078,30 +3078,23 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
-    var imports = std.ArrayListUnmanaged([]const u8){};
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var imports: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer imports.deinit(allocator);
 
     const tags = tree.tokens.items(.tag);
 
-    var i: usize = 0;
-    while (i < tags.len) : (i += 1) {
-        if (tags[i] != .builtin)
+    for (tags, 0..) |tag, i| {
+        if (tag != .builtin)
             continue;
-        const text = tree.tokenSlice(@intCast(i));
+        const name = offsets.identifierTokenToNameSlice(tree, @intCast(i));
+        if (!std.mem.eql(u8, name, "import")) continue;
+        if (!std.mem.startsWith(std.zig.Token.Tag, tags[i + 1 ..], &.{ .l_paren, .string_literal, .r_paren })) continue;
 
-        if (std.mem.eql(u8, text, "@import")) {
-            if (i + 3 >= tags.len)
-                break;
-            if (tags[i + 1] != .l_paren)
-                continue;
-            if (tags[i + 2] != .string_literal)
-                continue;
-            if (tags[i + 3] != .r_paren)
-                continue;
-
-            const str = tree.tokenSlice(@as(u32, @intCast(i + 2)));
-            try imports.append(allocator, str[1 .. str.len - 1]);
-        }
+        const str = tree.tokenSlice(@intCast(i + 2));
+        try imports.append(allocator, str[1 .. str.len - 1]);
     }
 
     return imports;
