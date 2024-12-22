@@ -490,10 +490,18 @@ pub fn rangeToSlice(text: []const u8, range: types.Range, encoding: Encoding) []
 
 pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc {
     std.debug.assert(orderPosition(range.start, range.end) != .gt);
-    return .{
-        .start = positionToIndex(text, range.start, encoding),
-        .end = positionToIndex(text, range.end, encoding),
+    const start = positionToIndex(text, range.start, encoding);
+
+    const end_position_relative_to_start: types.Position = .{
+        .line = range.end.line - range.start.line,
+        .character = if (range.start.line == range.end.line)
+            range.end.character - range.start.character
+        else
+            range.end.character,
     };
+
+    const relative_end = positionToIndex(text[start..], end_position_relative_to_start, encoding);
+    return .{ .start = start, .end = start + relative_end };
 }
 
 pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
