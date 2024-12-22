@@ -99,9 +99,8 @@ pub fn applyContentChanges(
     for (changes) |item| {
         const content_change = item.literal_0; // TextDocumentContentChangePartial
 
-        const start = offsets.positionToIndex(text_array.items, content_change.range.start, encoding);
-        const end = offsets.positionToIndex(text_array.items, content_change.range.end, encoding);
-        try text_array.replaceRange(allocator, start, end - start, content_change.text);
+        const loc = offsets.rangeToLoc(text_array.items, content_change.range, encoding);
+        try text_array.replaceRange(allocator, loc.start, loc.end - loc.start, content_change.text);
     }
 
     return try text_array.toOwnedSliceSentinel(allocator, 0);
