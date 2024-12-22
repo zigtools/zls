@@ -30,9 +30,9 @@
           dontConfigure = true;
           dontInstall = true;
           doCheck = true;
-          NO_COLOR = 1; # prevent escape codes from messing up the `nix log`
-          PACKAGE_DIR = pkgs.callPackage ./deps.nix { zig = zig; };
           buildPhase = ''
+            NO_COLOR=1 # prevent escape codes from messing up the `nix log`
+            PACKAGE_DIR=${pkgs.callPackage ./deps.nix { zig = zig; }}
             zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
           '';
           checkPhase = ''
