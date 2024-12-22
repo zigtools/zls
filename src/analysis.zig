@@ -3110,16 +3110,20 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
     errdefer import_nodes.deinit(allocator);
 
     const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
+    for (node_tags, 0..) |tag, node| {
+        switch (tag) {
+            .builtin_call,
+            .builtin_call_comma,
+            .builtin_call_two,
+            .builtin_call_two_comma,
+            => {},
+            else => continue,
+        }
 
-    var i: usize = 0;
-    while (i < node_tags.len) : (i += 1) {
-        const node: Ast.Node.Index = @intCast(i);
-        if (!ast.isBuiltinCall(tree, node)) continue;
-
+        const main_tokens = tree.nodes.items(.main_token);
         if (!std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport")) continue;
 
-        try import_nodes.append(allocator, node);
+        try import_nodes.append(allocator, @intCast(node));
     }
 
     return import_nodes.toOwnedSlice(allocator);
