@@ -49,37 +49,48 @@ pub fn build(b: *Build) !void {
     const enable_tracy = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
     const enable_tracy_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
-    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
 
     const resolved_zls_version = getVersion(b);
     const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
 
-    const build_options = b.addOptions();
-    build_options.step.name = "ZLS build options";
-    const build_options_module = build_options.createModule();
-    build_options.addOption(std.SemanticVersion, "version", resolved_zls_version);
-    build_options.addOption([]const u8, "version_string", resolved_zls_version_string);
-    build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
+    const build_options = blk: {
+        const build_options = b.addOptions();
+        build_options.step.name = "ZLS build options";
 
-    const exe_options = b.addOptions();
-    exe_options.step.name = "ZLS exe options";
-    const exe_options_module = exe_options.createModule();
-    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable-failing-allocator", "Whether to use a randomly failing allocator.") orelse false);
-    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable-failing-allocator-likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
-    exe_options.addOption(bool, "use_gpa", b.option(bool, "use-gpa", "Good for debugging") orelse (optimize == .Debug));
+        build_options.addOption(std.SemanticVersion, "version", resolved_zls_version);
+        build_options.addOption([]const u8, "version_string", resolved_zls_version_string);
+        build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
 
-    const test_options = b.addOptions();
-    test_options.step.name = "ZLS test options";
-    const test_options_module = test_options.createModule();
-    test_options.addOptionPath("zig_exe_path", .{ .cwd_relative = b.graph.zig_exe });
-    // TODO these paths may be relative
-    test_options.addOptionPath("zig_lib_path", .{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
-    test_options.addOptionPath("global_cache_path", .{ .cwd_relative = b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM") });
+        break :blk build_options.createModule();
+    };
+    const exe_options = blk: {
+        const exe_options = b.addOptions();
+        exe_options.step.name = "ZLS exe options";
+
+        exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable-failing-allocator", "Whether to use a randomly failing allocator.") orelse false);
+        exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable-failing-allocator-likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
+        exe_options.addOption(bool, "use_gpa", b.option(bool, "use-gpa", "Good for debugging") orelse (optimize == .Debug));
+
+        break :blk exe_options.createModule();
+    };
+    const test_options = blk: {
+        const test_options = b.addOptions();
+        test_options.step.name = "ZLS test options";
+
+        test_options.addOptionPath("zig_exe_path", .{ .cwd_relative = b.graph.zig_exe });
+        // TODO these paths may be relative
+        test_options.addOptionPath("zig_lib_path", .{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
+        test_options.addOptionPath("global_cache_path", .{ .cwd_relative = b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM") });
+
+        break :blk test_options.createModule();
+    };
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
     const lsp_module = b.dependency("lsp-codegen", .{}).module("lsp");
+
     const tracy_module = getTracyModule(b, .{
         .target = target,
         .optimize = optimize,
@@ -90,9 +101,11 @@ pub fn build(b: *Build) !void {
 
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
-        .root_source_file = b.path("src/tools/config_gen.zig"),
-        .target = b.graph.host,
-        .single_threaded = true,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/config_gen.zig"),
+            .target = b.graph.host,
+            .single_threaded = true,
+        }),
     });
 
     const version_data_module = blk: {
@@ -109,159 +122,155 @@ pub fn build(b: *Build) !void {
         break :blk b.addModule("version_data", .{ .root_source_file = version_data_path });
     };
 
-    const gen_cmd = b.addRunArtifact(gen_exe);
-    gen_cmd.addArgs(&.{
-        "--generate-config",
-        b.pathFromRoot("src/Config.zig"),
-        "--generate-schema",
-        b.pathFromRoot("schema.json"),
-    });
-    if (b.args) |args| gen_cmd.addArgs(args);
+    { // zig build gen
+        const update_source = b.addUpdateSourceFiles();
 
-    const gen_step = b.step("gen", "Regenerate config files");
-    gen_step.dependOn(&gen_cmd.step);
+        const gen_cmd = b.addRunArtifact(gen_exe);
+        gen_cmd.addArg("--generate-config");
+        update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("Config.zig"), "src/Config.zig");
+        gen_cmd.addArg("--generate-schema");
+        update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("schema.json"), "schema.json");
+        if (b.args) |args| gen_cmd.addArgs(args);
+
+        const gen_step = b.step("gen", "Regenerate config files");
+        gen_step.dependOn(&update_source.step);
+    }
 
     const zls_module = b.addModule("zls", .{
         .root_source_file = b.path("src/zls.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = single_threaded,
+        .pic = pie,
         .imports = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "lsp", .module = lsp_module },
             .{ .name = "tracy", .module = tracy_module },
-            .{ .name = "build_options", .module = build_options_module },
+            .{ .name = "build_options", .module = build_options },
             .{ .name = "version_data", .module = version_data_module },
         },
     });
 
-    var release_artifacts: std.BoundedArray(*Build.Step.Compile, release_targets.len) = .{};
+    { // zig build release
+        var release_artifacts: [release_targets.len]*Build.Step.Compile = undefined;
 
-    for (release_targets) |target_query| {
-        const exe = b.addExecutable(.{
-            .name = "zls",
-            .target = b.resolveTargetQuery(target_query),
-            .root_source_file = b.path("src/main.zig"),
-            .version = resolved_zls_version,
-            .optimize = optimize,
-            .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_600_000_000,
-            .single_threaded = single_threaded,
-            .pic = pie,
-            .use_llvm = use_llvm,
-            .use_lld = use_llvm,
-        });
-        exe.root_module.addImport("exe_options", exe_options_module);
-        exe.root_module.addImport("tracy", tracy_module);
-        exe.root_module.addImport("diffz", diffz_module);
-        exe.root_module.addImport("lsp", lsp_module);
-        exe.root_module.addImport("known-folders", known_folders_module);
-        exe.root_module.addImport("zls", zls_module);
+        for (release_targets, &release_artifacts) |target_query, *artifact| {
+            artifact.* = b.addExecutable(.{
+                .name = "zls",
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("src/main.zig"),
+                    .target = b.resolveTargetQuery(target_query),
+                    .optimize = optimize,
+                    .single_threaded = single_threaded,
+                    .pic = pie,
+                    .imports = &.{
+                        .{ .name = "exe_options", .module = exe_options },
+                        .{ .name = "known-folders", .module = known_folders_module },
+                        .{ .name = "tracy", .module = tracy_module },
+                        .{ .name = "zls", .module = zls_module },
+                    },
+                }),
+                .version = resolved_zls_version,
+                .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_600_000_000,
+                .use_llvm = use_llvm,
+                .use_lld = use_llvm,
+            });
+        }
 
-        release_artifacts.appendAssumeCapacity(exe);
+        release(b, &release_targets, &release_artifacts);
     }
 
-    release(b, &release_targets, release_artifacts.constSlice());
-
-    const exe = b.addExecutable(.{
-        .name = "zls",
+    const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .single_threaded = single_threaded,
         .pic = pie,
-        .use_llvm = use_llvm,
-        .use_lld = use_llvm,
+        .imports = &.{
+            .{ .name = "exe_options", .module = exe_options },
+            .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "tracy", .module = tracy_module },
+            .{ .name = "zls", .module = zls_module },
+        },
     });
-    exe.pie = pie;
-    exe.root_module.addImport("exe_options", exe_options_module);
-    exe.root_module.addImport("tracy", tracy_module);
-    exe.root_module.addImport("diffz", diffz_module);
-    exe.root_module.addImport("lsp", lsp_module);
-    exe.root_module.addImport("known-folders", known_folders_module);
-    exe.root_module.addImport("zls", zls_module);
-    b.installArtifact(exe);
 
-    {
+    { // zig build
+
+        const exe = b.addExecutable(.{
+            .name = "zls",
+            .root_module = exe_module,
+            .use_llvm = use_llvm,
+            .use_lld = use_llvm,
+        });
+        b.installArtifact(exe);
+    }
+
+    { // zig build check
         const exe_check = b.addExecutable(.{
             .name = "zls",
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .single_threaded = single_threaded,
+            .root_module = exe_module,
         });
-        exe_check.root_module.addImport("exe_options", exe_options_module);
-        exe_check.root_module.addImport("tracy", tracy_module);
-        exe_check.root_module.addImport("diffz", diffz_module);
-        exe_check.root_module.addImport("lsp", lsp_module);
-        exe_check.root_module.addImport("known-folders", known_folders_module);
-        exe_check.root_module.addImport("zls", zls_module);
 
         const check = b.step("check", "Check if ZLS compiles");
         check.dependOn(&exe_check.step);
     }
 
-    const test_step = b.step("test", "Run all the tests");
-
     const tests = b.addTest(.{
-        .root_source_file = b.path("tests/tests.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .single_threaded = single_threaded,
+            .pic = pie,
+            .imports = &.{
+                .{ .name = "zls", .module = zls_module },
+                .{ .name = "test_options", .module = test_options },
+            },
+        }),
         .filters = test_filters,
-        .single_threaded = single_threaded,
-        .pic = pie,
         .use_llvm = use_llvm,
         .use_lld = use_llvm,
     });
-
-    tests.root_module.addImport("zls", zls_module);
-    tests.root_module.addImport("test_options", test_options_module);
-    test_step.dependOn(&b.addRunArtifact(tests).step);
 
     const src_tests = b.addTest(.{
         .name = "src test",
-        .root_source_file = b.path("src/zls.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = zls_module,
         .filters = test_filters,
-        .single_threaded = single_threaded,
-        .pic = pie,
         .use_llvm = use_llvm,
         .use_lld = use_llvm,
     });
-    src_tests.root_module.addImport("build_options", build_options_module);
-    src_tests.root_module.addImport("test_options", test_options_module);
-    src_tests.root_module.addImport("lsp", lsp_module);
-    test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
-    const coverage_step = b.step("coverage", "Generate a coverage report with kcov");
-
-    const merge_step = std.Build.Step.Run.create(b, "merge coverage");
-    merge_step.addArgs(&.{ "kcov", "--merge" });
-    merge_step.rename_step_with_output_arg = false;
-    const merged_coverage_output = merge_step.addOutputFileArg(".");
-
-    {
-        const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-        kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
-        kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-        merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(tests.name));
-        kcov_collect.addArtifactArg(tests);
-        kcov_collect.enableTestRunnerMode();
+    { // zig build test
+        const test_step = b.step("test", "Run all the tests");
+        test_step.dependOn(&b.addRunArtifact(tests).step);
+        test_step.dependOn(&b.addRunArtifact(src_tests).step);
     }
 
-    {
-        const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-        kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
-        kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-        merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(src_tests.name));
-        kcov_collect.addArtifactArg(src_tests);
-        kcov_collect.enableTestRunnerMode();
-    }
+    { // zig build coverage
 
-    const install_coverage = b.addInstallDirectory(.{
-        .source_dir = merged_coverage_output,
-        .install_dir = .{ .custom = "coverage" },
-        .install_subdir = "",
-    });
-    coverage_step.dependOn(&install_coverage.step);
+        const merge_step = std.Build.Step.Run.create(b, "merge coverage");
+        merge_step.addArgs(&.{ "kcov", "--merge" });
+        merge_step.rename_step_with_output_arg = false;
+        const merged_coverage_output = merge_step.addOutputFileArg(".");
+
+        for ([_]*std.Build.Step.Compile{ tests, src_tests }) |test_exe| {
+            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(test_exe.name));
+            kcov_collect.addArtifactArg(test_exe);
+            kcov_collect.enableTestRunnerMode();
+        }
+
+        const install_coverage = b.addInstallDirectory(.{
+            .source_dir = merged_coverage_output,
+            .install_dir = .{ .custom = "coverage" },
+            .install_subdir = "",
+        });
+        const coverage_step = b.step("coverage", "Generate a coverage report with kcov");
+        coverage_step.dependOn(&install_coverage.step);
+    }
 }
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
@@ -334,13 +343,14 @@ fn getTracyModule(
         .root_source_file = b.path("src/tracy.zig"),
         .target = options.target,
         .optimize = options.optimize,
+        .imports = &.{
+            .{ .name = "options", .module = tracy_options.createModule() },
+        },
+        .link_libc = options.enable,
+        .link_libcpp = options.enable,
     });
-    tracy_module.addImport("options", tracy_options.createModule());
     if (!options.enable) return tracy_module;
     const tracy_dependency = b.lazyDependency("tracy", .{}) orelse return tracy_module;
-
-    tracy_module.link_libc = true;
-    tracy_module.link_libcpp = true;
 
     // On mingw, we need to opt into windows 7+ to get some features required by tracy.
     const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
