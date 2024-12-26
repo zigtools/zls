@@ -25,14 +25,41 @@ pub fn generateDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (handle.tree.errors.len == 0 and handle.tree.mode == .zig) {
+        const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
+        defer tracy_zone2.end();
+
+        var error_bundle = try getAstCheckDiagnostics(server, handle);
+        errdefer error_bundle.deinit(server.allocator);
+
+        try server.diagnostics_collection.pushSingleDocumentDiagnostics(
+            .parse,
+            handle.uri,
+            .{ .error_bundle = error_bundle },
+        );
+    } else {
+        var wip: std.zig.ErrorBundle.Wip = undefined;
+        try wip.init(server.allocator);
+        defer wip.deinit();
+
+        try collectParseDiagnostics(handle.tree, &wip);
+
+        var error_bundle = try wip.toOwnedBundle("");
+        errdefer error_bundle.deinit(server.allocator);
+
+        try server.diagnostics_collection.pushSingleDocumentDiagnostics(
+            .parse,
+            handle.uri,
+            .{ .error_bundle = error_bundle },
+        );
+    }
+
     {
         var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
         errdefer arena_allocator.deinit();
         const arena = arena_allocator.allocator();
 
         var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-
-        try collectParseDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
 
         if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
             try code_actions.collectAutoDiscardDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
@@ -53,48 +80,68 @@ pub fn generateDiagnostics(
         );
     }
 
-    if (handle.tree.errors.len == 0 and handle.tree.mode == .zig) {
-        const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
-        defer tracy_zone2.end();
-
-        var error_bundle = try getAstCheckDiagnostics(server, handle);
-        errdefer error_bundle.deinit(server.allocator);
-
-        try server.diagnostics_collection.pushSingleDocumentDiagnostics(
-            .parse,
-            handle.uri,
-            .{ .error_bundle = error_bundle },
-        );
-    }
-
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
     server.diagnostics_collection.publishDiagnostics() catch |err| {
         log.err("failed to publish diagnostics: {}", .{err});
     };
 }
 
-fn collectParseDiagnostics(
-    tree: Ast,
-    arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
-    offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
+fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try diagnostics.ensureUnusedCapacity(arena, tree.errors.len);
-    for (tree.errors) |err| {
-        var buffer: std.ArrayListUnmanaged(u8) = .{};
-        try tree.renderError(err, buffer.writer(arena));
+    if (tree.errors.len == 0) return;
 
-        diagnostics.appendAssumeCapacity(.{
-            .range = offsets.tokenToRange(tree, err.token, offset_encoding),
-            .severity = .Error,
-            .code = .{ .string = @tagName(err.tag) },
-            .source = "zls",
-            .message = try buffer.toOwnedSlice(arena),
-        });
+    const allocator = eb.gpa;
+
+    var msg_buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer msg_buffer.deinit(allocator);
+
+    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
+    defer notes.deinit(allocator);
+
+    const current_error = tree.errors[0];
+    for (tree.errors[1..]) |err| {
+        if (!err.is_note) break;
+
+        msg_buffer.clearRetainingCapacity();
+        try tree.renderError(err, msg_buffer.writer(allocator));
+        try notes.append(allocator, try eb.addErrorMessage(.{
+            .msg = try eb.addString(msg_buffer.items),
+            .src_loc = try errorBundleSourceLocationFromToken(tree, eb, err.token),
+        }));
     }
+
+    msg_buffer.clearRetainingCapacity();
+    try tree.renderError(current_error, msg_buffer.writer(allocator));
+    try eb.addRootErrorMessage(.{
+        .msg = try eb.addString(msg_buffer.items),
+        .src_loc = try errorBundleSourceLocationFromToken(tree, eb, current_error.token),
+        .notes_len = @intCast(notes.items.len),
+    });
+
+    const notes_start = try eb.reserveNotes(@intCast(notes.items.len));
+    @memcpy(eb.extra.items[notes_start..][0..notes.items.len], @as([]const u32, @ptrCast(notes.items)));
+}
+
+fn errorBundleSourceLocationFromToken(
+    tree: Ast,
+    eb: *std.zig.ErrorBundle.Wip,
+    token: Ast.TokenIndex,
+) error{OutOfMemory}!std.zig.ErrorBundle.SourceLocationIndex {
+    const loc = offsets.tokenToLoc(tree, token);
+    const pos = offsets.indexToPosition(tree.source, loc.start, .@"utf-8");
+    const line = offsets.lineSliceAtIndex(tree.source, loc.start);
+
+    return try eb.addSourceLocation(.{
+        .src_path = try eb.addString(""),
+        .line = pos.line,
+        .column = pos.character,
+        .span_start = @intCast(loc.start),
+        .span_main = @intCast(loc.start),
+        .span_end = @intCast(loc.end),
+        .source_line = try eb.addString(line),
+    });
 }
 
 fn collectWarnStyleDiagnostics(
