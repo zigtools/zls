@@ -221,34 +221,30 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
     };
     defer server.allocator.free(file_path);
 
-    var eb: std.zig.ErrorBundle.Wip = undefined;
-    try eb.init(server.allocator);
-    defer eb.deinit();
-
     if (server.config.prefer_ast_check_as_child_process and
         std.process.can_spawn and
         server.config.zig_exe_path != null)
     {
-        getErrorBundleFromAstCheck(
+        return getErrorBundleFromAstCheck(
             server.allocator,
             server.config.zig_exe_path.?,
             &server.zig_ast_check_lock,
             file_path,
             handle.tree.source,
-            &eb,
         ) catch |err| {
             log.err("failed to run ast-check: {}", .{err});
+            return .empty;
         };
     } else {
         const zir = try handle.getZir();
-        std.debug.assert(handle.getZirStatus() == .done);
+        if (!zir.hasCompileErrors()) return .empty;
 
-        if (zir.hasCompileErrors()) {
-            try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, file_path);
-        }
+        var eb: std.zig.ErrorBundle.Wip = undefined;
+        try eb.init(server.allocator);
+        defer eb.deinit();
+        try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
+        return try eb.toOwnedBundle("");
     }
-
-    return try eb.toOwnedBundle("");
 }
 
 fn getErrorBundleFromAstCheck(
@@ -257,10 +253,13 @@ fn getErrorBundleFromAstCheck(
     zig_ast_check_lock: *std.Thread.Mutex,
     file_path: []const u8,
     source: [:0]const u8,
-    error_bundle: *std.zig.ErrorBundle.Wip,
-) !void {
+) !std.zig.ErrorBundle {
     comptime std.debug.assert(std.process.can_spawn);
-    const stderr_bytes = blk: {
+
+    var stderr_bytes: []u8 = "";
+    defer allocator.free(stderr_bytes);
+
+    {
         zig_ast_check_lock.lock();
         defer zig_ast_check_lock.unlock();
 
@@ -271,33 +270,32 @@ fn getErrorBundleFromAstCheck(
 
         process.spawn() catch |err| {
             log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-            return;
+            return .empty;
         };
         try process.stdin.?.writeAll(source);
         process.stdin.?.close();
 
         process.stdin = null;
 
-        const stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, 16 * 1024 * 1024);
-        errdefer allocator.free(stderr_bytes);
+        stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, 16 * 1024 * 1024);
 
         const term = process.wait() catch |err| {
             log.warn("Failed to await zig ast-check process, error: {}", .{err});
-            allocator.free(stderr_bytes);
-            return;
+            return .empty;
         };
 
-        if (term != .Exited) {
-            allocator.free(stderr_bytes);
-            return;
-        }
-        break :blk stderr_bytes;
-    };
-    defer allocator.free(stderr_bytes);
+        if (term != .Exited) return .empty;
+    }
+
+    if (stderr_bytes.len == 0) return .empty;
 
     var last_error_message: ?std.zig.ErrorBundle.ErrorMessage = null;
     var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .{};
     defer notes.deinit(allocator);
+
+    var error_bundle: std.zig.ErrorBundle.Wip = undefined;
+    try error_bundle.init(allocator);
+    defer error_bundle.deinit();
 
     const eb_file_path = try error_bundle.addString(file_path);
 
@@ -369,6 +367,8 @@ fn getErrorBundleFromAstCheck(
         const notes_start = try error_bundle.reserveNotes(em.notes_len);
         @memcpy(error_bundle.extra.items[notes_start..][0..em.notes_len], @as([]const u32, @ptrCast(notes.items)));
     }
+
+    return try error_bundle.toOwnedBundle("");
 }
 
 /// This struct is not relocatable after initilization.
