@@ -1,0 +1,10 @@
+{
+  "deps_build_roots": [],
+  "packages": [],
+  "include_dirs": [],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}

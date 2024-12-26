@@ -1,0 +1,39 @@
+{
+  "deps_build_roots": [],
+  "packages": [
+    {
+      "name": "bar_in_foo",
+      "path": "bar.zig"
+    },
+    {
+      "name": "bar_in_main",
+      "path": "bar.zig"
+    },
+    {
+      "name": "foo_in_bar",
+      "path": "foo.zig"
+    },
+    {
+      "name": "foo_in_main",
+      "path": "foo.zig"
+    },
+    {
+      "name": "root",
+      "path": "foo.zig"
+    },
+    {
+      "name": "root",
+      "path": "bar.zig"
+    },
+    {
+      "name": "root",
+      "path": "main.zig"
+    }
+  ],
+  "include_dirs": [],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}
