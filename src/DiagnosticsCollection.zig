@@ -403,7 +403,7 @@ test errorBundleSourceLocationToRange {
     }, errorBundleSourceLocationToRange(eb, src_loc1, .@"utf-8"));
 }
 
-test {
+test DiagnosticsCollection {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
 

@@ -773,7 +773,7 @@ pub fn orderPosition(a: types.Position, b: types.Position) std.math.Order {
     return std.math.order(a.character, b.character);
 }
 
-test {
+test orderPosition {
     try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 0 }, .{ .line = 3, .character = 5 }));
     try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 3 }, .{ .line = 3, .character = 5 }));
     try std.testing.expectEqual(.lt, orderPosition(.{ .line = 1, .character = 6 }, .{ .line = 3, .character = 5 }));
