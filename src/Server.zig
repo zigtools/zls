@@ -1524,6 +1524,9 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
+    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
+
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
     // semantic tokens can be quite expensive to compute on large files
@@ -1544,6 +1547,10 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     if (server.config.semantic_tokens == .none) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+
+    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
+    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
+
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
     var analyser = server.initAnalyser(handle);
