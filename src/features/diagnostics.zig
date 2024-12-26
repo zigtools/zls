@@ -46,7 +46,11 @@ pub fn generateDiagnostics(
             try collectGlobalVarDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
         }
 
-        try server.diagnostics_collection.pushLspDiagnostics(.parse, handle.uri, arena_allocator.state, diagnostics.items);
+        try server.diagnostics_collection.pushSingleDocumentDiagnostics(
+            .parse,
+            handle.uri,
+            .{ .lsp = .{ .arena = arena_allocator.state, .diagnostics = diagnostics.items } },
+        );
     }
 
     if (handle.tree.errors.len == 0 and handle.tree.mode == .zig) {
@@ -54,9 +58,13 @@ pub fn generateDiagnostics(
         defer tracy_zone2.end();
 
         var error_bundle = try getAstCheckDiagnostics(server, handle);
-        defer error_bundle.deinit(server.allocator);
+        errdefer error_bundle.deinit(server.allocator);
 
-        try server.diagnostics_collection.pushErrorBundle(.parse, handle.version, null, error_bundle);
+        try server.diagnostics_collection.pushSingleDocumentDiagnostics(
+            .parse,
+            handle.uri,
+            .{ .error_bundle = error_bundle },
+        );
     }
 
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
@@ -215,12 +223,6 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
     std.debug.assert(handle.tree.errors.len == 0);
     std.debug.assert(handle.tree.mode == .zig);
 
-    const file_path = URI.parse(server.allocator, handle.uri) catch |err| {
-        log.err("failed to parse invalid uri '{s}': {}", .{ handle.uri, err });
-        return .empty;
-    };
-    defer server.allocator.free(file_path);
-
     if (server.config.prefer_ast_check_as_child_process and
         std.process.can_spawn and
         server.config.zig_exe_path != null)
@@ -229,7 +231,6 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             server.allocator,
             server.config.zig_exe_path.?,
             &server.zig_ast_check_lock,
-            file_path,
             handle.tree.source,
         ) catch |err| {
             log.err("failed to run ast-check: {}", .{err});
@@ -251,7 +252,6 @@ fn getErrorBundleFromAstCheck(
     allocator: std.mem.Allocator,
     zig_exe_path: []const u8,
     zig_ast_check_lock: *std.Thread.Mutex,
-    file_path: []const u8,
     source: [:0]const u8,
 ) !std.zig.ErrorBundle {
     comptime std.debug.assert(std.process.can_spawn);
@@ -297,7 +297,7 @@ fn getErrorBundleFromAstCheck(
     try error_bundle.init(allocator);
     defer error_bundle.deinit();
 
-    const eb_file_path = try error_bundle.addString(file_path);
+    const eb_file_path = try error_bundle.addString("");
 
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
     while (line_iterator.next()) |line| {

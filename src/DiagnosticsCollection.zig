@@ -8,13 +8,16 @@ mutex: std.Thread.Mutex = .{},
 tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
     version: u32 = 0,
     error_bundle_src_base_path: ?[]const u8 = null,
-    error_bundle: std.zig.ErrorBundle = std.zig.ErrorBundle.empty,
+    /// Used to store diagnostics from `pushErrorBundle`
+    error_bundle: std.zig.ErrorBundle = .empty,
+    /// Used to store diagnostics from `pushSingleDocumentDiagnostics`
     diagnostics_set: std.StringArrayHashMapUnmanaged(struct {
-        arena: std.heap.ArenaAllocator.State,
-        diagnostics: []lsp.types.Diagnostic,
-    }) = .{},
-}) = .{},
-outdated_files: std.StringArrayHashMapUnmanaged(void) = .{},
+        arena: std.heap.ArenaAllocator.State = .{},
+        diagnostics: []lsp.types.Diagnostic = &.{},
+        error_bundle: std.zig.ErrorBundle = .empty,
+    }) = .empty,
+}) = .empty,
+outdated_files: std.StringArrayHashMapUnmanaged(void) = .empty,
 transport: ?lsp.AnyTransport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
 
@@ -37,9 +40,10 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
     for (collection.tag_set.values()) |*entry| {
         entry.error_bundle.deinit(collection.allocator);
         if (entry.error_bundle_src_base_path) |src_path| collection.allocator.free(src_path);
-        for (entry.diagnostics_set.keys(), entry.diagnostics_set.values()) |uri, lsp_diagnostic| {
+        for (entry.diagnostics_set.keys(), entry.diagnostics_set.values()) |uri, *lsp_diagnostic| {
             collection.allocator.free(uri);
             lsp_diagnostic.arena.promote(collection.allocator).deinit();
+            lsp_diagnostic.error_bundle.deinit(collection.allocator);
         }
         entry.diagnostics_set.deinit(collection.allocator);
     }
@@ -49,13 +53,20 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
     collection.* = undefined;
 }
 
-/// Overrides all diangostics for the given document.
-pub fn pushLspDiagnostics(
+pub fn pushSingleDocumentDiagnostics(
     collection: *DiagnosticsCollection,
     tag: Tag,
     document_uri: []const u8,
-    diagnostics_arena_state: std.heap.ArenaAllocator.State,
-    diagnostics: []lsp.types.Diagnostic,
+    /// LSP and ErrorBundle will not override each other.
+    ///
+    /// Takes ownership on success.
+    diagnostics: union(enum) {
+        lsp: struct {
+            arena: std.heap.ArenaAllocator.State,
+            diagnostics: []lsp.types.Diagnostic,
+        },
+        error_bundle: std.zig.ErrorBundle,
+    },
 ) error{OutOfMemory}!void {
     collection.mutex.lock();
     defer collection.mutex.unlock();
@@ -68,22 +79,33 @@ pub fn pushLspDiagnostics(
         if (collection.outdated_files.fetchPutAssumeCapacity(duped_uri, {})) |_| collection.allocator.free(duped_uri);
     }
 
-    const duped_uri = try collection.allocator.dupe(u8, document_uri);
     try gop_tag.value_ptr.diagnostics_set.ensureUnusedCapacity(collection.allocator, 1);
+    const duped_uri = try collection.allocator.dupe(u8, document_uri);
     const gop_file = gop_tag.value_ptr.diagnostics_set.getOrPutAssumeCapacity(duped_uri);
     if (gop_file.found_existing) {
         collection.allocator.free(duped_uri);
-        gop_file.value_ptr.arena.promote(collection.allocator).deinit();
+    } else {
+        gop_file.value_ptr.* = .{};
     }
 
-    gop_file.value_ptr.* = .{
-        .arena = diagnostics_arena_state,
-        .diagnostics = diagnostics,
-    };
+    errdefer comptime unreachable;
+
+    switch (diagnostics) {
+        .lsp => |data| {
+            if (gop_file.found_existing) gop_file.value_ptr.arena.promote(collection.allocator).deinit();
+            gop_file.value_ptr.arena = data.arena;
+            gop_file.value_ptr.diagnostics = data.diagnostics;
+        },
+        .error_bundle => |error_bundle| {
+            if (gop_file.found_existing) gop_file.value_ptr.error_bundle.deinit(collection.allocator);
+            gop_file.value_ptr.error_bundle = error_bundle;
+        },
+    }
 }
 
 pub fn pushErrorBundle(
     collection: *DiagnosticsCollection,
+    /// All changes will affect diagnostics with the same tag.
     tag: Tag,
     /// * If the `version` is greater than the old version, all diagnostics get removed and the errors from `error_bundle` get added and the `version` is updated.
     /// * If the `version` is equal   to   the old version, the errors from `error_bundle` get added.
@@ -105,8 +127,11 @@ pub fn pushErrorBundle(
     const gop = try collection.tag_set.getOrPutValue(collection.allocator, tag, .{});
     const version_order = std.math.order(version, gop.value_ptr.version);
 
-    if (version_order == .lt) return;
-    defer gop.value_ptr.version = version;
+    switch (version_order) {
+        .lt => return, // Ignore outdated diagnostics
+        .eq => {},
+        .gt => gop.value_ptr.version = version,
+    }
 
     try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
     if (error_bundle.errorMessageCount() != 0) {
@@ -219,56 +244,90 @@ fn collectLspDiagnosticsForDocument(
     diagnostics: *std.ArrayListUnmanaged(lsp.types.Diagnostic),
 ) error{OutOfMemory}!void {
     for (collection.tag_set.values()) |entry| {
-        if (entry.diagnostics_set.get(document_uri)) |lsp_diangostics| {
-            try diagnostics.appendSlice(arena, lsp_diangostics.diagnostics);
+        if (entry.diagnostics_set.get(document_uri)) |per_document| {
+            try diagnostics.appendSlice(arena, per_document.diagnostics);
+
+            try convertErrorBundleToLSPDiangostics(
+                per_document.error_bundle,
+                null,
+                document_uri,
+                offset_encoding,
+                arena,
+                diagnostics,
+                true,
+            );
         }
 
-        const eb = entry.error_bundle;
-        if (eb.errorMessageCount() == 0) continue; // `getMessages` can't be called on an empty ErrorBundle
-        for (eb.getMessages()) |msg_index| {
-            const err = eb.getErrorMessage(msg_index);
-            if (err.src_loc == .none) continue;
+        try convertErrorBundleToLSPDiangostics(
+            entry.error_bundle,
+            entry.error_bundle_src_base_path,
+            document_uri,
+            offset_encoding,
+            arena,
+            diagnostics,
+            false,
+        );
+    }
+}
 
-            const src_loc = eb.getSourceLocation(err.src_loc);
-            const src_path = eb.nullTerminatedString(src_loc.src_path);
+fn convertErrorBundleToLSPDiangostics(
+    eb: std.zig.ErrorBundle,
+    error_bundle_src_base_path: ?[]const u8,
+    document_uri: []const u8,
+    offset_encoding: offsets.Encoding,
+    arena: std.mem.Allocator,
+    diagnostics: *std.ArrayListUnmanaged(lsp.types.Diagnostic),
+    is_single_document: bool,
+) error{OutOfMemory}!void {
+    if (eb.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
+    for (eb.getMessages()) |msg_index| {
+        const err = eb.getErrorMessage(msg_index);
+        if (err.src_loc == .none) continue;
 
-            const uri = try pathToUri(arena, entry.error_bundle_src_base_path, src_path) orelse continue;
+        const src_loc = eb.getSourceLocation(err.src_loc);
+        const src_path = eb.nullTerminatedString(src_loc.src_path);
+
+        if (!is_single_document) {
+            const uri = try pathToUri(arena, error_bundle_src_base_path, src_path) orelse continue;
             if (!std.mem.eql(u8, document_uri, uri)) continue;
-
-            const src_range = errorBundleSourceLocationToRange(eb, src_loc, offset_encoding);
-
-            const eb_notes = eb.getNotes(msg_index);
-            const relatedInformation = if (eb_notes.len == 0) null else blk: {
-                const lsp_notes = try arena.alloc(lsp.types.DiagnosticRelatedInformation, eb_notes.len);
-                for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
-                    const eb_note = eb.getErrorMessage(eb_note_index);
-                    if (eb_note.src_loc == .none) continue;
-
-                    const note_src_loc = eb.getSourceLocation(eb_note.src_loc);
-                    const note_src_path = eb.nullTerminatedString(note_src_loc.src_path);
-                    const note_src_range = errorBundleSourceLocationToRange(eb, note_src_loc, offset_encoding);
-
-                    const note_uri = try pathToUri(arena, entry.error_bundle_src_base_path, note_src_path) orelse continue;
-
-                    lsp_note.* = .{
-                        .location = .{
-                            .uri = note_uri,
-                            .range = note_src_range,
-                        },
-                        .message = eb.nullTerminatedString(eb_note.msg),
-                    };
-                }
-                break :blk lsp_notes;
-            };
-
-            try diagnostics.append(arena, .{
-                .range = src_range,
-                .severity = .Error,
-                .source = "zls",
-                .message = eb.nullTerminatedString(err.msg),
-                .relatedInformation = relatedInformation,
-            });
         }
+
+        const src_range = errorBundleSourceLocationToRange(eb, src_loc, offset_encoding);
+
+        const eb_notes = eb.getNotes(msg_index);
+        const relatedInformation = if (eb_notes.len == 0) null else blk: {
+            const lsp_notes = try arena.alloc(lsp.types.DiagnosticRelatedInformation, eb_notes.len);
+            for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
+                const eb_note = eb.getErrorMessage(eb_note_index);
+                if (eb_note.src_loc == .none) continue;
+
+                const note_src_loc = eb.getSourceLocation(eb_note.src_loc);
+                const note_src_path = eb.nullTerminatedString(note_src_loc.src_path);
+                const note_src_range = errorBundleSourceLocationToRange(eb, note_src_loc, offset_encoding);
+
+                const note_uri = if (is_single_document)
+                    document_uri
+                else
+                    try pathToUri(arena, error_bundle_src_base_path, note_src_path) orelse continue;
+
+                lsp_note.* = .{
+                    .location = .{
+                        .uri = note_uri,
+                        .range = note_src_range,
+                    },
+                    .message = eb.nullTerminatedString(eb_note.msg),
+                };
+            }
+            break :blk lsp_notes;
+        };
+
+        try diagnostics.append(arena, .{
+            .range = src_range,
+            .severity = .Error,
+            .source = "zls",
+            .message = eb.nullTerminatedString(err.msg),
+            .relatedInformation = relatedInformation,
+        });
     }
 }
 

@@ -1533,17 +1533,11 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
 }
 
 fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
-    const file_path = URI.parse(self.allocator, handle.uri) catch |err| {
-        log.err("failed to parse URI '{s}': {}", .{ handle.uri, err });
-        return;
-    };
-    defer self.allocator.free(file_path);
-
     var wip: std.zig.ErrorBundle.Wip = undefined;
     try wip.init(self.allocator);
     defer wip.deinit();
 
-    const src_path = try wip.addString(file_path);
+    const src_path = try wip.addString("");
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
         const result = blk: {
@@ -1584,10 +1578,16 @@ fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
         }
     }
 
-    var error_bundle = try wip.toOwnedBundle("");
-    defer error_bundle.deinit(self.allocator);
+    {
+        var error_bundle = try wip.toOwnedBundle("");
+        errdefer error_bundle.deinit(self.allocator);
 
-    try self.diagnostics_collection.pushErrorBundle(.cimport, handle.version, null, error_bundle);
+        try self.diagnostics_collection.pushSingleDocumentDiagnostics(
+            .cimport,
+            handle.uri,
+            .{ .error_bundle = error_bundle },
+        );
+    }
     try self.diagnostics_collection.publishDiagnostics();
 }
 
