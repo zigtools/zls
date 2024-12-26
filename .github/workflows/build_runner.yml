@@ -21,8 +21,7 @@ jobs:
         include:
           - zig-version: mach-latest
             build-runner-file: master.zig
-          - zig-version: master
-            build-runner-file: master.zig
+          # Zig master is handled by 'zig build test' in the main CI
     runs-on: ubuntu-latest
 
     steps:

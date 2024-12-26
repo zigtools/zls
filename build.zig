@@ -243,6 +243,11 @@ pub fn build(b: *Build) !void {
 
     { // zig build test
         const test_step = b.step("test", "Run all the tests");
+
+        const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
+        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
+
+        test_step.dependOn(test_build_runner_step);
         test_step.dependOn(&b.addRunArtifact(tests).step);
         test_step.dependOn(&b.addRunArtifact(src_tests).step);
     }

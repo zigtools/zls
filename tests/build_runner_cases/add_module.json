@@ -1,0 +1,15 @@
+{
+  "deps_build_roots": [],
+  "packages": [
+    {
+      "name": "root",
+      "path": "root.zig"
+    }
+  ],
+  "include_dirs": [],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}
