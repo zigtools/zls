@@ -4324,13 +4324,13 @@ pub fn innermostFunctionScopeAtIndex(document_scope: DocumentScope, source_index
 
 pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) Ast.Node.Index {
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
-    var ast_node: Ast.Node.Index = undefined; // the DocumentScope's root scope is guaranteed to have an Ast Node
+    var ast_node: ?Ast.Node.Index = null;
     while (scope_iterator.next().unwrap()) |inner_scope| {
         if (document_scope.getScopeAstNode(inner_scope)) |node| {
             ast_node = node;
         }
     }
-    return ast_node;
+    return ast_node.?; // the DocumentScope's root scope is guaranteed to have an Ast Node
 }
 
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
