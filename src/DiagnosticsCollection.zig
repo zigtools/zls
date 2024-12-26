@@ -133,6 +133,8 @@ pub fn pushErrorBundle(
         .gt => gop.value_ptr.version = version,
     }
 
+    if (error_bundle.errorMessageCount() == 0 and gop.value_ptr.error_bundle.errorMessageCount() == 0) return;
+
     try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
     if (error_bundle.errorMessageCount() != 0) {
         try new_error_bundle.addBundleAsRoots(error_bundle);
