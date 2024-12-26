@@ -11,8 +11,6 @@ const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/shared.zig").BuildConfig;
 const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
-const AstGen = std.zig.AstGen;
-const Zir = std.zig.Zir;
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 
@@ -194,7 +192,8 @@ pub const Handle = struct {
         condition: std.Thread.Condition = .{},
 
         document_scope: DocumentScope = undefined,
-        zir: Zir = undefined,
+        zir: std.zig.Zir = undefined,
+        zoir: std.zig.Zoir = undefined,
 
         associated_build_file: union(enum) {
             /// The Handle has no associated build file (build.zig).
@@ -230,16 +229,22 @@ pub const Handle = struct {
         has_document_scope_lock: bool = false,
         /// true if `handle.impl.document_scope` has been set
         has_document_scope: bool = false,
-        /// true if a thread has acquired the permission to compute the `ZIR`
+        /// true if a thread has acquired the permission to compute the `std.zig.Zir`
         has_zir_lock: bool = false,
-        /// all other threads will wait until the given thread has computed the `ZIR` before reading it.
+        /// all other threads will wait until the given thread has computed the `std.zig.Zir` before reading it.
         /// true if `handle.impl.zir` has been set
         has_zir: bool = false,
         zir_outdated: bool = undefined,
-        _: u26 = undefined,
+        /// true if a thread has acquired the permission to compute the `std.zig.Zoir`
+        has_zoir_lock: bool = false,
+        /// all other threads will wait until the given thread has computed the `std.zig.Zoir` before reading it.
+        /// true if `handle.impl.zoir` has been set
+        has_zoir: bool = false,
+        zoir_outdated: bool = undefined,
+        _: u23 = undefined,
     };
 
-    pub const ZirStatus = enum {
+    pub const ZirOrZoirStatus = enum {
         none,
         outdated,
         done,
@@ -277,15 +282,28 @@ pub const Handle = struct {
         return self.impl.document_scope;
     }
 
-    pub fn getZir(self: *Handle) error{OutOfMemory}!Zir {
+    pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
+        std.debug.assert(self.tree.mode == .zig);
         if (self.getStatus().has_zir) return self.impl.zir;
-        return try self.getZirCold();
+        return try self.getZirOrZoirCold(.zir);
     }
 
-    pub fn getZirStatus(self: *const Handle) ZirStatus {
+    pub fn getZirStatus(self: *const Handle) ZirOrZoirStatus {
         const status = self.getStatus();
         if (!status.has_zir) return .none;
         return if (status.zir_outdated) .outdated else .done;
+    }
+
+    pub fn getZoir(self: *Handle) error{OutOfMemory}!std.zig.Zoir {
+        std.debug.assert(self.tree.mode == .zon);
+        if (self.getStatus().has_zoir) return self.impl.zoir;
+        return try self.getZirOrZoirCold(.zoir);
+    }
+
+    pub fn getZoirStatus(self: *const Handle) ZirOrZoirStatus {
+        const status = self.getStatus();
+        if (!status.has_zoir) return .none;
+        return if (status.zoir_outdated) .outdated else .done;
     }
 
     /// Returns the associated build file (build.zig) of the handle.
@@ -415,18 +433,25 @@ pub const Handle = struct {
         return self.impl.document_scope;
     }
 
-    fn getZirCold(self: *Handle) error{OutOfMemory}!Zir {
+    fn getZirOrZoirCold(self: *Handle, comptime kind: enum { zir, zoir }) error{OutOfMemory}!switch (kind) {
+        .zir => std.zig.Zir,
+        .zoir => std.zig.Zoir,
+    } {
         @branchHint(.cold);
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
+
+        const has_field = "has_" ++ @tagName(kind);
+        const has_lock_field = "has_" ++ @tagName(kind) ++ "_lock";
+        const outdated_field = @tagName(kind) ++ "_outdated";
 
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
         while (true) {
             const status = self.getStatus();
-            if (status.has_zir) break;
-            if (status.has_zir_lock or
-                self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir_lock"), .release) != 0)
+            if (@field(status, has_field)) break;
+            if (@field(status, has_lock_field) or
+                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field), .release) != 0)
             {
                 // another thread is currently computing the ZIR
                 self.impl.condition.wait(&self.impl.lock);
@@ -434,25 +459,40 @@ pub const Handle = struct {
             }
             defer self.impl.condition.broadcast();
 
-            self.impl.zir = blk: {
-                const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
-                defer tracy_zone_inner.end();
+            switch (kind) {
+                .zir => {
+                    const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
+                    defer tracy_zone_inner.end();
 
-                var zir = try AstGen.generate(self.impl.allocator, self.tree);
-                errdefer zir.deinit(self.impl.allocator);
+                    var zir = try std.zig.AstGen.generate(self.impl.allocator, self.tree);
+                    errdefer zir.deinit(self.impl.allocator);
 
-                // remove unused capacity
-                var instructions = zir.instructions.toMultiArrayList();
-                try instructions.setCapacity(self.impl.allocator, instructions.len);
-                zir.instructions = instructions.slice();
+                    // remove unused capacity
+                    var instructions = zir.instructions.toMultiArrayList();
+                    try instructions.setCapacity(self.impl.allocator, instructions.len);
+                    zir.instructions = instructions.slice();
 
-                break :blk zir;
-            };
-            _ = self.impl.status.bitReset(@bitOffsetOf(Status, "zir_outdated"), .release); // atomically set zir_outdated
-            const old_has_zir = self.impl.status.bitSet(@bitOffsetOf(Status, "has_zir"), .release); // atomically set has_zir
-            std.debug.assert(old_has_zir == 0); // race condition: another thread set `has_zir` even though we hold the lock
+                    self.impl.zir = zir;
+                },
+                .zoir => {
+                    const tracy_zone_inner = tracy.traceNamed(@src(), "ZonGen.generate");
+                    defer tracy_zone_inner.end();
+
+                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree);
+                    errdefer zoir.deinit(self.impl.allocator);
+
+                    self.impl.zoir = zoir;
+                },
+            }
+
+            _ = self.impl.status.bitReset(@bitOffsetOf(Status, outdated_field), .release); // atomically set [zir|zoir]_outdated
+            const old_has = self.impl.status.bitSet(@bitOffsetOf(Status, has_field), .release); // atomically set has_[zir|zoir]
+            std.debug.assert(old_has == 0); // race condition: another thread set Zir or Zoir even though we hold the lock
         }
-        return self.impl.zir;
+        return switch (kind) {
+            .zir => self.impl.zir,
+            .zoir => self.impl.zoir,
+        };
     }
 
     fn getStatus(self: *const Handle) Status {

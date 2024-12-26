@@ -25,7 +25,7 @@ pub fn generateDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (handle.tree.errors.len == 0 and handle.tree.mode == .zig) {
+    if (handle.tree.errors.len == 0) {
         const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
         defer tracy_zone2.end();
 
@@ -268,10 +268,10 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
     defer tracy_zone.end();
 
     std.debug.assert(handle.tree.errors.len == 0);
-    std.debug.assert(handle.tree.mode == .zig);
 
-    if (server.config.prefer_ast_check_as_child_process and
-        std.process.can_spawn and
+    if (std.process.can_spawn and
+        server.config.prefer_ast_check_as_child_process and
+        handle.tree.mode == .zig and // TODO pass `--zon` if available
         server.config.zig_exe_path != null)
     {
         return getErrorBundleFromAstCheck(
@@ -283,15 +283,27 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             log.err("failed to run ast-check: {}", .{err});
             return .empty;
         };
-    } else {
-        const zir = try handle.getZir();
-        if (!zir.hasCompileErrors()) return .empty;
+    } else switch (handle.tree.mode) {
+        .zig => {
+            const zir = try handle.getZir();
+            if (!zir.hasCompileErrors()) return .empty;
 
-        var eb: std.zig.ErrorBundle.Wip = undefined;
-        try eb.init(server.allocator);
-        defer eb.deinit();
-        try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
-        return try eb.toOwnedBundle("");
+            var eb: std.zig.ErrorBundle.Wip = undefined;
+            try eb.init(server.allocator);
+            defer eb.deinit();
+            try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
+            return try eb.toOwnedBundle("");
+        },
+        .zon => {
+            const zoir = try handle.getZoir();
+            if (!zoir.hasCompileErrors()) return .empty;
+
+            var eb: std.zig.ErrorBundle.Wip = undefined;
+            try eb.init(server.allocator);
+            defer eb.deinit();
+            try eb.addZoirErrorMessages(zoir, handle.tree, handle.tree.source, "");
+            return try eb.toOwnedBundle("");
+        },
     }
 }
 
