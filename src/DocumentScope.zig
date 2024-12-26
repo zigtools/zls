@@ -562,7 +562,7 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
         .zon => {
             const root_node = tree.nodes.items(.data)[0].lhs;
             const new_scope = try context.startScope(
-                .other,
+                .container,
                 .{ .ast_node = root_node },
                 .{ .start = 0, .end = @intCast(tree.source.len) },
             );
