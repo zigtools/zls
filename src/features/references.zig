@@ -443,6 +443,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(request.uri()) orelse return null;
+    if (handle.tree.mode == .zon) return null;
 
     if (request.position().character <= 0) return null;
 

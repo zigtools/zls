@@ -1561,6 +1561,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
 
 fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!lsp.ResultType("textDocument/completion") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
@@ -1574,6 +1575,7 @@ fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
 fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
 
     if (request.position.character == 0) return null;
 
@@ -1653,6 +1655,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
@@ -1673,6 +1676,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
 
 fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!lsp.ResultType("textDocument/documentSymbol") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
     return .{
         .array_of_DocumentSymbol = try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding),
     };
@@ -1708,6 +1712,7 @@ fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: 
 
 fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.InlayHintParams) Error!?[]types.InlayHint {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
 
     // The Language Server Specification does not provide a client capabilities that allows the client to specify the MarkupKind of inlay hints.
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
