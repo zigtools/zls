@@ -46,11 +46,11 @@ pub fn build(b: *Build) !void {
 
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
-    const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
-    const enable_tracy_allocation = b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
-    const enable_tracy_callstack = b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy;
+    const enable_tracy = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
+    const enable_tracy_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
+    const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
-    const use_llvm = b.option(bool, "use_llvm", "Use Zig's llvm code backend");
+    const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
 
     const resolved_zls_version = getVersion(b);
     const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
@@ -65,9 +65,9 @@ pub fn build(b: *Build) !void {
     const exe_options = b.addOptions();
     exe_options.step.name = "ZLS exe options";
     const exe_options_module = exe_options.createModule();
-    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
-    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
-    exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
+    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable-failing-allocator", "Whether to use a randomly failing allocator.") orelse false);
+    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable-failing-allocator-likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
+    exe_options.addOption(bool, "use_gpa", b.option(bool, "use-gpa", "Good for debugging") orelse (optimize == .Debug));
 
     const test_options = b.addOptions();
     test_options.step.name = "ZLS test options";
