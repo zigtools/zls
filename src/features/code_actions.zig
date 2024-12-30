@@ -27,7 +27,7 @@ pub const Builder = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .{};
+        var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .empty;
 
         try handleUnorganizedImport(builder, actions);
 
@@ -155,7 +155,7 @@ pub fn generateStringLiteralCodeActions(
     if (!std.unicode.utf8ValidateSlice(parsed)) return;
     const with_slashes = try std.mem.replaceOwned(u8, builder.arena, parsed, "\n", "\n    \\\\"); // Hardcoded 4 spaces
 
-    var result = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, with_slashes.len + 3);
+    var result: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, with_slashes.len + 3);
     result.appendSliceAssumeCapacity("\\\\");
     result.appendSliceAssumeCapacity(with_slashes);
     result.appendAssumeCapacity('\n');
@@ -187,7 +187,7 @@ pub fn generateMultilineStringCodeActions(
 
     // collect the text in the literal
     const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
-    var str_escaped = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, 2 * (loc.end - loc.start));
+    var str_escaped: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, 2 * (loc.end - loc.start));
     str_escaped.appendAssumeCapacity('"');
     for (start..end) |i| {
         std.debug.assert(token_tags[i] == .multiline_string_literal_line);
@@ -586,11 +586,11 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
-    var edits = std.ArrayListUnmanaged(types.TextEdit){};
+    var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
 
     // add sorted imports
     {
-        var new_text = std.ArrayListUnmanaged(u8){};
+        var new_text: std.ArrayListUnmanaged(u8) = .empty;
         var writer = new_text.writer(builder.arena);
 
         for (sorted_imports, 0..) |import_decl, i| {
@@ -788,10 +788,10 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
 
     const root_decls = tree.rootDecls();
 
-    var skip_set = try std.DynamicBitSetUnmanaged.initEmpty(allocator, root_decls.len);
+    var skip_set: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, root_decls.len);
     defer skip_set.deinit(allocator);
 
-    var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .{};
+    var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .empty;
     defer imports.deinit(allocator);
 
     // iterate until no more imports are found
@@ -920,7 +920,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
     const num_separators = std.mem.count(u8, trimmed_identifier, "_");
 
     const new_text_len = trimmed_identifier.len - num_separators;
-    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
+    var new_text: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
 
     var idx: usize = 0;
@@ -984,7 +984,7 @@ fn createDiscardText(
         identifier_name.len +
         "; // autofix".len +
         if (add_suffix_newline) 1 + indent.len else 0;
-    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
+    var new_text: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
     new_text.appendSliceAssumeCapacity(indent);

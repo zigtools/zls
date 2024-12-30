@@ -8,21 +8,21 @@ const offsets = @import("offsets.zig");
 
 const DocumentScope = @This();
 
-scopes: std.MultiArrayList(Scope) = .{},
-declarations: std.MultiArrayList(Declaration) = .{},
+scopes: std.MultiArrayList(Scope),
+declarations: std.MultiArrayList(Declaration),
 /// used for looking up a child declaration in a given scope
-declaration_lookup_map: DeclarationLookupMap = .{},
-extra: std.ArrayListUnmanaged(u32) = .{},
+declaration_lookup_map: DeclarationLookupMap,
+extra: std.ArrayListUnmanaged(u32),
 /// All identifier token that are in error sets.
 /// When there are multiple error sets that contain the same error, only one of them is stored.
 /// A token that has a doc comment takes priority.
 /// This means that if there a multiple error sets with the same name, only one of them is included.
-global_error_set: IdentifierSet = .{},
+global_error_set: IdentifierSet,
 /// All identifier token that are in enums.
 /// When there are multiple enums that contain the field name, only one of them is stored.
 /// A token that has a doc comment takes priority.
 /// This means that if there a multiple enums with the same name, only one of them is included.
-global_enum_set: IdentifierSet = .{},
+global_enum_set: IdentifierSet,
 
 /// Stores a set of identifier tokens with unique names
 pub const IdentifierSet = std.ArrayHashMapUnmanaged(Ast.TokenIndex, void, IdentifierTokenContext, true);
@@ -63,7 +63,7 @@ pub const DeclarationLookup = struct {
 pub const DeclarationLookupContext = struct {
     pub fn hash(self: @This(), s: DeclarationLookup) u32 {
         _ = self;
-        var hasher = std.hash.Wyhash.init(0);
+        var hasher: std.hash.Wyhash = .init(0);
         std.hash.autoHash(&hasher, s.scope);
         hasher.update(s.name);
         std.hash.autoHash(&hasher, s.kind);
@@ -372,8 +372,8 @@ const ScopeContext = struct {
     doc_scope: *DocumentScope,
 
     current_scope: Scope.OptionalIndex = .none,
-    child_scopes_scratch: std.ArrayListUnmanaged(Scope.Index) = .{},
-    child_declarations_scratch: std.ArrayListUnmanaged(Declaration.Index) = .{},
+    child_scopes_scratch: std.ArrayListUnmanaged(Scope.Index) = .empty,
+    child_declarations_scratch: std.ArrayListUnmanaged(Declaration.Index) = .empty,
 
     fn deinit(context: *ScopeContext) void {
         context.child_scopes_scratch.deinit(context.allocator);
@@ -548,10 +548,17 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!Document
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var document_scope = DocumentScope{};
+    var document_scope: DocumentScope = .{
+        .scopes = .empty,
+        .declarations = .empty,
+        .declaration_lookup_map = .empty,
+        .extra = .empty,
+        .global_error_set = .empty,
+        .global_enum_set = .empty,
+    };
     errdefer document_scope.deinit(allocator);
 
-    var context = ScopeContext{
+    var context: ScopeContext = .{
         .allocator = allocator,
         .tree = tree,
         .doc_scope = &document_scope,
@@ -855,7 +862,7 @@ noinline fn walkContainerDecl(
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
-    var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
+    var uses: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
     defer uses.deinit(allocator);
 
     for (container_decl.ast.members) |decl| {
@@ -949,7 +956,7 @@ noinline fn walkErrorSetNode(
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
-    var it = ast.ErrorSetIterator.init(tree, node_idx);
+    var it: ast.ErrorSetIterator = .init(tree, node_idx);
 
     while (it.next()) |identifier_token| {
         try scope.pushDeclaration(identifier_token, .{ .error_token = identifier_token }, .other);

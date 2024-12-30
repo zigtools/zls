@@ -55,11 +55,11 @@ pub fn generateDiagnostics(
     }
 
     {
-        var arena_allocator = std.heap.ArenaAllocator.init(server.diagnostics_collection.allocator);
+        var arena_allocator: std.heap.ArenaAllocator = .init(server.diagnostics_collection.allocator);
         errdefer arena_allocator.deinit();
         const arena = arena_allocator.allocator();
 
-        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
 
         if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
             try code_actions.collectAutoDiscardDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
@@ -322,7 +322,7 @@ fn getErrorBundleFromAstCheck(
         zig_ast_check_lock.lock();
         defer zig_ast_check_lock.unlock();
 
-        var process = std.process.Child.init(&.{ zig_exe_path, "ast-check", "--color", "off" }, allocator);
+        var process: std.process.Child = .init(&.{ zig_exe_path, "ast-check", "--color", "off" }, allocator);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Ignore;
         process.stderr_behavior = .Pipe;
@@ -349,7 +349,7 @@ fn getErrorBundleFromAstCheck(
     if (stderr_bytes.len == 0) return .empty;
 
     var last_error_message: ?std.zig.ErrorBundle.ErrorMessage = null;
-    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .{};
+    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
     defer notes.deinit(allocator);
 
     var error_bundle: std.zig.ErrorBundle.Wip = undefined;
@@ -464,7 +464,7 @@ pub const BuildOnSave = struct {
             options.zig_lib_path,
             "--watch",
         };
-        var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(
+        var argv: std.ArrayListUnmanaged([]const u8) = try .initCapacity(
             options.allocator,
             base_args.len + options.build_on_save_args.len + @intFromBool(options.check_step_only),
         );
@@ -474,7 +474,7 @@ pub const BuildOnSave = struct {
         if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
         argv.appendSliceAssumeCapacity(options.build_on_save_args);
 
-        var child_process = std.process.Child.init(argv.items, options.allocator);
+        var child_process: std.process.Child = .init(argv.items, options.allocator);
         child_process.stdin_behavior = .Pipe;
         child_process.stdout_behavior = .Pipe;
         child_process.stderr_behavior = .Pipe;
@@ -544,7 +544,7 @@ pub const BuildOnSave = struct {
     ) void {
         defer self.allocator.free(workspace_path);
 
-        var transport = Transport.init(.{
+        var transport: Transport = .init(.{
             .gpa = self.allocator,
             .in = self.child_process.stdout.?,
             .out = self.child_process.stdin.?,
@@ -606,7 +606,7 @@ pub const BuildOnSave = struct {
 
         const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
 
-        var hasher = std.hash.Wyhash.init(0);
+        var hasher: std.hash.Wyhash = .init(0);
         hasher.update(workspace_path);
         std.hash.autoHash(&hasher, header.step_id);
 

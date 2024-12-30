@@ -84,9 +84,9 @@ pub const FailingAllocator = struct {
     /// `likelihood == 0` means that every allocation will fail
     /// `likelihood == std.math.intMax(u32)` means that no allocation will be forced to fail
     pub fn init(internal_allocator: std.mem.Allocator, likelihood: u32) FailingAllocator {
-        return FailingAllocator{
+        return .{
             .internal_allocator = internal_allocator,
-            .random = std.Random.DefaultPrng.init(std.crypto.random.int(u64)),
+            .random = .init(std.crypto.random.int(u64)),
             .likelihood = likelihood,
         };
     }

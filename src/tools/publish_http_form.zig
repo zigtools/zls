@@ -5,7 +5,7 @@
 const std = @import("std");
 
 pub fn main() !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     const arena = arena_allocator.allocator();
 
     var arg_it = try std.process.argsWithAllocator(arena);
@@ -14,7 +14,7 @@ pub fn main() !void {
 
     var uri: ?std.Uri = null;
     var authorization: std.http.Client.Request.Headers.Value = .default;
-    var form_fields = std.ArrayList(FormField).init(arena);
+    var form_fields: std.ArrayListUnmanaged(FormField) = .empty;
 
     while (arg_it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--user")) {
@@ -44,7 +44,7 @@ pub fn main() !void {
                     .value = try arena.dupe(u8, content),
                 };
             };
-            try form_fields.append(form_field);
+            try form_fields.append(arena, form_field);
         } else if (uri == null) {
             uri = try std.Uri.parse(arg);
         } else {
@@ -106,7 +106,7 @@ fn createMultiPartFormDataBody(
     boundary: []const u8,
     fields: []const FormField,
 ) error{OutOfMemory}![]const u8 {
-    var body: std.ArrayListUnmanaged(u8) = .{};
+    var body: std.ArrayListUnmanaged(u8) = .empty;
     errdefer body.deinit(allocator);
     const writer = body.writer(allocator);
 

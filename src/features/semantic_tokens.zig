@@ -65,7 +65,7 @@ const Builder = struct {
     handle: *DocumentStore.Handle,
     previous_source_index: usize = 0,
     source_index: usize = 0,
-    token_buffer: std.ArrayListUnmanaged(u32) = .{},
+    token_buffer: std.ArrayListUnmanaged(u32) = .empty,
     encoding: offsets.Encoding,
     limited: bool,
 

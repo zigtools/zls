@@ -223,19 +223,19 @@ fn testReferences(source: []const u8) !void {
 fn testMFReferences(sources: []const []const u8) !void {
     const placeholder_name = "placeholder";
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const File = struct { source: []const u8, new_source: []const u8 };
     const LocPair = struct { file_index: usize, old: offsets.Loc, new: offsets.Loc };
 
-    var files = std.StringArrayHashMapUnmanaged(File){};
+    var files: std.StringArrayHashMapUnmanaged(File) = .empty;
     defer {
         for (files.values()) |file| allocator.free(file.new_source);
         files.deinit(allocator);
     }
 
-    var loc_set: std.StringArrayHashMapUnmanaged(std.MultiArrayList(LocPair)) = .{};
+    var loc_set: std.StringArrayHashMapUnmanaged(std.MultiArrayList(LocPair)) = .empty;
     defer {
         for (loc_set.values()) |*locs| locs.deinit(allocator);
         loc_set.deinit(allocator);
@@ -257,7 +257,7 @@ fn testMFReferences(sources: []const []const u8) !void {
         }
     }
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
@@ -273,7 +273,7 @@ fn testMFReferences(sources: []const []const u8) !void {
             const file_uri = files.keys()[file_index];
 
             const middle = new_loc.start + (new_loc.end - new_loc.start) / 2;
-            const params = types.ReferenceParams{
+            const params: types.ReferenceParams = .{
                 .textDocument = .{ .uri = file_uri },
                 .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
                 .context = .{ .includeDeclaration = true },
@@ -289,7 +289,7 @@ fn testMFReferences(sources: []const []const u8) !void {
 
             // keeps track of expected locations that have been given by the server
             // used to detect double references and missing references
-            var visited = try std.DynamicBitSetUnmanaged.initEmpty(allocator, locs.len);
+            var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, locs.len);
             defer visited.deinit(allocator);
 
             for (actual_locations) |response_location| {

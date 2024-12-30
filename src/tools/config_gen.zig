@@ -135,7 +135,7 @@ fn fmtDocs(text: []const u8) std.fmt.Formatter(formatDocs) {
 }
 
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.mem.Allocator.Error)!void {
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer: std.ArrayList(u8) = .init(allocator);
     defer buffer.deinit();
     const writer = buffer.writer();
 
@@ -171,7 +171,7 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
     const source_unformatted = try buffer.toOwnedSliceSentinel(0);
     defer allocator.free(source_unformatted);
 
-    var tree = try std.zig.Ast.parse(allocator, source_unformatted, .zig);
+    var tree: std.zig.Ast = try .parse(allocator, source_unformatted, .zig);
     defer tree.deinit(allocator);
     std.debug.assert(tree.errors.len == 0);
 
@@ -190,7 +190,7 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
 
     var buff_out = std.io.bufferedWriter(schema_file.writer());
 
-    var schema = Schema{ .properties = .{} };
+    var schema: Schema = .{ .properties = .{} };
     defer schema.properties.map.deinit(allocator);
 
     try schema.properties.map.ensureTotalCapacity(allocator, @intCast(config.options.len));
@@ -446,7 +446,7 @@ const Builtin = struct {
 /// parses a `langref.html.in` file and extracts builtins from this section: `https://ziglang.org/documentation/master/#Builtin-Functions`
 /// the documentation field contains poorly formatted html
 fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref_file: []const u8) error{OutOfMemory}![]Builtin {
-    var tokenizer = Tokenizer{ .buffer = langref_file };
+    var tokenizer: Tokenizer = .{ .buffer = langref_file };
 
     const State = enum {
         /// searching for this line:
@@ -463,7 +463,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
     };
     var state: State = .searching;
 
-    var builtins = std.ArrayListUnmanaged(Builtin){};
+    var builtins: std.ArrayListUnmanaged(Builtin) = .empty;
     errdefer {
         for (builtins.items) |*builtin| {
             builtin.documentation.deinit(allocator);
@@ -506,7 +506,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                             try builtins.append(allocator, .{
                                 .name = content_name,
                                 .signature = "",
-                                .documentation = .{},
+                                .documentation = .empty,
                             });
                         },
                         .builtin_content => unreachable,
@@ -782,7 +782,7 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
 /// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
 /// and outputs its arguments: `comptime DestType: type`, `integer: anytype`
 fn extractArgumentsFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}![][]const u8 {
-    var arguments = std.ArrayListUnmanaged([]const u8){};
+    var arguments: std.ArrayListUnmanaged([]const u8) = .empty;
     defer arguments.deinit(allocator);
 
     var argument_start: usize = 0;
@@ -806,7 +806,7 @@ fn extractArgumentsFromSignature(allocator: std.mem.Allocator, signature: []cons
 /// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
 /// and outputs a snippet: `@intToEnum(${1:comptime DestType: type}, ${2:integer: anytype})`
 fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}![]const u8 {
-    var snippet = std.ArrayListUnmanaged(u8){};
+    var snippet: std.ArrayListUnmanaged(u8) = .empty;
     defer snippet.deinit(allocator);
     var writer = snippet.writer(allocator);
 
@@ -871,7 +871,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         \\    arguments: []const []const u8,
         \\};
         \\
-        \\pub const builtins = std.StaticStringMap(Builtin).initComptime(&.{
+        \\pub const builtins: std.StaticStringMap(Builtin) = .initComptime(&.{
         \\
     );
 
@@ -899,7 +899,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         });
 
         const html = builtin.documentation.items["</pre>".len..];
-        var markdown = std.ArrayListUnmanaged(u8){};
+        var markdown: std.ArrayListUnmanaged(u8) = .empty;
         defer markdown.deinit(allocator);
         try writeMarkdownFromHtml(html, markdown.writer(allocator));
 
@@ -941,7 +941,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
 }
 
 pub fn main() !void {
-    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var general_purpose_allocator: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
     const gpa = general_purpose_allocator.allocator();
 

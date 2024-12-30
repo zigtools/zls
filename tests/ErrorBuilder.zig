@@ -8,7 +8,7 @@ const offsets = zls.offsets;
 const ErrorBuilder = @This();
 
 allocator: std.mem.Allocator,
-files: std.StringArrayHashMapUnmanaged(File) = .{},
+files: std.StringArrayHashMapUnmanaged(File) = .empty,
 message_count: usize = 0,
 /// similar to `git diff --unified`
 /// show error messages with n lines of context.
@@ -21,7 +21,7 @@ file_name_visibility: enum {
 } = .multi_file,
 
 pub fn init(allocator: std.mem.Allocator) ErrorBuilder {
-    return ErrorBuilder{ .allocator = allocator };
+    return .{ .allocator = allocator };
 }
 
 pub fn deinit(builder: *ErrorBuilder) void {
@@ -283,7 +283,7 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
 
 const File = struct {
     source: []const u8,
-    messages: std.ArrayListUnmanaged(MsgItem) = .{},
+    messages: std.ArrayListUnmanaged(MsgItem) = .empty,
 };
 
 const MsgItem = struct {
@@ -335,7 +335,7 @@ const MsgItemIterator = struct {
 //
 
 test ErrorBuilder {
-    var eb = ErrorBuilder.init(std.testing.allocator);
+    var eb: ErrorBuilder = .init(std.testing.allocator);
     defer eb.deinit();
     try std.testing.expect(!eb.hasMessages());
 
@@ -350,7 +350,7 @@ test ErrorBuilder {
 }
 
 test "ErrorBuilder - write" {
-    var eb = ErrorBuilder.init(std.testing.allocator);
+    var eb: ErrorBuilder = .init(std.testing.allocator);
     defer eb.deinit();
 
     try std.testing.expectFmt("", "{}", .{eb});
@@ -478,7 +478,7 @@ test "ErrorBuilder - write" {
 }
 
 test "ErrorBuilder - write on empty file" {
-    var eb = ErrorBuilder.init(std.testing.allocator);
+    var eb: ErrorBuilder = .init(std.testing.allocator);
     defer eb.deinit();
 
     try eb.addFile("empty.zig", "");

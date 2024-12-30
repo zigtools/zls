@@ -97,7 +97,7 @@ fn testNodesAtLoc(source: []const u8) !void {
     };
 
     const uri = "file.zig";
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 

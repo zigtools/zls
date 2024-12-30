@@ -31,7 +31,7 @@ fn labelReferences(
     const first_tok = decl.decl.label.identifier;
     const last_tok = ast.lastToken(tree, decl.decl.label.block);
 
-    var locations = std.ArrayListUnmanaged(types.Location){};
+    var locations: std.ArrayListUnmanaged(types.Location) = .empty;
     errdefer locations.deinit(allocator);
 
     if (include_decl) {
@@ -63,7 +63,7 @@ fn labelReferences(
 
 const Builder = struct {
     allocator: std.mem.Allocator,
-    locations: std.ArrayListUnmanaged(types.Location) = .{},
+    locations: std.ArrayListUnmanaged(types.Location) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
     /// Whether the `decl_handle` has been added
@@ -182,7 +182,7 @@ fn gatherReferences(
     builder: anytype,
     handle_behavior: enum { get, get_or_load },
 ) !void {
-    var dependencies = std.StringArrayHashMapUnmanaged(void){};
+    var dependencies: std.StringArrayHashMapUnmanaged(void) = .empty;
     defer {
         for (dependencies.keys()) |uri| {
             allocator.free(uri);
@@ -196,7 +196,7 @@ fn gatherReferences(
                 continue;
         }
 
-        var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
+        var handle_dependencies: std.ArrayListUnmanaged([]const u8) = .empty;
         defer handle_dependencies.deinit(allocator);
         try analyser.store.collectDependencies(allocator, handle, &handle_dependencies);
 
@@ -290,7 +290,7 @@ pub const Callsite = struct {
 
 const CallBuilder = struct {
     allocator: std.mem.Allocator,
-    callsites: std.ArrayListUnmanaged(Callsite) = .{},
+    callsites: std.ArrayListUnmanaged(Callsite) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
     analyser: *Analyser,
@@ -452,12 +452,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree, source_index, true);
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     // TODO: Make this work with branching types
@@ -498,10 +493,10 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     switch (request) {
         .rename => |rename| {
             const escaped_rename = try std.fmt.allocPrint(arena, "{}", .{std.zig.fmtId(rename.newName)});
-            var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
+            var changes: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)) = .{};
 
             for (locations.items) |loc| {
-                const gop = try changes.getOrPutValue(arena, loc.uri, .{});
+                const gop = try changes.getOrPutValue(arena, loc.uri, .empty);
                 try gop.value_ptr.append(arena, .{
                     .range = loc.range,
                     .newText = escaped_rename,
@@ -521,7 +516,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         },
         .references => return .{ .references = locations.items },
         .highlight => {
-            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(arena, locations.items.len);
+            var highlights: std.ArrayListUnmanaged(types.DocumentHighlight) = try .initCapacity(arena, locations.items.len);
             const uri = handle.uri;
             for (locations.items) |loc| {
                 if (!std.mem.eql(u8, loc.uri, uri)) continue;

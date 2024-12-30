@@ -71,7 +71,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
     const source: [:0]u8 = try std.fmt.allocPrintZ(allocator, "const c = {s};", .{cimport_source});
     defer allocator.free(source);
 
-    var tree = try Ast.parse(allocator, source, .zig);
+    var tree: Ast = try .parse(allocator, source, .zig);
     defer tree.deinit(allocator);
 
     const node_tags = tree.nodes.items(.tag);
@@ -106,7 +106,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
 fn testTranslate(c_source: []const u8) !translate_c.Result {
     if (!std.process.can_spawn) return error.SkipZigTest;
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     var result = (try translate_c.translate(allocator, zls.DocumentStore.Config.fromMainConfig(ctx.server.config), &.{}, c_source)).?;

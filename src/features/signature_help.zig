@@ -35,7 +35,7 @@ fn fnProtoToSignatureInfo(
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
-    var params = std.ArrayListUnmanaged(types.ParameterInformation){};
+    var params: std.ArrayListUnmanaged(types.ParameterInformation) = .empty;
     var param_it = proto.iterate(&tree);
     while (ast.nextFnParam(&param_it)) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
@@ -115,9 +115,9 @@ pub fn getSignatureInfo(
             };
         }
     };
-    var symbol_stack = try std.ArrayListUnmanaged(StackSymbol).initCapacity(arena, 8);
+    var symbol_stack: std.ArrayListUnmanaged(StackSymbol) = try .initCapacity(arena, 8);
     var curr_commas: u32 = 0;
-    var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(arena, 4);
+    var comma_stack: std.ArrayListUnmanaged(u32) = try .initCapacity(arena, 4);
     var curr_token = last_token;
     while (curr_token >= first_token and curr_token != 0) : (curr_token -= 1) {
         switch (token_tags[curr_token]) {

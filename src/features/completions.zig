@@ -103,7 +103,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .container => |scope_handle| {
-            var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+            var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
             try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
 
             for (decls.items) |decl_with_handle| {
@@ -155,7 +155,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         if (std.mem.startsWith(u8, name, "_")) return;
         // TODO figuring out which declarations should be excluded could be made more complete and accurate
         // by translating an empty file to acquire all exclusions
-        const exclusions = std.StaticStringMap(void).initComptime(.{
+        const exclusions: std.StaticStringMap(void) = .initComptime(.{
             .{ "linux", {} },
             .{ "unix", {} },
             .{ "WIN32", {} },
@@ -488,8 +488,8 @@ fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult 
         end_index += 1;
     }
 
-    var insert_loc = offsets.Loc{ .start = start_index, .end = builder.source_index };
-    var replace_loc = offsets.Loc{ .start = start_index, .end = end_index };
+    var insert_loc: offsets.Loc = .{ .start = start_index, .end = builder.source_index };
+    var replace_loc: offsets.Loc = .{ .start = start_index, .end = end_index };
 
     var format: FunctionCompletionFormat = .only_name;
 
@@ -558,7 +558,7 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .{};
+    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
     try builder.analyser.collectAllSymbolsAtSourceIndex(builder.orig_handle, builder.source_index, &decls);
     for (decls.items) |decl_with_handle| {
         try declToCompletion(builder, decl_with_handle, .{});
@@ -604,12 +604,12 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
 
     switch (likely) {
         .struct_field, .switch_case => {},
-        else => return std.BufSet.init(builder.arena),
+        else => return .init(builder.arena),
     }
     const tree = builder.orig_handle.tree;
     const token_tags = tree.tokens.items(.tag);
 
-    var used_members_set = std.BufSet.init(builder.arena);
+    var used_members_set: std.BufSet = .init(builder.arena);
 
     var depth: usize = 0;
     var i: Ast.Node.Index = @max(dot_token_index, 2);
@@ -698,7 +698,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) !void {
-    var completions: CompletionSet = .{};
+    var completions: CompletionSet = .empty;
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
 
@@ -724,7 +724,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
     const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_separator_index orelse string_content_loc.start });
 
-    var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
+    var search_paths: std.ArrayListUnmanaged([]const u8) = .empty;
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
@@ -863,7 +863,7 @@ pub fn completionAtIndex(
         .arena = arena,
         .orig_handle = handle,
         .source_index = source_index,
-        .completions = .{},
+        .completions = .empty,
     };
     const source = handle.tree.source;
 
@@ -974,12 +974,12 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
 
     const store = &builder.server.document_store;
 
-    var dependencies = std.ArrayListUnmanaged(DocumentStore.Uri){};
+    var dependencies: std.ArrayListUnmanaged(DocumentStore.Uri) = .empty;
     try dependencies.append(builder.arena, builder.orig_handle.uri);
     try store.collectDependencies(builder.arena, builder.orig_handle, &dependencies);
 
     // TODO Better solution for deciding what tags to include
-    var result_set = CompletionSet{};
+    var result_set: CompletionSet = .empty;
 
     for (dependencies.items) |uri| {
         // not every dependency is loaded which results in incomplete completion
@@ -1073,7 +1073,7 @@ fn getEnumLiteralContext(
         (dot_token_index - 1);
     if (token_index == 0) return null;
 
-    var dot_context = EnumLiteralContext{ .likely = .enum_literal };
+    var dot_context: EnumLiteralContext = .{ .likely = .enum_literal };
 
     switch (token_tags[token_index]) {
         .equal => {
@@ -1364,7 +1364,7 @@ fn collectContainerNodes(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var types_with_handles = std.ArrayListUnmanaged(Analyser.Type){};
+    var types_with_handles: std.ArrayListUnmanaged(Analyser.Type) = .empty;
     const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
@@ -1528,7 +1528,7 @@ fn collectVarAccessContainerNodes(
         .func = func_node_handle.node,
         .param_index = @intCast(dot_context.fn_arg_index),
     } };
-    const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = func_node_handle.handle };
+    const fn_param_decl_with_handle: Analyser.DeclWithHandle = .{ .decl = fn_param_decl, .handle = func_node_handle.handle };
     const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
     try types_with_handles.append(arena, param_type);
 }

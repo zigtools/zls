@@ -21,9 +21,9 @@ allocator: std.mem.Allocator,
 config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
-handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
-build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .{},
-cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
+handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
+build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .empty,
+cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
 
 pub const Uri = []const u8;
@@ -34,7 +34,7 @@ pub const Hash = [Hasher.mac_length]u8;
 pub const max_document_size = std.math.maxInt(u32);
 
 pub fn computeHash(bytes: []const u8) Hash {
-    var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
+    var hasher: Hasher = .init(&@splat(0));
     hasher.update(bytes);
     var hash: Hash = undefined;
     hasher.final(&hash);
@@ -89,7 +89,7 @@ pub const BuildFile = struct {
 
     /// Usage example:
     /// ```zig
-    /// const package_uris = std.ArrayListUnmanaged([]const u8){};
+    /// const package_uris: std.ArrayListUnmanaged([]const u8) = .empty;
     /// defer {
     ///     for (package_uris) |uri| allocator.free(uri);
     ///     package_uris.deinit(allocator);
@@ -116,7 +116,7 @@ pub const BuildFile = struct {
 
     /// Usage example:
     /// ```zig
-    /// const include_paths = std.ArrayListUnmanaged([]u8){};
+    /// const include_paths: std.ArrayListUnmanaged([]u8) = .empty;
     /// defer {
     ///     for (include_paths) |path| allocator.free(path);
     ///     include_paths.deinit(allocator);
@@ -177,14 +177,14 @@ pub const Handle = struct {
     version: u32 = 0,
     tree: Ast,
     /// Contains one entry for every import in the document
-    import_uris: std.ArrayListUnmanaged(Uri) = .{},
+    import_uris: std.ArrayListUnmanaged(Uri) = .empty,
     /// Contains one entry for every cimport in the document
-    cimports: std.MultiArrayList(CImportHandle) = .{},
+    cimports: std.MultiArrayList(CImportHandle) = .empty,
 
     /// private field
     impl: struct {
         /// @bitCast from/to `Status`
-        status: std.atomic.Value(u32) = std.atomic.Value(u32).init(@bitCast(Status{})),
+        status: std.atomic.Value(u32) = .init(@bitCast(Status{})),
         /// TODO can we avoid storing one allocator per Handle?
         allocator: std.mem.Allocator,
 
@@ -417,7 +417,7 @@ pub const Handle = struct {
             defer self.impl.condition.broadcast();
 
             self.impl.document_scope = blk: {
-                var document_scope = try DocumentScope.init(self.impl.allocator, self.tree);
+                var document_scope: DocumentScope = try .init(self.impl.allocator, self.tree);
                 errdefer document_scope.deinit(self.impl.allocator);
 
                 // remove unused capacity
@@ -536,7 +536,7 @@ pub const Handle = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        const new_status = Handle.Status{
+        const new_status: Handle.Status = .{
             .open = self.getStatus().open,
         };
 
@@ -554,8 +554,8 @@ pub const Handle = struct {
         var old_zir = if (old_status.has_zir) self.impl.zir else null;
 
         self.tree = new_tree;
-        self.import_uris = .{};
-        self.cimports = .{};
+        self.import_uris = .empty;
+        self.cimports = .empty;
         self.impl.document_scope = undefined;
         self.impl.zir = undefined;
 
@@ -853,12 +853,12 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    var arena: std.heap.ArenaAllocator = .init(self.allocator);
     defer arena.deinit();
 
-    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(arena.allocator(), self.handles.count());
+    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(arena.allocator(), self.handles.count());
 
-    var queue = std.ArrayListUnmanaged(Uri){};
+    var queue: std.ArrayListUnmanaged(Uri) = .empty;
 
     for (self.handles.values(), 0..) |handle, handle_index| {
         if (!handle.getStatus().open) continue;
@@ -899,7 +899,7 @@ fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
 
     if (self.cimports.count() == 0) return;
 
-    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, self.cimports.count());
+    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.cimports.count());
     defer reachable.deinit(self.allocator);
 
     for (self.handles.values()) |handle| {
@@ -934,7 +934,7 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
 
     if (self.build_files.count() == 0) return;
 
-    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, self.build_files.count());
+    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.build_files.count());
     defer reachable.deinit(self.allocator);
 
     for (self.handles.values()) |handle| {
@@ -1004,7 +1004,7 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
         self.config.zig_exe_path.?, "build", "--build-runner", self.config.build_runner_path.?,
     };
 
-    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(self.allocator, base_args.len);
+    var args: std.ArrayListUnmanaged([]const u8) = try .initCapacity(self.allocator, base_args.len);
     errdefer {
         for (args.items) |arg| self.allocator.free(arg);
         args.deinit(self.allocator);
@@ -1073,7 +1073,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
         else => return error.RunFailed,
     }
 
-    const parse_options = std.json.ParseOptions{
+    const parse_options: std.json.ParseOptions = .{
         // We ignore unknown fields so people can roll
         // their own build runners in libraries with
         // the only requirement being general adherence
@@ -1110,7 +1110,7 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]Uri {
-    var potential_build_files = std.ArrayListUnmanaged(Uri){};
+    var potential_build_files: std.ArrayListUnmanaged(Uri) = .empty;
     errdefer {
         for (potential_build_files.items) |build_file_uri| self.allocator.free(build_file_uri);
         potential_build_files.deinit(self.allocator);
@@ -1190,10 +1190,10 @@ fn uriAssociatedWithBuild(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var checked_uris = std.StringHashMapUnmanaged(void){};
+    var checked_uris: std.StringHashMapUnmanaged(void) = .empty;
     defer checked_uris.deinit(self.allocator);
 
-    var package_uris = std.ArrayListUnmanaged(Uri){};
+    var package_uris: std.ArrayListUnmanaged(Uri) = .empty;
     defer {
         for (package_uris.items) |package_uri| self.allocator.free(package_uri);
         package_uris.deinit(self.allocator);
@@ -1250,7 +1250,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var handle = try Handle.init(self.allocator, uri, text);
+    var handle: Handle = try .init(self.allocator, uri, text);
     errdefer handle.deinit();
 
     _ = handle.setOpen(open);
@@ -1267,7 +1267,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             self.allocator.free(potential_build_files);
         }
 
-        var has_been_checked = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, potential_build_files.len);
+        var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, potential_build_files.len);
         errdefer has_been_checked.deinit(self.allocator);
 
         handle.impl.associated_build_file = .{ .unresolved = .{
@@ -1361,7 +1361,7 @@ fn collectCIncludes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!
     const cimport_nodes = try analysis.collectCImportNodes(allocator, tree);
     defer allocator.free(cimport_nodes);
 
-    var sources = std.MultiArrayList(CImportHandle){};
+    var sources: std.MultiArrayList(CImportHandle) = .empty;
     try sources.ensureTotalCapacity(allocator, cimport_nodes.len);
     errdefer {
         for (sources.items(.source)) |source| {
@@ -1450,7 +1450,7 @@ pub fn collectIncludeDirs(
     handle: *Handle,
     include_dirs: *std.ArrayListUnmanaged([]const u8),
 ) !bool {
-    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
     defer arena_allocator.deinit();
 
     const target_info: std.Target = .{
@@ -1464,7 +1464,7 @@ pub fn collectIncludeDirs(
         .ofmt = comptime std.Target.ObjectFormat.default(builtin.os.tag, builtin.cpu.arch),
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
-    const native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), target_info);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {
@@ -1514,7 +1514,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         }
     }
 
-    var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+    var include_dirs: std.ArrayListUnmanaged([]const u8) = .empty;
     defer {
         for (include_dirs.items) |path| {
             self.allocator.free(path);

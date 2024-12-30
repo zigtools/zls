@@ -238,12 +238,12 @@ fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
@@ -301,9 +301,9 @@ fn testDefinition(source: []const u8) !void {
 
     const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 
-    const declaration_params = types.DeclarationParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
-    const definition_params = types.DefinitionParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
-    const type_definition_params = types.TypeDefinitionParams{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const declaration_params: types.DeclarationParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const definition_params: types.DefinitionParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const type_definition_params: types.TypeDefinitionParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
 
     const maybe_declaration_response = if (declaration_loc != null)
         try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params)

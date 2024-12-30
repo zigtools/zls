@@ -230,7 +230,7 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
 
     const stdout = std.io.getStdOut().writer();
 
-    var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
+    var args_it: std.process.ArgIterator = try .initWithAllocator(allocator);
     defer args_it.deinit();
 
     const zls_exe_path = args_it.next() orelse "";
@@ -335,16 +335,16 @@ const stack_frames = switch (zig_builtin.mode) {
 };
 
 pub fn main() !u8 {
-    var allocator_state = if (exe_options.use_gpa)
-        std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
+    var allocator_state: if (exe_options.use_gpa)
+        std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames })
     else
-        binned_allocator.BinnedAllocator(.{}){};
+        binned_allocator.BinnedAllocator(.{}) = .init;
     defer _ = allocator_state.deinit();
 
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else void{};
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else {};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
 
-    var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else void{};
+    var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else {};
     const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
@@ -361,7 +361,7 @@ pub fn main() !u8 {
         .ChildTransport = zls.lsp.TransportOverStdio,
         .thread_safe_read = false,
         .thread_safe_write = true,
-    }) = .{ .child_transport = zls.lsp.TransportOverStdio.init(std.io.getStdIn(), std.io.getStdOut()) };
+    }) = .{ .child_transport = .init(std.io.getStdIn(), std.io.getStdOut()) };
 
     log_transport = if (result.disable_lsp_logs) null else transport.any();
     log_stderr = result.enable_stderr_logs;

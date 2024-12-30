@@ -413,7 +413,7 @@ test "std.ArrayList" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const array_list: std.ArrayList(S) = undefined;
+        \\const array_list: std.ArrayListUnmanaged(S) = undefined;
         \\const foo = array_list.items[0].<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
@@ -434,7 +434,7 @@ test "std.ArrayHashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoArrayHashMap(u32, S) = undefined;
+        \\const map: std.AutoArrayHashMapUnmanaged(u32, S) = undefined;
         \\const s = map.get(0);
         \\const foo = s.?.<cursor>
     , &.{
@@ -443,8 +443,8 @@ test "std.ArrayHashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoArrayHashMap(u32, S) = undefined;
-        \\const gop = try map.getOrPut(0);
+        \\const map: std.AutoArrayHashMapUnmanaged(u32, S) = undefined;
+        \\const gop = try map.getOrPut(undefined, 0);
         \\const foo = gop.value_ptr.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "S" },
@@ -466,7 +466,7 @@ test "std.HashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoHashMap(u32, S) = undefined;
+        \\const map: std.AutoHashMapUnmanaged(u32, S) = undefined;
         \\const s = map.get(0);
         \\const foo = s.?.<cursor>
     , &.{
@@ -475,8 +475,8 @@ test "std.HashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoHashMap(u32, S) = undefined;
-        \\const gop = try map.getOrPut(0);
+        \\const map: std.AutoHashMapUnmanaged(u32, S) = undefined;
+        \\const gop = try map.getOrPut(undefined, 0);
         \\const foo = gop.value_ptr.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "S" },
@@ -3758,7 +3758,7 @@ fn testCompletionWithOptions(
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     ctx.server.client_capabilities.completion_doc_supports_md = true;
@@ -3773,7 +3773,7 @@ fn testCompletionWithOptions(
 
     const test_uri = try ctx.addDocument(.{ .source = text });
 
-    const params = types.CompletionParams{
+    const params: types.CompletionParams = .{
         .textDocument = .{ .uri = test_uri },
         .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
     };
@@ -3802,7 +3802,7 @@ fn testCompletionWithOptions(
     var unexpected = try set_difference(actual, expected);
     defer unexpected.deinit(allocator);
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
@@ -3915,7 +3915,7 @@ fn testCompletionWithOptions(
     }
 
     if (missing.count() != 0 or unexpected.count() != 0) {
-        var buffer = std.ArrayListUnmanaged(u8){};
+        var buffer: std.ArrayListUnmanaged(u8) = .empty;
         defer buffer.deinit(allocator);
         const out = buffer.writer(allocator);
 
@@ -3928,7 +3928,7 @@ fn testCompletionWithOptions(
 }
 
 fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutOfMemory }!std.StringArrayHashMapUnmanaged(void) {
-    var set = std.StringArrayHashMapUnmanaged(void){};
+    var set: std.StringArrayHashMapUnmanaged(void) = .empty;
     errdefer set.deinit(allocator);
     try set.ensureTotalCapacity(allocator, items.len);
     for (items) |item| {
@@ -3948,7 +3948,7 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
 }
 
 fn set_intersection(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHashMapUnmanaged(void)) error{OutOfMemory}!std.StringArrayHashMapUnmanaged(void) {
-    var result = std.StringArrayHashMapUnmanaged(void){};
+    var result: std.StringArrayHashMapUnmanaged(void) = .empty;
     errdefer result.deinit(allocator);
     for (a.keys()) |key| {
         if (b.contains(key)) try result.putNoClobber(allocator, key, {});
@@ -3957,7 +3957,7 @@ fn set_intersection(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArray
 }
 
 fn set_difference(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHashMapUnmanaged(void)) error{OutOfMemory}!std.StringArrayHashMapUnmanaged(void) {
-    var result = std.StringArrayHashMapUnmanaged(void){};
+    var result: std.StringArrayHashMapUnmanaged(void) = .empty;
     errdefer result.deinit(allocator);
     for (a.keys()) |key| {
         if (!b.contains(key)) try result.putNoClobber(allocator, key, {});
@@ -4001,7 +4001,7 @@ fn testCompletionTextEdit(
     const expected_replace_text = try std.mem.concat(allocator, u8, &.{ text[0..cursor_line_loc.start], options.expected_replace_line, text[cursor_line_loc.end..] });
     defer allocator.free(expected_replace_text);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     ctx.server.client_capabilities.supports_snippets = true;
@@ -4013,7 +4013,7 @@ fn testCompletionTextEdit(
     const handle = ctx.server.document_store.getHandle(test_uri).?;
 
     const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);
-    const params = types.CompletionParams{
+    const params: types.CompletionParams = .{
         .textDocument = .{ .uri = test_uri },
         .position = cursor_position,
     };

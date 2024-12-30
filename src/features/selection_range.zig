@@ -22,13 +22,13 @@ pub fn generateSelectionRanges(
     // A faster algorithm would be to walk the tree starting from the root,
     // descending into the child containing the position at every step.
     const result = try arena.alloc(types.SelectionRange, positions.len);
-    var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(arena, 32);
+    var locs: std.ArrayListUnmanaged(offsets.Loc) = try .initCapacity(arena, 32);
     for (positions, result) |position, *out| {
         const index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
 
         locs.clearRetainingCapacity();
         for (0..handle.tree.nodes.len, handle.tree.nodes.items(.tag)) |i, tag| {
-            const node = @as(Ast.Node.Index, @intCast(i));
+            const node: Ast.Node.Index = @intCast(i);
             const loc = offsets.nodeToLoc(handle.tree, node);
 
             if (!(loc.start <= index and index <= loc.end)) continue;

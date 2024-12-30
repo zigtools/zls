@@ -106,9 +106,9 @@ const Builder = struct {
 };
 
 pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
-    var builder = Builder{
+    var builder: Builder = .{
         .allocator = allocator,
-        .locations = .{},
+        .locations = .empty,
         .tree = tree,
         .encoding = encoding,
     };
@@ -295,7 +295,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     }
 
     // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
-    var stack = std.ArrayListUnmanaged(usize){};
+    var stack: std.ArrayListUnmanaged(usize) = .empty;
     defer stack.deinit(allocator);
 
     var i: usize = 0;

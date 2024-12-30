@@ -33,14 +33,14 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
     const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
-    const params = types.SelectionRangeParams{
+    const params: types.SelectionRangeParams = .{
         .textDocument = .{ .uri = test_uri },
         .positions = &[_]types.Position{position},
     };
@@ -51,13 +51,13 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var got = std.ArrayList([]const u8).init(allocator);
-    defer got.deinit();
+    var got: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer got.deinit(allocator);
 
     var it: ?*const types.SelectionRange = &selectionRanges[0];
     while (it) |r| {
         const slice = offsets.rangeToSlice(phr.new_source, r.range, .@"utf-16");
-        (try got.addOne()).* = slice;
+        try got.append(allocator, slice);
         it = r.parent;
     }
     const last = got.pop();

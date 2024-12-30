@@ -16,9 +16,9 @@ const data = @import("version_data");
 
 /// don't show inlay hints for builtin functions whose parameter names carry no
 /// meaningful information or are trivial deductible based on the builtin name.
-const excluded_builtins_set = blk: {
+const excluded_builtins_set: std.StaticStringMap(void) = blk: {
     @setEvalBranchQuota(2000);
-    break :blk std.StaticStringMap(void).initComptime(.{
+    break :blk .initComptime(.{
         .{"addrSpaceCast"},
         .{"addWithOverflow"},
         .{"alignCast"},
@@ -154,7 +154,7 @@ const Builder = struct {
     analyser: *Analyser,
     config: *const Config,
     handle: *DocumentStore.Handle,
-    hints: std.ArrayListUnmanaged(InlayHint) = .{},
+    hints: std.ArrayListUnmanaged(InlayHint) = .empty,
     hover_kind: types.MarkupKind,
 
     fn appendParameterHint(self: *Builder, token_index: Ast.TokenIndex, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
@@ -232,7 +232,7 @@ fn writeCallHint(
     var buffer: [1]Ast.Node.Index = undefined;
     const fn_proto = fn_node.handle.tree.fullFnProto(&buffer, fn_node.node).?;
 
-    var params = try std.ArrayListUnmanaged(Ast.full.FnProto.Param).initCapacity(builder.arena, fn_proto.ast.params.len);
+    var params: std.ArrayListUnmanaged(Ast.full.FnProto.Param) = try .initCapacity(builder.arena, fn_proto.ast.params.len);
     defer params.deinit(builder.arena);
 
     var it = fn_proto.iterate(&fn_node.handle.tree);

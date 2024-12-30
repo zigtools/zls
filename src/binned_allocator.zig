@@ -35,6 +35,12 @@ pub fn BinnedAllocator(comptime config: Config) type {
 
         const Self = @This();
 
+        pub const init: Self = .{
+            .backing_allocator = std.heap.page_allocator,
+            .bins = .{ .{}, .{}, .{}, .{}, .{} },
+            .large_count = if (config.report_leaks) Counter.init(),
+        };
+
         pub fn deinit(self: *Self) void {
             const log = std.log.scoped(.binned_allocator);
 
@@ -227,17 +233,18 @@ pub fn BinnedAllocator(comptime config: Config) type {
 }
 
 test "small allocations - free in same order" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
-    var list = std.ArrayList(*u64).init(std.testing.allocator);
-    defer list.deinit();
+    const gpa = std.testing.allocator;
+    var list: std.ArrayListUnmanaged(*u64) = .empty;
+    defer list.deinit(gpa);
 
     var i: usize = 0;
     while (i < 513) : (i += 1) {
         const ptr = try allocator.create(u64);
-        try list.append(ptr);
+        try list.append(gpa, ptr);
     }
 
     for (list.items) |ptr| {
@@ -246,17 +253,18 @@ test "small allocations - free in same order" {
 }
 
 test "small allocations - free in reverse order" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
-    var list = std.ArrayList(*u64).init(std.testing.allocator);
-    defer list.deinit();
+    const gpa = std.testing.allocator;
+    var list: std.ArrayListUnmanaged(*u64) = .empty;
+    defer list.deinit(gpa);
 
     var i: usize = 0;
     while (i < 513) : (i += 1) {
         const ptr = try allocator.create(u64);
-        try list.append(ptr);
+        try list.append(gpa, ptr);
     }
 
     while (list.popOrNull()) |ptr| {
@@ -265,7 +273,7 @@ test "small allocations - free in reverse order" {
 }
 
 test "small allocations - alloc free alloc" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -276,7 +284,7 @@ test "small allocations - alloc free alloc" {
 }
 
 test "large allocations" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -289,7 +297,7 @@ test "large allocations" {
 }
 
 test "very large allocation" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -297,7 +305,7 @@ test "very large allocation" {
 }
 
 test "realloc" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -320,7 +328,7 @@ test "realloc" {
 }
 
 test "shrink" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -344,7 +352,7 @@ test "shrink" {
 }
 
 test "large object - grow" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -362,7 +370,7 @@ test "large object - grow" {
 }
 
 test "realloc small object to large object" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -379,7 +387,7 @@ test "realloc small object to large object" {
 }
 
 test "shrink large object to large object" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -404,7 +412,7 @@ test "shrink large object to large object" {
 }
 
 test "shrink large object to large object with larger alignment" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -423,9 +431,9 @@ test "shrink large object to large object with larger alignment" {
     // This loop allocates until we find a page that is not aligned to the big
     // alignment. Then we shrink the allocation after the loop, but increase the
     // alignment to the higher one, that we know will force it to realloc.
-    var stuff_to_free = std.ArrayList([]align(16) u8).init(debug_allocator);
+    var stuff_to_free: std.ArrayListUnmanaged([]align(16) u8) = .empty;
     while (std.mem.isAligned(@intFromPtr(slice.ptr), big_alignment)) {
-        try stuff_to_free.append(slice);
+        try stuff_to_free.append(debug_allocator, slice);
         slice = try allocator.alignedAlloc(u8, 16, alloc_size);
     }
     while (stuff_to_free.popOrNull()) |item| {
@@ -440,7 +448,7 @@ test "shrink large object to large object with larger alignment" {
 }
 
 test "realloc large object to small object" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -455,7 +463,7 @@ test "realloc large object to small object" {
 }
 
 test "non-page-allocator backing allocator" {
-    var binned = BinnedAllocator(.{}){ .backing_allocator = std.testing.allocator };
+    var binned: BinnedAllocator(.{}) = .{ .backing_allocator = std.testing.allocator };
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -464,7 +472,7 @@ test "non-page-allocator backing allocator" {
 }
 
 test "realloc large object to larger alignment" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -480,9 +488,9 @@ test "realloc large object to larger alignment" {
         else => 8192,
     };
     // This loop allocates until we find a page that is not aligned to the big alignment.
-    var stuff_to_free = std.ArrayList([]align(16) u8).init(debug_allocator);
+    var stuff_to_free: std.ArrayListUnmanaged([]align(16) u8) = .{};
     while (std.mem.isAligned(@intFromPtr(slice.ptr), big_alignment)) {
-        try stuff_to_free.append(slice);
+        try stuff_to_free.append(debug_allocator, slice);
         slice = try allocator.alignedAlloc(u8, 16, 8192 + 50);
     }
     while (stuff_to_free.popOrNull()) |item| {
@@ -505,7 +513,7 @@ test "realloc large object to larger alignment" {
 }
 
 test "large object does not shrink to small" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 
@@ -516,7 +524,7 @@ test "large object does not shrink to small" {
 }
 
 test "objects of size 1024 and 2048" {
-    var binned = BinnedAllocator(.{}){};
+    var binned: BinnedAllocator(.{}) = .{};
     defer binned.deinit();
     const allocator = binned.allocator();
 

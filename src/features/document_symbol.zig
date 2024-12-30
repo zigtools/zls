@@ -61,7 +61,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, var_decl_name_token),
-                .children = .{},
+                .children = .empty,
             };
         },
 
@@ -73,7 +73,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .kind = .Method, // there is no SymbolKind that represents a tests
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, test_name_token),
-                .children = .{},
+                .children = .empty,
             };
         },
 
@@ -88,7 +88,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .kind = .Function,
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, name_token),
-                .children = .{},
+                .children = .empty,
             };
         },
 
@@ -136,7 +136,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, decl_name_token),
-                .children = .{},
+                .children = .empty,
             };
         },
         .container_decl,
@@ -180,13 +180,13 @@ fn convertSymbols(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var symbol_buffer = std.ArrayListUnmanaged(types.DocumentSymbol){};
+    var symbol_buffer: std.ArrayListUnmanaged(types.DocumentSymbol) = .empty;
     try symbol_buffer.ensureTotalCapacityPrecise(arena, total_symbol_count);
 
     // instead of converting every `offsets.Loc` to `types.Range` by calling `offsets.locToRange`
     // we instead store a mapping from source indices to their desired position, sort them by their source index
     // and then iterate through them which avoids having to re-iterate through the source file to find out the line number
-    var mappings = std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping){};
+    var mappings: std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping) = .empty;
     try mappings.ensureTotalCapacityPrecise(arena, total_symbol_count * 4);
 
     const result = convertSymbolsInternal(from, &symbol_buffer, &mappings);
@@ -232,7 +232,7 @@ pub fn getDocumentSymbols(
     tree: Ast,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.DocumentSymbol {
-    var root_symbols = std.ArrayListUnmanaged(Symbol){};
+    var root_symbols: std.ArrayListUnmanaged(Symbol) = .empty;
     var total_symbol_count: usize = 0;
 
     var ctx = Context{

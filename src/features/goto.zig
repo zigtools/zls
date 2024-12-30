@@ -164,7 +164,7 @@ fn gotoDefinitionFieldAccess(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
-    var locs = std.ArrayListUnmanaged(types.DefinitionLink){};
+    var locs: std.ArrayListUnmanaged(types.DefinitionLink) = .empty;
 
     for (accesses) |access| {
         if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), access, kind, offset_encoding)) |l|
@@ -199,7 +199,7 @@ fn gotoDefinitionString(
             arena,
             blk: {
                 if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
-                var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+                var include_dirs: std.ArrayListUnmanaged([]const u8) = .empty;
                 _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
                     log.err("failed to resolve include paths: {}", .{err});
                     return null;
@@ -215,7 +215,7 @@ fn gotoDefinitionString(
         else => unreachable,
     };
 
-    const target_range = types.Range{
+    const target_range: types.Range = .{
         .start = .{ .line = 0, .character = 0 },
         .end = .{ .line = 0, .character = 0 },
     };
@@ -238,12 +238,7 @@ pub fn gotoHandler(
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
-    var analyser = Analyser.init(
-        server.allocator,
-        &server.document_store,
-        &server.ip,
-        handle,
-    );
+    var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
