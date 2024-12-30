@@ -168,6 +168,29 @@ pub fn pushErrorBundle(
     }
 }
 
+pub fn clearErrorBundle(collection: *DiagnosticsCollection, tag: Tag) void {
+    collection.mutex.lock();
+    defer collection.mutex.unlock();
+
+    const item = collection.tag_set.getPtr(tag) orelse return;
+
+    collectUrisFromErrorBundle(
+        collection.allocator,
+        item.error_bundle,
+        item.error_bundle_src_base_path,
+        &collection.outdated_files,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return,
+    };
+
+    if (item.error_bundle_src_base_path) |base_path| {
+        collection.allocator.free(base_path);
+        item.error_bundle_src_base_path = null;
+    }
+    item.error_bundle.deinit(collection.allocator);
+    item.error_bundle = .empty;
+}
+
 fn collectUrisFromErrorBundle(
     allocator: std.mem.Allocator,
     error_bundle: std.zig.ErrorBundle,

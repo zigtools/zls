@@ -551,6 +551,12 @@ pub const BuildOnSave = struct {
         });
         defer transport.deinit();
 
+        var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
+        defer {
+            for (diagnostic_tags.keys()) |tag| collection.clearErrorBundle(tag);
+            collection.publishDiagnostics() catch {};
+        }
+
         while (true) {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
                 error.EndOfStream => {
@@ -570,6 +576,7 @@ pub const BuildOnSave = struct {
                         &transport,
                         collection,
                         workspace_path,
+                        &diagnostic_tags,
                     ) catch |err| {
                         log.err("failed to handle error bundle message from zig build runner: {}", .{err});
                         return;
@@ -587,6 +594,7 @@ pub const BuildOnSave = struct {
         transport: *Transport,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
+        diagnostic_tags: *std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void),
     ) !void {
         const header = try transport.reader().readStructEndian(ServerToClient.ErrorBundle, .little);
 
@@ -603,6 +611,8 @@ pub const BuildOnSave = struct {
         std.hash.autoHash(&hasher, header.step_id);
 
         const diagnostic_tag: DiagnosticsCollection.Tag = @enumFromInt(@as(u32, @truncate(hasher.final())));
+
+        try diagnostic_tags.put(self.allocator, diagnostic_tag, {});
 
         try collection.pushErrorBundle(diagnostic_tag, header.cycle, workspace_path, error_bundle);
         try collection.publishDiagnostics();
