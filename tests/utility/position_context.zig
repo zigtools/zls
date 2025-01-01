@@ -518,7 +518,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
 
     const ctx = try Analyser.getPositionContext(allocator, tree, cursor_index, lookahead);
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 

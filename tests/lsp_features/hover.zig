@@ -1421,7 +1421,7 @@ fn testHoverWithOptions(
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     ctx.server.client_capabilities.hover_supports_md = options.markup_kind == .markdown;
@@ -1431,7 +1431,7 @@ fn testHoverWithOptions(
         .source = text,
     });
 
-    const params = types.HoverParams{
+    const params: types.HoverParams = .{
         .textDocument = .{ .uri = uri },
         .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
     };

@@ -58,7 +58,7 @@ pub const LoadConfigResult = union(enum) {
 
         pub fn toMessage(self: @This(), allocator: std.mem.Allocator) error{OutOfMemory}!?[]u8 {
             const error_bundle = self.error_bundle orelse return null;
-            var msg: std.ArrayListUnmanaged(u8) = .{};
+            var msg: std.ArrayListUnmanaged(u8) = .empty;
             errdefer msg.deinit(allocator);
             error_bundle.renderToWriter(.{ .ttyconf = .no_color }, msg.writer(allocator)) catch |err| switch (err) {
                 error.OutOfMemory => |e| return e,
@@ -97,13 +97,13 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) error{O
     };
     defer allocator.free(file_buf);
 
-    const parse_options = std.json.ParseOptions{
+    const parse_options: std.json.ParseOptions = .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     };
     var parse_diagnostics: std.json.Diagnostics = .{};
 
-    var scanner = std.json.Scanner.initCompleteInput(allocator, file_buf);
+    var scanner: std.json.Scanner = .initCompleteInput(allocator, file_buf);
     defer scanner.deinit();
     scanner.enableDiagnostics(&parse_diagnostics);
 

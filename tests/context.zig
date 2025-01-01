@@ -40,7 +40,7 @@ pub const Context = struct {
             const config_string = try std.json.stringifyAlloc(allocator, server.config, .{ .whitespace = .indent_2 });
             defer allocator.free(config_string);
 
-            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
             errdefer arena.deinit();
 
             const duped_config = try std.json.parseFromSliceLeaky(Config, arena.allocator(), config_string, .{ .allocate = .alloc_always });
@@ -51,7 +51,7 @@ pub const Context = struct {
 
         var context: Context = .{
             .server = server,
-            .arena = std.heap.ArenaAllocator.init(allocator),
+            .arena = .init(allocator),
         };
 
         _ = try context.server.sendRequestSync(context.arena.allocator(), "initialize", .{ .capabilities = .{} });
@@ -84,7 +84,7 @@ pub const Context = struct {
             .{ self.file_id, @tagName(options.mode) },
         );
 
-        const params = types.DidOpenTextDocumentParams{
+        const params: types.DidOpenTextDocumentParams = .{
             .textDocument = .{
                 .uri = uri,
                 .languageId = "zig",

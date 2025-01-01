@@ -513,7 +513,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     ctx.server.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
@@ -525,12 +525,12 @@ fn testInlayHints(source: []const u8, options: Options) !void {
 
     const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
-    const range = types.Range{
+    const range: types.Range = .{
         .start = types.Position{ .line = 0, .character = 0 },
         .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 
-    const params = types.InlayHintParams{
+    const params: types.InlayHintParams = .{
         .textDocument = .{ .uri = test_uri },
         .range = range,
     };
@@ -541,10 +541,10 @@ fn testInlayHints(source: []const u8, options: Options) !void {
         return error.InvalidResponse;
     };
 
-    var visited = try std.DynamicBitSetUnmanaged.initEmpty(allocator, hints.len);
+    var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, hints.len);
     defer visited.deinit(allocator);
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 

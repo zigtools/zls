@@ -7,7 +7,7 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) error{OutOfMemor
     if (path.len == 0) return try allocator.dupe(u8, "/");
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
-    var buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, prefix.len + path.len);
+    var buf: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, prefix.len + path.len);
     errdefer buf.deinit(allocator);
 
     buf.appendSliceAssumeCapacity(prefix);

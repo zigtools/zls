@@ -94,12 +94,12 @@ test "nested struct with self" {
 }
 
 fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const test_uri = try ctx.addDocument(.{ .source = source });
 
-    const params = types.DocumentSymbolParams{
+    const params: types.DocumentSymbolParams = .{
         .textDocument = .{ .uri = test_uri },
     };
 
@@ -108,10 +108,10 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var got = std.ArrayListUnmanaged(u8){};
+    var got: std.ArrayListUnmanaged(u8) = .empty;
     defer got.deinit(allocator);
 
-    var stack = std.BoundedArray([]const types.DocumentSymbol, 16){};
+    var stack: std.BoundedArray([]const types.DocumentSymbol, 16) = .{};
     stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
 
     var writer = got.writer(allocator);

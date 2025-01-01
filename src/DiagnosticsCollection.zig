@@ -226,7 +226,7 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
 pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || lsp.AnyTransport.WriteError)!void {
     const transport = collection.transport orelse return;
 
-    var arena_allocator = std.heap.ArenaAllocator.init(collection.allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(collection.allocator);
     defer arena_allocator.deinit();
 
     while (true) {
@@ -240,7 +240,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
 
             _ = arena_allocator.reset(.retain_capacity);
 
-            var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+            var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
             try collection.collectLspDiagnosticsForDocument(document_uri, collection.offset_encoding, arena_allocator.allocator(), &diagnostics);
 
             const params: lsp.types.PublishDiagnosticsParams = .{
@@ -429,7 +429,7 @@ test errorBundleSourceLocationToRange {
 }
 
 test DiagnosticsCollection {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
@@ -454,7 +454,7 @@ test DiagnosticsCollection {
         try std.testing.expectEqual(1, collection.outdated_files.count());
         try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -466,7 +466,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 0, null, eb2);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -476,7 +476,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 2, null, eb2);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -486,7 +486,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 3, null, .empty);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(0, diagnostics.items.len);
@@ -496,7 +496,7 @@ test DiagnosticsCollection {
         try collection.pushErrorBundle(@enumFromInt(16), 4, null, eb2);
         try collection.pushErrorBundle(@enumFromInt(17), 4, null, eb3);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .{};
+        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(2, diagnostics.items.len);

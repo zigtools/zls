@@ -18,7 +18,7 @@ test "diff - random" {
 }
 
 fn testDiff(allocator: std.mem.Allocator, seed: u64, encoding: zls.offsets.Encoding) !void {
-    var rand = std.Random.DefaultPrng.init(seed);
+    var rand: std.Random.DefaultPrng = .init(seed);
     const before = try gen(allocator, rand.random());
     defer allocator.free(before);
     const after = try gen(allocator, rand.random());

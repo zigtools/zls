@@ -38,7 +38,7 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     std.debug.assert(ast.isBuiltinCall(tree, node));
     std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport"));
 
-    var output = std.ArrayListUnmanaged(u8){};
+    var output: std.ArrayListUnmanaged(u8) = .empty;
     errdefer output.deinit(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
@@ -167,7 +167,7 @@ pub fn translate(
     };
 
     const argc = base_args.len + 2 * include_dirs.len + 1;
-    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, argc);
+    var argv: std.ArrayListUnmanaged([]const u8) = try .initCapacity(allocator, argc);
     defer argv.deinit(allocator);
 
     argv.appendSliceAssumeCapacity(base_args);
@@ -179,7 +179,7 @@ pub fn translate(
 
     argv.appendAssumeCapacity(file_path);
 
-    var process = std.process.Child.init(argv.items, allocator);
+    var process: std.process.Child = .init(argv.items, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Ignore;
@@ -195,7 +195,7 @@ pub fn translate(
         log.err("zig translate-c process did not terminate, error: {}", .{wait_err});
     };
 
-    var zcs = ZCSTransport.init(.{
+    var zcs: ZCSTransport = .init(.{
         .gpa = allocator,
         .in = process.stdout.?,
         .out = process.stdin.?,

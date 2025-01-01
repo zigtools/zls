@@ -19,7 +19,7 @@ pub fn main() !u8 {
     defer gpa.free(actual_unsanitized);
 
     const actual = blk: {
-        var base_dir_buffer: std.ArrayListUnmanaged(u8) = .{};
+        var base_dir_buffer: std.ArrayListUnmanaged(u8) = .empty;
         defer base_dir_buffer.deinit(gpa);
 
         try std.json.encodeJsonStringChars(args[3], .{}, base_dir_buffer.writer(gpa));

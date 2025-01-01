@@ -19,7 +19,7 @@ fn hoverSymbol(
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?[]const u8 {
-    var doc_strings = std.ArrayListUnmanaged([]const u8){};
+    var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
     return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings);
 }
 
@@ -36,8 +36,8 @@ fn hoverSymbolRecursive(
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
-    var type_references = Analyser.ReferencedType.Set.init(arena);
-    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
+    var type_references: Analyser.ReferencedType.Set = .empty;
+    var reference_collector: Analyser.ReferencedType.Collector = .{ .referenced_types = &type_references };
     if (try decl_handle.docComments(arena)) |doc|
         try doc_strings.append(arena, doc);
 
@@ -144,8 +144,8 @@ fn hoverSymbolRecursive(
     }
     const referenced_types: []const Analyser.ReferencedType = type_references.keys();
 
-    var hover_text = std.ArrayList(u8).init(arena);
-    const writer = hover_text.writer();
+    var hover_text: std.ArrayListUnmanaged(u8) = .empty;
+    const writer = hover_text.writer(arena);
     if (markup_kind == .markdown) {
         for (doc_strings.items) |doc|
             try writer.print("{s}\n\n", .{doc});
@@ -217,7 +217,7 @@ fn hoverDefinitionBuiltin(
 
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-    var contents: std.ArrayListUnmanaged(u8) = .{};
+    var contents: std.ArrayListUnmanaged(u8) = .empty;
     var writer = contents.writer(arena);
 
     if (std.mem.eql(u8, name, "@cImport")) blk: {
@@ -346,7 +346,7 @@ fn hoverDefinitionFieldAccess(
     const held_loc = offsets.locMerge(loc, name_loc);
     const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
 
-    var content = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, decls.len);
+    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.len);
 
     for (decls) |decl| {
         content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);

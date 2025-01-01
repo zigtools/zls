@@ -299,12 +299,12 @@ test "weird code" {
 }
 
 fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !void {
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const test_uri = try ctx.addDocument(.{ .source = source });
 
-    const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
+    const params: types.FoldingRangeParams = .{ .textDocument = .{ .uri = test_uri } };
 
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/foldingRange", params) orelse {
         std.debug.print("Server returned `null` as the result\n", .{});

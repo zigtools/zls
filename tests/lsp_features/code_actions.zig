@@ -855,7 +855,7 @@ fn testDiagnostic(
         want_zir: bool = true,
     },
 ) !void {
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
     ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
 
@@ -894,7 +894,7 @@ fn testDiagnostic(
         return error.InvalidResponse;
     };
 
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
+    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
     defer text_edits.deinit(allocator);
 
     for (response) |action| {

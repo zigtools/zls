@@ -62,7 +62,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.mutex.lock();
             defer pool.mutex.unlock();
 
-            const adapter = PrecomputedStringIndexAdapter{
+            const adapter: PrecomputedStringIndexAdapter = .{
                 .bytes = &pool.bytes,
                 .adapted_key = str,
                 .precomputed_key_hash = precomputed_key_hash,
@@ -85,7 +85,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.mutex.lock();
             defer pool.mutex.unlock();
 
-            const adapter = PrecomputedStringIndexAdapter{
+            const adapter: PrecomputedStringIndexAdapter = .{
                 .bytes = &pool.bytes,
                 .adapted_key = str,
                 .precomputed_key_hash = precomputed_key_hash,
@@ -169,9 +169,15 @@ pub fn StringPool(comptime config: Config) type {
             return std.mem.sliceTo(string_bytes + start, 0);
         }
 
-        mutex: @TypeOf(mutex_init) = mutex_init,
-        bytes: std.ArrayListUnmanaged(u8) = .{},
-        map: std.HashMapUnmanaged(u32, void, std.hash_map.StringIndexContext, std.hash_map.default_max_load_percentage) = .{},
+        mutex: MutexType,
+        bytes: std.ArrayListUnmanaged(u8),
+        map: std.HashMapUnmanaged(u32, void, std.hash_map.StringIndexContext, std.hash_map.default_max_load_percentage),
+
+        pub const empty: Pool = .{
+            .mutex = .{},
+            .bytes = .empty,
+            .map = .empty,
+        };
 
         pub fn deinit(pool: *Pool, allocator: Allocator) void {
             pool.bytes.deinit(allocator);
@@ -184,12 +190,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.* = undefined;
         }
 
-        const mutex_init = if (config.MutexType) |T|
-            T{}
-        else if (config.thread_safe)
-            std.Thread.Mutex{}
-        else
-            DummyMutex{};
+        pub const MutexType = config.MutexType orelse if (config.thread_safe) std.Thread.Mutex else DummyMutex;
 
         const DummyMutex = struct {
             pub fn lock(_: *@This()) void {}
@@ -229,7 +230,7 @@ const PrecomputedStringIndexAdapter = struct {
 
 test StringPool {
     const gpa = std.testing.allocator;
-    var pool = StringPool(.{}){};
+    var pool: StringPool(.{}) = .empty;
     defer pool.deinit(gpa);
 
     const str = "All Your Codebase Are Belong To Us";
@@ -246,7 +247,7 @@ test StringPool {
 
 test "StringPool - check interning" {
     const gpa = std.testing.allocator;
-    var pool = StringPool(.{ .thread_safe = false }){};
+    var pool: StringPool(.{ .thread_safe = false }) = .empty;
     defer pool.deinit(gpa);
 
     const str = "All Your Codebase Are Belong To Us";
@@ -266,9 +267,9 @@ test "StringPool - check interning" {
 
 test "StringPool - getOrPut on existing string without allocation" {
     const gpa = std.testing.allocator;
-    var failing_gpa = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
+    var failing_gpa: std.testing.FailingAllocator = .init(gpa, .{ .fail_index = 0 });
 
-    var pool = StringPool(.{}){};
+    var pool: StringPool(.{}) = .empty;
     defer pool.deinit(gpa);
 
     const hello_string = try pool.getOrPutString(gpa, "hello");

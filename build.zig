@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 /// Must match the `version` in `build.zig.zon`.
 /// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
-const zls_version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
+const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// std.Build: add new functions to create artifacts/Step.Compile from existing module
@@ -313,7 +313,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
             std.debug.assert(zls_version.order(ancestor_ver) == .gt); // ZLS version must be greater than its previous version
             std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
 
-            return std.SemanticVersion{
+            return .{
                 .major = zls_version.major,
                 .minor = zls_version.minor,
                 .patch = zls_version.patch,
@@ -436,7 +436,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         "--form", b.fmt("minimum-runtime-zig-version={s}", .{minimum_runtime_zig_version}),
     });
 
-    var compressed_artifacts = std.StringArrayHashMap(std.Build.LazyPath).init(b.allocator);
+    var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
 
     for (target_queries, release_artifacts) |target_query, exe| {
         const resolved_target = exe.root_module.resolved_target.?.result;
@@ -462,7 +462,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
             switch (extension) {
                 .zip => {
                     compress_cmd.addArgs(&.{ "7z", "a", "-mx=9" });
-                    compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
+                    compressed_artifacts.putNoClobber(b.allocator, file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
                     compress_cmd.addArtifactArg(exe);
                     compress_cmd.addFileArg(exe.getEmittedPdb());
                     compress_cmd.addFileArg(b.path("LICENSE"));
@@ -473,7 +473,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
                 => {
                     compress_cmd.setEnvironmentVariable("XZ_OPT", "-9");
                     compress_cmd.addArgs(&.{ "tar", "caf" });
-                    compressed_artifacts.putNoClobber(file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
+                    compressed_artifacts.putNoClobber(b.allocator, file_name, compress_cmd.addOutputFileArg(file_name)) catch @panic("OOM");
                     compress_cmd.addPrefixedDirectoryArg("-C", exe.getEmittedBinDirectory());
                     compress_cmd.addArg(exe_name);
 
@@ -554,8 +554,8 @@ const Build = blk: {
             @compileError(message);
         }
     } else {
-        const min_build_zig_simple = std.SemanticVersion{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
-        const zls_version_simple = std.SemanticVersion{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
+        const min_build_zig_simple: std.SemanticVersion = .{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
+        const zls_version_simple: std.SemanticVersion = .{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
         const min_zig_is_tagged = min_build_zig.build == null and min_build_zig.pre == null;
         if (!min_zig_is_tagged and zls_version_simple.order(min_build_zig_simple) != .eq) {
             const message = std.fmt.comptimePrint(
@@ -574,8 +574,8 @@ const Build = blk: {
     // check minimum build version
     const is_current_zig_tagged_release = builtin.zig_version.pre == null and builtin.zig_version.build == null;
     const is_min_build_zig_tagged_release = min_build_zig.pre == null and min_build_zig.build == null;
-    const min_build_zig_simple = std.SemanticVersion{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
-    const current_zig_simple = std.SemanticVersion{ .major = builtin.zig_version.major, .minor = builtin.zig_version.minor, .patch = 0 };
+    const min_build_zig_simple: std.SemanticVersion = .{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
+    const current_zig_simple: std.SemanticVersion = .{ .major = builtin.zig_version.major, .minor = builtin.zig_version.minor, .patch = 0 };
     if (switch (builtin.zig_version.order(min_build_zig)) {
         .lt => true,
         .eq => false,

@@ -269,12 +269,12 @@ fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_ac
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const test_uri = try ctx.addDocument(.{ .source = text });
 
-    const params = types.SignatureHelpParams{
+    const params: types.SignatureHelpParams = .{
         .textDocument = .{ .uri = test_uri },
         .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
     };

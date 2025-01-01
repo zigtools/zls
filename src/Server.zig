@@ -55,7 +55,7 @@ thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
 wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
-ip: InternPool = .{},
+ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
@@ -65,7 +65,7 @@ zig_ast_check_lock: std.Thread.Mutex = .{},
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 diagnostics_collection: DiagnosticsCollection,
-workspaces: std.ArrayListUnmanaged(Workspace) = .{},
+workspaces: std.ArrayListUnmanaged(Workspace) = .empty,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -227,7 +227,7 @@ fn sendToClientInternal(
     extra_name: []const u8,
     extra: anytype,
 ) error{OutOfMemory}![]u8 {
-    var buffer = std.ArrayListUnmanaged(u8){};
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buffer.deinit(server.allocator);
     var writer = buffer.writer(server.allocator);
     try writer.writeAll(
@@ -313,8 +313,8 @@ fn showMessage(
     }
 }
 
-fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
-    return Analyser.init(
+pub fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
+    return .init(
         server.allocator,
         &server.document_store,
         &server.ip,
@@ -344,12 +344,12 @@ pub fn getAutofixMode(server: *Server) enum {
 
 /// caller owns returned memory.
 fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
-    if (handle.tree.errors.len != 0) return .{};
-    if (handle.tree.mode == .zon) return .{};
+    if (handle.tree.errors.len != 0) return .empty;
+    if (handle.tree.mode == .zon) return .empty;
 
     var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
     defer error_bundle.deinit(server.allocator);
-    if (error_bundle.errorMessageCount() == 0) return .{};
+    if (error_bundle.errorMessageCount() == 0) return .empty;
 
     var analyser = server.initAnalyser(handle);
     defer analyser.deinit();
@@ -359,15 +359,15 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
-        .only_kinds = std.EnumSet(std.meta.Tag(types.CodeActionKind)).init(.{
+        .only_kinds = .init(.{
             .@"source.fixAll" = true,
         }),
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
     try builder.generateCodeAction(error_bundle, &actions);
 
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
+    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
     for (actions.items) |action| {
         std.debug.assert(action.kind != null);
         std.debug.assert(action.kind.? == .@"source.fixAll");
@@ -737,7 +737,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         },
     };
 
-    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
@@ -1343,7 +1343,7 @@ fn resolveConfiguration(
         const build_runner_hash = get_hash: {
             const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
 
-            var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
+            var hasher: Hasher = .init(&@splat(0));
             hasher.update(build_runner_source);
             hasher.update(build_runner_config_source);
             break :get_hash hasher.finalResult();
@@ -1753,7 +1753,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     defer analyser.deinit();
 
     const only_kinds = if (request.context.only) |kinds| blk: {
-        var set = std.EnumSet(std.meta.Tag(types.CodeActionKind)).initEmpty();
+        var set: std.EnumSet(std.meta.Tag(types.CodeActionKind)) = .initEmpty();
         for (kinds) |kind| {
             set.setPresent(kind, true);
         }
@@ -1768,7 +1768,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         .only_kinds = only_kinds,
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .{};
+    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
     try builder.generateCodeAction(error_bundle, &actions);
     try builder.generateCodeActionsInRange(request.range, &actions);
 
@@ -1890,11 +1890,11 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
         .config = .{},
         .document_store = .{
             .allocator = allocator,
-            .config = DocumentStore.Config.fromMainConfig(Config{}),
+            .config = .fromMainConfig(Config{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
         },
-        .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
+        .job_queue = .init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
         .diagnostics_collection = .{ .allocator = allocator },
@@ -2086,7 +2086,7 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
 
     try server.validateMessage(message);
 
-    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+    var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
     defer arena_allocator.deinit();
 
     switch (message) {

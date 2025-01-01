@@ -1952,7 +1952,7 @@ fn testSemanticTokensOptions(
         mode: std.zig.Ast.Mode = .zig,
     },
 ) !void {
-    var ctx = try Context.init();
+    var ctx: Context = try .init();
     defer ctx.deinit();
 
     const uri = try ctx.addDocument(.{
@@ -1960,7 +1960,7 @@ fn testSemanticTokensOptions(
         .mode = options.mode,
     });
 
-    const params = types.SemanticTokensParams{
+    const params: types.SemanticTokensParams = .{
         .textDocument = .{ .uri = uri },
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/semanticTokens/full", params) orelse {
@@ -1971,13 +1971,13 @@ fn testSemanticTokensOptions(
     const actual = response.data;
     try std.testing.expect(actual.len % 5 == 0); // every token is represented by 5 integers
 
-    var error_builder = ErrorBuilder.init(allocator);
+    var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
     try error_builder.addFile(uri, source);
 
-    var token_it = TokenIterator.init(source, actual);
+    var token_it: TokenIterator = .init(source, actual);
     var last_token_end: usize = 0;
 
     for (expected_tokens) |expected_token| {

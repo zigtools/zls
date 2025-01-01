@@ -214,7 +214,7 @@ pub fn fmtFieldDetail(ip: *InternPool, field: InternPool.Struct.Field) std.fmt.F
 
 test "dotCompletions - primitives" {
     const gpa = std.testing.allocator;
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
     try testCompletion(&ip, .bool_type, &.{});
@@ -226,7 +226,7 @@ test "dotCompletions - primitives" {
 
 test "dotCompletions - optional types" {
     const gpa = std.testing.allocator;
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
     const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
@@ -241,7 +241,7 @@ test "dotCompletions - optional types" {
 
 test "dotCompletions - array types" {
     const gpa = std.testing.allocator;
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
     const @"[3]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 3 } });
@@ -265,7 +265,7 @@ test "dotCompletions - array types" {
 
 test "dotCompletions - pointer types" {
     const gpa = std.testing.allocator;
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
@@ -317,7 +317,7 @@ test "dotCompletions - pointer types" {
 
 test "dotCompletions - single pointer indirection" {
     const gpa = std.testing.allocator;
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
     const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 1 } });
@@ -357,11 +357,11 @@ fn testCompletion(
     expected: []const types.CompletionItem,
 ) !void {
     const gpa = std.testing.allocator;
-    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    var arena_allocator: std.heap.ArenaAllocator = .init(gpa);
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
-    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+    var completions: std.ArrayListUnmanaged(types.CompletionItem) = .empty;
 
     try dotCompletions(arena, &completions, ip, index);
 
