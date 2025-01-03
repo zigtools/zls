@@ -2257,7 +2257,23 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
         .array_mult,
         .array_cat,
-        => {},
+        => {
+            const elem_idx = datas[node].lhs;
+            var elem_ty = try analyser.resolveTypeOfNode(.{ .node = elem_idx, .handle = handle }) orelse return null;
+
+            switch (elem_ty.data) {
+                .array => |*a| a.elem_count = null,
+                .pointer => |*p| {
+                    switch (p.elem_ty.data) {
+                        .array => |*a| a.elem_count = null,
+                        else => return null,
+                    }
+                },
+                else => return null,
+            }
+
+            return elem_ty;
+        },
 
         .assign_mul,
         .assign_div,
