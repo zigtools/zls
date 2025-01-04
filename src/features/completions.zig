@@ -247,7 +247,16 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         => {
             var kind: types.CompletionItemKind = blk: {
                 const parent_is_type_val = if (options.parent_container_ty) |container_ty| container_ty.is_type_val else null;
-                if (!(parent_is_type_val orelse true)) break :blk .Field;
+                if (decl_handle.decl == .ast_node)
+                    switch (decl_handle.handle.tree.nodeTag(decl_handle.decl.ast_node)) {
+                        .container_field_init,
+                        .container_field_align,
+                        .container_field,
+                        => {
+                            if (!(parent_is_type_val orelse true)) break :blk .Field;
+                        },
+                        else => {},
+                    };
                 break :blk if (decl_handle.isConst()) .Constant else .Variable;
             };
 
@@ -264,7 +273,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                     } else {
                         kind = .EnumMember;
                     }
-                } else if (ty.isStructType() or ty.isUnionType()) {
+                } else if (ty.is_type_val and ty.isStructType() or ty.isUnionType()) {
                     kind = .Struct;
                 } else if (decl_handle.decl == .function_parameter and ty.isMetaType()) {
                     kind = .TypeParameter;
