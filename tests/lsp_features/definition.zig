@@ -150,6 +150,13 @@ test "label" {
         \\    }
         \\}
     );
+    try testDefinition(
+        \\comptime {
+        \\    <def><decl>sw</decl></def>: switch (0) {
+        \\        else => break :<>sw,
+        \\    }
+        \\}
+    );
 }
 
 test "different cursor position" {

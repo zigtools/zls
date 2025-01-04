@@ -190,6 +190,13 @@ test "label" {
         \\    break :<0> 0;
         \\};
     );
+    try testReferences(
+        \\comptime {
+        \\    <0>: switch (0) {
+        \\        else => break :<0>,
+        \\    }
+        \\}
+    );
 }
 
 test "asm" {
