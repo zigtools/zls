@@ -1546,18 +1546,22 @@ test "decl literal" {
         \\    field: u32,
         \\
         \\    pub const foo: error{OutOfMemory}!S = .{};
-        \\    var bar: @This() = .{};
-        \\    var baz: u32 = .{};
+        \\    const bar: *const S = &.{};
+        \\    var baz: @This() = .{};
+        \\    var qux: u32 = .{};
         \\
         \\    fn init() ?S {}
+        \\    fn create() !*S {}
         \\    fn func() void {}
         \\};
         \\const s: S = .<cursor>;
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Constant },
-        .{ .label = "bar", .kind = .Struct },
+        .{ .label = "bar", .kind = .Constant },
+        .{ .label = "baz", .kind = .Struct },
         .{ .label = "init", .kind = .Function, .detail = "fn () ?S" },
+        .{ .label = "create", .kind = .Function, .detail = "fn () !*S" },
     });
 }
 

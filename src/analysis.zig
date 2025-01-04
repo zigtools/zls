@@ -2781,6 +2781,7 @@ pub const Type = struct {
             result_type = switch (result_type.data) {
                 .optional => |child_ty| child_ty.*,
                 .error_union => |info| info.payload.*,
+                .pointer => |child_ty| child_ty.elem_ty.*,
                 else => return result_type,
             };
         }
