@@ -389,7 +389,7 @@ test "nested generic function" {
         \\var list: ArrayList(u8) = .<cursor>;
     , &.{
         .{ .label = "items", .kind = .Field, .detail = "[]T" },
-        .{ .label = "empty", .kind = .Struct, .detail = "ArrayListAligned((unknown type))" }, // detail should be `ArrayListAligned(u8)`
+        .{ .label = "empty", .kind = .Constant, .detail = "ArrayListAligned((unknown type))" }, // detail should be `ArrayListAligned(u8)`
     });
 }
 
@@ -1617,7 +1617,7 @@ test "decl literal" {
         .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Constant },
         .{ .label = "bar", .kind = .Constant },
-        .{ .label = "baz", .kind = .Struct },
+        .{ .label = "baz", .kind = .Variable },
         .{ .label = "init", .kind = .Function, .detail = "fn () ?S" },
         .{ .label = "create", .kind = .Function, .detail = "fn () !*S" },
     });
@@ -1663,7 +1663,7 @@ test "decl literal function call" {
         \\}
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
-        .{ .label = "default", .kind = .Struct },
+        .{ .label = "default", .kind = .Constant },
         .{ .label = "init", .kind = .Function, .detail = "fn () S" },
     });
 }
@@ -2444,7 +2444,7 @@ test "return - decl literal" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
         .{ .label = "init", .kind = .Function, .detail = "fn () S" },
-        .{ .label = "default", .kind = .Struct },
+        .{ .label = "default", .kind = .Constant },
     });
 }
 
@@ -2495,7 +2495,7 @@ test "return - structinit decl literal" {
         .{ .label = "beta", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
         .{ .label = "init", .kind = .Function, .detail = "fn () S" },
-        .{ .label = "default", .kind = .Struct },
+        .{ .label = "default", .kind = .Constant },
     });
 }
 
@@ -2817,25 +2817,25 @@ test "builtin fns return type" {
         .{ .label = "void", .kind = .Field, .detail = "void" },
         .{ .label = "bool", .kind = .Field, .detail = "void" },
         .{ .label = "noreturn", .kind = .Field, .detail = "void" },
-        .{ .label = "int", .kind = .Struct, .detail = "Int" },
-        .{ .label = "float", .kind = .Struct, .detail = "Float" },
-        .{ .label = "pointer", .kind = .Struct, .detail = "Pointer" },
-        .{ .label = "array", .kind = .Struct, .detail = "Array" },
-        .{ .label = "@\"struct\"", .kind = .Struct, .detail = "Struct" },
+        .{ .label = "int", .kind = .Field, .detail = "Int" },
+        .{ .label = "float", .kind = .Field, .detail = "Float" },
+        .{ .label = "pointer", .kind = .Field, .detail = "Pointer" },
+        .{ .label = "array", .kind = .Field, .detail = "Array" },
+        .{ .label = "@\"struct\"", .kind = .Field, .detail = "Struct" },
         .{ .label = "comptime_float", .kind = .Field, .detail = "void" },
         .{ .label = "comptime_int", .kind = .Field, .detail = "void" },
         .{ .label = "undefined", .kind = .Field, .detail = "void" },
         .{ .label = "null", .kind = .Field, .detail = "void" },
-        .{ .label = "optional", .kind = .Struct, .detail = "Optional" },
-        .{ .label = "error_union", .kind = .Struct, .detail = "ErrorUnion" },
+        .{ .label = "optional", .kind = .Field, .detail = "Optional" },
+        .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
         .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
-        .{ .label = "@\"enum\"", .kind = .Struct, .detail = "Enum" },
-        .{ .label = "@\"union\"", .kind = .Struct, .detail = "Union" },
-        .{ .label = "@\"fn\"", .kind = .Struct, .detail = "Fn" },
-        .{ .label = "@\"opaque\"", .kind = .Struct, .detail = "Opaque" },
-        .{ .label = "frame", .kind = .Struct, .detail = "Frame" },
-        .{ .label = "@\"anyframe\"", .kind = .Struct, .detail = "AnyFrame" },
-        .{ .label = "vector", .kind = .Struct, .detail = "Vector" },
+        .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
+        .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
+        .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },
+        .{ .label = "@\"opaque\"", .kind = .Field, .detail = "Opaque" },
+        .{ .label = "frame", .kind = .Field, .detail = "Frame" },
+        .{ .label = "@\"anyframe\"", .kind = .Field, .detail = "AnyFrame" },
+        .{ .label = "vector", .kind = .Field, .detail = "Vector" },
         .{ .label = "enum_literal", .kind = .Field, .detail = "void" },
     });
 }
