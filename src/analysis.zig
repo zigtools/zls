@@ -3851,6 +3851,24 @@ pub fn getFieldAccessType(
             },
             // only hit when `(try foo())` otherwise getPositionContext never includes the `try` keyword
             .keyword_try => do_unwrap_error_payload = true,
+            .l_brace => {
+                var brace_count: usize = 1;
+                var next = tokenizer.next();
+                while (next.tag != .eof) : (next = tokenizer.next()) {
+                    if (next.tag == .r_brace) {
+                        brace_count -= 1;
+                        if (brace_count == 0) break;
+                    } else if (next.tag == .l_brace) {
+                        brace_count += 1;
+                    }
+                } else return null;
+                if (current_type) |ct| {
+                    if (ct.isStructType() or ct.isUnionType()) {
+                        // struct initialization
+                        current_type = ct.instanceTypeVal(analyser);
+                    }
+                }
+            },
             else => {
                 log.debug("Unimplemented token: {}", .{tok.tag});
                 return null;

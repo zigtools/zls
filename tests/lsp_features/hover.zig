@@ -313,6 +313,17 @@ test "struct" {
         \\(u32)
         \\```
     );
+    try testHover(
+        \\const S = struct { foo: u32 };
+        \\const foo = (S{ .foo = 0 }).<cursor>foo;
+    ,
+        \\```zig
+        \\u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+    );
 }
 
 test "decl literal" {
