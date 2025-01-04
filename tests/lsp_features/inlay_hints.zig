@@ -283,16 +283,16 @@ test "comptime return types" {
 
     try testInlayHints(
         \\const std<type> = @import("std");
-        \\const boolMap<HashMap(i32,bool)> = std.AutoHashMap(i32, bool).init(allocator);
-        \\const u32Map<HashMap(i32,u32)> = std.AutoHashMap(i32, u32).init(allocator);
+        \\const boolMap<HashMap(i32,bool,AutoContext(i32))> = std.AutoHashMap(i32, bool).init(allocator);
+        \\const u32Map<HashMap(i32,u32,AutoContext(i32))> = std.AutoHashMap(i32, u32).init(allocator);
         \\const boolPtr<?*bool> = boolMap.getPtr(123);
         \\const u32Ptr<?*u32> = u32Map.getPtr(123);
     , .{ .kind = .Type });
 
     try testInlayHints(
         \\const std<type> = @import("std");
-        \\const map<HashMap(i32,HashMap(i32,void))> = std.AutoHashMap(i32, std.AutoHashMap(i32, void)).init(allocator);
-        \\const value<?*HashMap(i32,void)> = map.getPtr(123);
+        \\const map<HashMap(i32,HashMap(i32,void,AutoContext(i32)),AutoContext(i32))> = std.AutoHashMap(i32, std.AutoHashMap(i32, void)).init(allocator);
+        \\const value<?*HashMap(i32,void,AutoContext(i32))> = map.getPtr(123);
         \\const double<?*void> = map.getPtr(123).?.*.getPtr(456);
     , .{ .kind = .Type });
 }

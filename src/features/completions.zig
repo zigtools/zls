@@ -103,6 +103,9 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .container => |scope_handle| {
+            const starting_depth = builder.analyser.comptime_state.depth();
+            try builder.analyser.comptime_state.push(builder.analyser.gpa, scope_handle.bound_params);
+            defer builder.analyser.comptime_state.pop(starting_depth);
             var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
             try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
 
@@ -111,11 +114,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     .parent_container_ty = ty,
                 });
             }
-        },
-        .bound_scope => |bound_scope| {
-            try builder.analyser.comptime_state.push(builder.analyser.gpa, bound_scope.bound_params);
-            defer builder.analyser.comptime_state.pop();
-            try typeToCompletion(builder, bound_scope.scope.*);
         },
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .merge_error_sets => {
@@ -175,6 +173,15 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         doc_comments.appendAssumeCapacity(docs);
     }
 
+    const starting_depth = builder.analyser.comptime_state.depth();
+    var pushed = false;
+    if (decl_handle.from) |from| {
+        if (from.bound_params.len > 0) {
+            try builder.analyser.comptime_state.push(builder.analyser.gpa, from.bound_params);
+            pushed = true;
+        }
+    }
+    defer if (pushed) builder.analyser.comptime_state.pop(starting_depth);
     const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
 
     if (maybe_resolved_ty) |resolve_ty| {
