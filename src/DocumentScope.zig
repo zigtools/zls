@@ -1280,6 +1280,20 @@ noinline fn walkSwitchNode(
 ) error{OutOfMemory}!void {
     const full = tree.fullSwitch(node_idx).?;
 
+    const switch_scope = if (full.label_token) |label_token| blk: {
+        const scope = try context.startScope(
+            .other,
+            .{ .ast_node = node_idx },
+            locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
+        );
+        try scope.pushDeclaration(
+            label_token,
+            .{ .label = .{ .identifier = label_token, .block = node_idx } },
+            .label,
+        );
+        break :blk scope;
+    } else null;
+
     try walkNode(context, tree, full.ast.condition);
 
     for (full.ast.cases, 0..) |case, case_index| {
@@ -1299,6 +1313,7 @@ noinline fn walkSwitchNode(
             try walkNode(context, tree, switch_case.ast.target_expr);
         }
     }
+    if (switch_scope) |scope| try scope.finalize();
 }
 
 noinline fn walkErrdeferNode(

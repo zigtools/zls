@@ -2888,6 +2888,16 @@ test "label" {
     , &.{
         .{ .label = "blk", .kind = .Text }, // idk what kind this should be
     });
+    // TODO: the AST for this only contains the comptime block so the label isn't completed
+    // try testCompletion(
+    //     \\comptime {
+    //     \\    sw: switch (0) {
+    //     \\        else => break :<cursor>,
+    //     \\    }
+    //     \\}
+    // , &.{
+    //     .{ .label = "sw", .kind = .Text },
+    // });
 
     try testCompletion(
         \\const S = struct { alpha: u32 };
