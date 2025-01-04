@@ -282,10 +282,154 @@ fn symbolReferences(
             try builder.collectReferences(curr_handle, .root);
         },
         .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
-        .label => unreachable, // handled separately by labelReferences
+        .label, .keyword => unreachable, // handled separately by labelReferences and controlFlowReferences
         .error_token => {},
     }
 
+    return builder.locations;
+}
+
+const ControlFlowCtx = struct {
+    const Error = error{OutOfMemory};
+    builder: *Builder,
+    handle: *DocumentStore.Handle,
+    allocator: std.mem.Allocator,
+    label: ?[]const u8,
+    last_loop: Ast.TokenIndex,
+    nodes: []const Ast.Node.Index,
+    fn iter(ctx: *ControlFlowCtx, tree: Ast, node: Ast.Node.Index) Error!void {
+        const main_token = tree.nodeMainToken(node);
+        switch (tree.nodeTag(node)) {
+            .@"break", .@"continue" => {
+                if (tree.nodeData(node).opt_token_and_opt_node[0].unwrap()) |label| {
+                    const loop_label = ctx.label orelse return;
+                    if (std.mem.eql(u8, loop_label, tree.tokenSlice(label))) {
+                        try ctx.builder.add(ctx.handle, main_token);
+                    }
+                } else {
+                    for (ctx.nodes) |n| switch (tree.nodeTag(n)) {
+                        .for_simple,
+                        .@"for",
+                        .while_cont,
+                        .while_simple,
+                        .@"while",
+                        .switch_comma,
+                        .@"switch",
+                        => {
+                            if (switch (tree.nodeTag(n)) {
+                                // break/continue on a switch must be labeled
+                                .switch_comma, .@"switch" => continue,
+                                else => tree.nodeMainToken(n) == ctx.last_loop,
+                            }) {
+                                try ctx.builder.add(ctx.handle, main_token);
+                                return;
+                            }
+                        },
+                        else => {},
+                    };
+                }
+            },
+
+            .@"while",
+            .while_simple,
+            .while_cont,
+            .@"for",
+            .for_simple,
+            => {
+                const last_loop = ctx.last_loop;
+                defer ctx.last_loop = last_loop;
+                ctx.last_loop = main_token;
+                try ast.iterateChildren(tree, node, ctx, Error, iter);
+            },
+            else => try ast.iterateChildren(tree, node, ctx, Error, iter),
+        }
+    }
+};
+
+fn controlFlowReferences(
+    allocator: std.mem.Allocator,
+    analyser: *Analyser,
+    request: GeneralReferencesRequest,
+    decl_handle: Analyser.DeclWithHandle,
+    encoding: offsets.Encoding,
+) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+    if (request == .rename) return .empty;
+    const handle = decl_handle.handle;
+    const tree = handle.tree;
+    const kw_token = decl_handle.decl.keyword;
+
+    var builder: Builder = .{
+        .allocator = allocator,
+        .analyser = analyser,
+        .decl_handle = decl_handle,
+        .encoding = encoding,
+    };
+
+    try builder.add(handle, kw_token);
+    const source_index = handle.tree.tokenStart(kw_token);
+    const nodes = try ast.nodesOverlappingIndex(allocator, tree, source_index);
+    defer allocator.free(nodes);
+
+    switch (tree.tokenTag(kw_token)) {
+        .keyword_continue,
+        .keyword_break,
+        => {
+            const maybe_label = blk: {
+                if (tree.tokenTag(kw_token + 1) != .colon) break :blk null;
+                if (tree.tokenTag(kw_token + 2) != .identifier) break :blk null;
+                break :blk kw_token + 2;
+            };
+            for (nodes) |node| switch (tree.nodeTag(node)) {
+                .for_simple,
+                .@"for",
+                .while_cont,
+                .while_simple,
+                .@"while",
+                => {
+                    // if the break/continue is unlabeled it must belong to the first loop we encounter
+                    const label = maybe_label orelse break try builder.add(handle, tree.nodeMainToken(node));
+                    const loop_label = ast.nodeLabelToken(tree, node) orelse continue;
+                    if (std.mem.eql(u8, tree.tokenSlice(label), tree.tokenSlice(loop_label))) {
+                        try builder.add(handle, tree.nodeMainToken(node));
+                    }
+                },
+                .switch_comma,
+                .@"switch",
+                => {
+                    const label = maybe_label orelse continue;
+                    const switch_label = ast.nodeLabelToken(tree, node) orelse continue;
+                    if (std.mem.eql(u8, tree.tokenSlice(label), tree.tokenSlice(switch_label))) {
+                        try builder.add(
+                            handle,
+                            // we already know the switch is labeled so we can just offset
+                            tree.nodeMainToken(node) + 2,
+                        );
+                    }
+                },
+                else => {},
+            };
+        },
+        .keyword_for,
+        .keyword_while,
+        .keyword_switch,
+        => {
+            const maybe_label = blk: {
+                if (tree.tokenTag(kw_token - 1) != .colon) break :blk null;
+                if (tree.tokenTag(kw_token - 2) != .identifier) break :blk null;
+                break :blk kw_token - 2;
+            };
+            var ctx: ControlFlowCtx = .{
+                .builder = &builder,
+                .handle = handle,
+                .allocator = allocator,
+                .label = if (maybe_label) |l| tree.tokenSlice(l) else null,
+                .last_loop = kw_token,
+                .nodes = nodes,
+            };
+            try ast.iterateChildren(tree, nodes[0], &ctx, ControlFlowCtx.Error, ControlFlowCtx.iter);
+        },
+        else => {},
+    }
     return builder.locations;
 }
 
@@ -467,6 +611,10 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         },
         .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
         .enum_literal => try analyser.getSymbolEnumLiteral(handle, source_index, name),
+        .keyword => Analyser.DeclWithHandle{
+            .decl = .{ .keyword = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft() },
+            .handle = handle,
+        },
         else => null,
     } orelse return null;
 
@@ -475,10 +623,16 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         else => true,
     };
 
-    const locations = if (decl.decl == .label)
-        try labelReferences(arena, decl, server.offset_encoding, include_decl)
-    else
-        try symbolReferences(
+    const locations = switch (decl.decl) {
+        .label => try labelReferences(arena, decl, server.offset_encoding, include_decl),
+        .keyword => try controlFlowReferences(
+            arena,
+            &analyser,
+            request,
+            decl,
+            server.offset_encoding,
+        ),
+        else => try symbolReferences(
             arena,
             &analyser,
             request,
@@ -486,7 +640,8 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             server.offset_encoding,
             include_decl,
             server.config.skip_std_references,
-        );
+        ),
+    };
 
     switch (request) {
         .rename => |rename| {
