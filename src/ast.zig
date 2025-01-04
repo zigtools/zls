@@ -1230,7 +1230,9 @@ fn iterateChildrenTypeErased(
         },
         .test_decl, .@"errdefer" => try callback(context, tree, tree.nodeData(node).opt_token_and_node[1]),
         .anyframe_type => try callback(context, tree, tree.nodeData(node).token_and_node[1]),
-        .@"break" => {
+        .@"break",
+        .@"continue",
+        => {
             if (tree.nodeData(node).opt_token_and_opt_node[1].unwrap()) |rhs| {
                 try callback(context, tree, rhs);
             }
@@ -1470,7 +1472,6 @@ fn iterateChildrenTypeErased(
         .asm_input,
         => unreachable,
 
-        .@"continue",
         .anyframe_literal,
         .char_literal,
         .number_literal,
