@@ -230,6 +230,16 @@ test "struct" {
         \\(type)
         \\```
     );
+    try testHover(
+        \\<cursor>foo: u32,
+    ,
+        \\```zig
+        \\u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+    );
 }
 
 test "decl literal" {

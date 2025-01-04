@@ -52,6 +52,14 @@ test "simple" {
         \\    foo(0, 1, <cursor>)
         \\}
     , "fn foo(a: u32, b: u32, c: u32) void", 2);
+    // first character on line
+    try testSignatureHelp(
+        \\fn foo(a: u32) void {
+        \\    foo(
+        \\<cursor>
+        \\    )
+        \\}
+    , "fn foo(a: u32) void", 0);
 }
 
 test "no right paren" {

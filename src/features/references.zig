@@ -445,8 +445,6 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const handle = server.document_store.getHandle(request.uri()) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
-    if (request.position().character <= 0) return null;
-
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
