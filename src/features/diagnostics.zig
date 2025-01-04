@@ -63,7 +63,9 @@ pub fn generateDiagnostics(
         var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
 
         if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
-            try code_actions.collectAutoDiscardDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+            var analyser = server.initAnalyser(handle);
+            defer analyser.deinit();
+            try code_actions.collectAutoDiscardDiagnostics(&analyser, handle, arena, &diagnostics, server.offset_encoding);
         }
 
         if (server.config.warn_style and handle.tree.mode == .zig) {

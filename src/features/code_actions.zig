@@ -244,13 +244,15 @@ pub const supported_code_actions: []const types.CodeActionKind = &.{
 };
 
 pub fn collectAutoDiscardDiagnostics(
-    tree: Ast,
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+    const tree = handle.tree;
 
     // search for the following pattern:
     // _ = some_identifier; // autofix
@@ -276,13 +278,30 @@ pub fn collectAutoDiscardDiagnostics(
         const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
 
+        const related_info = blk: {
+            const decl = (try analyser.lookupSymbolGlobal(
+                handle,
+                offsets.tokenToSlice(tree, identifier_token),
+                tree.tokenStart(identifier_token),
+            )) orelse break :blk &.{};
+            const def = try decl.definitionToken(analyser, false);
+            const range = offsets.tokenToRange(tree, def.token, offset_encoding);
+            break :blk try arena.dupe(types.DiagnosticRelatedInformation, &.{.{
+                .location = .{
+                    .uri = handle.uri,
+                    .range = range,
+                },
+                .message = "variable declared here",
+            }});
+        };
+
         try diagnostics.append(arena, .{
             .range = offsets.tokenToRange(tree, identifier_token, offset_encoding),
             .severity = .Information,
             .code = null,
             .source = "zls",
             .message = "auto discard for unused variable",
-            // TODO add a relatedInformation that shows where the discarded identifier comes from
+            .relatedInformation = related_info,
         });
     }
 }
