@@ -4605,12 +4605,13 @@ pub fn getPositionContext(
                     return .{ .char_literal = tok.loc };
                 }
             },
-            .keyword_break,
-            .keyword_continue,
-            .keyword_callconv,
             .keyword_addrspace,
+            .keyword_break,
+            .keyword_callconv,
+            .keyword_continue,
             .keyword_for,
             .keyword_if,
+            .keyword_switch,
             .keyword_while,
             => curr_ctx.ctx = .{ .keyword = tok.tag },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
