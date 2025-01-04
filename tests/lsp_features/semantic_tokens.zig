@@ -96,6 +96,33 @@ test "string literals" {
     });
 }
 
+test "string literal escape sequences" {
+    try testSemanticTokensOptions(
+        \\const omega = "Hello, \u{1f30e}!\n";
+    ,
+        &.{
+            .{ "const", .keyword, .{} },
+            .{ "omega", .variable, .{ .declaration = true } },
+            .{ "=", .operator, .{} },
+            .{ "\"Hello, \\u{1f30e}!\\n\"", .string, .{} },
+        },
+        .{ .overlapping_token_support = false },
+    );
+    try testSemanticTokensOptions(
+        \\const omega = "Hello, \u{1f30e}!\n";
+    ,
+        &.{
+            .{ "const", .keyword, .{} },
+            .{ "omega", .variable, .{ .declaration = true } },
+            .{ "=", .operator, .{} },
+            .{ "\"Hello, \\u{1f30e}!\\n\"", .string, .{} },
+            .{ "\\u{1f30e}", .escapeSequence, .{} },
+            .{ "\\n", .escapeSequence, .{} },
+        },
+        .{ .overlapping_token_support = true },
+    );
+}
+
 test "type literals" {
     try testSemanticTokens(
         \\bool,
@@ -137,6 +164,32 @@ test "char literals" {
         .{ "=", .operator, .{} },
         .{ "' '", .string, .{} },
     });
+}
+
+test "char literal escape sequences" {
+    try testSemanticTokensOptions(
+        \\var alpha = '\n';
+    ,
+        &.{
+            .{ "var", .keyword, .{} },
+            .{ "alpha", .variable, .{ .declaration = true } },
+            .{ "=", .operator, .{} },
+            .{ "'\\n'", .string, .{} },
+        },
+        .{ .overlapping_token_support = false },
+    );
+    try testSemanticTokensOptions(
+        \\var alpha = '\n';
+    ,
+        &.{
+            .{ "var", .keyword, .{} },
+            .{ "alpha", .variable, .{ .declaration = true } },
+            .{ "=", .operator, .{} },
+            .{ "'\\n'", .string, .{} },
+            .{ "\\n", .escapeSequence, .{} },
+        },
+        .{ .overlapping_token_support = true },
+    );
 }
 
 test "var decl" {
@@ -1965,10 +2018,13 @@ fn testSemanticTokensOptions(
     expected_tokens: []const TokenData,
     options: struct {
         mode: std.zig.Ast.Mode = .zig,
+        overlapping_token_support: bool = false,
     },
 ) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
+
+    ctx.server.client_capabilities.supports_semantic_tokens_overlapping = options.overlapping_token_support;
 
     const uri = try ctx.addDocument(.{
         .source = source,
@@ -1993,14 +2049,14 @@ fn testSemanticTokensOptions(
     try error_builder.addFile(uri, source);
 
     var token_it: TokenIterator = .init(source, actual);
-    var last_token_end: usize = 0;
+    var last_token_index: usize = 0; // should only be used for error messages
 
     for (expected_tokens) |expected_token| {
         const token = token_it.next() orelse {
-            try error_builder.msgAtIndex("expected a `{s}` token here", uri, last_token_end, .err, .{expected_token.@"0"});
+            try error_builder.msgAtIndex("expected a `{s}` token here", uri, last_token_index, .err, .{expected_token.@"0"});
             return error.ExpectedToken;
         };
-        last_token_end = token.loc.end;
+        last_token_index = if (options.overlapping_token_support) token.loc.start else token.loc.end;
 
         const token_source = offsets.locToSlice(source, token.loc);
 

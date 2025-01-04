@@ -29,6 +29,7 @@ pub const TokenType = enum(u32) {
     modifier,
     comment,
     string,
+    escapeSequence,
     number,
     regexp,
     operator,
@@ -68,6 +69,7 @@ const Builder = struct {
     token_buffer: std.ArrayListUnmanaged(u32) = .empty,
     encoding: offsets.Encoding,
     limited: bool,
+    overlappingTokenSupport: bool,
 
     fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
         const tree = self.handle.tree;
@@ -131,7 +133,7 @@ const Builder = struct {
         std.debug.assert(loc.start <= loc.end);
         std.debug.assert(self.previous_source_index <= self.source_index);
         if (loc.start < self.previous_source_index) return;
-        if (loc.start < self.source_index) return;
+        if (!self.overlappingTokenSupport and loc.start < self.source_index) return;
         switch (token_type) {
             .namespace,
             .type,
@@ -157,6 +159,7 @@ const Builder = struct {
             .keyword,
             .comment,
             .string,
+            .escapeSequence,
             .number,
             .operator,
             .builtin,
@@ -696,6 +699,20 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .char_literal,
         => {
             try writeToken(builder, main_token, .string);
+            if (builder.overlappingTokenSupport) {
+                const string_start = tree.tokenStart(main_token);
+                const string = offsets.nodeToSlice(tree, node);
+                var offset: usize = 0;
+                while (offset < string.len) {
+                    const slash_index = std.mem.indexOfScalarPos(u8, string, offset, '\\') orelse break;
+                    offset = slash_index;
+                    _ = std.zig.string_literal.parseEscapeSequence(string, &offset);
+                    try builder.addDirect(.escapeSequence, .{}, .{
+                        .start = slash_index + string_start,
+                        .end = offset + string_start,
+                    });
+                }
+            }
         },
         .multiline_string_literal => {
             const first_token, const last_token = tree.nodeData(node).token_and_token;
@@ -1092,6 +1109,7 @@ pub fn writeSemanticTokens(
     loc: ?offsets.Loc,
     encoding: offsets.Encoding,
     limited: bool,
+    overlappingTokenSupport: bool,
 ) error{OutOfMemory}!types.SemanticTokens {
     var builder = Builder{
         .arena = arena,
@@ -1099,6 +1117,7 @@ pub fn writeSemanticTokens(
         .handle = handle,
         .encoding = encoding,
         .limited = limited,
+        .overlappingTokenSupport = overlappingTokenSupport,
     };
 
     var nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();
