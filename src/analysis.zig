@@ -1268,6 +1268,17 @@ fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, node_handle: Nod
     return analyser.ip.toInt(ip_index, T);
 }
 
+fn extractArrayData(data: *Type.Data) ?*Type.Data {
+    return switch (data.*) {
+        .array => data,
+        .pointer => |*p| switch (p.elem_ty.data) {
+            .array => &p.elem_ty.data,
+            else => null,
+        },
+        else => null,
+    };
+}
+
 const primitives: std.StaticStringMap(InternPool.Index) = .initComptime(.{
     .{ "anyerror", .anyerror_type },
     .{ "anyframe", .anyframe_type },
@@ -2256,23 +2267,39 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {},
 
         .array_mult,
-        .array_cat,
         => {
             const elem_idx = datas[node].lhs;
             var elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = elem_idx, .handle = handle }) orelse return null;
+            const arr_data = extractArrayData(&elem_ty.data) orelse return null;
 
-            switch (elem_ty.data) {
-                .array => |*a| a.elem_count = null,
-                .pointer => |*p| {
-                    switch (p.elem_ty.data) {
-                        .array => |*a| a.elem_count = null,
-                        else => return null,
-                    }
-                },
-                else => return null,
+            const mult_idx = datas[node].rhs;
+            const mult_lit = try analyser.resolveIntegerLiteral(u64, .{ .node = mult_idx, .handle = handle });
+
+            if (arr_data.array.elem_count) |count| {
+                arr_data.array.elem_count = if (mult_lit) |mult| count * mult else null;
             }
 
             return elem_ty;
+        },
+        .array_cat,
+        => {
+            const l_elem_idx = datas[node].lhs;
+            var l_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = l_elem_idx, .handle = handle }) orelse return null;
+            const l_arr_data = extractArrayData(&l_elem_ty.data) orelse return null;
+
+            const r_elem_idx = datas[node].rhs;
+            var r_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = r_elem_idx, .handle = handle }) orelse return null;
+            const r_arr_data = extractArrayData(&r_elem_ty.data) orelse return null;
+
+            if (l_arr_data.array.elem_count != null) {
+                if (r_arr_data.array.elem_count) |right_count| {
+                    l_arr_data.array.elem_count.? += right_count;
+                } else {
+                    l_arr_data.array.elem_count = null;
+                }
+            }
+
+            return l_elem_ty;
         },
 
         .assign_mul,
