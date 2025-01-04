@@ -2763,8 +2763,8 @@ test "builtin fns taking an enum arg" {
         \\    @setFloatMode(.<cursor>)
         \\}
     , &.{
-        .{ .label = "strict", .kind = .EnumMember, .detail = "strict" },
-        .{ .label = "optimized", .kind = .EnumMember, .detail = "optimized" },
+        .{ .label = "strict", .kind = .EnumMember },
+        .{ .label = "optimized", .kind = .EnumMember },
     });
     try testCompletion(
         \\test {
@@ -2780,13 +2780,13 @@ test "builtin fns taking an enum arg" {
         \\    @reduce(.<cursor>
         \\}
     , &.{
-        .{ .label = "And", .kind = .EnumMember, .detail = "And" },
-        .{ .label = "Or", .kind = .EnumMember, .detail = "Or" },
-        .{ .label = "Xor", .kind = .EnumMember, .detail = "Xor" },
-        .{ .label = "Min", .kind = .EnumMember, .detail = "Min" },
-        .{ .label = "Max", .kind = .EnumMember, .detail = "Max" },
-        .{ .label = "Add", .kind = .EnumMember, .detail = "Add" },
-        .{ .label = "Mul", .kind = .EnumMember, .detail = "Mul" },
+        .{ .label = "And", .kind = .EnumMember },
+        .{ .label = "Or", .kind = .EnumMember },
+        .{ .label = "Xor", .kind = .EnumMember },
+        .{ .label = "Min", .kind = .EnumMember },
+        .{ .label = "Max", .kind = .EnumMember },
+        .{ .label = "Add", .kind = .EnumMember },
+        .{ .label = "Mul", .kind = .EnumMember },
     });
     try testCompletionTextEdit(.{
         .source = "comptime { @export(foo ,.<cursor>",
@@ -2849,14 +2849,14 @@ test "builtin fns taking an enum arg" {
         \\    @call(.<cursor>
         \\}
     , &.{
-        .{ .label = "auto", .kind = .EnumMember, .detail = "auto" },
-        .{ .label = "async_kw", .kind = .EnumMember, .detail = "async_kw" },
-        .{ .label = "never_tail", .kind = .EnumMember, .detail = "never_tail" },
-        .{ .label = "never_inline", .kind = .EnumMember, .detail = "never_inline" },
-        .{ .label = "no_async", .kind = .EnumMember, .detail = "no_async" },
-        .{ .label = "always_tail", .kind = .EnumMember, .detail = "always_tail" },
-        .{ .label = "always_inline", .kind = .EnumMember, .detail = "always_inline" },
-        .{ .label = "compile_time", .kind = .EnumMember, .detail = "compile_time" },
+        .{ .label = "auto", .kind = .EnumMember },
+        .{ .label = "async_kw", .kind = .EnumMember },
+        .{ .label = "never_tail", .kind = .EnumMember },
+        .{ .label = "never_inline", .kind = .EnumMember },
+        .{ .label = "no_async", .kind = .EnumMember },
+        .{ .label = "always_tail", .kind = .EnumMember },
+        .{ .label = "always_inline", .kind = .EnumMember },
+        .{ .label = "compile_time", .kind = .EnumMember },
     });
     try testCompletionTextEdit(.{
         .source = "var a: u16 addrspace(.<cursor>",

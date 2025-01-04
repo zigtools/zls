@@ -1361,10 +1361,14 @@ fn collectContainerFields(
                     break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
                 };
 
+                const detail = if (Analyser.getContainerFieldSignature(tree, field)) |signature| detail: {
+                    if (std.mem.eql(u8, name, signature) and field.ast.tuple_like) break :detail null;
+                    break :detail signature;
+                } else null;
                 break :blk .{
                     .label = name,
                     .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-                    .detail = Analyser.getContainerFieldSignature(tree, field),
+                    .detail = detail,
                     .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
                     .insertText = insert_text,
                 };
