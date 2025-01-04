@@ -112,6 +112,11 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 });
             }
         },
+        .bound_scope => |bound_scope| {
+            try builder.analyser.comptime_state.push(builder.analyser.gpa, bound_scope.bound_params);
+            defer builder.analyser.comptime_state.pop();
+            try typeToCompletion(builder, bound_scope.scope.*);
+        },
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .merge_error_sets => {
                 const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
