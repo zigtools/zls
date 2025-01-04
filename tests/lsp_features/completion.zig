@@ -1321,6 +1321,17 @@ test "struct" {
         .{ .label = "Self", .kind = .Struct },
         .{ .label = "bar", .kind = .Struct },
     });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo = (S{}).<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
 }
 
 test "union" {

@@ -96,6 +96,10 @@ test "field access" {
         \\var s: S = undefined;
         \\const foo = s.<>alpha;
     );
+    try testDefinition(
+        \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
+        \\const foo = (S{ .alpha = undefined }).<>alpha;
+    );
 }
 
 test "struct init" {
