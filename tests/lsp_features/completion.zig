@@ -2803,13 +2803,6 @@ test "builtin fns taking an enum arg" {
         .enable_snippets = false,
     });
     try testCompletionTextEdit(.{
-        .source = "test { @fence(.<cursor>",
-        .label = "acq_rel",
-        .expected_insert_line = "test { @fence(.acq_rel",
-        .expected_replace_line = "test { @fence(.acq_rel",
-        .enable_snippets = false,
-    });
-    try testCompletionTextEdit(.{
         .source = "test { @cmpxchgWeak(1,2,3,4, .<cursor>",
         .label = "acq_rel",
         .expected_insert_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",

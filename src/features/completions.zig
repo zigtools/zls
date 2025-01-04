@@ -1477,13 +1477,6 @@ fn resolveBuiltinFnArg(
             }
         }
 
-        if (std.mem.eql(u8, name, "@fence")) {
-            switch (arg_index) {
-                0 => break :name "AtomicOrder",
-                else => return null,
-            }
-        }
-
         if (std.mem.eql(u8, name, "@cmpxchgWeak") or std.mem.eql(u8, name, "@cmpxchgStrong")) {
             switch (arg_index) {
                 4, 5 => break :name "AtomicOrder",
