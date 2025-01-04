@@ -1721,6 +1721,24 @@ test "switch" {
         .{ "val", .variable, .{ .declaration = true } },
         .{ "val", .variable, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = sw: switch (0) {
+        \\    else => break :sw 0,
+        \\};
+    ,
+        &.{
+            .{ "const", .keyword, .{} },
+            .{ "foo", .variable, .{ .declaration = true, .static = true } },
+            .{ "=", .operator, .{} },
+            .{ "sw", .label, .{ .declaration = true } },
+            .{ "switch", .keyword, .{} },
+            .{ "0", .number, .{} },
+            .{ "else", .keyword, .{} },
+            .{ "break", .keyword, .{} },
+            .{ "sw", .label, .{} },
+            .{ "0", .number, .{} },
+        },
+    );
 }
 
 test "defer" {
