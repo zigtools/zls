@@ -4,6 +4,9 @@ const TupleType = struct { i64, f32 };
 const some_tuple: struct { i64, f32 } = undefined;
 //    ^^^^^^^^^^ (struct { i64, f32 })()
 
+const either_tuple = if (true) .{undefined} else .{ undefined, undefined };
+//    ^^^^^^^^^^^^ (either type)()
+
 comptime {
     const some_tuple_0, const some_tuple_1 = some_tuple;
     //    ^^^^^^^^^^^^ (i64)()
