@@ -202,6 +202,7 @@ fn fieldTokenType(
 ) ?TokenType {
     if (!ast.isContainer(handle.tree, container_decl))
         return null;
+    if (handle.tree.nodeTag(container_decl) == .root) return .property;
     if (is_static_access and ast.isTaggedUnion(handle.tree, container_decl))
         return .enumMember;
     const main_token = handle.tree.nodeMainToken(container_decl);
@@ -875,7 +876,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeNodeTokens(builder, lhs);
             try writeNodeTokens(builder, rhs);
         },
-        .for_range, => {
+        .for_range => {
             const start, const opt_end = tree.nodeData(node).node_and_opt_node;
             try writeNodeTokens(builder, start);
             if (opt_end.unwrap()) |end| try writeNodeTokens(builder, end);

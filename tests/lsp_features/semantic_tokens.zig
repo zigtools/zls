@@ -905,6 +905,23 @@ test "root struct" {
         .{ "=", .operator, .{} },
         .{ "undefined", .keywordLiteral, .{} },
     });
+    // field access
+    try testSemanticTokens(
+        \\alpha: u32,
+        \\const beta: @This() = undefined;
+        \\_ = beta.alpha;
+    , &.{
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "beta", .variable, .{ .declaration = true } },
+        .{ "@This", .builtin, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "=", .operator, .{} },
+        .{ "beta", .variable, .{} },
+        .{ "alpha", .property, .{} },
+    });
 }
 
 test "struct" {
