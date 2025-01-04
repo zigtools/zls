@@ -267,6 +267,36 @@ test "var decl" {
     , .{ .kind = .Type });
 }
 
+test "comptime return types" {
+    try testInlayHints(
+        \\const std<type> = @import("std");
+        \\const list<ArrayListAligned(ArrayListAligned(i32))> = std.ArrayList(std.ArrayList(i32)).init(allocator);
+        \\const innerList<ArrayListAligned(i32)> = list.items[0];
+        \\const nested<i32> = list.items[0].items[0];
+    , .{ .kind = .Type });
+
+    try testInlayHints(
+        \\const std<type> = @import("std");
+        \\const str<[]u8> = try std.mem.concat(allocator, u8, .{ "foo", "bar" });
+        \\const int<[]i32> = try std.mem.concat(allocator, i32, .{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+    , .{ .kind = .Type });
+
+    try testInlayHints(
+        \\const std<type> = @import("std");
+        \\const boolMap<HashMap(i32,bool)> = std.AutoHashMap(i32, bool).init(allocator);
+        \\const u32Map<HashMap(i32,u32)> = std.AutoHashMap(i32, u32).init(allocator);
+        \\const boolPtr<?*bool> = boolMap.getPtr(123);
+        \\const u32Ptr<?*u32> = u32Map.getPtr(123);
+    , .{ .kind = .Type });
+
+    try testInlayHints(
+        \\const std<type> = @import("std");
+        \\const map<HashMap(i32,HashMap(i32,void))> = std.AutoHashMap(i32, std.AutoHashMap(i32, void)).init(allocator);
+        \\const value<?*HashMap(i32,void)> = map.getPtr(123);
+        \\const double<?*void> = map.getPtr(123).?.*.getPtr(456);
+    , .{ .kind = .Type });
+}
+
 test "assign destructure" {
     try testInlayHints(
         \\test {
