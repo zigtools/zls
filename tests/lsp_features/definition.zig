@@ -167,6 +167,13 @@ test "different cursor position" {
         \\    _ = foo<>;
         \\}
     );
+    try testDefinition(
+        \\const <def><decl>foo</decl></def> = 5;
+        \\comptime {
+        \\    _ = 
+        \\<>foo;
+        \\}
+    );
 }
 
 test "alias" {

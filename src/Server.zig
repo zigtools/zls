@@ -1635,8 +1635,6 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
-    if (request.position.character == 0) return null;
-
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
@@ -1710,8 +1708,6 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
 }
 
 fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
-    if (request.position.character == 0) return null;
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
