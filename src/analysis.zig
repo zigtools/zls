@@ -4525,7 +4525,7 @@ fn collectUsingnamespaceDeclarationsOfContainer(
     switch (use_expr.data) {
         .bound_scope => |bs| {
             try analyser.collectDeclarationsOfContainer(
-                bs.scope.*.container().data.container,
+                bs.container().*.data.container,
                 original_handle,
                 instance_access,
                 decl_collection,
