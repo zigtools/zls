@@ -115,7 +115,7 @@ pub fn main() !void {
     var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
 
     var install_prefix: ?[]const u8 = null;
-    var dir_list = std.Build.DirList{};
+    var dir_list: std.Build.DirList = .{};
     var max_rss: u64 = 0;
     var skip_oom_steps = false;
     var seed: u32 = 0;
@@ -1364,7 +1364,7 @@ const copied_from_zig = struct {
         };
 
         var code: u8 = undefined;
-        const stdout = if (b.runAllowFail(&[_][]const u8{
+        const stdout = if (b.runAllowFail(&.{
             "pkg-config",
             pkg_name,
             "--cflags",
@@ -1384,22 +1384,22 @@ const copied_from_zig = struct {
         while (it.next()) |tok| {
             if (mem.eql(u8, tok, "-I")) {
                 const dir = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&[_][]const u8{ "-I", dir });
+                try zig_args.appendSlice(&.{ "-I", dir });
             } else if (mem.startsWith(u8, tok, "-I")) {
                 try zig_args.append(tok);
             } else if (mem.eql(u8, tok, "-L")) {
                 const dir = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&[_][]const u8{ "-L", dir });
+                try zig_args.appendSlice(&.{ "-L", dir });
             } else if (mem.startsWith(u8, tok, "-L")) {
                 try zig_args.append(tok);
             } else if (mem.eql(u8, tok, "-l")) {
                 const lib = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&[_][]const u8{ "-l", lib });
+                try zig_args.appendSlice(&.{ "-l", lib });
             } else if (mem.startsWith(u8, tok, "-l")) {
                 try zig_args.append(tok);
             } else if (mem.eql(u8, tok, "-D")) {
                 const macro = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&[_][]const u8{ "-D", macro });
+                try zig_args.appendSlice(&.{ "-D", macro });
             } else if (mem.startsWith(u8, tok, "-D")) {
                 try zig_args.append(tok);
             } else if (b.debug_pkg_config) {
@@ -1411,14 +1411,14 @@ const copied_from_zig = struct {
     }
 
     fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
-        const stdout = try self.runAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
+        const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .Ignore);
         var list = ArrayList(std.Build.PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
         while (line_it.next()) |line| {
             if (mem.trim(u8, line, " \t").len == 0) continue;
             var tok_it = mem.tokenizeAny(u8, line, " \t");
-            try list.append(std.Build.PkgConfigPkg{
+            try list.append(.{
                 .name = tok_it.next() orelse return error.PkgConfigInvalidOutput,
                 .desc = tok_it.rest(),
             });

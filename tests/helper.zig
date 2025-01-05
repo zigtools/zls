@@ -103,7 +103,7 @@ pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const 
     }
     try new_source.appendSlice(allocator, source[source_index..source.len]);
 
-    return CollectPlaceholdersResult{
+    return .{
         .locations = locations,
         .new_source = try new_source.toOwnedSlice(allocator),
     };

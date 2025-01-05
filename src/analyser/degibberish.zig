@@ -12,7 +12,7 @@ const FormatDegibberishData = struct {
 };
 
 pub fn fmtDegibberish(ip: *InternPool, ty: InternPool.Index) std.fmt.Formatter(formatDegibberish) {
-    const data = FormatDegibberishData{ .ip = ip, .ty = ty };
+    const data: FormatDegibberishData = .{ .ip = ip, .ty = ty };
     return .{ .data = data };
 }
 

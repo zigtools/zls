@@ -43,7 +43,7 @@ fn gotoDefinitionSymbol(
             const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
             const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
-            return types.DefinitionLink{
+            return .{
                 .originSelectionRange = name_range,
                 .targetUri = type_declaration.handle.uri,
                 .targetRange = target_range,
@@ -53,7 +53,7 @@ fn gotoDefinitionSymbol(
     };
     const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);
 
-    return types.DefinitionLink{
+    return .{
         .originSelectionRange = name_range,
         .targetUri = token_handle.handle.uri,
         .targetRange = target_range,
@@ -130,13 +130,13 @@ fn gotoDefinitionBuiltin(
         const hash = handle.cimports.items(.hash)[index];
 
         const result = document_store.cimports.get(hash) orelse return null;
-        const target_range = types.Range{
+        const target_range: types.Range = .{
             .start = .{ .line = 0, .character = 0 },
             .end = .{ .line = 0, .character = 0 },
         };
         switch (result) {
             .failure => return null,
-            .success => |uri| return types.DefinitionLink{
+            .success => |uri| return .{
                 .originSelectionRange = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
                 .targetUri = uri,
                 .targetRange = target_range,
@@ -219,7 +219,7 @@ fn gotoDefinitionString(
         .start = .{ .line = 0, .character = 0 },
         .end = .{ .line = 0, .character = 0 },
     };
-    return types.DefinitionLink{
+    return .{
         .originSelectionRange = offsets.locToRange(handle.tree.source, loc, offset_encoding),
         .targetUri = uri orelse return null,
         .targetRange = target_range,

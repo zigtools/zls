@@ -155,7 +155,7 @@ pub const Env = struct {
 pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.json.Parsed(Env) {
     const zig_env_result = std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &[_][]const u8{ zig_exe_path, "env" },
+        .argv = &.{ zig_exe_path, "env" },
     }) catch {
         logger.err("Failed to execute zig env", .{});
         return null;
@@ -197,7 +197,7 @@ fn getConfigurationType() type {
     for (config_info.@"struct".fields, &fields) |field, *new_field| {
         new_field.* = field;
         if (@typeInfo(field.type) != .optional) {
-            new_field.type = @Type(std.builtin.Type{
+            new_field.type = @Type(.{
                 .optional = .{ .child = field.type },
             });
         }
@@ -223,7 +223,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
 
     var it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);
     while (it.next()) |path| {
-        var full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, zig_exe });
+        var full_path = try std.fs.path.join(allocator, &.{ path, zig_exe });
         defer allocator.free(full_path);
 
         if (!std.fs.path.isAbsolute(full_path)) {

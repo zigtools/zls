@@ -14,7 +14,7 @@ pub const BuildOption = struct {
             try allocator.dupe(u8, val)
         else
             null;
-        return BuildOption{
+        return .{
             .name = copy_name,
             .value = copy_value,
         };

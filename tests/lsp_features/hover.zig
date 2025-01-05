@@ -563,6 +563,89 @@ test "union" {
     );
 }
 
+test "array cat and mult" {
+    try testHover(
+        \\const <cursor>a = [_]u8{0} ++ [_]u8{1};
+    ,
+        \\```zig
+        \\const a = [_]u8{0} ++ [_]u8{1}
+        \\```
+        \\```zig
+        \\([?]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = [1]u8{0} ++ [_]u8{1};
+    ,
+        \\```zig
+        \\const a = [1]u8{0} ++ [_]u8{1}
+        \\```
+        \\```zig
+        \\([?]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = [_]u8{0} ++ [1]u8{1};
+    ,
+        \\```zig
+        \\const a = [_]u8{0} ++ [1]u8{1}
+        \\```
+        \\```zig
+        \\([?]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = [1]u8{0} ++ [1]u8{1};
+    ,
+        \\```zig
+        \\const a = [1]u8{0} ++ [1]u8{1}
+        \\```
+        \\```zig
+        \\([2]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = &[2]u8{ 0, 1 } ++ &[3]u8{ 2, 3, 4 };
+    ,
+        \\```zig
+        \\const a = &[2]u8{ 0, 1 } ++ &[3]u8{ 2, 3, 4 }
+        \\```
+        \\```zig
+        \\(*[5]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = [_]u8{0} ** 2;
+    ,
+        \\```zig
+        \\const a = [_]u8{0} ** 2
+        \\```
+        \\```zig
+        \\([?]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = [1]u8{0} ** 2;
+    ,
+        \\```zig
+        \\const a = [1]u8{0} ** 2
+        \\```
+        \\```zig
+        \\([2]u8)
+        \\```
+    );
+    try testHover(
+        \\const <cursor>a = &[3]u8{ 0, 1, 2 } ** 2;
+    ,
+        \\```zig
+        \\const a = &[3]u8{ 0, 1, 2 } ** 2
+        \\```
+        \\```zig
+        \\(*[6]u8)
+        \\```
+    );
+}
+
 test "sentinel values" {
     try testHover(
         \\const <cursor>a: [:0] i1 = undefined;

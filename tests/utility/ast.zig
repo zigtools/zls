@@ -79,8 +79,8 @@ fn testNodesAtLoc(source: []const u8) !void {
     std.debug.assert(std.mem.eql(u8, offsets.locToSlice(source, old_locs[2]), "<inner>"));
     std.debug.assert(std.mem.eql(u8, offsets.locToSlice(source, old_locs[3]), "<outer>"));
 
-    const inner_loc = offsets.Loc{ .start = locs[1].start, .end = locs[2].start };
-    const outer_loc = offsets.Loc{ .start = locs[0].start, .end = locs[3].end };
+    const inner_loc: offsets.Loc = .{ .start = locs[1].start, .end = locs[2].start };
+    const outer_loc: offsets.Loc = .{ .start = locs[0].start, .end = locs[3].end };
 
     const new_source = try allocator.dupeZ(u8, ccp.new_source);
     defer allocator.free(new_source);
@@ -91,7 +91,7 @@ fn testNodesAtLoc(source: []const u8) !void {
     const nodes = try ast.nodesAtLoc(allocator, tree, inner_loc);
     defer allocator.free(nodes);
 
-    const actual_loc = offsets.Loc{
+    const actual_loc: offsets.Loc = .{
         .start = offsets.nodeToLoc(tree, nodes[0]).start,
         .end = offsets.nodeToLoc(tree, nodes[nodes.len - 1]).end,
     };

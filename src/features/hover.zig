@@ -266,7 +266,7 @@ fn hoverDefinitionBuiltin(
         },
     }
 
-    return types.Hover{
+    return .{
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,

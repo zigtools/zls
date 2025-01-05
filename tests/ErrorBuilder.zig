@@ -219,7 +219,7 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
             try writer.print("{s}:\n", .{file_name});
         }
 
-        var it = MsgItemIterator{
+        var it: MsgItemIterator = .{
             .source = file.source,
             .messages = file.messages.items,
         };
@@ -234,10 +234,10 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
             const line_loc = offsets.lineLocAtIndex(file.source, some_line_source_index);
             defer last_line_end = line_loc.end;
 
-            const unified_loc = if (builder.unified) |n|
+            const unified_loc: offsets.Loc = if (builder.unified) |n|
                 offsets.multilineLocAtIndex(file.source, some_line_source_index, n)
             else
-                offsets.Loc{
+                .{
                     .start = 0,
                     .end = file.source.len,
                 };

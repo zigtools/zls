@@ -1352,7 +1352,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
             // #boundsCheck
             // https://github.com/zigtools/zls/issues/567
             if (last_param_type_token >= it.tree.tokens.len - 1)
-                return Ast.full.FnProto.Param{
+                return .{
                     .first_doc_comment = first_doc_comment,
                     .comptime_noalias = comptime_noalias,
                     .name_token = name_token,
@@ -1365,7 +1365,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 it.tok_i += 1;
             }
             it.tok_flag = true;
-            return Ast.full.FnProto.Param{
+            return .{
                 .first_doc_comment = first_doc_comment,
                 .comptime_noalias = comptime_noalias,
                 .name_token = name_token,
@@ -1388,7 +1388,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
         switch (token_tags[it.tok_i]) {
             .ellipsis3 => {
                 it.tok_flag = false; // Next iteration should return null.
-                return Ast.full.FnProto.Param{
+                return .{
                     .first_doc_comment = first_doc_comment,
                     .comptime_noalias = null,
                     .name_token = null,
@@ -1410,7 +1410,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
         }
         if (token_tags[it.tok_i] == .keyword_anytype) {
             it.tok_i += 1;
-            return Ast.full.FnProto.Param{
+            return .{
                 .first_doc_comment = first_doc_comment,
                 .comptime_noalias = comptime_noalias,
                 .name_token = name_token,

@@ -493,10 +493,10 @@ const ScopeContext = struct {
             .loc = loc,
             .parent_scope = context.current_scope,
             .child_scopes = .{
-                .small = [_]Scope.OptionalIndex{.none} ** Scope.ChildScopes.small_size,
+                .small = @splat(.none),
             },
             .child_declarations = .{
-                .small = [_]Declaration.OptionalIndex{.none} ** Scope.ChildDeclarations.small_size,
+                .small = @splat(.none),
             },
         });
         const new_scope_index: Scope.Index = @enumFromInt(context.doc_scope.scopes.len - 1);
@@ -896,7 +896,7 @@ noinline fn walkContainerDecl(
                     const gop = try context.doc_scope.global_enum_set.getOrPutContext(
                         context.allocator,
                         main_token,
-                        IdentifierTokenContext{ .tree = tree },
+                        .{ .tree = tree },
                     );
                     if (!gop.found_existing) {
                         gop.key_ptr.* = main_token;
@@ -963,7 +963,7 @@ noinline fn walkErrorSetNode(
         const gop = try context.doc_scope.global_error_set.getOrPutContext(
             context.allocator,
             identifier_token,
-            IdentifierTokenContext{ .tree = tree },
+            .{ .tree = tree },
         );
         if (!gop.found_existing or token_tags[identifier_token - 1] == .doc_comment) {
             // a token with a doc comment takes priority.

@@ -101,7 +101,7 @@ pub fn StringPool(comptime config: Config) type {
                 allocator,
                 str,
                 adapter,
-                std.hash_map.StringIndexContext{ .bytes = &pool.bytes },
+                .{ .bytes = &pool.bytes },
             );
 
             if (!gop.found_existing) {

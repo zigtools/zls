@@ -4032,7 +4032,7 @@ fn testCompletionTextEdit(
 
         const TextEditOrInsertReplace = std.meta.Child(@TypeOf(completion_item.textEdit));
 
-        const text_edit_or_insert_replace = completion_item.textEdit orelse blk: {
+        const text_edit_or_insert_replace: TextEditOrInsertReplace = completion_item.textEdit orelse blk: {
             var start_index: usize = cursor_idx;
             while (start_index > 0 and zls.Analyser.isSymbolChar(handle.tree.source[start_index - 1])) {
                 start_index -= 1;
@@ -4040,10 +4040,10 @@ fn testCompletionTextEdit(
 
             const start_position = offsets.indexToPosition(text, start_index, ctx.server.offset_encoding);
 
-            break :blk TextEditOrInsertReplace{
-                .TextEdit = types.TextEdit{
+            break :blk .{
+                .TextEdit = .{
                     .newText = completion_item.insertText orelse completion_item.label,
-                    .range = types.Range{ .start = start_position, .end = cursor_position },
+                    .range = .{ .start = start_position, .end = cursor_position },
                 },
             };
         };
@@ -4070,8 +4070,8 @@ fn testCompletionTextEdit(
                 try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.insert)); // text edit range must contain the cursor position
                 try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.replace)); // text edit range must contain the cursor position
 
-                const insert_text_edit = types.TextEdit{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.insert };
-                const replace_text_edit = types.TextEdit{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.replace };
+                const insert_text_edit: types.TextEdit = .{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.insert };
+                const replace_text_edit: types.TextEdit = .{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.replace };
 
                 const actual_insert_text = try zls.diff.applyTextEdits(allocator, text, &.{insert_text_edit}, ctx.server.offset_encoding);
                 defer allocator.free(actual_insert_text);

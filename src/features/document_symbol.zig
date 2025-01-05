@@ -216,7 +216,7 @@ fn convertSymbolsInternal(
             .selectionRange = undefined,
             .children = convertSymbolsInternal(symbol.children.items, symbol_buffer, mappings),
         };
-        mappings.appendSliceAssumeCapacity(&[4]offsets.multiple.IndexToPositionMapping{
+        mappings.appendSliceAssumeCapacity(&.{
             .{ .output = &out.range.start, .source_index = symbol.loc.start },
             .{ .output = &out.selectionRange.start, .source_index = symbol.selection_loc.start },
             .{ .output = &out.selectionRange.end, .source_index = symbol.selection_loc.end },
@@ -235,7 +235,7 @@ pub fn getDocumentSymbols(
     var root_symbols: std.ArrayListUnmanaged(Symbol) = .empty;
     var total_symbol_count: usize = 0;
 
-    var ctx = Context{
+    var ctx: Context = .{
         .arena = arena,
         .last_var_decl_name = null,
         .parent_node = 0, // root-node
