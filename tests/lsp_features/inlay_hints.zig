@@ -526,7 +526,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 
     const range: types.Range = .{
-        .start = types.Position{ .line = 0, .character = 0 },
+        .start = .{ .line = 0, .character = 0 },
         .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 

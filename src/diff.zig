@@ -6,7 +6,7 @@ const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const DiffMatchPatch = @import("diffz");
 
-const dmp = DiffMatchPatch{
+const dmp: DiffMatchPatch = .{
     .diff_timeout = 250,
 };
 

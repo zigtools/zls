@@ -655,7 +655,7 @@ pub const Index = enum(u32) {
         start: u32,
         len: u32,
 
-        pub const empty = Slice{
+        pub const empty: Slice = .{
             .start = std.math.maxInt(u32),
             .len = 0,
         };
@@ -713,7 +713,7 @@ pub const StringSlice = struct {
     start: u32,
     len: u32,
 
-    pub const empty = StringSlice{
+    pub const empty: StringSlice = .{
         .start = std.math.maxInt(u32),
         .len = 0,
     };
@@ -751,7 +751,7 @@ pub const LimbSlice = struct {
     start: u32,
     len: u32,
 
-    pub const empty = LimbSlice{
+    pub const empty: LimbSlice = .{
         .start = std.math.maxInt(u32),
         .len = 0,
     };
@@ -2507,7 +2507,7 @@ fn coerceInMemoryAllowed(
     const src_tag = ip.zigTypeTag(src_ty);
 
     if (dest_tag != src_tag) {
-        return InMemoryCoercionResult{ .no_match = .{
+        return .{ .no_match = .{
             .actual = dest_ty,
             .wanted = src_ty,
         } };
@@ -2525,7 +2525,7 @@ fn coerceInMemoryAllowed(
                 (dest_info.signedness == .signed and (src_info.signedness == .unsigned or dest_info.bits <= src_info.bits)) or
                 (dest_info.signedness == .unsigned and src_info.signedness == .signed))
             {
-                return InMemoryCoercionResult{ .int_not_coercible = .{
+                return .{ .int_not_coercible = .{
                     .actual_signedness = src_info.signedness,
                     .wanted_signedness = dest_info.signedness,
                     .actual_bits = src_info.bits,
@@ -2538,7 +2538,7 @@ fn coerceInMemoryAllowed(
             const dest_bits = ip.floatBits(dest_ty, target);
             const src_bits = ip.floatBits(src_ty, target);
             if (dest_bits == src_bits) return .ok;
-            return InMemoryCoercionResult{ .no_match = .{
+            return .{ .no_match = .{
                 .actual = dest_ty,
                 .wanted = src_ty,
             } };
@@ -2555,7 +2555,7 @@ fn coerceInMemoryAllowed(
             }
 
             if (maybe_dest_ptr_ty != maybe_src_ptr_ty) {
-                return InMemoryCoercionResult{ .optional_shape = .{
+                return .{ .optional_shape = .{
                     .actual = src_ty,
                     .wanted = dest_ty,
                 } };
@@ -2566,7 +2566,7 @@ fn coerceInMemoryAllowed(
 
             const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_child_type, src_child_type, dest_is_const, target);
             if (child != .ok) {
-                return InMemoryCoercionResult{ .optional_child = .{
+                return .{ .optional_child = .{
                     .child = try child.dupe(arena),
                     .actual = src_child_type,
                     .wanted = dest_child_type,
@@ -2583,7 +2583,7 @@ fn coerceInMemoryAllowed(
             const src_payload = src_key.error_union_type.payload_type;
             const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_payload, src_payload, dest_is_const, target);
             if (child != .ok) {
-                return InMemoryCoercionResult{ .error_union_payload = .{
+                return .{ .error_union_payload = .{
                     .child = try child.dupe(arena),
                     .actual = src_payload,
                     .wanted = dest_payload,
@@ -2601,7 +2601,7 @@ fn coerceInMemoryAllowed(
             const dest_info = dest_key.array_type;
             const src_info = src_key.array_type;
             if (dest_info.len != src_info.len) {
-                return InMemoryCoercionResult{ .array_len = .{
+                return .{ .array_len = .{
                     .actual = src_info.len,
                     .wanted = dest_info.len,
                 } };
@@ -2609,7 +2609,7 @@ fn coerceInMemoryAllowed(
 
             const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.child, src_info.child, dest_is_const, target);
             if (child != .ok) {
-                return InMemoryCoercionResult{ .array_elem = .{
+                return .{ .array_elem = .{
                     .child = try child.dupe(arena),
                     .actual = src_info.child,
                     .wanted = dest_info.child,
@@ -2621,7 +2621,7 @@ fn coerceInMemoryAllowed(
                 dest_info.sentinel == src_info.sentinel // is this enough for a value equality check?
             );
             if (!ok_sent) {
-                return InMemoryCoercionResult{ .array_sentinel = .{
+                return .{ .array_sentinel = .{
                     .actual = src_info.sentinel,
                     .wanted = dest_info.sentinel,
                     .ty = dest_info.child,
@@ -2634,7 +2634,7 @@ fn coerceInMemoryAllowed(
             const src_len = src_key.vector_type.len;
 
             if (dest_len != src_len) {
-                return InMemoryCoercionResult{ .vector_len = .{
+                return .{ .vector_len = .{
                     .actual = src_len,
                     .wanted = dest_len,
                 } };
@@ -2644,7 +2644,7 @@ fn coerceInMemoryAllowed(
             const src_elem_ty = src_key.vector_type.child;
             const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_elem_ty, src_elem_ty, dest_is_const, target);
             if (child != .ok) {
-                return InMemoryCoercionResult{ .vector_elem = .{
+                return .{ .vector_elem = .{
                     .child = try child.dupe(arena),
                     .actual = src_elem_ty,
                     .wanted = dest_elem_ty,
@@ -2654,7 +2654,7 @@ fn coerceInMemoryAllowed(
             return .ok;
         },
         else => {
-            return InMemoryCoercionResult{ .no_match = .{
+            return .{ .no_match = .{
                 .actual = dest_ty,
                 .wanted = src_ty,
             } };
@@ -2690,7 +2690,7 @@ fn coerceInMemoryAllowedErrorSets(
 
     if (missing_error_buf.items.len == 0) return .ok;
 
-    return InMemoryCoercionResult{
+    return .{
         .missing_error = try arena.dupe(String, missing_error_buf.items),
     };
 }
@@ -2707,15 +2707,15 @@ fn coerceInMemoryAllowedFns(
     const src_info = ip.indexToKey(src_ty).function_type;
 
     if (dest_info.flags.is_var_args != src_info.flags.is_var_args) {
-        return InMemoryCoercionResult{ .fn_var_args = dest_info.flags.is_var_args };
+        return .{ .fn_var_args = dest_info.flags.is_var_args };
     }
 
     if (dest_info.flags.is_generic != src_info.flags.is_generic) {
-        return InMemoryCoercionResult{ .fn_generic = dest_info.flags.is_generic };
+        return .{ .fn_generic = dest_info.flags.is_generic };
     }
 
     if (dest_info.flags.calling_convention != src_info.flags.calling_convention) {
-        return InMemoryCoercionResult{ .fn_cc = .{
+        return .{ .fn_cc = .{
             .actual = src_info.flags.calling_convention,
             .wanted = dest_info.flags.calling_convention,
         } };
@@ -2724,7 +2724,7 @@ fn coerceInMemoryAllowedFns(
     if (src_info.return_type != Index.noreturn_type) {
         const rt = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.return_type, src_info.return_type, true, target);
         if (rt != .ok) {
-            return InMemoryCoercionResult{ .fn_return_type = .{
+            return .{ .fn_return_type = .{
                 .child = try rt.dupe(arena),
                 .actual = src_info.return_type,
                 .wanted = dest_info.return_type,
@@ -2733,14 +2733,14 @@ fn coerceInMemoryAllowedFns(
     }
 
     if (dest_info.args.len != src_info.args.len) {
-        return InMemoryCoercionResult{ .fn_param_count = .{
+        return .{ .fn_param_count = .{
             .actual = src_info.args.len,
             .wanted = dest_info.args.len,
         } };
     }
 
     if (!dest_info.args_is_noalias.eql(src_info.args_is_noalias)) {
-        return InMemoryCoercionResult{ .fn_param_noalias = .{
+        return .{ .fn_param_noalias = .{
             .actual = src_info.args_is_noalias.mask,
             .wanted = dest_info.args_is_noalias.mask,
         } };
@@ -2748,7 +2748,7 @@ fn coerceInMemoryAllowedFns(
 
     if (!dest_info.args_is_comptime.eql(src_info.args_is_comptime)) {
         const index = dest_info.args_is_comptime.xorWith(src_info.args_is_comptime).findFirstSet().?;
-        return InMemoryCoercionResult{ .fn_param_comptime = .{
+        return .{ .fn_param_comptime = .{
             .index = index,
             .wanted = dest_info.args_is_comptime.isSet(index),
         } };
@@ -2764,7 +2764,7 @@ fn coerceInMemoryAllowedFns(
         // Note: Cast direction is reversed here.
         const param = try ip.coerceInMemoryAllowed(gpa, arena, src_arg_ty, dest_arg_ty, true, target);
         if (param != .ok) {
-            return InMemoryCoercionResult{ .fn_param = .{
+            return .{ .fn_param = .{
                 .child = try param.dupe(arena),
                 .actual = src_arg_ty,
                 .wanted = dest_arg_ty,
@@ -2799,7 +2799,7 @@ fn coerceInMemoryAllowedPtrs(
     const ok_ptr_size = src_info.flags.size == dest_info.flags.size or
         src_info.flags.size == .C or dest_info.flags.size == .C;
     if (!ok_ptr_size) {
-        return InMemoryCoercionResult{ .ptr_size = .{
+        return .{ .ptr_size = .{
             .actual = src_info.flags.size,
             .wanted = dest_info.flags.size,
         } };
@@ -2810,7 +2810,7 @@ fn coerceInMemoryAllowedPtrs(
         (!src_info.flags.is_volatile or dest_info.flags.is_volatile);
 
     if (!ok_cv_qualifiers) {
-        return InMemoryCoercionResult{ .ptr_qualifiers = .{
+        return .{ .ptr_qualifiers = .{
             .actual_const = src_info.flags.is_const,
             .wanted_const = dest_info.flags.is_const,
             .actual_volatile = src_info.flags.is_volatile,
@@ -2819,7 +2819,7 @@ fn coerceInMemoryAllowedPtrs(
     }
 
     if (dest_info.flags.address_space != src_info.flags.address_space) {
-        return InMemoryCoercionResult{ .ptr_addrspace = .{
+        return .{ .ptr_addrspace = .{
             .actual = src_info.flags.address_space,
             .wanted = dest_info.flags.address_space,
         } };
@@ -2827,7 +2827,7 @@ fn coerceInMemoryAllowedPtrs(
 
     const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_info.elem_type, dest_info.flags.is_const, target);
     if (child != .ok) {
-        return InMemoryCoercionResult{ .ptr_child = .{
+        return .{ .ptr_child = .{
             .child = try child.dupe(arena),
             .actual = src_info.elem_type,
             .wanted = dest_info.elem_type,
@@ -2839,7 +2839,7 @@ fn coerceInMemoryAllowedPtrs(
 
     const ok_allows_zero = (dest_allow_zero and (src_allow_zero or dest_is_const)) or (!dest_allow_zero and !src_allow_zero);
     if (!ok_allows_zero) {
-        return InMemoryCoercionResult{ .ptr_allowzero = .{
+        return .{ .ptr_allowzero = .{
             .actual = src_ty,
             .wanted = dest_ty,
         } };
@@ -2848,7 +2848,7 @@ fn coerceInMemoryAllowedPtrs(
     if (src_info.packed_offset.host_size != dest_info.packed_offset.host_size or
         src_info.packed_offset.bit_offset != dest_info.packed_offset.bit_offset)
     {
-        return InMemoryCoercionResult{ .ptr_bit_range = .{
+        return .{ .ptr_bit_range = .{
             .actual_host = src_info.packed_offset.host_size,
             .wanted_host = dest_info.packed_offset.host_size,
             .actual_offset = src_info.packed_offset.bit_offset,
@@ -2858,7 +2858,7 @@ fn coerceInMemoryAllowedPtrs(
 
     const ok_sent = dest_info.sentinel == .none or src_info.flags.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
     if (!ok_sent) {
-        return InMemoryCoercionResult{ .ptr_sentinel = .{
+        return .{ .ptr_sentinel = .{
             .actual = src_info.sentinel,
             .wanted = dest_info.sentinel,
             .ty = dest_info.elem_type,

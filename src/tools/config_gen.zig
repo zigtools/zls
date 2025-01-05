@@ -349,7 +349,7 @@ const Tokenizer = struct {
     };
 
     fn next(self: *Tokenizer) Token {
-        var result = Token{
+        var result: Token = .{
             .id = .Eof,
             .start = self.index,
             .end = undefined,

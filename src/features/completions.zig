@@ -132,7 +132,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
         ),
         .either => |either_entries| {
             for (either_entries) |entry| {
-                const entry_ty = Analyser.Type{ .data = entry.type_data, .is_type_val = ty.is_type_val };
+                const entry_ty: Analyser.Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
                 try typeToCompletion(builder, entry_ty);
             }
         },
@@ -180,7 +180,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
 
     const documentation: std.meta.FieldType(types.CompletionItem, .documentation) =
         .{
-        .MarkupContent = types.MarkupContent{
+        .MarkupContent = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
             .value = try std.mem.join(builder.arena, "\n\n", doc_comments.constSlice()),
         },
@@ -267,7 +267,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                 .label = name,
                 .kind = kind,
                 .documentation = if (compile_error_message) |message| .{
-                    .MarkupContent = types.MarkupContent{
+                    .MarkupContent = .{
                         .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
                         .value = message,
                     },
@@ -775,7 +775,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             else
                 label;
 
-            _ = try completions.getOrPut(builder.arena, types.CompletionItem{
+            _ = try completions.getOrPut(builder.arena, .{
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
@@ -999,7 +999,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
             );
 
             if (!gop.found_existing) {
-                gop.key_ptr.* = types.CompletionItem{
+                gop.key_ptr.* = .{
                     .label = name,
                     .detail = switch (kind) {
                         .error_set => try std.fmt.allocPrint(builder.arena, "error.{}", .{std.zig.fmtId(name)}),
@@ -1016,7 +1016,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
             if (gop.key_ptr.documentation == null) {
                 if (try Analyser.getDocCommentsBeforeToken(builder.arena, dependency_handle.tree, identifier_token)) |documentation| {
                     gop.key_ptr.documentation = .{
-                        .MarkupContent = types.MarkupContent{
+                        .MarkupContent = .{
                             // TODO check if client supports markdown
                             .kind = .markdown,
                             .value = documentation,
@@ -1260,7 +1260,7 @@ fn getSwitchOrStructInitContext(
     // FIXME: This creates a 'blind spot' if the first node in a file is a .container_field_init
     if (upper_index == 0) return null;
 
-    return EnumLiteralContext{
+    return .{
         .likely = likely,
         .identifier_token_index = upper_index,
         .fn_arg_index = fn_arg_index,
