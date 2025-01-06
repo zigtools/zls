@@ -552,12 +552,14 @@ pub const Handle = struct {
         var old_cimports = self.cimports;
         var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
         var old_zir = if (old_status.has_zir) self.impl.zir else null;
+        var old_zoir = if (old_status.has_zoir) self.impl.zoir else null;
 
         self.tree = new_tree;
         self.import_uris = .empty;
         self.cimports = .empty;
         self.impl.document_scope = undefined;
         self.impl.zir = undefined;
+        self.impl.zoir = undefined;
 
         self.version += 1;
 
@@ -574,6 +576,7 @@ pub const Handle = struct {
 
         if (old_document_scope) |*document_scope| document_scope.deinit(self.impl.allocator);
         if (old_zir) |*zir| zir.deinit(self.impl.allocator);
+        if (old_zoir) |*zoir| zoir.deinit(self.impl.allocator);
     }
 
     fn deinit(self: *Handle) void {
@@ -585,6 +588,7 @@ pub const Handle = struct {
         const allocator = self.impl.allocator;
 
         if (status.has_zir) self.impl.zir.deinit(allocator);
+        if (status.has_zoir) self.impl.zoir.deinit(allocator);
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);

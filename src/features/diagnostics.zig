@@ -552,6 +552,8 @@ pub const BuildOnSave = struct {
         defer transport.deinit();
 
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
+        defer diagnostic_tags.deinit(self.allocator);
+
         defer {
             for (diagnostic_tags.keys()) |tag| collection.clearErrorBundle(tag);
             collection.publishDiagnostics() catch {};

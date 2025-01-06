@@ -366,6 +366,10 @@ pub fn main() !u8 {
     log_transport = if (result.disable_lsp_logs) null else transport.any();
     log_stderr = result.enable_stderr_logs;
     log_level = result.log_level orelse log_level;
+    defer {
+        log_transport = null;
+        log_stderr = true;
+    }
 
     log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
     log.info("Log File:         {?s} ({s})", .{ log_file_path, @tagName(log_level) });
