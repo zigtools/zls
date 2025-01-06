@@ -674,12 +674,6 @@ fn exitHandler(server: *Server, _: std.mem.Allocator, _: void) Error!void {
     };
 }
 
-fn cancelRequestHandler(server: *Server, _: std.mem.Allocator, request: types.CancelParams) Error!void {
-    _ = server;
-    _ = request;
-    // TODO implement $/cancelRequest
-}
-
 fn registerCapability(server: *Server, method: []const u8) Error!void {
     const id = try std.fmt.allocPrint(server.allocator, "register-{s}", .{method});
     defer server.allocator.free(id);
@@ -1821,7 +1815,6 @@ const HandledRequestParams = union(enum) {
 const HandledNotificationParams = union(enum) {
     initialized: types.InitializedParams,
     exit,
-    @"$/cancelRequest": types.CancelParams,
     @"textDocument/didOpen": types.DidOpenTextDocumentParams,
     @"textDocument/didChange": types.DidChangeTextDocumentParams,
     @"textDocument/didSave": types.DidSaveTextDocumentParams,
@@ -1865,7 +1858,6 @@ fn isBlockingMessage(msg: Message) bool {
             .other => return false,
         },
         .notification => |notification| switch (notification.params) {
-            .@"$/cancelRequest" => return false,
             .initialized,
             .exit,
             .@"textDocument/didOpen",
@@ -2048,7 +2040,6 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
     return switch (@field(Params, method)) {
         .initialized => try server.initializedHandler(arena, params),
         .exit => try server.exitHandler(arena, params),
-        .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
         .@"textDocument/didOpen" => try server.openDocumentHandler(arena, params),
         .@"textDocument/didChange" => try server.changeDocumentHandler(arena, params),
         .@"textDocument/didSave" => try server.saveDocumentHandler(arena, params),
@@ -2171,6 +2162,7 @@ fn validateMessage(server: *const Server, message: Message) Error!void {
 
     // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#dollarRequests
     if (message == .request and std.mem.startsWith(u8, method, "$/")) return error.MethodNotFound;
+    if (message == .notification and std.mem.startsWith(u8, method, "$/")) return;
 
     switch (server.status) {
         .uninitialized => blk: {
