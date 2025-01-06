@@ -109,7 +109,7 @@ pub fn applyContentChanges(
 // https://cs.opensource.google/go/x/tools/+/master:internal/lsp/diff/diff.go;l=40
 
 fn textEditLessThan(_: void, lhs: types.TextEdit, rhs: types.TextEdit) bool {
-    return offsets.rangeLessThan(lhs.range, rhs.range);
+    return offsets.positionLessThan(lhs.range.start, rhs.range.start) or offsets.positionLessThan(lhs.range.end, rhs.range.end);
 }
 
 /// Caller owns returned memory.
