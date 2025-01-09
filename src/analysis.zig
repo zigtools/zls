@@ -4089,8 +4089,8 @@ pub const DeclWithHandle = struct {
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {
                     if (tree.nodes.items(.tag)[case_value] != .enum_literal) continue;
-
-                    const name = tree.tokenSlice(tree.nodes.items(.main_token)[case_value]);
+                    const name_token = tree.nodes.items(.main_token)[case_value];
+                    const name = offsets.identifierTokenToNameSlice(tree, name_token);
                     const decl = try switch_expr_type.lookupSymbol(analyser, name) orelse continue;
                     break :blk (try decl.resolveType(analyser)) orelse continue;
                 }
@@ -4616,7 +4616,9 @@ pub fn resolveExpressionTypeFromAncestors(
             var buffer: [2]Ast.Node.Index = undefined;
             const struct_init = tree.fullStructInit(&buffer, ancestors[0]).?;
             if (std.mem.indexOfScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
-                const field_name = tree.tokenSlice(tree.firstToken(node) - 2);
+                const field_name_token = tree.firstToken(node) - 2;
+                if (token_tags[field_name_token] != .identifier) return null;
+                const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
                 if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
                     return try field_decl.resolveType(analyser);
                 }
