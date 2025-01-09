@@ -118,6 +118,7 @@ pub fn translate(
     allocator: std.mem.Allocator,
     config: Config,
     include_dirs: []const []const u8,
+    c_macros: []const []const u8,
     source: []const u8,
 ) !?Result {
     const tracy_zone = tracy.trace(@src());
@@ -166,7 +167,7 @@ pub fn translate(
         "--listen=-",
     };
 
-    const argc = base_args.len + 2 * include_dirs.len + 1;
+    const argc = base_args.len + 2 * include_dirs.len + c_macros.len + 1;
     var argv: std.ArrayListUnmanaged([]const u8) = try .initCapacity(allocator, argc);
     defer argv.deinit(allocator);
 
@@ -176,6 +177,8 @@ pub fn translate(
         argv.appendAssumeCapacity("-I");
         argv.appendAssumeCapacity(include_dir);
     }
+
+    argv.appendSliceAssumeCapacity(c_macros);
 
     argv.appendAssumeCapacity(file_path);
 
