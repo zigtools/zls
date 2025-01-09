@@ -72,7 +72,8 @@ fn gotoDefinitionLabel(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = offsets.locToSlice(handle.tree.source, loc);
+    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try Analyser.lookupLabel(handle, name, pos_index)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, loc, offset_encoding), decl, kind, offset_encoding);
 }
