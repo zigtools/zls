@@ -1026,13 +1026,19 @@ fn extractBuildInformation(
             name: []const u8,
             packages: *Packages,
             include_dirs: *std.StringArrayHashMapUnmanaged(void),
+            c_macros: *std.StringArrayHashMapUnmanaged(void),
         ) !void {
             if (module.root_source_file) |root_source_file| {
                 _ = try packages.addPackage(name, root_source_file.getPath(module.owner));
             }
 
             if (compile) |exe| {
-                try processPkgConfig(allocator, include_dirs, exe);
+                try processPkgConfig(allocator, include_dirs, c_macros, exe);
+            }
+
+            try c_macros.ensureUnusedCapacity(allocator, module.c_macros.items.len);
+            for (module.c_macros.items) |c_macro| {
+                c_macros.putAssumeCapacity(c_macro, {});
             }
 
             for (module.include_dirs.items) |include_dir| {
@@ -1119,6 +1125,9 @@ fn extractBuildInformation(
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(gpa);
 
+    var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
+    defer c_macros.deinit(gpa);
+
     var packages: Packages = .{ .allocator = gpa };
     defer packages.deinit();
 
@@ -1127,20 +1136,20 @@ fn extractBuildInformation(
         for (steps.keys()) |step| {
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
-            try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs);
+            try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
                 for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs);
+                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
             }
         }
 
         for (b.modules.values()) |root_module| {
             const graph = root_module.getGraph();
-            try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs);
+            try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
                 for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs);
+                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
             }
         }
@@ -1190,6 +1199,7 @@ fn extractBuildInformation(
             .include_dirs = include_dirs.keys(),
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = available_options,
+            .c_macros = c_macros.keys(),
         },
         .{
             .whitespace = .indent_2,
@@ -1201,6 +1211,7 @@ fn extractBuildInformation(
 fn processPkgConfig(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    c_macros: *std.StringArrayHashMapUnmanaged(void),
     exe: *Step.Compile,
 ) !void {
     for (exe.root_module.link_objects.items) |link_object| {
@@ -1209,7 +1220,7 @@ fn processPkgConfig(
 
         if (system_lib.use_pkg_config == .no) continue;
 
-        getPkgConfigIncludes(allocator, include_dirs, exe, system_lib.name) catch |err| switch (err) {
+        const args = copied_from_zig.runPkgConfig(exe, system_lib.name) catch |err| switch (err) {
             error.PkgConfigInvalidOutput,
             error.PkgConfigCrashed,
             error.PkgConfigFailed,
@@ -1218,31 +1229,25 @@ fn processPkgConfig(
             => switch (system_lib.use_pkg_config) {
                 .yes => {
                     // pkg-config failed, so zig will not add any include paths
+                    continue;
                 },
                 .force => {
                     std.log.warn("pkg-config failed for library {s}", .{system_lib.name});
+                    continue;
                 },
                 .no => unreachable,
             },
             else => |e| return e,
         };
-    }
-}
-
-fn getPkgConfigIncludes(
-    allocator: std.mem.Allocator,
-    include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *Step.Compile,
-    name: []const u8,
-) !void {
-    if (copied_from_zig.runPkgConfig(exe, name)) |args| {
         for (args) |arg| {
             if (std.mem.startsWith(u8, arg, "-I")) {
                 const candidate = arg[2..];
                 try include_dirs.put(allocator, candidate, {});
+            } else if (std.mem.startsWith(u8, arg, "-D")) {
+                try c_macros.put(allocator, arg, {});
             }
         }
-    } else |err| return err;
+    }
 }
 
 // TODO: Having a copy of this is not very nice

@@ -35,5 +35,6 @@
     "install",
     "uninstall"
   ],
-  "available_options": {}
+  "available_options": {},
+  "c_macros": []
 }

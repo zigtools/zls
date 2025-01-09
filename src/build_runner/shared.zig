@@ -11,6 +11,7 @@ pub const BuildConfig = struct {
     include_dirs: []const []const u8,
     top_level_steps: []const []const u8,
     available_options: std.json.ArrayHashMap(AvailableOption),
+    c_macros: []const []const u8 = &.{},
 
     pub const DepsBuildRoots = Package;
     pub const Package = struct {
