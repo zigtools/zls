@@ -66,6 +66,7 @@ config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 diagnostics_collection: DiagnosticsCollection,
 workspaces: std.ArrayListUnmanaged(Workspace) = .empty,
+builds_in_progress: std.atomic.Value(i32) = .init(0),
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -85,6 +86,7 @@ const ClientCapabilities = struct {
     supports_completion_deprecated_tag: bool = false,
     label_details_support: bool = false,
     supports_configuration: bool = false,
+    supports_work_done_progress: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
     /// The detail entries for big structs such as std.zig.CrossTarget were
@@ -313,6 +315,81 @@ fn showMessage(
     }
 }
 
+const progress_token = "buildProgressToken";
+
+fn onBuildStart(ctx: ?*anyopaque) void {
+    // Called from document store worker thread pool, should be safe as all
+    // functions used have internal locking
+    const server: *Server = @ptrCast(@alignCast(ctx));
+
+    if (!server.client_capabilities.supports_work_done_progress) return;
+
+    // Atomicity note: We do not actually care about memory surrounding the
+    // counter, we only care about the counter itself. We only need to ensure
+    // we aren't double entering/exiting
+    const prev = server.builds_in_progress.fetchAdd(1, .monotonic);
+    if (prev != 0) return;
+
+    if (server.sendToClientRequest(
+        .{ .string = "progress" },
+        "window/workDoneProgress/create",
+        types.WorkDoneProgressCreateParams{
+            .token = .{ .string = progress_token },
+        },
+    )) |msg| {
+        server.allocator.free(msg);
+    } else |e| {
+        std.log.err("Failed to create progress notification (error {})", .{e});
+    }
+
+    if (server.sendToClientNotification(
+        "$/progress",
+        .{
+            .token = progress_token,
+            .value = types.WorkDoneProgressBegin{
+                .title = "Loading build configuration",
+            },
+        },
+    )) |msg| {
+        server.allocator.free(msg);
+    } else |e| {
+        std.log.err("Failed to send progress begin (error {})", .{e});
+    }
+}
+
+fn onBuildEnd(ctx: ?*anyopaque, status: DocumentStore.WorkerNotifier.EndStatus) void {
+    // Called from document store worker thread pool, should be safe as all
+    // functions used have internal locking
+    const server: *Server = @ptrCast(@alignCast(ctx));
+
+    if (!server.client_capabilities.supports_work_done_progress) return;
+
+    // Atomicity note: We do not actually care about memory surrounding the
+    // counter, we only care about the counter itself. We only need to ensure
+    // we aren't double entering/exiting
+    const prev = server.builds_in_progress.fetchSub(1, .monotonic);
+    if (prev != 1) return;
+
+    const message = switch (status) {
+        .failed => "Failed",
+        .success => "Success",
+    };
+
+    if (server.sendToClientNotification(
+        "$/progress",
+        .{
+            .token = progress_token,
+            .value = types.WorkDoneProgressEnd{
+                .message = message,
+            },
+        },
+    )) |msg| {
+        server.allocator.free(msg);
+    } else |e| {
+        std.log.err("Failed to send progress end (error {})", .{e});
+    }
+}
+
 pub fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
     return .init(
         server.allocator,
@@ -510,6 +587,12 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                     }
                 }
             }
+        }
+    }
+
+    if (request.capabilities.window) |window| {
+        if (window.workDoneProgress) |wdp| {
+            server.client_capabilities.supports_work_done_progress = wdp;
         }
     }
 
@@ -1873,6 +1956,11 @@ fn isBlockingMessage(msg: Message) bool {
     }
 }
 
+const progress_report_vtable = DocumentStore.WorkerNotifier.VTable{
+    .onStart = onBuildStart,
+    .onEnd = onBuildEnd,
+};
+
 /// make sure to also set the `transport` field
 pub fn create(allocator: std.mem.Allocator) !*Server {
     const server = try allocator.create(Server);
@@ -1885,6 +1973,10 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
             .config = .fromMainConfig(.{}),
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
+            .build_running_notifier = .{
+                .ctx = server,
+                .vtable = &progress_report_vtable,
+            },
         },
         .job_queue = .init(allocator),
         .thread_pool = undefined, // set below
