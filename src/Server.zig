@@ -513,6 +513,12 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
+    if (request.capabilities.window) |window| {
+        if (window.workDoneProgress) |wdp| {
+            server.document_store.supports_work_done_progress = wdp;
+        }
+    }
+
     if (request.capabilities.workspace) |workspace| {
         server.client_capabilities.supports_apply_edits = workspace.applyEdit orelse false;
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
@@ -1928,6 +1934,7 @@ pub fn destroy(server: *Server) void {
 pub fn setTransport(server: *Server, transport: lsp.AnyTransport) void {
     server.transport = transport;
     server.diagnostics_collection.transport = transport;
+    server.document_store.transport = transport;
 }
 
 pub fn keepRunning(server: Server) bool {
