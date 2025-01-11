@@ -243,17 +243,16 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
             try collection.collectLspDiagnosticsForDocument(document_uri, collection.offset_encoding, arena_allocator.allocator(), &diagnostics);
 
-            const params: lsp.types.PublishDiagnosticsParams = .{
-                .uri = document_uri,
-                .diagnostics = diagnostics.items,
+            const notification: lsp.TypedJsonRPCNotification(lsp.types.PublishDiagnosticsParams) = .{
+                .method = "textDocument/publishDiagnostics",
+                .params = .{
+                    .uri = document_uri,
+                    .diagnostics = diagnostics.items,
+                },
             };
 
             // TODO make the diagnostics serializable without requiring the mutex to be locked
-            break :blk try std.fmt.allocPrint(collection.allocator,
-                \\{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{}}}
-            , .{
-                std.json.fmt(params, .{ .emit_null_optional_fields = false }),
-            });
+            break :blk try std.json.stringifyAlloc(collection.allocator, notification, .{ .emit_null_optional_fields = false });
         };
         defer collection.allocator.free(json_message);
 

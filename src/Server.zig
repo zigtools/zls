@@ -187,7 +187,11 @@ fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anyt
     // TODO validate response is from a client to server request
     // TODO validate result type
 
-    return try server.sendToClientInternal(id, null, null, "result", result);
+    const response: lsp.TypedJsonRPCResponse(@TypeOf(result)) = .{
+        .id = id,
+        .result = result,
+    };
+    return try sendToClientInternal(server.allocator, server.transport, response);
 }
 
 fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
@@ -198,7 +202,12 @@ fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []con
     // TODO validate method is server to client
     // TODO validate params type
 
-    return try server.sendToClientInternal(id, method, null, "params", params);
+    const request: lsp.TypedJsonRPCRequest(@TypeOf(params)) = .{
+        .id = id,
+        .method = method,
+        .params = params,
+    };
+    return try sendToClientInternal(server.allocator, server.transport, request);
 }
 
 fn sendToClientNotification(server: *Server, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
@@ -209,73 +218,40 @@ fn sendToClientNotification(server: *Server, method: []const u8, params: anytype
     // TODO validate method is server to client
     // TODO validate params type
 
-    return try server.sendToClientInternal(null, method, null, "params", params);
+    const notification: lsp.TypedJsonRPCNotification(@TypeOf(params)) = .{
+        .method = method,
+        .params = params,
+    };
+    return try sendToClientInternal(server.allocator, server.transport, notification);
 }
 
-fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ?lsp.JsonRPCMessage.Response.Error) error{OutOfMemory}![]u8 {
+fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: lsp.JsonRPCMessage.Response.Error) error{OutOfMemory}![]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.sendToClientInternal(id, null, err, "", null);
+    const response: lsp.JsonRPCMessage = .{
+        .response = .{ .id = id, .result_or_error = .{ .@"error" = err } },
+    };
+
+    return try sendToClientInternal(server.allocator, server.transport, response);
 }
 
-fn sendToClientInternal(
-    server: *Server,
-    maybe_id: ?lsp.JsonRPCMessage.ID,
-    maybe_method: ?[]const u8,
-    maybe_err: ?lsp.JsonRPCMessage.Response.Error,
-    extra_name: []const u8,
-    extra: anytype,
-) error{OutOfMemory}![]u8 {
-    var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    errdefer buffer.deinit(server.allocator);
-    var writer = buffer.writer(server.allocator);
-    try writer.writeAll(
-        \\{"jsonrpc":"2.0"
-    );
-    if (maybe_id) |id| {
-        try writer.writeAll(
-            \\,"id":
-        );
-        try std.json.stringify(id, .{}, writer);
-    }
-    if (maybe_method) |method| {
-        try writer.writeAll(
-            \\,"method":
-        );
-        try std.json.stringify(method, .{}, writer);
-    }
-    switch (@TypeOf(extra)) {
-        void => {},
-        ?void => {
-            try writer.print(
-                \\,"{s}":null
-            , .{extra_name});
-        },
-        else => {
-            try writer.print(
-                \\,"{s}":
-            , .{extra_name});
-            try std.json.stringify(extra, .{ .emit_null_optional_fields = false }, writer);
-        },
-    }
-    if (maybe_err) |err| {
-        try writer.writeAll(
-            \\,"error":
-        );
-        try std.json.stringify(err, .{}, writer);
-    }
-    try writer.writeByte('}');
+fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?lsp.AnyTransport, message: anytype) error{OutOfMemory}![]u8 {
+    const message_stringified = try std.json.stringifyAlloc(allocator, message, .{
+        .emit_null_optional_fields = false,
+    });
+    errdefer allocator.free(message_stringified);
 
-    if (server.transport) |transport| {
-        const tracy_zone_transport = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
-        defer tracy_zone_transport.end();
+    if (transport) |t| {
+        const tracy_zone = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
+        defer tracy_zone.end();
 
-        transport.writeJsonMessage(buffer.items) catch |err| {
-            log.err("failed to write response: {}", .{err});
+        t.writeJsonMessage(message_stringified) catch |err| {
+            log.err("failed to write message: {}", .{err});
         };
     }
-    return buffer.toOwnedSlice(server.allocator);
+
+    return message_stringified;
 }
 
 fn showMessage(
@@ -2082,7 +2058,7 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
 
     switch (message) {
         .request => |request| switch (request.params) {
-            .other => return try server.sendToClientResponse(request.id, null),
+            .other => return try server.sendToClientResponse(request.id, @as(?void, null)),
             inline else => |params, method| {
                 const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
                 return try server.sendToClientResponse(request.id, result);
