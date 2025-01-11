@@ -14,8 +14,8 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0,
 /// nix flake update --commit-lock-file
 /// ```
 ///
-/// Must match the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.2534+12d64c456";
+/// Also update the `minimum_zig_version` in `build.zig.zon`.
+const minimum_build_zig_version = "0.14.0-dev.2633+bc846c379";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// make zig compiler processes live across rebuilds
