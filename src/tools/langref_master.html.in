@@ -2001,6 +2001,15 @@ or
       the pointer is never dereferenced:</p>
       {#code|test_comptime_pointer_conversion.zig#}
 
+      <p>
+      {#link|@ptrCast#} converts a pointer's element type to another. This
+      creates a new pointer that can cause undetectable illegal behavior
+      depending on the loads and stores that pass through it. Generally, other
+      kinds of type conversions are preferable to
+      {#syntax#}@ptrCast{#endsyntax#} if possible.
+      </p>
+      {#code|test_pointer_casting.zig#}
+
       {#see_also|Optional Pointers|@ptrFromInt|@intFromPtr|C Pointers#}
       {#header_open|volatile#}
       <p>Loads and stores are assumed to not have side effects. If a given load or store
@@ -2015,14 +2024,6 @@ or
       Input/Output, it is probably a bug.
       </p>
       {#header_close#}
-      <p>
-      {#link|@ptrCast#} converts a pointer's element type to another. This
-      creates a new pointer that can cause undetectable illegal behavior
-      depending on the loads and stores that pass through it. Generally, other
-      kinds of type conversions are preferable to
-      {#syntax#}@ptrCast{#endsyntax#} if possible.
-      </p>
-      {#code|test_pointer_casting.zig#}
 
       {#header_open|Alignment#}
       <p>
@@ -3052,32 +3053,6 @@ fn createFoo(param: i32) !Foo {
       The {#syntax#}errdefer{#endsyntax#} statement can optionally capture the error:
       </p>
       {#code|test_errdefer_capture.zig#}
-      {#header_close#}
-      {#header_open|Common errdefer Slip-Ups#}
-      <p>
-      It should be noted that {#syntax#}errdefer{#endsyntax#} statements only last until the end of the block
-      they are written in, and therefore are not run if an error is returned outside of that block:
-      </p>
-      {#code|test_errdefer_slip_ups.zig#}
-
-      <p>
-      To ensure that {#syntax#}deallocateFoo{#endsyntax#} is properly called
-      when returning an error, you must add an {#syntax#}errdefer{#endsyntax#} outside of the block:
-      </p>
-      {#code|test_errdefer_block.zig#}
-
-      <p>
-      The fact that errdefers only last for the block they are declared in is
-      especially important when using loops:
-      </p>
-      {#code|test_errdefer_loop_leak.zig#}
-
-      <p>
-      Special care must be taken with code that allocates in a loop
-      to make sure that no memory is leaked when returning an error:
-      </p>
-      {#code|test_errdefer_loop.zig#}
-
       {#header_close#}
       <p>
       A couple of other tidbits about error handling:
@@ -5293,13 +5268,6 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       Selects values element-wise from {#syntax#}a{#endsyntax#} or {#syntax#}b{#endsyntax#} based on {#syntax#}pred{#endsyntax#}. If {#syntax#}pred[i]{#endsyntax#} is {#syntax#}true{#endsyntax#}, the corresponding element in the result will be {#syntax#}a[i]{#endsyntax#} and otherwise {#syntax#}b[i]{#endsyntax#}.
       </p>
       {#see_also|Vectors#}
-      {#header_close#}
-
-      {#header_open|@setAlignStack#}
-      <pre>{#syntax#}@setAlignStack(comptime alignment: u29) void{#endsyntax#}</pre>
-      <p>
-      Ensures that a function will have a stack alignment of at least {#syntax#}alignment{#endsyntax#} bytes.
-      </p>
       {#header_close#}
 
       {#header_open|@setEvalBranchQuota#}
