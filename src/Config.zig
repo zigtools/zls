@@ -10,7 +10,12 @@ enable_snippets: bool = true,
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 
+/// Whether to show the function signature in completion results. May improve readability in some editors when disabled
+completion_label_details: bool = true,
+
 /// Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.
+///
+/// For more infromation, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.
 enable_build_on_save: ?bool = null,
 
 /// Specify which arguments should be passed to Zig when running build-on-save.
@@ -40,10 +45,10 @@ inlay_hints_show_builtin: bool = true,
 /// Don't show inlay hints for single argument calls
 inlay_hints_exclude_single_argument: bool = true,
 
-/// Hides inlay hints when parameter name matches the identifier (e.g. foo: foo)
+/// Hides inlay hints when parameter name matches the identifier (e.g. `foo: foo`)
 inlay_hints_hide_redundant_param_names: bool = false,
 
-/// Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)
+/// Hides inlay hints when parameter name matches the last token of a parameter node (e.g. `foo: bar.foo`, `foo: &foo`)
 inlay_hints_hide_redundant_param_names_last_token: bool = false,
 
 /// Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.
@@ -55,28 +60,25 @@ warn_style: bool = false,
 /// Whether to highlight global var declarations
 highlight_global_var_declarations: bool = false,
 
-/// When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
+/// When true, skips searching for references in the standard library. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
 skip_std_references: bool = false,
 
-/// Favor using `zig ast-check` instead of ZLS's fork
+/// Favor using `zig ast-check` instead of the builtin one
 prefer_ast_check_as_child_process: bool = true,
 
-/// Path to 'builtin;' useful for debugging, automatically set if let null
+/// Override the path to 'builtin' module. Automatically resolved if unset.
 builtin_path: ?[]const u8 = null,
 
-/// Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports
+/// Override the Zig library path. Will be automatically resolved using the 'zig_exe_path'.
 zig_lib_path: ?[]const u8 = null,
 
-/// Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided
+/// Specify the path to the Zig executable (not the directory). If unset, zig is looked up in `PATH`. e.g. `/path/to/zig-templeos-armless-1.0.0/zig`.
 zig_exe_path: ?[]const u8 = null,
 
-/// Path to the `build_runner.zig` file provided by ZLS. null is equivalent to `${executable_directory}/build_runner.zig`
+/// Specify a custom build runner to resolve build system information.
 build_runner_path: ?[]const u8 = null,
 
-/// Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls`
+/// Path to a directory that will be used as zig's cache. Will default to `${KnownFolders.Cache}/zls`.
 global_cache_path: ?[]const u8 = null,
-
-/// When false, the function signature of completion results is hidden. Improves readability in some editors
-completion_label_details: bool = true,
 
 // DO NOT EDIT

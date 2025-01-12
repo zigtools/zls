@@ -13,8 +13,14 @@
             "default": true
         },
         {
+            "name": "completion_label_details",
+            "description": "Whether to show the function signature in completion results. May improve readability in some editors when disabled",
+            "type": "bool",
+            "default": true
+        },
+        {
             "name": "enable_build_on_save",
-            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.",
+            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.\n\nFor more infromation, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.",
             "type": "?bool",
             "default": null
         },
@@ -67,13 +73,13 @@
         },
         {
             "name": "inlay_hints_hide_redundant_param_names",
-            "description": "Hides inlay hints when parameter name matches the identifier (e.g. foo: foo)",
+            "description": "Hides inlay hints when parameter name matches the identifier (e.g. `foo: foo`)",
             "type": "bool",
             "default": false
         },
         {
             "name": "inlay_hints_hide_redundant_param_names_last_token",
-            "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)",
+            "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. `foo: bar.foo`, `foo: &foo`)",
             "type": "bool",
             "default": false
         },
@@ -97,51 +103,45 @@
         },
         {
             "name": "skip_std_references",
-            "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
+            "description": "When true, skips searching for references in the standard library. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "bool",
             "default": false
         },
         {
             "name": "prefer_ast_check_as_child_process",
-            "description": "Favor using `zig ast-check` instead of ZLS's fork",
+            "description": "Favor using `zig ast-check` instead of the builtin one",
             "type": "bool",
             "default": true
         },
         {
             "name": "builtin_path",
-            "description": "Path to 'builtin;' useful for debugging, automatically set if let null",
+            "description": "Override the path to 'builtin' module. Automatically resolved if unset.",
             "type": "?[]const u8",
             "default": null
         },
         {
             "name": "zig_lib_path",
-            "description": "Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports",
+            "description": "Override the Zig library path. Will be automatically resolved using the 'zig_exe_path'.",
             "type": "?[]const u8",
             "default": null
         },
         {
             "name": "zig_exe_path",
-            "description": "Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided",
+            "description": "Specify the path to the Zig executable (not the directory). If unset, zig is looked up in `PATH`. e.g. `/path/to/zig-templeos-armless-1.0.0/zig`.",
             "type": "?[]const u8",
             "default": null
         },
         {
             "name": "build_runner_path",
-            "description": "Path to the `build_runner.zig` file provided by ZLS. null is equivalent to `${executable_directory}/build_runner.zig`",
+            "description": "Specify a custom build runner to resolve build system information.",
             "type": "?[]const u8",
             "default": null
         },
         {
             "name": "global_cache_path",
-            "description": "Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls`",
+            "description": "Path to a directory that will be used as zig's cache. Will default to `${KnownFolders.Cache}/zls`.",
             "type": "?[]const u8",
             "default": null
-        },
-        {
-            "name": "completion_label_details",
-            "description": "When false, the function signature of completion results is hidden. Improves readability in some editors",
-            "type": "bool",
-            "default": true
         }
     ]
 }
