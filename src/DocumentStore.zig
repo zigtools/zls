@@ -814,6 +814,7 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
     if (self.config.global_cache_path == null) return;
+    if (self.config.zig_lib_path == null) return;
 
     if (builtin.single_threaded) {
         self.invalidateBuildFileWorker(build_file_uri, false);
@@ -1039,6 +1040,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     std.debug.assert(self.config.zig_exe_path != null);
     std.debug.assert(self.config.build_runner_path != null);
     std.debug.assert(self.config.global_cache_path != null);
+    std.debug.assert(self.config.zig_lib_path != null);
 
     const build_file_path = try URI.parse(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
