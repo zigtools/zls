@@ -247,11 +247,6 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         .description = "Traces the communication between VS Code and the language server.",
         .default = .{ .string = "off" },
     });
-    configuration.map.putAssumeCapacityNoClobber("zig.zls.checkForUpdate", .{
-        .type = "boolean",
-        .description = "Whether to automatically check for new updates",
-        .default = .{ .bool = true },
-    });
     configuration.map.putAssumeCapacityNoClobber("zig.zls.path", .{
         .scope = "machine-overridable",
         .type = "string",
