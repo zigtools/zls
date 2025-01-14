@@ -123,17 +123,20 @@ pub fn build(b: *Build) !void {
     };
 
     { // zig build gen
-        const update_source = b.addUpdateSourceFiles();
+        const gen_step = b.step("gen", "Regenerate config files");
 
         const gen_cmd = b.addRunArtifact(gen_exe);
-        gen_cmd.addArg("--generate-config");
-        update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("Config.zig"), "src/Config.zig");
-        gen_cmd.addArg("--generate-schema");
-        update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("schema.json"), "schema.json");
-        if (b.args) |args| gen_cmd.addArgs(args);
-
-        const gen_step = b.step("gen", "Regenerate config files");
-        gen_step.dependOn(&update_source.step);
+        if (b.args) |args| {
+            gen_cmd.addArgs(args);
+            gen_step.dependOn(&gen_cmd.step);
+        } else {
+            const update_source = b.addUpdateSourceFiles();
+            gen_cmd.addArg("--generate-config");
+            update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("Config.zig"), "src/Config.zig");
+            gen_cmd.addArg("--generate-schema");
+            update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("schema.json"), "schema.json");
+            gen_step.dependOn(&update_source.step);
+        }
     }
 
     const zls_module = b.addModule("zls", .{
