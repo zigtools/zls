@@ -1005,7 +1005,7 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
     defer tracy_zone.end();
 
     const base_args = &[_][]const u8{
-        self.config.zig_exe_path.?, "build", "--build-runner", self.config.build_runner_path.?,
+        self.config.zig_exe_path.?, "build", "--build-runner", self.config.build_runner_path.?, "--zig-lib-dir", self.config.zig_lib_path.?,
     };
 
     var args: std.ArrayListUnmanaged([]const u8) = try .initCapacity(self.allocator, base_args.len);
