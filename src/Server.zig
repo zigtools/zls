@@ -764,7 +764,7 @@ const Workspace = struct {
     }) error{OutOfMemory}!void {
         comptime std.debug.assert(BuildOnSave.isSupportedComptime());
 
-        const build_on_save_supported = if (args.runtime_zig_version) |version| BuildOnSave.isSupportedRuntime(version) else false;
+        const build_on_save_supported = if (args.runtime_zig_version) |version| BuildOnSave.isSupportedRuntime(version, false) else false;
         const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
         const enable = build_on_save_supported and build_on_save_wanted;
 
@@ -1075,9 +1075,8 @@ pub fn updateConfiguration(
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
         } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
-        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !BuildOnSave.isSupportedRuntime(resolve_result.zig_runtime_version.?)) {
-            // There is one edge-case where build on save is not supported because of Linux pre 5.17
-            log.warn("'enable_build_on_save' is not supported by Zig {}", .{resolve_result.zig_runtime_version.?});
+        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !BuildOnSave.isSupportedRuntime(resolve_result.zig_runtime_version.?, true)) {
+            // already logged
         }
     }
 
