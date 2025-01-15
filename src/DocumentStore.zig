@@ -25,6 +25,7 @@ handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .empty,
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
+build_running_notifier: WorkerNotifier,
 
 pub const Uri = []const u8;
 
@@ -168,6 +169,26 @@ pub const BuildFile = struct {
         if (self.impl.config) |cfg| cfg.deinit();
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| cfg.deinit();
+    }
+};
+
+pub const WorkerNotifier = struct {
+    ctx: ?*anyopaque,
+    vtable: *const VTable,
+
+    pub const EndStatus = enum { success, failed };
+
+    pub const VTable = struct {
+        onStart: *const fn (ctx: ?*anyopaque) void,
+        onEnd: *const fn (ctx: ?*anyopaque, status: EndStatus) void,
+    };
+
+    pub fn onStart(self: WorkerNotifier) void {
+        self.vtable.onStart(self.ctx);
+    }
+
+    pub fn onEnd(self: WorkerNotifier, status: EndStatus) void {
+        self.vtable.onEnd(self.ctx, status);
     }
 };
 
@@ -836,6 +857,10 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build_file_uri_owned: bool) void {
     defer if (is_build_file_uri_owned) self.allocator.free(build_file_uri);
 
+    var end_status: WorkerNotifier.EndStatus = .failed;
+    self.build_running_notifier.onStart();
+    defer self.build_running_notifier.onEnd(end_status);
+
     const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
         return;
@@ -846,6 +871,9 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
         return;
     };
     build_file.setBuildConfig(build_config);
+
+    // Looks like a useless assignment, but alters deffered onEnd
+    end_status = .success;
 }
 
 /// The `DocumentStore` represents a graph structure where every
