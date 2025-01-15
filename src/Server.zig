@@ -36,6 +36,8 @@ const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
+const BuildOnSave = diagnostics_gen.BuildOnSave;
+
 const log = std.log.scoped(.server);
 
 // public fields
@@ -733,7 +735,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
 const Workspace = struct {
     uri: types.URI,
-    build_on_save: if (build_runner_shared.isBuildOnSaveSupportedComptime()) ?diagnostics_gen.BuildOnSave else void,
+    build_on_save: if (BuildOnSave.isSupportedComptime()) ?BuildOnSave else void,
 
     fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
         const duped_uri = try server.allocator.dupe(u8, uri);
@@ -741,12 +743,12 @@ const Workspace = struct {
 
         return .{
             .uri = duped_uri,
-            .build_on_save = if (build_runner_shared.isBuildOnSaveSupportedComptime()) null else {},
+            .build_on_save = if (BuildOnSave.isSupportedComptime()) null else {},
         };
     }
 
     fn deinit(workspace: *Workspace, allocator: std.mem.Allocator) void {
-        if (build_runner_shared.isBuildOnSaveSupportedComptime()) {
+        if (BuildOnSave.isSupportedComptime()) {
             if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
         }
         allocator.free(workspace.uri);
@@ -759,10 +761,9 @@ const Workspace = struct {
         /// Whether the build on save process should be restarted if it is already running.
         restart: bool,
     }) error{OutOfMemory}!void {
-        comptime std.debug.assert(build_runner_shared.isBuildOnSaveSupportedComptime());
-        comptime std.debug.assert(build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // Update `isBuildOnSaveSupportedRuntime` and build runner
+        comptime std.debug.assert(BuildOnSave.isSupportedComptime());
 
-        const build_on_save_supported = if (args.runtime_zig_version) |version| build_runner_shared.isBuildOnSaveSupportedRuntime(version) else false;
+        const build_on_save_supported = if (args.runtime_zig_version) |version| BuildOnSave.isSupportedRuntime(version) else false;
         const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
         const enable = build_on_save_supported and build_on_save_wanted;
 
@@ -785,7 +786,7 @@ const Workspace = struct {
         };
         defer args.server.allocator.free(workspace_path);
 
-        workspace.build_on_save = @as(diagnostics_gen.BuildOnSave, undefined);
+        workspace.build_on_save = @as(BuildOnSave, undefined);
         workspace.build_on_save.?.init(.{
             .allocator = args.server.allocator,
             .workspace_path = workspace_path,
@@ -971,7 +972,7 @@ pub fn updateConfiguration(
         }
     }
 
-    if (build_runner_shared.isBuildOnSaveSupportedComptime() and
+    if (BuildOnSave.isSupportedComptime() and
         options.resolve and
         // If the client supports the `workspace/configuration` request, defer
         // build on save initialization until after we have received workspace
@@ -1070,7 +1071,7 @@ pub fn updateConfiguration(
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!build_runner_shared.isBuildOnSaveSupportedComptime()) {
+        if (!BuildOnSave.isSupportedComptime()) {
             // This message is not very helpful but it relatively uncommon to happen anyway.
             log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
         } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
@@ -1079,7 +1080,7 @@ pub fn updateConfiguration(
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
         } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
-        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !build_runner_shared.isBuildOnSaveSupportedRuntime(resolve_result.zig_runtime_version.?)) {
+        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !BuildOnSave.isSupportedRuntime(resolve_result.zig_runtime_version.?)) {
             // There is one edge-case where build on save is not supported because of Linux pre 5.17
             log.warn("'enable_build_on_save' is not supported by Zig {}", .{resolve_result.zig_runtime_version.?});
         }

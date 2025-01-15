@@ -4,7 +4,6 @@
 //!   - master (0.14.0-dev.2046+b8795b4d0 and later)
 //!
 //! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
-//! As an example, see how `child_type_coercion_version` is used to deal with breaking changes.
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
 //! `zig build --build-runner src/build_runner/master.zig`
@@ -28,11 +27,6 @@ const Allocator = std.mem.Allocator;
 pub const dependencies = @import("@dependencies");
 
 // ----------- List of Zig versions that introduced breaking changes -----------
-
-const child_type_coercion_version =
-    std.SemanticVersion.parse("0.14.0-dev.2506+32354d119") catch unreachable;
-const accept_root_module_version =
-    std.SemanticVersion.parse("0.14.0-dev.2534+12d64c456") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -317,9 +311,7 @@ pub fn main() !void {
         var prog_node = main_progress_node.start("Configure", 0);
         defer prog_node.end();
         try builder.runBuild(root);
-        if (comptime builtin.zig_version.order(accept_root_module_version) != .lt) {
-            createModuleDependencies(builder) catch @panic("OOM");
-        }
+        createModuleDependencies(builder) catch @panic("OOM");
     }
 
     if (graph.needed_lazy_dependencies.entries.len != 0) {
@@ -384,6 +376,11 @@ pub fn main() !void {
         return;
     }
 
+    if (!std.Build.Watch.have_impl) {
+        std.log.warn("Build-On-Save is not supported on {} by Zig {}", .{ builtin.target.os.tag, builtin.zig_version });
+        process.exit(1);
+    }
+
     const suicide_thread = try std.Thread.spawn(.{}, struct {
         fn do() void {
             _ = std.io.getStdIn().reader().readByte() catch process.exit(1);
@@ -391,9 +388,6 @@ pub fn main() !void {
         }
     }.do, .{});
     suicide_thread.detach();
-
-    if (!shared.isBuildOnSaveSupportedComptime()) return;
-    if (!shared.isBuildOnSaveSupportedRuntime(builtin.zig_version)) return;
 
     var w = try Watch.init();
 
@@ -768,25 +762,20 @@ fn workerMakeOneStep(
     }
 }
 
-const ArgsType = if (builtin.zig_version.order(child_type_coercion_version) == .lt)
-    [][:0]const u8
-else
-    []const [:0]const u8;
-
-fn nextArg(args: ArgsType, idx: *usize) ?[:0]const u8 {
+fn nextArg(args: []const [:0]const u8, idx: *usize) ?[:0]const u8 {
     if (idx.* >= args.len) return null;
     defer idx.* += 1;
     return args[idx.*];
 }
 
-fn nextArgOrFatal(args: ArgsType, idx: *usize) [:0]const u8 {
+fn nextArgOrFatal(args: []const [:0]const u8, idx: *usize) [:0]const u8 {
     return nextArg(args, idx) orelse {
         std.debug.print("expected argument after '{s}'\n  access the help menu with 'zig build -h'\n", .{args[idx.* - 1]});
         process.exit(1);
     };
 }
 
-fn argsRest(args: ArgsType, idx: usize) ?ArgsType {
+fn argsRest(args: []const [:0]const u8, idx: usize) ?[]const [:0]const u8 {
     if (idx >= args.len) return null;
     return args[idx..];
 }
@@ -1088,15 +1077,8 @@ fn extractBuildInformation(
     var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
     defer step_dependencies.deinit(gpa);
 
-    const DependencyItem = struct {
-        compile: ?*std.Build.Step.Compile,
-        module: *std.Build.Module,
-    };
-
-    var dependency_set: std.AutoArrayHashMapUnmanaged(DependencyItem, []const u8) = .{};
-    defer dependency_set.deinit(gpa);
-
-    if (comptime builtin.zig_version.order(accept_root_module_version) != .lt) {
+    // collect step dependencies
+    {
         var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .{};
         defer modules.deinit(gpa);
 
@@ -1118,46 +1100,6 @@ fn extractBuildInformation(
         // collect all dependencies of all found modules
         for (modules.keys()) |module| {
             try helper.addModuleDependencies(gpa, &step_dependencies, module);
-        }
-    } else {
-        var dependency_iterator: std.Build.Module.DependencyIterator = .{
-            .allocator = gpa,
-            .index = 0,
-            .set = .{},
-            .chase_dyn_libs = true,
-        };
-        defer dependency_iterator.deinit();
-
-        // collect root modules of `Step.Compile`
-        for (steps.keys()) |step| {
-            const compile = step.cast(Step.Compile) orelse continue;
-
-            dependency_iterator.set.ensureUnusedCapacity(arena, compile.root_module.import_table.count() + 1) catch @panic("OOM");
-            dependency_iterator.set.putAssumeCapacity(.{
-                .module = &compile.root_module,
-                .compile = compile,
-            }, "root");
-        }
-
-        // collect public modules
-        for (b.modules.values()) |module| {
-            dependency_iterator.set.ensureUnusedCapacity(gpa, module.import_table.count() + 1) catch @panic("OOM");
-            dependency_iterator.set.putAssumeCapacity(.{
-                .module = module,
-                .compile = null,
-            }, "root");
-        }
-
-        var dependency_items: std.ArrayListUnmanaged(std.Build.Module.DependencyIterator.Item) = .{};
-        defer dependency_items.deinit(gpa);
-
-        // collect all dependencies
-        while (dependency_iterator.next()) |item| {
-            try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
-            _ = try dependency_set.fetchPut(gpa, .{
-                .module = item.module,
-                .compile = item.compile,
-            }, item.name);
         }
     }
 
@@ -1181,16 +1123,7 @@ fn extractBuildInformation(
     defer packages.deinit();
 
     // extract packages and include paths
-    if (comptime builtin.zig_version.order(accept_root_module_version) == .lt) {
-        for (dependency_set.keys(), dependency_set.values()) |item, name| {
-            try helper.processItem(gpa, item.module, item.compile, name, &packages, &include_dirs);
-            for (item.module.import_table.keys(), item.module.import_table.values()) |import_name, import| {
-                if (import.root_source_file) |root_source_file| {
-                    _ = try packages.addPackage(import_name, root_source_file.getPath(item.module.owner));
-                }
-            }
-        }
-    } else {
+    {
         for (steps.keys()) |step| {
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
