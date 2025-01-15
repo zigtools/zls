@@ -530,6 +530,7 @@ const Build = blk: {
     std.debug.assert(zls_version.pre == null or std.mem.eql(u8, zls_version.pre.?, "dev"));
     std.debug.assert(zls_version.build == null);
     const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
+    const zls_version_simple: std.SemanticVersion = .{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
 
     if (min_runtime_zig.order(min_build_zig) == .gt) {
         const message = std.fmt.comptimePrint(
@@ -546,19 +547,28 @@ const Build = blk: {
 
     // check that the ZLS version and minimum build version make sense
     if (zls_version_is_tagged) {
-        if (zls_version.order(min_build_zig) != .eq) {
+        if (zls_version_simple.order(min_build_zig) != .eq) {
             const message = std.fmt.comptimePrint(
                 \\A tagged release of ZLS should have the same tagged release of Zig as the minimum build requirement:
                 \\          ZLS version: {[current_version]}
                 \\  minimum Zig version: {[minimum_version]}
                 \\
                 \\This is a developer error. Set `minimum_build_zig_version` in `build.zig` and `minimum_zig_version` in `build.zig.zon` to {[current_version]}.
-            , .{ .current_version = zls_version, .minimum_version = min_build_zig });
+            , .{ .current_version = zls_version_simple, .minimum_version = min_build_zig });
+            @compileError(message);
+        }
+        if (zls_version_simple.order(min_runtime_zig) != .eq) {
+            const message = std.fmt.comptimePrint(
+                \\A tagged release of ZLS should have the same tagged release of Zig as the minimum runtime version:
+                \\          ZLS version: {[current_version]}
+                \\  minimum Zig version: {[minimum_version]}
+                \\
+                \\This is a developer error. Set `minimum_runtime_zig_version` in `build.zig` to `{[current_version]}`.
+            , .{ .current_version = zls_version_simple, .minimum_version = min_runtime_zig });
             @compileError(message);
         }
     } else {
         const min_build_zig_simple: std.SemanticVersion = .{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
-        const zls_version_simple: std.SemanticVersion = .{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
         const min_zig_is_tagged = min_build_zig.build == null and min_build_zig.pre == null;
         if (!min_zig_is_tagged and zls_version_simple.order(min_build_zig_simple) != .eq) {
             const message = std.fmt.comptimePrint(

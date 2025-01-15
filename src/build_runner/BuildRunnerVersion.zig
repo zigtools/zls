@@ -15,8 +15,24 @@ pub const BuildRunnerVersion = enum {
     }
 
     pub fn selectBuildRunnerVersion(runtime_zig_version: std.SemanticVersion) ?BuildRunnerVersion {
-        const minimum_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
-        return selectVersionInternal(BuildRunnerVersion, minimum_runtime_zig_version, runtime_zig_version);
+        const is_zls_version_tagged = build_options.version.pre == null and build_options.version.build == null;
+        if (is_zls_version_tagged) {
+            // A ZLS release should not have a 'master.zig' build runner.
+            // To fix this, rename it to `${ZLS_VERSION}.zig` and remove all outdated version checks from it.
+            comptime std.debug.assert(!@hasField(BuildRunnerVersion, "master"));
+        }
+
+        const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
+        return selectVersionInternal(
+            BuildRunnerVersion,
+            // If ZLS is a tagged release, it should not support development builds of the next release cycle. Example:
+            // - ZLS `0.13.0`     with Zig `0.13.0`     -> ok
+            // - ZLS `0.13.0`     with Zig `0.14.0-dev` -> bad
+            // - ZLS `0.14.0-dev` with Zig `0.13.0`     -> check `minimum_runtime_zig_version`
+            // - ZLS `0.14.0-dev` with Zig `0.14.0-dev` -> check `minimum_runtime_zig_version`
+            if (!is_zls_version_tagged) min_runtime_zig_version else null,
+            runtime_zig_version,
+        );
     }
 
     pub fn getBuildRunnerFile(version: BuildRunnerVersion) [:0]const u8 {
@@ -28,12 +44,15 @@ pub const BuildRunnerVersion = enum {
 
 fn selectVersionInternal(
     comptime AvailableVersion: type,
-    /// Only relevant when the ZLS version is a development build
-    comptime minimum_runtime_zig_version: std.SemanticVersion,
+    /// If set, a non-tagged `runtime_zig_version` must be at least the specified version.
+    /// If unset, a non-tagged `runtime_zig_version` will return `null`.
+    /// Will be ignored if the `runtime_zig_version` is a tagged release.
+    ///
+    /// Will be `null` iff ZLS is a tagged release.
+    comptime minimum_runtime_zig_version: ?std.SemanticVersion,
     runtime_zig_version: std.SemanticVersion,
 ) ?AvailableVersion {
     const runtime_zig_version_is_tagged = runtime_zig_version.build == null and runtime_zig_version.pre == null;
-    const minimum_runtime_zig_version_is_tagged = minimum_runtime_zig_version.build == null and minimum_runtime_zig_version.pre == null;
 
     const available_version_tags = comptime std.meta.tags(AvailableVersion);
     // `null` means master
@@ -53,7 +72,6 @@ fn selectVersionInternal(
     comptime {
         std.debug.assert(available_version_tags.len != 0);
         std.debug.assert(available_version_tags.len == available_versions.len);
-        std.debug.assert(minimum_runtime_zig_version_is_tagged == !@hasField(AvailableVersion, "master"));
     }
 
     if (runtime_zig_version_is_tagged) {
@@ -65,16 +83,25 @@ fn selectVersionInternal(
             }
         }
         return null;
-    }
+    } else if (minimum_runtime_zig_version) |min_runtime_zig_version| {
+        const min_runtime_zig_version_is_tagged = min_runtime_zig_version.build == null and min_runtime_zig_version.pre == null;
+        // There are two allowed states:
+        //   - the minimum runtime zig version is a development build and a 'master' build runner is available
+        //   - the minimum runtime zig version is a tagged release and no 'master' build runner is available
+        comptime std.debug.assert(min_runtime_zig_version_is_tagged == !@hasField(AvailableVersion, "master"));
 
-    switch (runtime_zig_version.order(available_versions[0] orelse minimum_runtime_zig_version)) {
-        .eq, .gt => return available_version_tags[0],
-        .lt => return null,
+        switch (runtime_zig_version.order(available_versions[0] orelse min_runtime_zig_version)) {
+            .eq, .gt => return available_version_tags[0],
+            .lt => return null,
+        }
+    } else {
+        comptime std.debug.assert(!@hasField(AvailableVersion, "master"));
+        return null;
     }
 }
 
 test selectVersionInternal {
-    @setEvalBranchQuota(6_000);
+    @setEvalBranchQuota(10_000);
     const expect = std.testing.expect;
     const expectEqual = std.testing.expectEqual;
     const parse = std.SemanticVersion.parse;
@@ -160,69 +187,93 @@ test selectVersionInternal {
 
         try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.11.0"), // minimum Zig version on master
-            try parse("0.11.0-dev.1+aaaaaaaaa"), // Zig version
-        ));
-        try expectEqual(.@"0.11.0", selectVersionInternal(
-            AvailableVersion, // available build runners
-            try parse("0.11.0"), // minimum Zig version on master
-            try parse("0.11.0"), // Zig version
-        ));
-        try expectEqual(null, selectVersionInternal(
-            AvailableVersion, // available build runners
-            try parse("0.11.0"), // minimum Zig version on master
-            try parse("0.12.0-dev.1+aaaaaaaaa"), // Zig version
-        ));
-        try expectEqual(.@"0.12.0", selectVersionInternal(
-            AvailableVersion, // available build runners
-            try parse("0.11.0"), // minimum Zig version on master
-            try parse("0.12.0"), // Zig version
-        ));
-
-        try expectEqual(null, selectVersionInternal(
-            AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.10.0"), // Zig version
         ));
         try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.11.0-dev.1+aaaaaaaaa"), // Zig version
         ));
         try expectEqual(.@"0.11.0", selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.11.0"), // Zig version
         ));
         try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.12.0-dev.1+aaaaaaaaa"), // Zig version
         ));
         try expectEqual(.@"0.12.0", selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.12.0"), // Zig version
         ));
         try expectEqual(.@"0.12.0", selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.12.0"), // Zig version
         ));
         try expectEqual(.@"0.12.0", selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.12.1"), // Zig version
         ));
-        try expectEqual(.@"0.12.0", selectVersionInternal(
+        try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.13.0-dev.1+aaaaaaaaa"), // Zig version
         ));
         try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
-            try parse("0.12.0"), // minimum Zig version on master
+            null,
             try parse("0.13.0"), // Zig version
+        ));
+    }
+
+    {
+        const AvailableVersion = enum { @"0.12.0" };
+
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.11.0-dev.5+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.11.0"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.12.0-dev.5+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(.@"0.12.0", selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.12.0"), // Zig version
+        ));
+        try expectEqual(.@"0.12.0", selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.12.1"), // Zig version
+        ));
+        try expectEqual(.@"0.12.0", selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.13.0"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.12.0"), // minimum Zig version
+            try parse("0.13.1"), // Zig version
         ));
     }
 
@@ -250,6 +301,51 @@ test selectVersionInternal {
             try parse("0.12.0"), // Zig version
         ));
         try expectEqual(.@"0.12.0", selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.12.1"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.13.0-dev.4+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(.master, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(.master, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.13.0-dev.10+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.13.0"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.13.1"), // Zig version
+        ));
+    }
+
+    {
+        const AvailableVersion = enum { master };
+
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.12.0-dev.5+aaaaaaaaa"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
+            AvailableVersion, // available build runners
+            try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
+            try parse("0.12.0"), // Zig version
+        ));
+        try expectEqual(null, selectVersionInternal(
             AvailableVersion, // available build runners
             try parse("0.13.0-dev.5+aaaaaaaaa"), // minimum Zig version on master
             try parse("0.12.1"), // Zig version
