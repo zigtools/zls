@@ -552,14 +552,17 @@ pub const BuildOnSave = struct {
         comptime std.debug.assert(isSupportedComptime());
 
         if (builtin.os.tag == .linux) blk: {
-            // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
+            // std.build.Watch requires `AT_HANDLE_FID` which is Linux 6.5+
+            // https://github.com/ziglang/zig/issues/20720
+            const minimum_linux_version: std.SemanticVersion = .{ .major = 6, .minor = 5, .patch = 0 };
+
             const utsname = std.posix.uname();
             const version = parseUnameKernelVersion(&utsname.release) catch |err| {
                 if (log_message) log.warn("failed to parse kernel version '{s}': {}", .{ utsname.release, err });
                 break :blk;
             };
-            if (version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt) break :blk;
-            if (log_message) log.err("Build-On-Save is not supported by Linux '{s}' (requires 5.17+)", .{utsname.release});
+            if (version.order(minimum_linux_version) != .lt) break :blk;
+            if (log_message) log.err("Build-On-Save is not supported by Linux '{s}' (requires at least {})", .{ utsname.release, minimum_linux_version });
             return false;
         }
 
