@@ -1,6 +1,7 @@
 //! Implementation of [`textDocument/publishDiagnostics`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics)
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.diag);
 
@@ -535,6 +536,48 @@ pub const BuildOnSave = struct {
 
         self.thread.join();
         self.* = undefined;
+    }
+
+    const windows_support_version = std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
+    const kqueue_support_version = std.SemanticVersion.parse("0.14.0-dev.2046+b8795b4d0") catch unreachable;
+
+    /// Returns true if is comptime known that build on save is supported.
+    pub inline fn isSupportedComptime() bool {
+        if (!std.process.can_spawn) return false;
+        if (builtin.single_threaded) return false;
+        return true;
+    }
+
+    pub fn isSupportedRuntime(runtime_zig_version: std.SemanticVersion) bool {
+        if (!isSupportedComptime()) return false;
+
+        if (builtin.os.tag == .linux) blk: {
+            // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
+            const utsname = std.posix.uname();
+            const version = std.SemanticVersion.parse(&utsname.release) catch break :blk;
+            if (version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt) break :blk;
+            return false;
+        }
+
+        // We can't rely on `std.Build.Watch.have_impl` because we need to
+        // check the runtime Zig version instead of Zig version that ZLS
+        // has been built with.
+        return switch (builtin.os.tag) {
+            .linux => true,
+            .windows => runtime_zig_version.order(windows_support_version) != .lt,
+            .dragonfly,
+            .freebsd,
+            .netbsd,
+            .openbsd,
+            .ios,
+            .macos,
+            .tvos,
+            .visionos,
+            .watchos,
+            .haiku,
+            => runtime_zig_version.order(kqueue_support_version) != .lt,
+            else => false,
+        };
     }
 
     fn loop(
