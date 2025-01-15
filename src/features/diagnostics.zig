@@ -548,21 +548,25 @@ pub const BuildOnSave = struct {
         return true;
     }
 
-    pub fn isSupportedRuntime(runtime_zig_version: std.SemanticVersion) bool {
-        if (!isSupportedComptime()) return false;
+    pub fn isSupportedRuntime(runtime_zig_version: std.SemanticVersion, log_message: bool) bool {
+        comptime std.debug.assert(isSupportedComptime());
 
         if (builtin.os.tag == .linux) blk: {
             // std.build.Watch requires `FAN_REPORT_TARGET_FID` which is Linux 5.17+
             const utsname = std.posix.uname();
-            const version = std.SemanticVersion.parse(&utsname.release) catch break :blk;
+            const version = parseUnameKernelVersion(&utsname.release) catch |err| {
+                if (log_message) log.warn("failed to parse kernel version '{s}': {}", .{ utsname.release, err });
+                break :blk;
+            };
             if (version.order(.{ .major = 5, .minor = 17, .patch = 0 }) != .lt) break :blk;
+            if (log_message) log.err("Build-On-Save is not supported by Linux '{s}' (requires 5.17+)", .{utsname.release});
             return false;
         }
 
         // We can't rely on `std.Build.Watch.have_impl` because we need to
         // check the runtime Zig version instead of Zig version that ZLS
         // has been built with.
-        return switch (builtin.os.tag) {
+        const zig_version_supported = switch (builtin.os.tag) {
             .linux => true,
             .windows => runtime_zig_version.order(windows_support_version) != .lt,
             .dragonfly,
@@ -578,6 +582,35 @@ pub const BuildOnSave = struct {
             => runtime_zig_version.order(kqueue_support_version) != .lt,
             else => false,
         };
+
+        if (!zig_version_supported) {
+            log.warn("Build-On-Save is not supported on {s} by Zig {}", .{ @tagName(builtin.os.tag), runtime_zig_version });
+        }
+
+        return zig_version_supported;
+    }
+
+    fn parseUnameKernelVersion(kernel_version: []const u8) !std.SemanticVersion {
+        const extra_index = std.mem.indexOfAny(u8, kernel_version, "-+");
+        const required = kernel_version[0..(extra_index orelse kernel_version.len)];
+        var it = std.mem.splitScalar(u8, required, '.');
+        return .{
+            .major = try std.fmt.parseUnsigned(usize, it.next() orelse return error.InvalidVersion, 10),
+            .minor = try std.fmt.parseUnsigned(usize, it.next() orelse return error.InvalidVersion, 10),
+            .patch = try std.fmt.parseUnsigned(usize, it.next() orelse return error.InvalidVersion, 10),
+        };
+    }
+
+    test parseUnameKernelVersion {
+        try std.testing.expectFmt("5.17.0", "{}", .{try parseUnameKernelVersion("5.17.0")});
+        try std.testing.expectFmt("6.12.9", "{}", .{try parseUnameKernelVersion("6.12.9-rc7")});
+        try std.testing.expectFmt("6.6.71", "{}", .{try parseUnameKernelVersion("6.6.71-42-generic")});
+        try std.testing.expectFmt("5.15.167", "{}", .{try parseUnameKernelVersion("5.15.167.4-microsoft-standard-WSL2")}); // WSL2
+        try std.testing.expectFmt("4.4.0", "{}", .{try parseUnameKernelVersion("4.4.0-20241-Microsoft")}); // WSL1
+
+        try std.testing.expectError(error.InvalidCharacter, parseUnameKernelVersion(""));
+        try std.testing.expectError(error.InvalidVersion, parseUnameKernelVersion("5"));
+        try std.testing.expectError(error.InvalidVersion, parseUnameKernelVersion("5.5"));
     }
 
     fn loop(
