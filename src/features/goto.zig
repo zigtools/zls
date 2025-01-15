@@ -188,7 +188,7 @@ fn gotoDefinitionString(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const loc = pos_context.loc().?;
+    const loc = pos_context.stringLiteralContentLoc(handle.tree.source);
     if (loc.start == loc.end) return null;
     const import_str = offsets.locToSlice(handle.tree.source, loc);
 

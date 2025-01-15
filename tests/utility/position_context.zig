@@ -287,11 +287,17 @@ test "import/embedfile string literal" {
         \\const std = @import(<loc>"st</loc><cursor>");
     , .import_string_literal, .{ .lookahead = false });
     try testContext(
+        \\const std = @import(<loc>"s<cursor>t"</loc>);
+    , .import_string_literal, .{ .lookahead = true });
+    try testContext(
         \\const std = @embedFile(<loc>"file</loc><cursor>.");
     , .embedfile_string_literal, .{ .lookahead = false });
     try testContext(
         \\const std = @embedFile(<loc>"file.</loc><cursor>");
     , .embedfile_string_literal, .{ .lookahead = false });
+    try testContext(
+        \\const std = @embedFile(<loc>"file.<cursor>"</loc>);
+    , .embedfile_string_literal, .{ .lookahead = true });
 
     try testContext(
         \\const std = @import(<loc>"std"</loc><cursor>);
