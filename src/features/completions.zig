@@ -36,7 +36,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .One, .C => {
+            .one, .c => {
                 if (ty.is_type_val) return;
 
                 builder.completions.appendAssumeCapacity(.{
@@ -49,13 +49,13 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     ),
                 });
 
-                if (info.size == .C) return;
+                if (info.size == .c) return;
 
                 if (try builder.analyser.resolveDerefType(ty)) |child_ty| {
                     try typeToCompletion(builder, child_ty);
                 }
             },
-            .Slice => {
+            .slice => {
                 if (ty.is_type_val) return;
 
                 builder.completions.appendAssumeCapacity(.{
@@ -66,7 +66,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
 
                 var many_ptr_ty = ty;
                 many_ptr_ty.is_type_val = true;
-                many_ptr_ty.data.pointer.size = .Many;
+                many_ptr_ty.data.pointer.size = .many;
                 builder.completions.appendAssumeCapacity(.{
                     .label = "ptr",
                     .kind = .Field,
@@ -77,7 +77,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     ),
                 });
             },
-            .Many => {},
+            .many => {},
         },
         .array => |info| {
             if (ty.is_type_val) return;

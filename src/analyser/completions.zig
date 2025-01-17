@@ -19,7 +19,7 @@ pub fn dotCompletions(
     const ty: InternPool.Index = ip.typeOf(index);
 
     const inner_ty = switch (ip.indexToKey(ty)) {
-        .pointer_type => |pointer_info| if (pointer_info.flags.size == .One) pointer_info.elem_type else ty,
+        .pointer_type => |pointer_info| if (pointer_info.flags.size == .one) pointer_info.elem_type else ty,
         else => ty,
     };
 
@@ -63,7 +63,7 @@ pub fn dotCompletions(
             else => {},
         },
         .pointer_type => |pointer_info| {
-            if (pointer_info.flags.size != .Slice) return;
+            if (pointer_info.flags.size != .slice) return;
 
             const formatted = try std.fmt.allocPrint(arena, "{}", .{inner_ty.fmt(ip)});
             std.debug.assert(std.mem.startsWith(u8, formatted, "[]"));
@@ -271,19 +271,19 @@ test "dotCompletions - pointer types" {
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
-            .size = .One,
+            .size = .one,
         },
     } });
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
-            .size = .Slice,
+            .size = .slice,
         },
     } });
     const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
-            .size = .Slice,
+            .size = .slice,
             .is_const = true,
         },
     } });
@@ -324,19 +324,19 @@ test "dotCompletions - single pointer indirection" {
     const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = @"[1]u32",
         .flags = .{
-            .size = .One,
+            .size = .one,
         },
     } });
     const @"**[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = @"*[1]u32",
         .flags = .{
-            .size = .One,
+            .size = .one,
         },
     } });
     const @"[*][1]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = @"[1]u32",
         .flags = .{
-            .size = .Many,
+            .size = .many,
         },
     } });
 
