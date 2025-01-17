@@ -42,10 +42,10 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
 
                 // single pointer
                 const size_prefix = switch (pointer_info.flags.size) {
-                    .One => "single-item pointer",
-                    .Many => "many-item pointer",
-                    .Slice => "slice (pointer + length)",
-                    .C => "C pointer",
+                    .one => "single-item pointer",
+                    .many => "many-item pointer",
+                    .slice => "slice (pointer + length)",
+                    .c => "C pointer",
                 };
 
                 try writer.writeAll(size_prefix);

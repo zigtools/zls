@@ -201,7 +201,7 @@ fn getConfigurationType() type {
                 .optional = .{ .child = field.type },
             });
         }
-        new_field.default_value = &@as(new_field.type, null);
+        new_field.default_value_ptr = &@as(new_field.type, null);
     }
     config_info.@"struct".fields = fields[0..];
     config_info.@"struct".decls = &.{};
