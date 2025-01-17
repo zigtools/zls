@@ -22,7 +22,7 @@ jobs:
           - zig-version: mach-latest
             build-runner-file: master.zig
           # Zig master is handled by 'zig build test' in the main CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
