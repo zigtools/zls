@@ -6,6 +6,7 @@ const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.store);
+const lsp = @import("lsp");
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/shared.zig").BuildConfig;
@@ -25,6 +26,9 @@ handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .empty,
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
+builds_in_progress: std.atomic.Value(i32) = .init(0),
+transport: ?lsp.AnyTransport = null,
+supports_work_done_progress: bool = false,
 
 pub const Uri = []const u8;
 
@@ -833,8 +837,100 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     };
 }
 
+const progress_token = "buildProgressToken";
+
+fn sendMessageToClient(allocator: std.mem.Allocator, transport: lsp.AnyTransport, message: anytype) !void {
+    const serialized = try std.json.stringifyAlloc(
+        allocator,
+        message,
+        .{ .emit_null_optional_fields = false },
+    );
+    defer allocator.free(serialized);
+
+    try transport.writeJsonMessage(serialized);
+}
+
+fn notifyBuildStart(self: *DocumentStore) void {
+    if (!self.supports_work_done_progress) return;
+
+    // Atomicity note: We do not actually care about memory surrounding the
+    // counter, we only care about the counter itself. We only need to ensure
+    // we aren't double entering/exiting
+    const prev = self.builds_in_progress.fetchAdd(1, .monotonic);
+    if (prev != 0) return;
+
+    const transport = self.transport orelse return;
+
+    sendMessageToClient(
+        self.allocator,
+        transport,
+        .{
+            .jsonrpc = "2.0",
+            .id = "progress",
+            .method = "window/workDoneProgress/create",
+            .params = lsp.types.WorkDoneProgressCreateParams{
+                .token = .{ .string = progress_token },
+            },
+        },
+    ) catch |err| {
+        log.err("Failed to send create work message: {}", .{err});
+        return;
+    };
+
+    sendMessageToClient(self.allocator, transport, .{
+        .jsonrpc = "2.0",
+        .method = "$/progress",
+        .params = .{
+            .token = progress_token,
+            .value = lsp.types.WorkDoneProgressBegin{
+                .title = "Loading build configuration",
+            },
+        },
+    }) catch |err| {
+        log.err("Failed to send progress start message: {}", .{err});
+        return;
+    };
+}
+
+const EndStatus = enum { success, failed };
+
+fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
+    if (!self.supports_work_done_progress) return;
+
+    // Atomicity note: We do not actually care about memory surrounding the
+    // counter, we only care about the counter itself. We only need to ensure
+    // we aren't double entering/exiting
+    const prev = self.builds_in_progress.fetchSub(1, .monotonic);
+    if (prev != 1) return;
+
+    const transport = self.transport orelse return;
+
+    const message = switch (status) {
+        .failed => "Failed",
+        .success => "Success",
+    };
+
+    sendMessageToClient(self.allocator, transport, .{
+        .jsonrpc = "2.0",
+        .method = "$/progress",
+        .params = .{
+            .token = progress_token,
+            .value = lsp.types.WorkDoneProgressEnd{
+                .message = message,
+            },
+        },
+    }) catch |err| {
+        log.err("Failed to send progress end message: {}", .{err});
+        return;
+    };
+}
+
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build_file_uri_owned: bool) void {
     defer if (is_build_file_uri_owned) self.allocator.free(build_file_uri);
+
+    var end_status: EndStatus = .failed;
+    self.notifyBuildStart();
+    defer self.notifyBuildEnd(end_status);
 
     const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
@@ -846,6 +942,9 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
         return;
     };
     build_file.setBuildConfig(build_config);
+
+    // Looks like a useless assignment, but alters deffered onEnd
+    end_status = .success;
 }
 
 /// The `DocumentStore` represents a graph structure where every
