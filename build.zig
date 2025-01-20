@@ -256,15 +256,16 @@ pub fn build(b: *Build) !void {
     }
 
     { // zig build coverage
+        const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
 
         const merge_step = std.Build.Step.Run.create(b, "merge coverage");
-        merge_step.addArgs(&.{ "kcov", "--merge" });
+        merge_step.addArgs(&.{ kcov_bin, "--merge" });
         merge_step.rename_step_with_output_arg = false;
         const merged_coverage_output = merge_step.addOutputFileArg(".");
 
         for ([_]*std.Build.Step.Compile{ tests, src_tests }) |test_exe| {
             const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
+            kcov_collect.addArgs(&.{ kcov_bin, "--collect-only" });
             kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
             merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(test_exe.name));
             kcov_collect.addArtifactArg(test_exe);
