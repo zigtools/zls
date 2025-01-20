@@ -1038,6 +1038,7 @@ pub fn updateConfiguration(
         .resolved, .unresolved_dont_error => {},
         .unresolved => blk: {
             if (!options.resolve) break :blk;
+            if (server.status != .initialized) break :blk;
 
             const zig_version = resolve_result.zig_runtime_version.?;
             const zls_version = build_options.version;
