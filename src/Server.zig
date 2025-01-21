@@ -2201,6 +2201,8 @@ fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!
         //
     } else if (std.mem.eql(u8, id, "inlay_hints_refresh")) {
         //
+    } else if (std.mem.eql(u8, id, "progress")) {
+        //
     } else if (std.mem.startsWith(u8, id, "register")) {
         //
     } else if (std.mem.eql(u8, id, "apply_edit")) {
