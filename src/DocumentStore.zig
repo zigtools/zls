@@ -28,7 +28,11 @@ cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?lsp.AnyTransport = null,
-supports_work_done_progress: bool = false,
+lsp_capabilities: struct {
+    supports_work_done_progress: bool = false,
+    supports_semantic_tokens_refresh: bool = false,
+    supports_inlay_hints_refresh: bool = false,
+} = .{},
 
 pub const Uri = []const u8;
 
@@ -851,7 +855,7 @@ fn sendMessageToClient(allocator: std.mem.Allocator, transport: lsp.AnyTransport
 }
 
 fn notifyBuildStart(self: *DocumentStore) void {
-    if (!self.supports_work_done_progress) return;
+    if (!self.lsp_capabilities.supports_work_done_progress) return;
 
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
@@ -895,7 +899,7 @@ fn notifyBuildStart(self: *DocumentStore) void {
 const EndStatus = enum { success, failed };
 
 fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
-    if (!self.supports_work_done_progress) return;
+    if (!self.lsp_capabilities.supports_work_done_progress) return;
 
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
@@ -942,6 +946,31 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
         return;
     };
     build_file.setBuildConfig(build_config);
+
+    if (self.transport) |transport| {
+        if (self.lsp_capabilities.supports_semantic_tokens_refresh) {
+            sendMessageToClient(
+                self.allocator,
+                transport,
+                lsp.TypedJsonRPCRequest(?void){
+                    .id = .{ .string = "semantic_tokens_refresh" },
+                    .method = "workspace/semanticTokens/refresh",
+                    .params = @as(?void, null),
+                },
+            ) catch {};
+        }
+        if (self.lsp_capabilities.supports_inlay_hints_refresh) {
+            sendMessageToClient(
+                self.allocator,
+                transport,
+                lsp.TypedJsonRPCRequest(?void){
+                    .id = .{ .string = "inlay_hints_refresh" },
+                    .method = "workspace/inlayHint/refresh",
+                    .params = @as(?void, null),
+                },
+            ) catch {};
+        }
+    }
 
     // Looks like a useless assignment, but alters deffered onEnd
     end_status = .success;

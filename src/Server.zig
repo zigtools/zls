@@ -491,7 +491,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
     if (request.capabilities.window) |window| {
         if (window.workDoneProgress) |wdp| {
-            server.document_store.supports_work_done_progress = wdp;
+            server.document_store.lsp_capabilities.supports_work_done_progress = wdp;
         }
     }
 
@@ -502,6 +502,12 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             if (did_change.dynamicRegistration orelse false) {
                 server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
+        }
+        if (workspace.semanticTokens) |workspace_semantic_tokens| {
+            server.document_store.lsp_capabilities.supports_semantic_tokens_refresh = workspace_semantic_tokens.refreshSupport orelse false;
+        }
+        if (workspace.inlayHint) |inlay_hint| {
+            server.document_store.lsp_capabilities.supports_inlay_hints_refresh = inlay_hint.refreshSupport orelse false;
         }
     }
 
@@ -1014,13 +1020,6 @@ pub fn updateConfiguration(
                 try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
             }
         }
-
-        const json_message = try server.sendToClientRequest(
-            .{ .string = "semantic_tokens_refresh" },
-            "workspace/semanticTokens/refresh",
-            {},
-        );
-        server.allocator.free(json_message);
     }
 
     // <---------------------------------------------------------->
@@ -2199,6 +2198,8 @@ fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!
     };
 
     if (std.mem.eql(u8, id, "semantic_tokens_refresh")) {
+        //
+    } else if (std.mem.eql(u8, id, "inlay_hints_refresh")) {
         //
     } else if (std.mem.startsWith(u8, id, "register")) {
         //
