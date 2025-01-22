@@ -787,8 +787,8 @@ const Workspace = struct {
         };
         defer args.server.allocator.free(workspace_path);
 
-        workspace.build_on_save = @as(BuildOnSave, undefined);
-        workspace.build_on_save.?.init(.{
+        std.debug.assert(workspace.build_on_save == null);
+        workspace.build_on_save = BuildOnSave.init(.{
             .allocator = args.server.allocator,
             .workspace_path = workspace_path,
             .build_on_save_args = args.server.config.build_on_save_args,
@@ -798,7 +798,6 @@ const Workspace = struct {
             .build_runner_path = build_runner_path,
             .collection = &args.server.diagnostics_collection,
         }) catch |err| {
-            workspace.build_on_save = null;
             log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
             return;
         };
