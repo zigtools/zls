@@ -21,7 +21,6 @@ const mem = std.mem;
 const process = std.process;
 const ArrayList = std.ArrayList;
 const Step = std.Build.Step;
-const Watch = std.Build.Watch;
 const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
@@ -376,20 +375,22 @@ pub fn main() !void {
         return;
     }
 
-    if (!std.Build.Watch.have_impl) {
-        std.log.warn("Build-On-Save is not supported on {} by Zig {}", .{ builtin.target.os.tag, builtin.zig_version });
-        process.exit(1);
-    }
-
-    const suicide_thread = try std.Thread.spawn(.{}, struct {
-        fn do() void {
-            _ = std.io.getStdIn().reader().readByte() catch process.exit(1);
-            process.exit(0);
-        }
-    }.do, .{});
-    suicide_thread.detach();
-
     var w = try Watch.init();
+
+    const message_thread = try std.Thread.spawn(.{}, struct {
+        fn do(ww: *Watch) void {
+            while (std.io.getStdIn().reader().readByte()) |tag| {
+                switch (tag) {
+                    '\x00' => ww.trigger(),
+                    else => process.exit(1),
+                }
+            } else |err| switch (err) {
+                error.EndOfStream => process.exit(0),
+                else => process.exit(1),
+            }
+        }
+    }.do, .{&w});
+    message_thread.detach();
 
     const gpa = arena;
     var transport = Transport.init(.{
@@ -430,7 +431,7 @@ pub fn main() !void {
         // if any more events come in. After the debounce interval has passed,
         // trigger a rebuild on all steps with modified inputs, as well as their
         // recursive dependants.
-        var debounce_timeout: Watch.Timeout = .none;
+        var debounce_timeout: std.Build.Watch.Timeout = .none;
         while (true) switch (try w.wait(gpa, debounce_timeout)) {
             .timeout => {
                 markFailedStepsDirty(gpa, step_stack.keys());
@@ -456,6 +457,57 @@ fn markFailedStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
         else => continue,
     };
 }
+
+/// A wrapper around `std.Build.Watch` that supports manually triggering recompilations.
+const Watch = struct {
+    fs_watch: std.Build.Watch,
+    supports_fs_watch: bool,
+    manual_event: std.Thread.ResetEvent,
+    steps: []const *Step,
+
+    fn init() !Watch {
+        return .{
+            .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init() else {},
+            .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
+            .manual_event = .{},
+            .steps = &.{},
+        };
+    }
+
+    fn update(w: *Watch, gpa: Allocator, steps: []const *Step) !void {
+        if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
+            return try w.fs_watch.update(gpa, steps);
+        }
+        w.steps = steps;
+    }
+
+    fn trigger(w: *Watch) void {
+        if (w.supports_fs_watch) {
+            @panic("received manualy filesystem event even though std.Build.Watch is supported");
+        }
+        w.manual_event.set();
+    }
+
+    fn wait(w: *Watch, gpa: Allocator, timeout: std.Build.Watch.Timeout) !std.Build.Watch.WaitResult {
+        if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
+            return try w.fs_watch.wait(gpa, timeout);
+        }
+        switch (timeout) {
+            .none => w.manual_event.wait(),
+            .ms => |ms| w.manual_event.timedWait(@as(u64, ms) * std.time.ns_per_ms) catch return .timeout,
+        }
+        w.manual_event.reset();
+        markStepsDirty(gpa, w.steps);
+        return .dirty;
+    }
+
+    fn markStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
+        for (all_steps) |step| switch (step.state) {
+            .precheck_done => continue,
+            else => step.recursiveReset(gpa),
+        };
+    }
+};
 
 const Run = struct {
     max_rss: u64,

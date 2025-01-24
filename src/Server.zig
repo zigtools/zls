@@ -737,6 +737,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 const Workspace = struct {
     uri: types.URI,
     build_on_save: if (BuildOnSaveSupport.isSupportedComptime()) ?BuildOnSave else void,
+    build_on_save_mode: if (BuildOnSaveSupport.isSupportedComptime()) ?enum { watch, manual } else void,
 
     fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
         const duped_uri = try server.allocator.dupe(u8, uri);
@@ -745,6 +746,7 @@ const Workspace = struct {
         return .{
             .uri = duped_uri,
             .build_on_save = if (BuildOnSaveSupport.isSupportedComptime()) null else {},
+            .build_on_save_mode = if (BuildOnSaveSupport.isSupportedComptime()) null else {},
         };
     }
 
@@ -753,6 +755,16 @@ const Workspace = struct {
             if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
         }
         allocator.free(workspace.uri);
+    }
+
+    fn sendManualWatchUpdate(workspace: *Workspace) void {
+        comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
+
+        const build_on_save = if (workspace.build_on_save) |*build_on_save| build_on_save else return;
+        const mode = workspace.build_on_save_mode orelse return;
+        if (mode != .manual) return;
+
+        build_on_save.sendManualWatchUpdate();
     }
 
     fn refreshBuildOnSave(workspace: *Workspace, args: struct {
@@ -764,7 +776,17 @@ const Workspace = struct {
     }) error{OutOfMemory}!void {
         comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
 
-        const build_on_save_supported = if (args.runtime_zig_version) |version| BuildOnSaveSupport.isSupportedRuntime(version) == .supported else false;
+        if (args.runtime_zig_version) |runtime_zig_version| {
+            workspace.build_on_save_mode = switch (BuildOnSaveSupport.isSupportedRuntime(runtime_zig_version)) {
+                .supported => .watch,
+                // If if build on save has been explicitly enabled, fallback to the implementation with manual updates
+                else => if (args.server.config.enable_build_on_save orelse false) .manual else null,
+            };
+        } else {
+            workspace.build_on_save_mode = null;
+        }
+
+        const build_on_save_supported = workspace.build_on_save_mode != null;
         const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
         const enable = build_on_save_supported and build_on_save_wanted;
 
@@ -1071,9 +1093,7 @@ pub fn updateConfiguration(
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!BuildOnSaveSupport.isSupportedComptime() and @TypeOf(BuildOnSaveSupport.minimum_zig_version) == void) {
-            log.info("'enable_build_on_save' is ignored because it is not supported on {s}", .{@tagName(zig_builtin.os.tag)});
-        } else if (!BuildOnSaveSupport.isSupportedComptime()) {
+        if (!BuildOnSaveSupport.isSupportedComptime()) {
             // This message is not very helpful but it relatively uncommon to happen anyway.
             log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
         } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
@@ -1085,9 +1105,10 @@ pub fn updateConfiguration(
         } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null) {
             switch (BuildOnSaveSupport.isSupportedRuntime(resolve_result.zig_runtime_version.?)) {
                 .supported => {},
-                .invalid_linux_kernel_version => |*utsname_release| log.warn("'enable_build_on_save' is ignored because it because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
-                .unsupported_linux_kernel_version => |kernel_version| log.warn("'enable_build_on_save' is ignored because it is not supported by Linux '{}' (requires at least {})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
-                .unsupported_zig_version => log.warn("'enable_build_on_save' is ignored because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), resolve_result.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
+                .invalid_linux_kernel_version => |*utsname_release| log.warn("Build-On-Save cannot run in watch mode because it because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
+                .unsupported_linux_kernel_version => |kernel_version| log.warn("Build-On-Save cannot run in watch mode because it is not supported by Linux '{}' (requires at least {})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
+                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), resolve_result.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
+                .unsupported_os => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s}", .{@tagName(zig_builtin.os.tag)}),
             }
         }
     }
@@ -1462,6 +1483,12 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
             },
         );
         server.allocator.free(json_message);
+    }
+
+    if (BuildOnSaveSupport.isSupportedComptime()) {
+        for (server.workspaces.items) |*workspace| {
+            workspace.sendManualWatchUpdate();
+        }
     }
 }
 
