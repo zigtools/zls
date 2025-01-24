@@ -532,6 +532,10 @@ pub const BuildOnSave = struct {
         self.thread.join();
     }
 
+    pub fn sendManualWatchUpdate(self: *BuildOnSave) void {
+        self.child_process.stdin.?.writeAll("\x00") catch {};
+    }
+
     fn loop(
         allocator: std.mem.Allocator,
         child_process: *std.process.Child,

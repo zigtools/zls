@@ -150,7 +150,8 @@ pub const BuildOnSaveSupport = union(enum) {
     supported,
     invalid_linux_kernel_version: if (builtin.os.tag == .linux) std.meta.FieldType(std.posix.utsname, .release) else noreturn,
     unsupported_linux_kernel_version: if (builtin.os.tag == .linux) std.SemanticVersion else noreturn,
-    unsupported_zig_version: void,
+    unsupported_zig_version: if (@TypeOf(minimum_zig_version) != void) void else noreturn,
+    unsupported_os: if (@TypeOf(minimum_zig_version) == void) void else noreturn,
 
     const linux_support_version = std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
     const windows_support_version = std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
@@ -184,7 +185,6 @@ pub const BuildOnSaveSupport = union(enum) {
     pub inline fn isSupportedComptime() bool {
         if (!std.process.can_spawn) return false;
         if (builtin.single_threaded) return false;
-        if (@TypeOf(minimum_zig_version) == void) return false;
         return true;
     }
 
@@ -202,6 +202,10 @@ pub const BuildOnSaveSupport = union(enum) {
             return .{
                 .unsupported_linux_kernel_version = version,
             };
+        }
+
+        if (@TypeOf(minimum_zig_version) == void) {
+            return .unsupported_os;
         }
 
         if (runtime_zig_version.order(minimum_zig_version) == .lt) {
