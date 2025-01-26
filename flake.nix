@@ -8,12 +8,23 @@
 
       gitignore.url = "github:hercules-ci/gitignore.nix";
       gitignore.inputs.nixpkgs.follows = "nixpkgs";
-
-      flake-utils.url = "github:numtide/flake-utils";
     };
 
-  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, zig-overlay, gitignore }: let
+    inherit (nixpkgs) lib;
+
+    # flake-utils polyfill
+    eachSystem = systems: fn:
+      lib.foldl' (
+        acc: system:
+          lib.recursiveUpdate
+          acc
+          (lib.mapAttrs (_: value: {${system} = value;}) (fn system))
+      ) {}
+      systems;
+
+    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+  in eachSystem systems (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         zig = zig-overlay.packages.${system}.master;
