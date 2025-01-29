@@ -25,6 +25,7 @@
         packages.zls = pkgs.stdenvNoCC.mkDerivation {
           name = "zls";
           version = "master";
+          meta.mainProgram = "zls";
           src = gitignoreSource ./.;
           nativeBuildInputs = [ zig ];
           dontConfigure = true;
