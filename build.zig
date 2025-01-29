@@ -51,8 +51,9 @@ pub fn build(b: *Build) !void {
     const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
+    const commit_hash = b.option([]const u8, "commit-hash", "Use the specified commit hash rather than running 'git describe'");
 
-    const resolved_zls_version = getVersion(b);
+    const resolved_zls_version = getVersion(b, commit_hash);
     const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
 
     const build_options = blk: {
@@ -283,11 +284,20 @@ pub fn build(b: *Build) !void {
 }
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
-fn getVersion(b: *Build) std.SemanticVersion {
+fn getVersion(b: *Build, override_commit_hash: ?[]const u8) std.SemanticVersion {
     if (zls_version.pre == null and zls_version.build == null) return zls_version;
+    if (override_commit_hash) |hash| {
+        return .{
+            .major = zls_version.major,
+            .minor = zls_version.minor,
+            .patch = zls_version.patch,
+            .pre = "dev",
+            .build = hash[0..@min(hash.len, 7)],
+        };
+    }
 
     const argv: []const []const u8 = &.{
-        "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags",
+        "git", "-C", b.path(".").getPath2(b, null), "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
