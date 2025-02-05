@@ -345,25 +345,13 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         }),
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
-    try builder.generateCodeAction(error_bundle, &actions);
-
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
-    for (actions.items) |action| {
-        std.debug.assert(action.kind != null);
-        std.debug.assert(action.kind.? == .@"source.fixAll");
-        std.debug.assert(action.edit != null);
-        std.debug.assert(action.edit.?.changes != null);
-
-        const changes = action.edit.?.changes.?.map;
-        if (changes.count() != 1) continue;
-
-        const edits: []const types.TextEdit = changes.get(handle.uri) orelse continue;
-
-        try text_edits.appendSlice(arena, edits);
+    try builder.generateCodeAction(error_bundle);
+    for (builder.actions.items) |action| {
+        std.debug.assert(action.kind.?.eql(.@"source.fixAll")); // We request only source.fixall code actions
     }
 
-    return text_edits;
+    defer builder.fixall_text_edits = .empty;
+    return builder.fixall_text_edits;
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -1780,13 +1768,12 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         .only_kinds = only_kinds,
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
-    try builder.generateCodeAction(error_bundle, &actions);
-    try builder.generateCodeActionsInRange(request.range, &actions);
+    try builder.generateCodeAction(error_bundle);
+    try builder.generateCodeActionsInRange(request.range);
 
-    const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
-    const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
-    for (actions.items, result) |action, *out| {
+    const Result = lsp.ResultType("textDocument/codeAction");
+    const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), builder.actions.items.len);
+    for (builder.actions.items, result) |action, *out| {
         out.* = .{ .CodeAction = action };
     }
 
