@@ -25,7 +25,7 @@ const minimum_build_zig_version = "0.14.0-dev.3046+08d661fcf";
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.14.0-dev.3046+08d661fcf";
+const minimum_runtime_zig_version = "0.14.0-dev.2534+12d64c456";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
