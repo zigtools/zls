@@ -19,17 +19,19 @@ pub const Builder = struct {
     offset_encoding: offsets.Encoding,
     only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
 
+    actions: std.ArrayListUnmanaged(types.CodeAction) = .empty,
+    fixall_text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty,
+
     pub fn generateCodeAction(
         builder: *Builder,
         error_bundle: std.zig.ErrorBundle,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
         var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .empty;
 
-        try handleUnorganizedImport(builder, actions);
+        try handleUnorganizedImport(builder);
 
         if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
         for (error_bundle.getMessages()) |msg_index| {
@@ -47,26 +49,34 @@ pub const Builder = struct {
 
             switch (kind) {
                 .unused => |id| switch (id) {
-                    .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
-                    .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                    .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                    .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                    .@"function parameter" => try handleUnusedFunctionParameter(builder, loc),
+                    .@"local constant" => try handleUnusedVariableOrConstant(builder, loc),
+                    .@"local variable" => try handleUnusedVariableOrConstant(builder, loc),
+                    .@"switch tag capture", .capture => try handleUnusedCapture(builder, loc, &remove_capture_actions),
                 },
-                .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
-                .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
+                .non_camelcase_fn => try handleNonCamelcaseFunction(builder, loc),
+                .pointless_discard => try handlePointlessDiscard(builder, loc),
                 .omit_discard => |id| switch (id) {
                     .@"error capture; omit it instead" => {},
-                    .@"error capture" => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                    .@"error capture" => try handleUnusedCapture(builder, loc, &remove_capture_actions),
                 },
                 // the undeclared identifier may be a discard
-                .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
+                .undeclared_identifier => try handlePointlessDiscard(builder, loc),
                 .unreachable_code => {
                     // TODO
                     // autofix: comment out code
                     // fix: remove code
                 },
-                .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
+                .var_never_mutated => try handleVariableNeverMutated(builder, loc),
             }
+        }
+
+        if (builder.fixall_text_edits.items.len != 0) {
+            try builder.actions.append(builder.arena, .{
+                .title = "apply fixall",
+                .kind = .@"source.fixAll",
+                .edit = try builder.createWorkspaceEdit(builder.fixall_text_edits.items),
+            });
         }
     }
 
@@ -79,7 +89,6 @@ pub const Builder = struct {
     pub fn generateCodeActionsInRange(
         builder: *Builder,
         range: types.Range,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
@@ -101,8 +110,8 @@ pub const Builder = struct {
         }
 
         switch (token_tags[token_idx]) {
-            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
-            .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
+            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
+            .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
             else => {},
         }
     }
@@ -128,7 +137,6 @@ pub const Builder = struct {
 pub fn generateStringLiteralCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -161,7 +169,7 @@ pub fn generateStringLiteralCodeActions(
     result.appendAssumeCapacity('\n');
 
     const loc = offsets.tokenToLoc(builder.handle.tree, token);
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "convert to a multiline string literal",
         .kind = .refactor,
         .isPreferred = false,
@@ -172,7 +180,6 @@ pub fn generateStringLiteralCodeActions(
 pub fn generateMultilineStringCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -220,7 +227,7 @@ pub fn generateMultilineStringCodeActions(
     ) orelse builder.handle.tree.source.len;
     const remove_loc: offsets.Loc = .{ .start = first_token_start, .end = last_token_end };
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "convert to a string literal",
         .kind = .refactor,
         .isPreferred = false,
@@ -284,7 +291,7 @@ pub fn collectAutoDiscardDiagnostics(
     }
 }
 
-fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -296,17 +303,15 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const new_text = try createCamelcaseText(builder.arena, identifier_name);
 
-    const action1: types.CodeAction = .{
+    try builder.actions.append(builder.arena, .{
         .title = "make function name camelCase",
         .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
-    };
-
-    try actions.append(builder.arena, action1);
+    });
 }
 
-fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -360,20 +365,14 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const add_suffix_newline = is_last_param and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
-    try actions.ensureUnusedCapacity(builder.arena, 2);
-
     if (builder.wantKind(.@"source.fixAll")) {
-        actions.insertAssumeCapacity(0, .{
-            .title = "discard function parameter",
-            .kind = .@"source.fixAll",
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-        });
+        try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
     }
 
     if (builder.wantKind(.quickfix)) {
+        // TODO add no `// autofix` comment
         // TODO fix formatting
-        actions.appendAssumeCapacity(.{
+        try builder.actions.append(builder.arena, .{
             .title = "remove function parameter",
             .kind = .quickfix,
             .isPreferred = false,
@@ -382,11 +381,11 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     }
 }
 
-fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!builder.wantKind(.@"source.fixAll")) return;
+    if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
@@ -412,17 +411,23 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, false);
 
-    try actions.append(builder.arena, .{
-        .title = "discard value",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-    });
+    if (builder.wantKind(.@"source.fixAll")) {
+        try builder.fixall_text_edits.append(builder.arena, builder.createTextEditPos(insert_index, new_text));
+    }
+
+    if (builder.wantKind(.quickfix)) {
+        // TODO add no `// autofix` comment
+        try builder.actions.append(builder.arena, .{
+            .title = "discard value",
+            .kind = .quickfix,
+            .isPreferred = true,
+            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
+        });
+    }
 }
 
 fn handleUnusedCapture(
     builder: *Builder,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
     loc: offsets.Loc,
     remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
 ) !void {
@@ -445,13 +450,12 @@ fn handleUnusedCapture(
     // https://github.com/ziglang/zig/pull/22209
     if (std.mem.eql(u8, identifier_name, "_")) return;
 
-    try actions.ensureUnusedCapacity(builder.arena, 3);
-
     if (builder.wantKind(.quickfix)) {
         const capture_loc = getCaptureLoc(source, loc) orelse return;
 
         const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
-        actions.appendAssumeCapacity(.{
+
+        try builder.actions.append(builder.arena, .{
             .title = "discard capture name",
             .kind = .quickfix,
             .isPreferred = false,
@@ -462,7 +466,7 @@ fn handleUnusedCapture(
         // search for a matching action by comparing ranges.
         const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
         if (!gop.found_existing) {
-            actions.appendAssumeCapacity(.{
+            try builder.actions.append(builder.arena, .{
                 .title = "remove capture",
                 .kind = .quickfix,
                 .isPreferred = false,
@@ -516,33 +520,34 @@ fn handleUnusedCapture(
     const add_suffix_newline = is_last_capture and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
-    actions.insertAssumeCapacity(0, .{
-        .title = "discard capture",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-    });
+    try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
 }
 
-fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!builder.wantKind(.@"source.fixAll")) return;
+    if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const edit_loc = getDiscardLoc(builder.handle.tree.source, loc) orelse return;
 
-    try actions.append(builder.arena, .{
-        .title = "remove pointless discard",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{
-            builder.createTextEditLoc(edit_loc, ""),
-        }),
-    });
+    if (builder.wantKind(.@"source.fixAll")) {
+        try builder.fixall_text_edits.append(builder.arena, builder.createTextEditLoc(edit_loc, ""));
+    }
+
+    if (builder.wantKind(.quickfix)) {
+        try builder.actions.append(builder.arena, .{
+            .title = "remove pointless discard",
+            .kind = .@"source.fixAll",
+            .isPreferred = true,
+            .edit = try builder.createWorkspaceEdit(&.{
+                builder.createTextEditLoc(edit_loc, ""),
+            }),
+        });
+    }
 }
 
-fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -559,7 +564,7 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
 
     if (!std.mem.eql(u8, offsets.locToSlice(source, var_keyword_loc), "var")) return;
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "use 'const'",
         .kind = .quickfix,
         .isPreferred = true,
@@ -569,7 +574,7 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
     });
 }
 
-fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction)) !void {
+fn handleUnorganizedImport(builder: *Builder) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -632,7 +637,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
 
     const workspace_edit = try builder.createWorkspaceEdit(edits.items);
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "organize @import",
         .kind = .@"source.organizeImports",
         .isPreferred = true,
