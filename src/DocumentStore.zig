@@ -486,7 +486,7 @@ pub const Handle = struct {
                     const tracy_zone_inner = tracy.traceNamed(@src(), "ZonGen.generate");
                     defer tracy_zone_inner.end();
 
-                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree);
+                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree, .{});
                     errdefer zoir.deinit(self.impl.allocator);
 
                     self.impl.zoir = zoir;
