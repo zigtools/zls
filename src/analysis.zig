@@ -865,6 +865,10 @@ pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Type) error{OutOfMem
             std.debug.assert(child_ty.is_type_val);
             return try child_ty.instanceTypeVal(analyser);
         },
+        .pointer => |ptr| {
+            if (ptr.size == .c) return optional;
+            return null;
+        },
         else => return null,
     }
 }
