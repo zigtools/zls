@@ -1164,6 +1164,19 @@ test "optional" {
         \\(i32)
         \\```
     );
+
+    try testHover(
+        \\var value: u32 = 123;
+        \\const ptr: [*c]u32 = &value;
+        \\const f<cursor>oo = ptr orelse unreachable;
+    ,
+        \\```zig
+        \\const foo = ptr orelse unreachable
+        \\```
+        \\```zig
+        \\([*c]u32)
+        \\```
+    );
 }
 
 test "error union" {
