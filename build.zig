@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// std.builtin.Type renames, and make it easier to modify std.builtin
+/// compiler,std: implement ZON support
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.2801+4d8c24c6c";
+const minimum_build_zig_version = "0.14.0-dev.3042+317722b37";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// std.Build: add new functions to create artifacts/Step.Compile from existing module
