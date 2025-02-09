@@ -823,6 +823,29 @@ test "array type" {
     , &.{});
 }
 
+test "tuple fields" {
+    try testCompletion(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const foo = .{ b, a };
+        \\    const bar = foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "@\"0\"", .kind = .Field, .detail = "i64" },
+        .{ .label = "@\"1\"", .kind = .Field, .detail = "f32" },
+    });
+    try testCompletion(
+        \\fn foo() void {
+        \\    const foo: struct { i64, f32 } = .{ 1, 0 };
+        \\    const bar = foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "@\"0\"", .kind = .Field, .detail = "i64" },
+        .{ .label = "@\"1\"", .kind = .Field, .detail = "f32" },
+    });
+}
+
 test "if/for/while/catch scopes" {
     try testCompletion(
         \\const S = struct { pub const T = u32; };

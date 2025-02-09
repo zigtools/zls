@@ -90,7 +90,21 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 .kind = .Field,
             });
         },
-        .tuple => {}, // TODO
+        .tuple => |elem_ty_slice| {
+            if (ty.is_type_val) return;
+            try builder.completions.ensureUnusedCapacity(builder.arena, elem_ty_slice.len);
+            for (elem_ty_slice, 0..) |elem_ty, i| {
+                builder.completions.appendAssumeCapacity(.{
+                    .label = try std.fmt.allocPrint(builder.arena, "@\"{}\"", .{i}),
+                    .kind = .Field,
+                    .detail = try std.fmt.allocPrint(
+                        builder.arena,
+                        "{}",
+                        .{elem_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                    ),
+                });
+            }
+        },
         .optional => |child_ty| {
             if (ty.is_type_val) return;
             builder.completions.appendAssumeCapacity(.{
@@ -110,6 +124,20 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             for (decls.items) |decl_with_handle| {
                 try declToCompletion(builder, decl_with_handle, .{
                     .parent_container_ty = ty,
+                });
+            }
+
+            if (ty.is_type_val) return;
+            var i: usize = 0;
+            while (try builder.analyser.resolveTupleFieldType(ty, i)) |elem_ty| : (i += 1) {
+                try builder.completions.append(builder.arena, .{
+                    .label = try std.fmt.allocPrint(builder.arena, "@\"{}\"", .{i}),
+                    .kind = .Field,
+                    .detail = try std.fmt.allocPrint(
+                        builder.arena,
+                        "{}",
+                        .{elem_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                    ),
                 });
             }
         },
