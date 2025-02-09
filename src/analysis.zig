@@ -1122,40 +1122,13 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
 }
 
 pub fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
-    const scope_handle = switch (tuple.data) {
-        .container => |s| s,
-        .tuple => |elem_ty_slice| {
-            if (index >= elem_ty_slice.len) return null;
-            return elem_ty_slice[index];
+    switch (tuple.data) {
+        .tuple => |fields| {
+            if (index >= fields.len) return null;
+            return fields[index].instanceTypeVal(analyser);
         },
         else => return null,
-    };
-    const node = scope_handle.toNode();
-    const handle = scope_handle.handle;
-    const tree = handle.tree;
-    const main_tokens = tree.nodes.items(.main_token);
-    const token_tags = tree.tokens.items(.tag);
-
-    if (token_tags[main_tokens[node]] != .keyword_struct)
-        return null;
-
-    var buf: [2]Ast.Node.Index = undefined;
-    const container_decl = tree.fullContainerDecl(&buf, node) orelse
-        return null;
-
-    if (index >= container_decl.ast.members.len)
-        return null;
-
-    const field = tree.fullContainerField(container_decl.ast.members[index]) orelse
-        return null;
-
-    if (!field.ast.tuple_like)
-        return null;
-
-    if (try analyser.resolveTypeOfNode(.{ .node = field.ast.type_expr, .handle = handle })) |ty|
-        return try ty.instanceTypeVal(analyser);
-
-    return null;
+    }
 }
 
 fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
@@ -1204,7 +1177,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
         .tuple => {
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
-            return analyser.resolveTupleFieldType(ty, index);
+            return try analyser.resolveTupleFieldType(ty, index);
         },
 
         .optional => |child_ty| {
@@ -1213,20 +1186,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .container => |scope_handle| switch (scope_handle.handle.tree.nodes.items(.tag)[scope_handle.toNode()]) {
-            .container_decl,
-            .container_decl_trailing,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            => {
-                if (!allDigits(name)) return null;
-                const index = std.fmt.parseUnsigned(u16, name, 10) catch return null;
-                return analyser.resolveTupleFieldType(ty, index);
-            },
-            else => {},
-        },
+        .container => {},
 
         .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
             .multiline_string_literal,
@@ -1725,6 +1685,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const elem_ty_slice = try analyser.arena.allocator().alloc(Type, array_init_info.ast.elements.len);
             for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
                 elem_ty.* = try analyser.resolveTypeOfNodeInternal(.{ .node = element, .handle = handle }) orelse return null;
+                elem_ty.* = elem_ty.typeOf(analyser);
             }
             return .{
                 .data = .{ .tuple = elem_ty_slice },
@@ -1769,7 +1730,40 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        => {
+        => |tag| {
+            not_a_tuple: {
+                switch (tag) {
+                    .container_decl,
+                    .container_decl_trailing,
+                    .container_decl_two,
+                    .container_decl_two_trailing,
+                    => {},
+                    else => break :not_a_tuple,
+                }
+
+                var buffer: [2]Ast.Node.Index = undefined;
+                const container_decl = tree.fullContainerDecl(&buffer, node).?;
+                if (container_decl.ast.members.len == 0) break :not_a_tuple; // technically a tuple
+                if (token_tags[container_decl.ast.main_token] != .keyword_struct) break :not_a_tuple;
+                const elem_ty_slice = try analyser.arena.allocator().alloc(Type, container_decl.ast.members.len);
+
+                var has_unresolved_fields = false;
+                for (elem_ty_slice, container_decl.ast.members) |*elem_ty, member_node| {
+                    const container_field = tree.fullContainerField(member_node) orelse break :not_a_tuple;
+                    if (!container_field.ast.tuple_like) break :not_a_tuple;
+                    elem_ty.* = try analyser.resolveTypeOfNodeInternal(.{ .node = container_field.ast.type_expr, .handle = handle }) orelse {
+                        has_unresolved_fields = true;
+                        continue;
+                    };
+                }
+
+                if (has_unresolved_fields) return null;
+                return .{
+                    .data = .{ .tuple = elem_ty_slice },
+                    .is_type_val = true,
+                };
+            }
+
             // TODO: use map? idk
             const document_scope = try handle.getDocumentScope();
 
@@ -2735,7 +2729,7 @@ pub const Type = struct {
     }
 
     pub fn isStructType(self: Type) bool {
-        return self.isContainerKind(.keyword_struct) or self.isRoot();
+        return self.data == .tuple or self.isContainerKind(.keyword_struct) or self.isRoot();
     }
 
     pub fn isNamespace(self: Type) bool {
@@ -2973,7 +2967,7 @@ pub const Type = struct {
                     if (i != 0) {
                         try writer.writeAll(", ");
                     }
-                    try writer.print("{}", .{elem_ty.fmt(analyser, ctx.options)});
+                    try writer.print("{}", .{elem_ty.fmtTypeVal(analyser, ctx.options)});
                 }
                 try writer.writeAll(" }");
             },
@@ -4094,7 +4088,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
-                    .container, .tuple => try analyser.resolveTupleFieldType(node, pay.index),
+                    .tuple => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
                 };
             },
