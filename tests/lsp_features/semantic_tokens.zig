@@ -1798,6 +1798,59 @@ test "deprecated" {
     });
 }
 
+test "deprecated with doc comment" {
+    try testSemanticTokens(
+        \\/// Deprecated: use bar
+        \\const foo = 123;
+    , &.{
+        .{ "/// Deprecated: use bar", .comment, .{ .documentation = true } },
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "123", .number, .{} },
+    });
+    try testSemanticTokens(
+        \\/// DEPRECATED use bar
+        \\const foo = 123;
+        \\const bar = foo;
+    , &.{
+        .{ "/// DEPRECATED use bar", .comment, .{ .documentation = true } },
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "123", .number, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "foo", .variable, .{ .deprecated = true } },
+    });
+    try testSemanticTokens(
+        \\const S = struct {
+        \\  /// deprecated, use bar
+        \\  const foo = 123;
+        \\};
+        \\const bar = S.foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "/// deprecated, use bar", .comment, .{ .documentation = true } },
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "123", .number, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true, .deprecated = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "foo", .variable, .{ .deprecated = true } },
+    });
+}
+
 test "zon file" {
     try testSemanticTokensOptions(
         \\.{

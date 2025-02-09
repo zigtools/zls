@@ -2347,6 +2347,68 @@ test "deprecated " {
     });
 }
 
+test "deprecated with doc comment " {
+    try testCompletion(
+        \\/// Deprecated; some message
+        \\const foo = 123;
+        \\const bar = <cursor>
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Constant,
+            .documentation = " Deprecated; some message",
+            .deprecated = true,
+        },
+    });
+    try testCompletion(
+        \\///Deprecated
+        \\fn bar() void {}
+        \\const baz = <cursor>
+    , &.{
+        .{
+            .label = "bar",
+            .kind = .Function,
+            .documentation = "Deprecated",
+            .deprecated = true,
+        },
+    });
+    try testCompletion(
+        \\fn bar() void {}
+        \\///Deprecated, use bar
+        \\const foo = bar;
+        \\const baz = <cursor>
+    , &.{
+        .{
+            .label = "bar",
+            .kind = .Function,
+        },
+        .{
+            .label = "foo",
+            .kind = .Function,
+            .documentation = "Deprecated, use bar",
+            .deprecated = true,
+        },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    /// Deprecated
+        \\    foo: u32,
+        \\};
+        \\comptime {
+        \\    var s: S = undefined;
+        \\    s.<cursor>
+        \\}
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Field,
+            .documentation = " Deprecated",
+            .deprecated = true,
+            .detail = "u32",
+        },
+    });
+}
+
 test "declarations" {
     try testCompletion(
         \\const S = struct {

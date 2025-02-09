@@ -227,6 +227,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
 
             var is_deprecated: bool = false;
             if (maybe_resolved_ty) |ty| {
+                if (ty.deprecated_comment) is_deprecated = true;
                 if (try builder.analyser.resolveFuncProtoOfCallable(ty)) |func_ty| blk: {
                     var item = try functionTypeCompletion(builder, name, options.parent_container_ty, func_ty) orelse break :blk;
                     item.documentation = documentation;
@@ -274,8 +275,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                 } else documentation,
                 .detail = detail,
                 .labelDetails = label_details,
-                .deprecated = if (compile_error_message != null and builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
-                .tags = if (compile_error_message != null and builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
+                .deprecated = if (is_deprecated and builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
+                .tags = if (is_deprecated and builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
             });
         },
         .label => {
@@ -433,6 +434,8 @@ fn functionTypeCompletion(
             .{ .InsertReplaceEdit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
         else
             .{ .TextEdit = .{ .newText = new_text, .range = insert_range } },
+        .deprecated = if (func_ty.deprecated_comment and builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
+        .tags = if (func_ty.deprecated_comment and builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
     };
 }
 

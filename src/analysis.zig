@@ -1429,6 +1429,15 @@ const FindBreaks = struct {
     }
 };
 
+fn isDeprecatedWithDoc(tree: Ast, base_token: Ast.TokenIndex) bool {
+    const token_tags = tree.tokens.items(.tag);
+    const doc_index = getDocCommentTokenIndex(token_tags, base_token) orelse return false;
+    const doc_slice = tree.tokenSlice(doc_index);
+    if (doc_slice.len < "///Deprecated".len) return false;
+
+    return std.ascii.startsWithIgnoreCase(doc_slice[@as(usize, 3) + @intFromBool(doc_slice[3] == ' ') ..], "deprecated");
+}
+
 /// Resolves the type of an Ast Node.
 /// Returns `null` if the type could not be resolved.
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
@@ -1476,10 +1485,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const var_decl = tree.fullVarDecl(node).?;
             var fallback_type: ?Type = null;
+            const deprecated_comment = isDeprecatedWithDoc(tree, var_decl.firstToken());
 
             if (var_decl.ast.type_node != 0) blk: {
                 const type_node: NodeWithHandle = .{ .node = var_decl.ast.type_node, .handle = handle };
-                const decl_type = try analyser.resolveTypeOfNodeInternal(type_node) orelse break :blk;
+                var decl_type = try analyser.resolveTypeOfNodeInternal(type_node) orelse break :blk;
+                if (deprecated_comment) decl_type.deprecated_comment = true;
                 if (decl_type.isMetaType()) {
                     fallback_type = decl_type;
                     break :blk;
@@ -1489,7 +1500,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             if (var_decl.ast.init_node != 0) blk: {
                 const value: NodeWithHandle = .{ .node = var_decl.ast.init_node, .handle = handle };
-                return try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
+                var value_type = try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
+                if (deprecated_comment) value_type.deprecated_comment = true;
+                return value_type;
             }
 
             return fallback_type;
@@ -1568,19 +1581,27 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .container_field_init,
         .container_field_align,
         => {
-            const container_type = try innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
+            const first_tok = tree.firstToken(node);
+            const deprecated_comment = isDeprecatedWithDoc(tree, first_tok);
+
+            var container_type = try innermostContainer(handle, offsets.tokenToIndex(tree, first_tok));
+            if (deprecated_comment) container_type.deprecated_comment = true;
             if (container_type.isEnumType())
                 return try container_type.instanceTypeVal(analyser);
 
             if (container_type.isTaggedUnion()) {
                 var field = tree.fullContainerField(node).?;
                 field.convertToNonTupleLike(tree.nodes);
-                if (field.ast.type_expr == 0)
-                    return try Type.typeValFromIP(analyser, .void_type);
+                if (field.ast.type_expr == 0) {
+                    var void_type = try Type.typeValFromIP(analyser, .void_type);
+                    if (deprecated_comment) void_type.deprecated_comment = true;
+                    return void_type;
+                }
             }
 
             const base: NodeWithHandle = .{ .node = datas[node].lhs, .handle = handle };
-            const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
+            var base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
+            if (deprecated_comment) base_type.deprecated_comment = true;
             return try base_type.instanceTypeVal(analyser);
         },
         .@"comptime",
@@ -1954,12 +1975,17 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
+            const fn_proto = tree.fullFnProto(&buf, node).?;
             // This is a function type
-            if (tree.fullFnProto(&buf, node).?.name_token == null) {
+            if (fn_proto.name_token == null) {
                 return Type.typeVal(node_handle);
             }
 
-            return .{ .data = .{ .other = .{ .node = node, .handle = handle } }, .is_type_val = false };
+            return .{
+                .data = .{ .other = .{ .node = node, .handle = handle } },
+                .is_type_val = false,
+                .deprecated_comment = isDeprecatedWithDoc(tree, fn_proto.firstToken()),
+            };
         },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
@@ -2372,6 +2398,8 @@ pub const Type = struct {
     /// ```
     /// if `data == .ip_index` then this field is equivalent to `typeOf(index) == .type_type`
     is_type_val: bool,
+    /// True if the type belongs to a declaration with a doc comment starting with "deprecated".
+    deprecated_comment: bool = false,
 
     pub const Data = union(enum) {
         /// - `*const T`
@@ -2453,6 +2481,7 @@ pub const Type = struct {
 
     pub fn hashWithHasher(self: Type, hasher: anytype) void {
         hasher.update(&.{ @intFromBool(self.is_type_val), @intFromEnum(self.data) });
+        hasher.update(&.{ @intFromBool(self.deprecated_comment), @intFromEnum(self.data) });
 
         switch (self.data) {
             .pointer => |info| {
@@ -2497,6 +2526,7 @@ pub const Type = struct {
 
     pub fn eql(a: Type, b: Type) bool {
         if (a.is_type_val != b.is_type_val) return false;
+        if (a.deprecated_comment != b.deprecated_comment) return false;
         if (@intFromEnum(a.data) != @intFromEnum(b.data)) return false;
 
         switch (a.data) {
@@ -2660,9 +2690,14 @@ pub const Type = struct {
                         },
                     },
                     .is_type_val = payload.index == .type_type,
+                    .deprecated_comment = self.deprecated_comment,
                 };
             },
-            else => .{ .data = self.data, .is_type_val = false },
+            else => .{
+                .data = self.data,
+                .is_type_val = false,
+                .deprecated_comment = self.deprecated_comment,
+            },
         };
     }
 
