@@ -1201,7 +1201,11 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .tuple => {}, // TODO
+        .tuple => {
+            if (!allDigits(name)) return null;
+            const index = std.fmt.parseInt(u16, name, 10) catch return null;
+            return analyser.resolveTupleFieldType(ty, index);
+        },
 
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
@@ -1217,13 +1221,8 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             .container_decl_two,
             .container_decl_two_trailing,
             => {
-                if (!std.mem.startsWith(u8, name, "@\"")) return null;
-                if (!std.mem.endsWith(u8, name, "\"")) return null;
-
-                const text = name[2 .. name.len - 1];
-                if (!allDigits(text)) return null;
-                const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
-
+                if (!allDigits(name)) return null;
+                const index = std.fmt.parseUnsigned(u16, name, 10) catch return null;
                 return analyser.resolveTupleFieldType(ty, index);
             },
             else => {},
