@@ -82,8 +82,7 @@ pub fn BinnedAllocator(comptime config: Config) type {
         ) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
-            const size = @max(len, align_);
+            const size = @max(len, log2_align.toByteUnits());
             inline for (&self.bins) |*bin| {
                 if (size <= bin.size) {
                     return bin.alloc(self.backing_allocator);
@@ -109,7 +108,7 @@ pub fn BinnedAllocator(comptime config: Config) type {
         ) bool {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
+            const align_ = log2_align.toByteUnits();
             comptime var prev_size: usize = 0;
             inline for (&self.bins) |*bin| {
                 if (buf.len <= bin.size and align_ <= bin.size) {
@@ -127,7 +126,7 @@ pub fn BinnedAllocator(comptime config: Config) type {
         fn free(ctx: *anyopaque, buf: []u8, log2_align: std.mem.Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
+            const align_ = log2_align.toByteUnits();
             inline for (&self.bins) |*bin| {
                 if (buf.len <= bin.size and align_ <= bin.size) {
                     bin.free(buf.ptr);
