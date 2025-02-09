@@ -511,6 +511,25 @@ test "tuples" {
     , .{ .kind = .Type });
 }
 
+test "tuple fields" {
+    try testInlayHints(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const tmp<struct { i64, f32 }> = .{ b, a };
+        \\    const x<i64> = tmp.@"0";
+        \\    const y<f32> = tmp.@"1";
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\fn foo() void {
+        \\    const tmp: struct { i64, f32 } = .{ 1, 0 };
+        \\    const x<i64> = tmp.@"0";
+        \\    const y<f32> = tmp.@"1";
+        \\}
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,
