@@ -1017,8 +1017,8 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
             else => return null,
         },
         else => switch (rhs) {
-            .single => {
-                const elem_ty = lhs.bracketAccessElemType() orelse return null;
+            .single => |index_maybe| {
+                const elem_ty = lhs.bracketAccessElemType(index_maybe) orelse return null;
                 return try elem_ty.instanceTypeVal(analyser);
             },
             .open => |start_maybe| {
@@ -1068,7 +1068,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
                 };
             },
             .range => |range_maybe| {
-                const elem_ty = lhs.bracketAccessElemType() orelse return null;
+                const elem_ty = lhs.bracketAccessElemType(null) orelse return null;
                 const is_const = switch (lhs.data) {
                     .array => false, // TODO: should only be false for `var`
                     .pointer => |info| info.is_const,
@@ -2904,8 +2904,13 @@ pub const Type = struct {
         return analyser.lookupSymbolContainer(scope_handle, symbol, .other);
     }
 
-    fn bracketAccessElemType(self: Type) ?*Type {
+    fn bracketAccessElemType(self: Type, index_maybe: ?u64) ?*Type {
         return switch (self.data) {
+            .tuple => |fields| {
+                const index = index_maybe orelse return null;
+                if (index >= fields.len) return null;
+                return &fields[index];
+            },
             .array => |info| info.elem_ty,
             .pointer => |info| switch (info.size) {
                 .one => switch (info.elem_ty.data) {
