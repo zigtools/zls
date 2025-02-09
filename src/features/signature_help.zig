@@ -123,7 +123,7 @@ pub fn getSignatureInfo(
         switch (token_tags[curr_token]) {
             .comma => curr_commas += 1,
             .l_brace => {
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {
@@ -140,7 +140,7 @@ pub fn getSignatureInfo(
                 try symbol_stack.append(arena, .l_brace);
             },
             .l_bracket => {
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {
@@ -158,7 +158,7 @@ pub fn getSignatureInfo(
             },
             .l_paren => {
                 const paren_commas = curr_commas;
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {

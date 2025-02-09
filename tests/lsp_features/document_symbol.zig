@@ -129,7 +129,7 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
             _ = stack.pop();
         }
     }
-    _ = got.popOrNull(); // Final \n
+    _ = got.pop(); // Final \n
 
     try std.testing.expectEqualStrings(want, got.items);
 }

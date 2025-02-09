@@ -69,14 +69,20 @@ pub fn BinnedAllocator(comptime config: Config) type {
                     .alloc = alloc,
                     .resize = resize,
                     .free = free,
+                    .remap = remap,
                 },
             };
         }
 
-        fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
+        fn alloc(
+            ctx: *anyopaque,
+            len: usize,
+            log2_align: std.mem.Alignment,
+            ret_addr: usize,
+        ) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(log2_align));
+            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
             const size = @max(len, align_);
             inline for (&self.bins) |*bin| {
                 if (size <= bin.size) {
@@ -94,10 +100,16 @@ pub fn BinnedAllocator(comptime config: Config) type {
             }
         }
 
-        fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+        fn resize(
+            ctx: *anyopaque,
+            buf: []u8,
+            log2_align: std.mem.Alignment,
+            new_len: usize,
+            ret_addr: usize,
+        ) bool {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(log2_align));
+            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
             comptime var prev_size: usize = 0;
             inline for (&self.bins) |*bin| {
                 if (buf.len <= bin.size and align_ <= bin.size) {
@@ -112,10 +124,10 @@ pub fn BinnedAllocator(comptime config: Config) type {
             return self.backing_allocator.rawResize(buf, log2_align, new_len, ret_addr);
         }
 
-        fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
+        fn free(ctx: *anyopaque, buf: []u8, log2_align: std.mem.Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(log2_align));
+            const align_ = @as(usize, 1) << @intFromEnum(log2_align);
             inline for (&self.bins) |*bin| {
                 if (buf.len <= bin.size and align_ <= bin.size) {
                     bin.free(buf.ptr);
@@ -128,6 +140,19 @@ pub fn BinnedAllocator(comptime config: Config) type {
             if (config.report_leaks) {
                 self.large_count.decrement();
             }
+        }
+
+        fn remap(
+            ctx: *anyopaque,
+            memory: []u8,
+            log2_align: std.mem.Alignment,
+            new_len: usize,
+            ret_addr: usize,
+        ) ?[*]u8 {
+            return if (resize(ctx, memory, log2_align, new_len, ret_addr))
+                memory.ptr
+            else
+                null;
         }
 
         const Mutex = if (config.thread_safe)

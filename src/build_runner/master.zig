@@ -1024,7 +1024,7 @@ fn extractBuildInformation(
             stack.appendAssumeCapacity(&tls.step);
         }
 
-        while (stack.popOrNull()) |step| {
+        while (stack.pop()) |step| {
             const gop = try steps.getOrPut(gpa, step);
             if (gop.found_existing) continue;
 

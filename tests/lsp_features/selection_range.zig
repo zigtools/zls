@@ -61,7 +61,8 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         it = r.parent;
     }
     const last = got.pop();
-    try std.testing.expectEqualStrings(phr.new_source, last);
+    try std.testing.expect(last != null);
+    try std.testing.expectEqualStrings(phr.new_source, last.?);
     try std.testing.expectEqual(want.len, got.items.len);
     for (want, got.items) |expected, actual| {
         try std.testing.expectEqualStrings(expected, actual);
