@@ -108,10 +108,9 @@ pub fn BinnedAllocator(comptime config: Config) type {
         ) bool {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = alignment.toByteUnits();
             comptime var prev_size: usize = 0;
             inline for (&self.bins) |*bin| {
-                if (buf.len <= bin.size and align_ <= bin.size) {
+                if (buf.len <= bin.size and alignment.toByteUnits() <= bin.size) {
                     // Check it still fits
                     return new_len > prev_size and new_len <= bin.size;
                 }
@@ -126,9 +125,8 @@ pub fn BinnedAllocator(comptime config: Config) type {
         fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
-            const align_ = alignment.toByteUnits();
             inline for (&self.bins) |*bin| {
-                if (buf.len <= bin.size and align_ <= bin.size) {
+                if (buf.len <= bin.size and alignment.toByteUnits() <= bin.size) {
                     bin.free(buf.ptr);
                     return;
                 }
