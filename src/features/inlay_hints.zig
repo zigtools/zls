@@ -157,7 +157,15 @@ const Builder = struct {
     hints: std.ArrayListUnmanaged(InlayHint) = .empty,
     hover_kind: types.MarkupKind,
 
-    fn appendParameterHint(self: *Builder, token_index: Ast.TokenIndex, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
+    fn appendParameterHint(
+        self: *Builder,
+        node_tag: Ast.Node.Tag,
+        token_index: Ast.TokenIndex,
+        label: []const u8,
+        tooltip: []const u8,
+        tooltip_noalias: bool,
+        tooltip_comptime: bool,
+    ) !void {
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
         const tooltip_text = blk: {
             if (tooltip.len == 0) break :blk "";
@@ -171,7 +179,10 @@ const Builder = struct {
         };
 
         try self.hints.append(self.arena, .{
-            .index = offsets.tokenToIndex(self.handle.tree, token_index),
+            .index = if (node_tag == .multiline_string_literal)
+                offsets.tokenToLoc(self.handle.tree, token_index - 1).end
+            else
+                offsets.tokenToIndex(self.handle.tree, token_index),
             .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = .{
@@ -276,6 +287,7 @@ fn writeCallHint(
             offsets.nodeToSlice(fn_node.handle.tree, param.type_expr);
 
         try builder.appendParameterHint(
+            tree.nodes.items(.tag)[arg],
             tree.firstToken(arg),
             parameter_name,
             tooltip,
@@ -317,6 +329,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         if (label.len == 0 or std.mem.eql(u8, label, "...")) return;
 
         try builder.appendParameterHint(
+            tree.nodes.items(.tag)[parameter],
             tree.firstToken(parameter),
             label,
             std.mem.trim(u8, type_expr, " \t\n"),
