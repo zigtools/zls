@@ -699,25 +699,25 @@ test "sentinel values" {
         \\```
     );
     try testHover(
-        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\var array = [_:0]u8{ 1, 2, 3, 4 };
         \\const <cursor>range = array[0..2];
     ,
         \\```zig
         \\const range = array[0..2]
         \\```
         \\```zig
-        \\([]u8)
+        \\(*[2]u8)
         \\```
     );
     try testHover(
-        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\var array = [_:0]u8{ 1, 2, 3, 4 };
         \\const <cursor>open = array[1..];
     ,
         \\```zig
         \\const open = array[1..]
         \\```
         \\```zig
-        \\([:0]u8)
+        \\(*[?:0]u8)
         \\```
     );
     // try testHover(
