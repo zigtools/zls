@@ -90,6 +90,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 .kind = .Field,
             });
         },
+        .tuple => {}, // TODO
         .optional => |child_ty| {
             if (ty.is_type_val) return;
             builder.completions.appendAssumeCapacity(.{

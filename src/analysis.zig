@@ -1124,14 +1124,9 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
 pub fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
     const scope_handle = switch (tuple.data) {
         .container => |s| s,
-        .other => |node| {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const array_init_info = node.handle.tree.fullArrayInit(&buffer, node.node) orelse return null;
-
-            const elements = array_init_info.ast.elements;
-            if (index >= elements.len) return null;
-
-            return try analyser.resolveTypeOfNode(.{ .handle = node.handle, .node = elements[index] });
+        .tuple => |elem_ty_slice| {
+            if (index >= elem_ty_slice.len) return null;
+            return elem_ty_slice[index];
         },
         else => return null,
     };
@@ -1205,6 +1200,8 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
                 return try Type.typeValFromIP(analyser, .usize_type);
             }
         },
+
+        .tuple => {}, // TODO
 
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
@@ -1726,8 +1723,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return try array_ty.instanceTypeVal(analyser);
             }
 
+            const elem_ty_slice = try analyser.arena.allocator().alloc(Type, array_init_info.ast.elements.len);
+            for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
+                elem_ty.* = try analyser.resolveTypeOfNodeInternal(.{ .node = element, .handle = handle }) orelse return null;
+            }
             return .{
-                .data = .{ .other = node_handle },
+                .data = .{ .tuple = elem_ty_slice },
                 .is_type_val = false,
             };
         },
@@ -2398,6 +2399,9 @@ pub const Type = struct {
             elem_ty: *Type,
         },
 
+        /// `.{a,b}`
+        tuple: []Type,
+
         /// `?T`
         optional: *Type,
 
@@ -2420,7 +2424,6 @@ pub const Type = struct {
 
         /// - Error type: `Foo || Bar`, `Foo!Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
-        /// - `.{a,b}`
         /// - `start..end`
         other: NodeWithHandle,
 
@@ -2470,6 +2473,11 @@ pub const Type = struct {
                 std.hash.autoHash(hasher, info.sentinel);
                 info.elem_ty.hashWithHasher(hasher);
             },
+            .tuple => |elem_ty_slice| {
+                for (elem_ty_slice) |elem_ty| {
+                    elem_ty.hashWithHasher(hasher);
+                }
+            },
             .optional, .union_tag => |t| t.hashWithHasher(hasher),
             .error_union => |info| {
                 if (info.error_set) |error_set| {
@@ -2515,6 +2523,12 @@ pub const Type = struct {
                 if (std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
                 if (a_type.sentinel != b_type.sentinel) return false;
                 if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
+            },
+            .tuple => |a_slice| {
+                const b_slice = b.data.tuple;
+                for (a_slice, b_slice) |a_type, b_type| {
+                    if (!a_type.eql(b_type)) return false;
+                }
             },
             inline .optional,
             .union_tag,
@@ -2953,6 +2967,16 @@ pub const Type = struct {
                 }
                 try writer.writeByte(']');
                 try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
+            },
+            .tuple => |elem_ty_slice| {
+                try writer.writeAll("struct { ");
+                for (elem_ty_slice, 0..) |elem_ty, i| {
+                    if (i != 0) {
+                        try writer.writeAll(", ");
+                    }
+                    try writer.print("{}", .{elem_ty.fmt(analyser, ctx.options)});
+                }
+                try writer.writeAll(" }");
             },
             .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser, ctx.options)}),
             .error_union => |info| {
@@ -4071,7 +4095,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
-                    .container, .other => try analyser.resolveTupleFieldType(node, pay.index),
+                    .container, .tuple => try analyser.resolveTupleFieldType(node, pay.index),
                     else => null,
                 };
             },
@@ -5032,6 +5056,7 @@ fn addReferencedTypes(
     switch (ty.data) {
         .pointer => |info| try analyser.addReferencedTypes(info.elem_ty.*, .{ .referenced_types = referenced_types }),
         .array => |info| try analyser.addReferencedTypes(info.elem_ty.*, .{ .referenced_types = referenced_types }),
+        .tuple => {},
         .optional => |child_ty| try analyser.addReferencedTypes(child_ty.*, .{ .referenced_types = referenced_types }),
         .error_union => |info| {
             if (info.error_set) |error_set| {

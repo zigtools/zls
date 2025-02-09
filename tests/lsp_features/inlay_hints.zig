@@ -501,6 +501,16 @@ test "truncate merged error sets" {
     , .{ .kind = .Type });
 }
 
+test "tuples" {
+    try testInlayHints(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const tmp<struct { i64, f32 }> = .{ b, a };
+        \\}
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,
