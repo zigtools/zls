@@ -204,24 +204,6 @@ test "assign destructure" {
     });
     try testSemanticTokens(
         \\test {
-        \\    const S, const E = .{ struct {}, enum {} };
-        \\};
-    , &.{
-        .{ "test", .keyword, .{} },
-
-        .{ "const", .keyword, .{} },
-        .{ "S", .namespace, .{ .declaration = true } },
-
-        .{ "const", .keyword, .{} },
-        .{ "E", .@"enum", .{ .declaration = true } },
-
-        .{ "=", .operator, .{} },
-
-        .{ "struct", .keyword, .{} },
-        .{ "enum", .keyword, .{} },
-    });
-    try testSemanticTokens(
-        \\test {
         \\    var foo: u32 = undefined;
         \\    var bar: u64 = undefined;
         \\    foo, bar = .{ 3, 4 };
@@ -981,9 +963,9 @@ test "struct" {
     try testSemanticTokens(
         \\const T = u32;
         \\const Foo = struct {
-        \\    u32,
-        \\    []const u8 align(8) = undefined,
-        \\    T align(4),
+        \\    alpha: u32,
+        \\    beta: []const u8 align(8) = undefined,
+        \\    gamma: T align(4),
         \\};
     , &.{
         .{ "const", .keyword, .{} },
@@ -995,8 +977,10 @@ test "struct" {
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
 
+        .{ "alpha", .property, .{ .declaration = true } },
         .{ "u32", .type, .{} },
 
+        .{ "beta", .property, .{ .declaration = true } },
         .{ "const", .keyword, .{} },
         .{ "u8", .type, .{} },
         .{ "align", .keyword, .{} },
@@ -1004,6 +988,7 @@ test "struct" {
         .{ "=", .operator, .{} },
         .{ "undefined", .keywordLiteral, .{} },
 
+        .{ "gamma", .property, .{ .declaration = true } },
         .{ "T", .type, .{} },
         .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },

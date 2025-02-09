@@ -202,15 +202,6 @@ test "assign destructure" {
     });
     try testCompletion(
         \\test {
-        \\    const S, const E = .{struct{}, enum{}};
-        \\    <cursor>
-        \\}
-    , &.{
-        .{ .label = "S", .kind = .Struct, .detail = "type" },
-        .{ .label = "E", .kind = .Enum, .detail = "type" },
-    });
-    try testCompletion(
-        \\test {
         \\    var foo: u32 = undefined;
         \\    foo, const bar: u64, var baz = [_]u32{1, 2, 3};
         \\    <cursor>
