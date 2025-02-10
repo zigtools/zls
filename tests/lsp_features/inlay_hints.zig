@@ -698,6 +698,12 @@ test "immutable open slices with sentinel" {
     // , .{ .kind = .Type });
 }
 
+test "inferred-size arrays" {
+    try testInlayHints(
+        \\var array<[4]i32> = [_]i32{ 1, 2, 3, 4 };
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,

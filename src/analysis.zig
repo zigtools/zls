@@ -1682,9 +1682,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buffer: [2]Ast.Node.Index = undefined;
             const array_init_info = tree.fullArrayInit(&buffer, node).?;
 
-            if (array_init_info.ast.type_expr != 0) blk: {
-                const array_ty = try analyser.resolveTypeOfNode(.{ .node = array_init_info.ast.type_expr, .handle = handle }) orelse break :blk;
-                return try array_ty.instanceTypeVal(analyser);
+            if (array_init_info.ast.type_expr != 0) {
+                var array_ty = try analyser.resolveTypeOfNode(.{ .node = array_init_info.ast.type_expr, .handle = handle }) orelse return null;
+                array_ty = try array_ty.instanceTypeVal(analyser) orelse return null;
+                if (array_ty.data == .array and array_ty.data.array.elem_count == null) {
+                    array_ty.data.array.elem_count = array_init_info.ast.elements.len;
+                }
+                return array_ty;
             }
 
             const elem_ty_slice = try analyser.arena.allocator().alloc(Type, array_init_info.ast.elements.len);
