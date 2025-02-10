@@ -224,7 +224,7 @@ fn colorIdentifierBasedOnType(
     is_parameter: bool,
     tok_mod: TokenModifiers,
 ) !void {
-    if (type_node.is_type_val) {
+    if (type_node.isTypeVal(builder.analyser)) {
         const token_type: TokenType =
             if (type_node.isNamespace())
             .namespace
@@ -255,7 +255,7 @@ fn colorIdentifierBasedOnType(
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
         var new_tok_mod = tok_mod;
-        if (type_node.data == .compile_error) {
+        if (type_node == .dynamic and type_node.dynamic.data == .compile_error) {
             new_tok_mod.deprecated = true;
         }
         try writeTokenMod(builder, target_tok, if (is_parameter) .parameter else .variable, new_tok_mod);
@@ -389,8 +389,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
             const func_ty = Analyser.Type{
-                .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
-                .is_type_val = true,
+                .dynamic = .{
+                    .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
+                    .is_type_val = true,
+                },
             };
 
             const func_name_tok_type: TokenType = if (func_ty.isTypeFunc())
@@ -581,7 +583,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
-                )) |struct_type| switch (struct_type.data) {
+                )) |struct_type| if (struct_type != .dynamic) null else switch (struct_type.dynamic.data) {
                     .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, false),
                     else => null,
                 } else null;
@@ -875,8 +877,11 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type = switch (lhs_type.data) {
-                                .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
+                            const tok_type = switch (lhs_type) {
+                                .dynamic => |payload| switch (payload.data) {
+                                    .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, payload.is_type_val),
+                                    else => null,
+                                },
                                 else => null,
                             };
 

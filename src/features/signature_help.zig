@@ -20,7 +20,7 @@ fn fnProtoToSignatureInfo(
     func_type: Analyser.Type,
     markup_kind: types.MarkupKind,
 ) !types.SignatureInformation {
-    const fn_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
+    const fn_node_handle = func_type.dynamic.data.other; // this assumes that function types can only be Ast nodes
     const fn_node = fn_node_handle.node;
     const fn_handle = fn_node_handle.handle;
     const tree = fn_handle.tree;
@@ -271,7 +271,7 @@ pub fn getSignatureInfo(
                 };
                 const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-                const skip_self_param = !ty.is_type_val;
+                const skip_self_param = !ty.isTypeVal(analyser);
                 ty = try analyser.resolveFieldAccess(ty, name) orelse {
                     try symbol_stack.append(arena, .l_paren);
                     continue;
