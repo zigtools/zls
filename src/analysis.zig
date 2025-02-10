@@ -1130,15 +1130,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .one => switch (info.elem_ty.data) {
-                .array => {
-                    std.debug.assert(!info.elem_ty.is_type_val);
-                    if (std.mem.eql(u8, "len", name)) {
-                        return try Type.typeValFromIP(analyser, .usize_type);
-                    }
-                },
-                else => {},
-            },
+            .one => unreachable, // handled by resolveDerefType
             .slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return try Type.typeValFromIP(analyser, .usize_type);
@@ -1161,8 +1153,18 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             .many, .c => {},
         },
 
-        .array => {
+        .array => |info| {
             if (std.mem.eql(u8, "len", name)) {
+                if (info.elem_count) |elem_count| {
+                    const index = try analyser.ip.get(
+                        analyser.gpa,
+                        .{ .int_u64_value = .{ .ty = .usize_type, .int = elem_count } },
+                    );
+                    return .{
+                        .data = .{ .ip_index = .{ .index = index } },
+                        .is_type_val = false,
+                    };
+                }
                 return try Type.typeValFromIP(analyser, .usize_type);
             }
         },

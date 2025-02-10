@@ -704,6 +704,14 @@ test "inferred-size arrays" {
     , .{ .kind = .Type });
 }
 
+test "array.len" {
+    try testInlayHints(
+        \\var array: [4]i32 = undefined;
+        \\const len<usize> = array.len;
+        \\const ptr<*[4]i32> = array[0..len];
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,
