@@ -943,6 +943,19 @@ test "struct" {
     });
     try testSemanticTokens(
         \\const Foo = struct {
+        \\    u32,
+        \\    void,
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .@"struct", .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "u32", .type, .{} },
+        .{ "void", .type, .{} },
+    });
+    try testSemanticTokens(
+        \\const Foo = struct {
         \\    alpha: u32 = 3,
         \\    comptime beta: void = {},
         \\};
