@@ -1,7 +1,7 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
 //! This build runner is targeting compatibility with the following Zig versions:
-//!   - master (0.14.0-dev.3181+914248237 and later)
+//!   - master (0.14.0-dev.2046+b8795b4d0 and later)
 //!
 //! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
 //!
@@ -1024,7 +1024,7 @@ fn extractBuildInformation(
             stack.appendAssumeCapacity(&tls.step);
         }
 
-        while (stack.pop()) |step| {
+        while (stack.popOrNull()) |step| {
             const gop = try steps.getOrPut(gpa, step);
             if (gop.found_existing) continue;
 
