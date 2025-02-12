@@ -224,6 +224,10 @@ fn colorIdentifierBasedOnType(
     is_parameter: bool,
     tok_mod: TokenModifiers,
 ) !void {
+    var new_tok_mod = tok_mod;
+    if (type_node.deprecated_comment) {
+        new_tok_mod.deprecated = true;
+    }
     if (type_node.is_type_val) {
         const token_type: TokenType =
             if (type_node.isNamespace())
@@ -241,11 +245,10 @@ fn colorIdentifierBasedOnType(
         else
             .type;
 
-        try writeTokenMod(builder, target_tok, token_type, tok_mod);
+        try writeTokenMod(builder, target_tok, token_type, new_tok_mod);
     } else if (type_node.isTypeFunc()) {
-        try writeTokenMod(builder, target_tok, .type, tok_mod);
+        try writeTokenMod(builder, target_tok, .type, new_tok_mod);
     } else if (type_node.isFunc()) {
-        var new_tok_mod = tok_mod;
         if (type_node.isGenericFunc()) {
             new_tok_mod.generic = true;
         }
@@ -254,7 +257,6 @@ fn colorIdentifierBasedOnType(
 
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
-        var new_tok_mod = tok_mod;
         if (type_node.data == .compile_error) {
             new_tok_mod.deprecated = true;
         }
