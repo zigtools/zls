@@ -34,10 +34,26 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
 
     try builder.completions.ensureUnusedCapacity(builder.arena, 2);
 
-    switch (ty.data) {
+    const payload = switch (ty) {
+        .dynamic => |payload| payload,
+        .ip_index => |payload| return analyser_completions.dotCompletions(
+            builder.arena,
+            &builder.completions,
+            builder.analyser.ip,
+            payload.index,
+        ),
+        .either => |either_entries| {
+            for (either_entries) |entry| {
+                try typeToCompletion(builder, entry.type);
+            }
+            return;
+        },
+    };
+
+    switch (payload.data) {
         .pointer => |info| switch (info.size) {
             .one, .c => {
-                if (ty.is_type_val) return;
+                if (payload.is_type_val) return;
 
                 builder.completions.appendAssumeCapacity(.{
                     .label = "*",
@@ -56,7 +72,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 }
             },
             .slice => {
-                if (ty.is_type_val) return;
+                if (payload.is_type_val) return;
 
                 builder.completions.appendAssumeCapacity(.{
                     .label = "len",
@@ -64,9 +80,10 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     .kind = .Field,
                 });
 
-                var many_ptr_ty = ty;
-                many_ptr_ty.is_type_val = true;
-                many_ptr_ty.data.pointer.size = .many;
+                var many_ptr_payload = payload;
+                many_ptr_payload.is_type_val = true;
+                many_ptr_payload.data.pointer.size = .many;
+                const many_ptr_ty: Analyser.Type = .{ .dynamic = many_ptr_payload };
                 builder.completions.appendAssumeCapacity(.{
                     .label = "ptr",
                     .kind = .Field,
@@ -80,7 +97,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             .many => {},
         },
         .array => |info| {
-            if (ty.is_type_val) return;
+            if (payload.is_type_val) return;
             builder.completions.appendAssumeCapacity(.{
                 .label = "len",
                 .detail = if (info.elem_count) |count|
@@ -91,7 +108,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .tuple => |elem_ty_slice| {
-            if (ty.is_type_val) return;
+            if (payload.is_type_val) return;
             try builder.completions.ensureUnusedCapacity(builder.arena, elem_ty_slice.len);
             for (elem_ty_slice, 0..) |elem_ty, i| {
                 builder.completions.appendAssumeCapacity(.{
@@ -106,7 +123,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             }
         },
         .optional => |child_ty| {
-            if (ty.is_type_val) return;
+            if (payload.is_type_val) return;
             builder.completions.appendAssumeCapacity(.{
                 .label = "?",
                 .kind = .Operator,
@@ -119,7 +136,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
         },
         .container => |scope_handle| {
             var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
-            try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
+            try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !payload.is_type_val, &decls);
 
             for (decls.items) |decl_with_handle| {
                 try declToCompletion(builder, decl_with_handle, .{
@@ -138,18 +155,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 }
             },
             else => {},
-        },
-        .ip_index => |payload| try analyser_completions.dotCompletions(
-            builder.arena,
-            &builder.completions,
-            builder.analyser.ip,
-            payload.index,
-        ),
-        .either => |either_entries| {
-            for (either_entries) |entry| {
-                const entry_ty: Analyser.Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                try typeToCompletion(builder, entry_ty);
-            }
         },
         .error_union,
         .union_tag,
@@ -188,7 +193,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
     const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
 
     if (maybe_resolved_ty) |resolve_ty| {
-        if (try resolve_ty.docComments(builder.arena)) |docs| {
+        if (try resolve_ty.docComments(builder.analyser)) |docs| {
             doc_comments.appendAssumeCapacity(docs);
         }
     }
@@ -208,9 +213,14 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
             !builder.server.client_capabilities.supports_completion_deprecated_tag) break :blk null;
 
         const resolved_ty = maybe_resolved_ty orelse break :blk null;
-        if (resolved_ty.data != .compile_error) break :blk null;
-
-        const node_with_handle = resolved_ty.data.compile_error;
+        const payload = switch (resolved_ty) {
+            .dynamic => |payload| payload,
+            .ip_index, .either => break :blk null,
+        };
+        const node_with_handle = switch (payload.data) {
+            .compile_error => |node_with_handle| node_with_handle,
+            else => break :blk null,
+        };
         const tree = node_with_handle.handle.tree;
 
         var buffer: [2]Ast.Node.Index = undefined;
@@ -235,7 +245,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         .switch_payload,
         => {
             var kind: types.CompletionItemKind = blk: {
-                const parent_is_type_val = if (options.parent_container_ty) |container_ty| container_ty.is_type_val else null;
+                const parent_is_type_val = if (options.parent_container_ty) |container_ty| container_ty.isTypeVal(builder.analyser) else null;
                 if (!(parent_is_type_val orelse true)) break :blk .Field;
                 break :blk if (decl_handle.isConst()) .Constant else .Variable;
             };
@@ -248,27 +258,27 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
                     builder.completions.appendAssumeCapacity(item);
                     return;
                 } else if (ty.isEnumType()) {
-                    if (ty.is_type_val) {
+                    if (ty.isTypeVal(builder.analyser)) {
                         kind = .Enum;
                     } else {
                         kind = .EnumMember;
                     }
                 } else if (ty.isStructType() or ty.isUnionType()) {
                     kind = .Struct;
-                } else if (decl_handle.decl == .function_parameter and ty.isMetaType()) {
+                } else if (decl_handle.decl == .function_parameter and ty.isMetaType(builder.analyser)) {
                     kind = .TypeParameter;
                 } else if (ty.isEnumLiteral(builder.analyser)) {
                     kind = .EnumMember;
-                } else if (ty.data == .compile_error) {
+                } else if (ty == .dynamic and ty.dynamic.data == .compile_error) {
                     is_deprecated = true;
                 }
             }
 
             const detail = if (maybe_resolved_ty) |ty| blk: {
-                if (ty.is_type_val and ty.data == .ip_index and !builder.analyser.ip.isUnknown(ty.data.ip_index.index)) {
+                if (ty.isTypeVal(builder.analyser) and ty == .ip_index and !builder.analyser.ip.isUnknown(ty.ip_index.index)) {
                     break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
                 } else {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{try ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
                 }
             } else null;
 
@@ -318,7 +328,7 @@ fn functionTypeCompletion(
 ) error{OutOfMemory}!?types.CompletionItem {
     std.debug.assert(func_ty.isFunc());
 
-    const node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
+    const node_handle = func_ty.dynamic.data.other; // this assumes that function types can only be Ast nodes
     const tree = node_handle.handle.tree;
 
     var buf: [1]Ast.Node.Index = undefined;
@@ -327,9 +337,9 @@ fn functionTypeCompletion(
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
-        if (container_ty.is_type_val) break :blk false;
+        if (container_ty.isTypeVal(builder.analyser)) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk try builder.analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+        break :blk try builder.analyser.firstParamIs(func_ty, try container_ty.typeOf(builder.analyser));
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
@@ -1290,7 +1300,17 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
-    const scope_handle = switch (container.data) {
+    const payload = switch (container) {
+        .dynamic => |payload| payload,
+        .ip_index => return,
+        .either => |either_entries| {
+            for (either_entries) |entry| {
+                try collectContainerFields(builder, likely, entry.type, omit_members);
+            }
+            return;
+        },
+    };
+    const scope_handle = switch (payload.data) {
         .container => |s| s,
         else => return,
     };
@@ -1341,7 +1361,7 @@ fn collectContainerFields(
                 if (likely != .enum_assignment) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
-                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                expected_ty = (try expected_ty.typeOf(builder.analyser)).resolveDeclLiteralResultType();
                 if (!expected_ty.eql(container)) continue;
                 try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
                 continue;
@@ -1357,7 +1377,7 @@ fn collectContainerFields(
                 const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
-                if (!expected_ty.eql(container) and !expected_ty.typeOf(builder.analyser).eql(container)) continue;
+                if (!expected_ty.eql(container) and !(try expected_ty.typeOf(builder.analyser)).eql(container)) continue;
                 break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
             },
             else => continue,
@@ -1528,17 +1548,17 @@ fn collectVarAccessContainerNodes(
     const result = try symbol_decl.resolveType(analyser) orelse return;
     const type_expr = try analyser.resolveDerefType(result) orelse result;
     if (!type_expr.isFunc()) {
-        try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try type_expr.getAllTypesWithHandlesArrayList(analyser, types_with_handles);
         return;
     }
 
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
         var node_type = try analyser.resolveReturnType(type_expr) orelse return;
         if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-        try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try node_type.getAllTypesWithHandlesArrayList(analyser, types_with_handles);
         return;
     }
-    const func_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
+    const func_node_handle = type_expr.dynamic.data.other; // this assumes that function types can only be Ast nodes
     const fn_param_decl: Analyser.Declaration = .{ .function_parameter = .{
         .func = func_node_handle.node,
         .param_index = @intCast(dot_context.fn_arg_index),
@@ -1572,7 +1592,7 @@ fn collectFieldAccessContainerNodes(
             }
         }
         // if (dot_context.likely == .enum_literal and !(container.isEnumType() or container.isUnionType())) return;
-        try container.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try container.getAllTypesWithHandlesArrayList(analyser, types_with_handles);
         return;
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -1584,14 +1604,14 @@ fn collectFieldAccessContainerNodes(
             if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (!node_type.isFunc()) {
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllTypesWithHandlesArrayList(analyser, types_with_handles);
             continue;
         }
 
         if (dot_context.need_ret_type) { // => we need f()'s return type
             node_type = try analyser.resolveReturnType(node_type) orelse continue;
             if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllTypesWithHandlesArrayList(analyser, types_with_handles);
             continue;
         }
         // don't have the luxury of referencing an `Ast.full.Call`
@@ -1604,12 +1624,12 @@ fn collectFieldAccessContainerNodes(
             const first_symbol = symbol_iter.next() orelse continue;
             const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
             const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
-            if (!symbol_type.is_type_val) { // then => instance_of_T
+            if (!symbol_type.isTypeVal(analyser)) { // then => instance_of_T
                 if (try analyser.hasSelfParam(node_type)) break :blk 1;
             }
             break :blk 0; // is `T`, no SelfParam
         };
-        const fn_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
+        const fn_node_handle = node_type.dynamic.data.other; // this assumes that function types can only be Ast nodes
         const param_decl: Analyser.Declaration.Param = .{
             .param_index = @truncate(dot_context.fn_arg_index + additional_index),
             .func = fn_node_handle.node,

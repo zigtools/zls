@@ -134,13 +134,13 @@ fn hoverSymbolRecursive(
 
     var resolved_type_str: []const u8 = "unknown";
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
-        if (try resolved_type.docComments(arena)) |doc|
+        if (try resolved_type.docComments(analyser)) |doc|
             try doc_strings.append(arena, doc);
         try analyser.referencedTypes(
             resolved_type,
             &reference_collector,
         );
-        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser, .{ .truncate_container_decls = false })});
+        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{try resolved_type.fmt(analyser, .{ .truncate_container_decls = false })});
     }
     const referenced_types: []const Analyser.ReferencedType = type_references.keys();
 

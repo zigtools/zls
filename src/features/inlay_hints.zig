@@ -238,7 +238,7 @@ fn writeCallHint(
 
     const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
-    const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
+    const fn_node = fn_ty.dynamic.data.other; // this assumes that function types can only be Ast nodes
 
     var buffer: [1]Ast.Node.Index = undefined;
     const fn_proto = fn_node.handle.tree.fullFnProto(&buffer, fn_node.node).?;
@@ -345,7 +345,7 @@ fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
         "{}",
-        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+        .{try resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
     );
     if (type_str.len == 0) return null;
 
@@ -363,7 +363,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
         "{}",
-        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+        .{try resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
     );
     if (type_str.len == 0) return null;
 
@@ -568,7 +568,7 @@ fn writeNodeInlayHint(
                 const type_str: []const u8 = try std.fmt.allocPrint(
                     builder.arena,
                     "{}",
-                    .{ty.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+                    .{try ty.fmt(builder.analyser, .{ .truncate_container_decls = true })},
                 );
                 if (type_str.len == 0) continue;
                 try appendTypeHintString(
