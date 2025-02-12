@@ -5,7 +5,6 @@ const exe_options = @import("exe_options");
 
 const tracy = @import("tracy");
 const known_folders = @import("known-folders");
-const binned_allocator = @import("binned_allocator.zig");
 
 const log = std.log.scoped(.main);
 
@@ -329,20 +328,23 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
     return result;
 }
 
-const stack_frames = switch (zig_builtin.mode) {
-    .Debug => 10,
-    else => 0,
-};
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !u8 {
-    var allocator_state: if (exe_options.use_gpa)
-        std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames })
-    else
-        binned_allocator.BinnedAllocator(.{}) = .init;
-    defer _ = allocator_state.deinit();
+    const base_allocator, const is_debug = gpa: {
+        if (exe_options.debug_gpa) break :gpa .{ debug_allocator.allocator(), true };
+        if (zig_builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
+        break :gpa switch (zig_builtin.mode) {
+            .Debug => .{ debug_allocator.allocator(), true },
+            .ReleaseSafe, .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
 
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else {};
-    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(base_allocator) else {};
+    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else base_allocator;
 
     var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else {};
     const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
