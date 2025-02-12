@@ -2738,7 +2738,7 @@ pub const Type = union(enum) {
                         .descriptor = entry.descriptor,
                     });
                 }
-                return fromEither(analyser, either.items);
+                return try fromEither(analyser, either.items);
             },
         }
     }
@@ -2756,7 +2756,7 @@ pub const Type = union(enum) {
                 for (entries) |entry| {
                     either.appendAssumeCapacity(.{ .type = try entry.type.typeOf(analyser), .descriptor = entry.descriptor });
                 }
-                return .{ .either = either.items }; // TODO: should this use fromEither?
+                return try fromEither(analyser, either.items) orelse .{ .either = either.items };
             },
         }
     }
