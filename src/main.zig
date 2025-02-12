@@ -134,7 +134,7 @@ const Env = struct {
     ///
     /// The semantic version can have one of the following formats:
     /// - `MAJOR.MINOR.PATCH` is a tagged release of ZLS
-    /// - `MAJOR.MINOR.PATCH-dev.COMMIT_HEIGHT-SHORT_COMMIT_HASH` is a development build of ZLS
+    /// - `MAJOR.MINOR.PATCH-dev.COMMIT_HEIGHT+SHORT_COMMIT_HASH` is a development build of ZLS
     /// - `MAJOR.MINOR.PATCH-dev` is a development build of ZLS where the exact version could not be resolved.
     ///
     version: []const u8,

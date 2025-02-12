@@ -53,14 +53,13 @@ pub fn build(b: *Build) !void {
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
 
     const resolved_zls_version = getVersion(b);
-    const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
 
     const build_options = blk: {
         const build_options = b.addOptions();
         build_options.step.name = "ZLS build options";
 
         build_options.addOption(std.SemanticVersion, "version", resolved_zls_version);
-        build_options.addOption([]const u8, "version_string", resolved_zls_version_string);
+        build_options.addOption([]const u8, "version_string", b.fmt("{}", .{resolved_zls_version}));
         build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
 
         break :blk build_options.createModule();
@@ -284,6 +283,13 @@ pub fn build(b: *Build) !void {
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
 fn getVersion(b: *Build) std.SemanticVersion {
+    const version_string = b.option([]const u8, "version-string", "Override the version of this build. Must be a semantic version.");
+    if (version_string) |semver_string| {
+        return std.SemanticVersion.parse(semver_string) catch |err| {
+            std.debug.panic("Expected -Dversion-string={s} to be a semantic version: {}", .{ semver_string, err });
+        };
+    }
+
     if (zls_version.pre == null and zls_version.build == null) return zls_version;
 
     const argv: []const []const u8 = &.{
@@ -292,9 +298,12 @@ fn getVersion(b: *Build) std.SemanticVersion {
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
         const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
-        std.log.warn("Failed to run git describe to resolve ZLS version: {}\ncommand: {s}", .{
-            err, argv_joined,
-        });
+        std.log.warn(
+            \\Failed to run git describe to resolve ZLS version: {}
+            \\command: {s}
+            \\
+            \\Consider passing the -Dversion-string flag to specify the ZLS version.
+        , .{ err, argv_joined });
         return zls_version;
     };
 
