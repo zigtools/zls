@@ -3737,7 +3737,7 @@ pub fn getPositionContext(
         }
     }
 
-    if (stack.popOrNull()) |state| {
+    if (stack.pop()) |state| {
         switch (state.ctx) {
             .parens_expr => |loc| return .{ .var_access = loc },
             .var_access => |loc| {

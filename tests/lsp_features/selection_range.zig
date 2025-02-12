@@ -60,7 +60,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         try got.append(allocator, slice);
         it = r.parent;
     }
-    const last = got.pop();
+    const last = got.pop().?;
     try std.testing.expectEqualStrings(phr.new_source, last);
     try std.testing.expectEqual(want.len, got.items.len);
     for (want, got.items) |expected, actual| {
