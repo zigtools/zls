@@ -1000,7 +1000,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
         try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
     }
 
-    while (queue.popOrNull()) |uri| {
+    while (queue.pop()) |uri| {
         const handle_index = self.handles.getIndex(uri) orelse continue;
         if (reachable.isSet(handle_index)) continue;
         reachable.set(handle_index);
