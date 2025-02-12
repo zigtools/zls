@@ -549,6 +549,169 @@ test "tuple fields" {
     , .{ .kind = .Type });
 }
 
+test "tuple fields accessed with brackets" {
+    try testInlayHints(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const tmp<struct { i64, f32 }> = .{ b, a };
+        \\    const x<i64> = tmp[0];
+        \\    const y<f32> = tmp[1];
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\fn foo() void {
+        \\    const tmp: struct { i64, f32 } = .{ 1, 0 };
+        \\    const x<i64> = tmp[0];
+        \\    const y<f32> = tmp[1];
+        \\}
+    , .{ .kind = .Type });
+}
+
+test "mutable range slices" {
+    try testInlayHints(
+        \\var foo: []f32 = undefined;
+        \\const bar<*[2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*]f32 = undefined;
+        \\const bar<*[2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*c]f32 = undefined;
+        \\const bar<*[2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *[4]f32 = undefined;
+        \\const bar<*[2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [4]f32 = undefined;
+        \\const bar<*[2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+}
+
+test "immutable range slices" {
+    try testInlayHints(
+        \\var foo: []const f32 = undefined;
+        \\const bar<*const [2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*]const f32 = undefined;
+        \\const bar<*const [2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*c]const f32 = undefined;
+        \\const bar<*const [2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *const [4]f32 = undefined;
+        \\const bar<*const [2]f32> = foo[1..3];
+    , .{ .kind = .Type });
+    // try testInlayHints(
+    //     \\const foo: [4]f32 = undefined;
+    //     \\const bar<*const [2]f32> = foo[1..3];
+    // , .{ .kind = .Type });
+}
+
+test "mutable open slices" {
+    try testInlayHints(
+        \\var foo: []f32 = undefined;
+        \\const bar<[]f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*]f32 = undefined;
+        \\const bar<[*]f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*c]f32 = undefined;
+        \\const bar<[*c]f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *[4]f32 = undefined;
+        \\const bar<*[3]f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [4]f32 = undefined;
+        \\const bar<*[3]f32> = foo[1..];
+    , .{ .kind = .Type });
+}
+
+test "mutable open slices with sentinel" {
+    try testInlayHints(
+        \\var foo: [:0]i32 = undefined;
+        \\const bar<[:0]i32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*:0]i32 = undefined;
+        \\const bar<[*:0]i32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *[4:0]i32 = undefined;
+        \\const bar<*[3:0]i32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [4:0]i32 = undefined;
+        \\const bar<*[3:0]i32> = foo[1..];
+    , .{ .kind = .Type });
+}
+
+test "immutable open slices" {
+    try testInlayHints(
+        \\var foo: []const f32 = undefined;
+        \\const bar<[]const f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*]const f32 = undefined;
+        \\const bar<[*]const f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*c]const f32 = undefined;
+        \\const bar<[*c]const f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *const [4]f32 = undefined;
+        \\const bar<*const [3]f32> = foo[1..];
+    , .{ .kind = .Type });
+    // try testInlayHints(
+    //     \\const foo: [4]f32 = undefined;
+    //     \\const bar<*const [3]f32> = foo[1..];
+    // , .{ .kind = .Type });
+}
+
+test "immutable open slices with sentinel" {
+    try testInlayHints(
+        \\var foo: [:0]const f32 = undefined;
+        \\const bar<[:0]const f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: [*:0]const f32 = undefined;
+        \\const bar<[*:0]const f32> = foo[1..];
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\var foo: *const [4:0]f32 = undefined;
+        \\const bar<*const [3:0]f32> = foo[1..];
+    , .{ .kind = .Type });
+    // try testInlayHints(
+    //     \\const foo: [4:0]f32 = undefined;
+    //     \\const bar<*const [3:0]f32> = foo[1..];
+    // , .{ .kind = .Type });
+}
+
+test "inferred-size arrays" {
+    try testInlayHints(
+        \\var array<[4]i32> = [_]i32{ 1, 2, 3, 4 };
+    , .{ .kind = .Type });
+}
+
+test "array.len" {
+    try testInlayHints(
+        \\var array: [4]i32 = undefined;
+        \\const len<usize> = array.len;
+        \\const ptr<*[4]i32> = array[0..len];
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHintKind,
     show_builtin: bool = true,

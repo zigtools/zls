@@ -571,7 +571,7 @@ test "array cat and mult" {
         \\const a = [_]u8{0} ++ [_]u8{1}
         \\```
         \\```zig
-        \\([?]u8)
+        \\([2]u8)
         \\```
     );
     try testHover(
@@ -581,7 +581,7 @@ test "array cat and mult" {
         \\const a = [1]u8{0} ++ [_]u8{1}
         \\```
         \\```zig
-        \\([?]u8)
+        \\([2]u8)
         \\```
     );
     try testHover(
@@ -591,7 +591,7 @@ test "array cat and mult" {
         \\const a = [_]u8{0} ++ [1]u8{1}
         \\```
         \\```zig
-        \\([?]u8)
+        \\([2]u8)
         \\```
     );
     try testHover(
@@ -621,7 +621,7 @@ test "array cat and mult" {
         \\const a = [_]u8{0} ** 2
         \\```
         \\```zig
-        \\([?]u8)
+        \\([2]u8)
         \\```
     );
     try testHover(
@@ -684,7 +684,7 @@ test "sentinel values" {
         \\const array = [_:0]u8{ 1, 2, 3, 4 }
         \\```
         \\```zig
-        \\([?:0]u8)
+        \\([4:0]u8)
         \\```
     );
     try testHover(
@@ -699,25 +699,25 @@ test "sentinel values" {
         \\```
     );
     try testHover(
-        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\var array = [_:0]u8{ 1, 2, 3, 4 };
         \\const <cursor>range = array[0..2];
     ,
         \\```zig
         \\const range = array[0..2]
         \\```
         \\```zig
-        \\([]u8)
+        \\(*[2]u8)
         \\```
     );
     try testHover(
-        \\const array = [_:0]u8{ 1, 2, 3, 4 };
+        \\var array = [_:0]u8{ 1, 2, 3, 4 };
         \\const <cursor>open = array[1..];
     ,
         \\```zig
         \\const open = array[1..]
         \\```
         \\```zig
-        \\([:0]u8)
+        \\(*[3:0]u8)
         \\```
     );
     // try testHover(
