@@ -1082,37 +1082,40 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccessKi
             },
         },
         .pointer => |info| return switch (info.size) {
-            .one => if (info.elem_ty.* != .dynamic) return null else switch (info.elem_ty.dynamic.data) {
-                .array => |array_info| {
-                    switch (rhs) {
-                        .Single => return try array_info.elem_ty.instanceTypeVal(analyser),
-                        .Open => {
-                            return .{ .dynamic = .{
-                                .data = .{
-                                    .pointer = .{
-                                        .size = .slice,
-                                        .sentinel = array_info.sentinel,
-                                        .is_const = false,
-                                        .elem_ty = array_info.elem_ty,
+            .one => switch (info.elem_ty.*) {
+                .dynamic => |elem_payload| switch (elem_payload.data) {
+                    .array => |array_info| {
+                        switch (rhs) {
+                            .Single => return try array_info.elem_ty.instanceTypeVal(analyser),
+                            .Open => {
+                                return .{ .dynamic = .{
+                                    .data = .{
+                                        .pointer = .{
+                                            .size = .slice,
+                                            .sentinel = array_info.sentinel,
+                                            .is_const = false,
+                                            .elem_ty = array_info.elem_ty,
+                                        },
                                     },
-                                },
-                                .is_type_val = false,
-                            } };
-                        },
-                        .Range => {
-                            return .{ .dynamic = .{
-                                .data = .{
-                                    .pointer = .{
-                                        .size = .slice,
-                                        .sentinel = .none,
-                                        .is_const = false,
-                                        .elem_ty = array_info.elem_ty,
+                                    .is_type_val = false,
+                                } };
+                            },
+                            .Range => {
+                                return .{ .dynamic = .{
+                                    .data = .{
+                                        .pointer = .{
+                                            .size = .slice,
+                                            .sentinel = .none,
+                                            .is_const = false,
+                                            .elem_ty = array_info.elem_ty,
+                                        },
                                     },
-                                },
-                                .is_type_val = false,
-                            } };
-                        },
-                    }
+                                    .is_type_val = false,
+                                } };
+                            },
+                        }
+                    },
+                    else => return null,
                 },
                 else => return null,
             },
@@ -1181,12 +1184,15 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
     };
     switch (payload.data) {
         .pointer => |info| switch (info.size) {
-            .one => if (info.elem_ty.* != .dynamic) {} else switch (info.elem_ty.dynamic.data) {
-                .array => {
-                    std.debug.assert(!info.elem_ty.dynamic.is_type_val);
-                    if (std.mem.eql(u8, "len", name)) {
-                        return try Type.typeValFromIP(analyser, .usize_type);
-                    }
+            .one => switch (info.elem_ty.*) {
+                .dynamic => |elem_payload| switch (elem_payload.data) {
+                    .array => {
+                        std.debug.assert(!elem_payload.is_type_val);
+                        if (std.mem.eql(u8, "len", name)) {
+                            return try Type.typeValFromIP(analyser, .usize_type);
+                        }
+                    },
+                    else => {},
                 },
                 else => {},
             },

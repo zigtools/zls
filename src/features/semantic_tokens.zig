@@ -583,8 +583,11 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
-                )) |struct_type| if (struct_type != .dynamic) null else switch (struct_type.dynamic.data) {
-                    .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, false),
+                )) |struct_type| switch (struct_type) {
+                    .dynamic => |payload| switch (payload.data) {
+                        .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, false),
+                        else => null,
+                    },
                     else => null,
                 } else null;
             }
