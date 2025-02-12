@@ -304,7 +304,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
         if (std.mem.startsWith(u8, tree.source[possible_region..], "//#region")) {
             try stack.append(allocator, possible_region);
         } else if (std.mem.startsWith(u8, tree.source[possible_region..], "//#endregion")) {
-            const start_index = stack.popOrNull() orelse break; // null means there are more endregions than regions
+            const start_index = stack.pop() orelse break; // null means there are more endregions than regions
             const end_index = offsets.lineLocAtIndex(tree.source, possible_region).end;
             const is_same_line = std.mem.indexOfScalar(u8, tree.source[start_index..end_index], '\n') == null;
             if (is_same_line) continue;
