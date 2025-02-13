@@ -67,6 +67,12 @@ pub fn deinit(self: *Analyser) void {
     self.arena.deinit();
 }
 
+fn allocType(analyser: *Analyser, ty: Type) error{OutOfMemory}!*Type {
+    const ptr = try analyser.arena.allocator().create(Type);
+    ptr.* = ty;
+    return ptr;
+}
+
 pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex) error{OutOfMemory}!?[]const u8 {
     const tokens = tree.tokens.items(.tag);
     const doc_comment_index = getDocCommentTokenIndex(tokens, base) orelse return null;
@@ -842,12 +848,10 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
     if (!child_type.is_type_val) return null;
 
     if (ast.hasInferredError(tree, fn_proto)) {
-        const child_type_ptr = try analyser.arena.allocator().create(Type);
-        child_type_ptr.* = child_type;
         return .{
             .data = .{ .error_union = .{
                 .error_set = null,
-                .payload = child_type_ptr,
+                .payload = try analyser.allocType(child_type),
             } },
             .is_type_val = false,
         };
@@ -894,15 +898,13 @@ pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{
 }
 
 pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
-    const base_type_ptr = try analyser.arena.allocator().create(Type);
-    base_type_ptr.* = ty.typeOf(analyser);
     return .{
         .data = .{
             .pointer = .{
                 .size = .one,
                 .sentinel = .none,
                 .is_const = false,
-                .elem_ty = base_type_ptr,
+                .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
             },
         },
         .is_type_val = false,
@@ -949,9 +951,7 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, ty: Type, symbol: []const u8
         return try child.resolveType(analyser);
 
     if (container_decl.ast.enum_token != null) {
-        const union_type_ptr = try analyser.arena.allocator().create(Type);
-        union_type_ptr.* = ty;
-        return .{ .data = .{ .union_tag = union_type_ptr }, .is_type_val = false };
+        return .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = false };
     }
 
     if (container_decl.ast.arg != 0) {
@@ -1608,10 +1608,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const child_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].lhs, .handle = handle }) orelse return null;
             if (!child_ty.is_type_val) return null;
 
-            const child_ty_ptr = try analyser.arena.allocator().create(Type);
-            child_ty_ptr.* = child_ty;
-
-            return .{ .data = .{ .optional = child_ty_ptr }, .is_type_val = true };
+            return .{ .data = .{ .optional = try analyser.allocType(child_ty) }, .is_type_val = true };
         },
         .ptr_type_aligned,
         .ptr_type_sentinel,
@@ -1625,15 +1622,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
-            const elem_ty_ptr = try analyser.arena.allocator().create(Type);
-            elem_ty_ptr.* = elem_ty;
             return .{
                 .data = .{
                     .pointer = .{
                         .size = ptr_info.size,
                         .sentinel = sentinel,
                         .is_const = ptr_info.const_token != null,
-                        .elem_ty = elem_ty_ptr,
+                        .elem_ty = try analyser.allocType(elem_ty),
                     },
                 },
                 .is_type_val = true,
@@ -1650,14 +1645,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_info.ast.elem_type, .handle = handle }) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
-            const elem_ty_ptr = try analyser.arena.allocator().create(Type);
-            elem_ty_ptr.* = elem_ty;
-
             return .{
                 .data = .{ .array = .{
                     .elem_count = elem_count,
                     .sentinel = sentinel,
-                    .elem_ty = elem_ty_ptr,
+                    .elem_ty = try analyser.allocType(elem_ty),
                 } },
                 .is_type_val = true,
             };
@@ -1696,16 +1688,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const payload = try analyser.resolveTypeOfNodeInternal(.{ .node = datas[node].rhs, .handle = handle }) orelse return null;
             if (!payload.is_type_val) return null;
 
-            const error_set_ptr = try analyser.arena.allocator().create(Type);
-            error_set_ptr.* = error_set;
-
-            const payload_ptr = try analyser.arena.allocator().create(Type);
-            payload_ptr.* = payload;
-
             return .{
                 .data = .{ .error_union = .{
-                    .error_set = error_set_ptr,
-                    .payload = payload_ptr,
+                    .error_set = try analyser.allocType(error_set),
+                    .payload = try analyser.allocType(payload),
                 } },
                 .is_type_val = true,
             };
@@ -4102,12 +4088,9 @@ pub const DeclWithHandle = struct {
 
         if (!self.isCaptureByRef()) return resolved_ty;
 
-        const resolved_ty_ptr = try analyser.arena.allocator().create(Type);
-        resolved_ty_ptr.* = resolved_ty.typeOf(analyser);
-
         return .{
             .data = .{ .pointer = .{
-                .elem_ty = resolved_ty_ptr,
+                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser)),
                 .sentinel = .none,
                 .is_const = false,
                 .size = .one,
