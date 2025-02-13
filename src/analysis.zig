@@ -2288,7 +2288,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .failure => unreachable, // checked above
             };
 
-            return .{ .ip_index = .{ .index = value orelse try analyser.ip.getUnknown(analyser.gpa, ty) } };
+            return if (value) |v| .{ .ip_index = .{ .index = v } } else try Type.typeValFromIP(analyser, ty);
         },
 
         .enum_literal => return try Type.typeValFromIP(analyser, .enum_literal_type),
@@ -2493,7 +2493,7 @@ pub const Type = union(enum) {
     pub fn isTypeVal(self: Type, analyser: *Analyser) bool {
         switch (self) {
             .dynamic => |payload| return payload.is_type_val,
-            .ip_index => |payload| return analyser.ip.typeOf(payload.index) == .type_type,
+            .ip_index => |payload| return analyser.ip.isType(payload.index),
             .either => |entries| {
                 for (entries) |entry| {
                     if (entry.type.isTypeVal(analyser)) {
@@ -2722,13 +2722,8 @@ pub const Type = union(enum) {
             },
             .ip_index => |payload| {
                 if (payload.index == .unknown_type) return null;
-                if (analyser.ip.typeOf(payload.index) != .type_type) return null;
-                return .{
-                    .ip_index = .{
-                        .index = try analyser.ip.getUnknown(analyser.gpa, payload.index),
-                        .node = payload.node,
-                    },
-                };
+                if (!analyser.ip.isType(payload.index)) return null;
+                return try typeValFromIP(analyser, payload.index);
             },
             .either => |entries| {
                 var either = try std.ArrayListUnmanaged(Type.TypeWithDescriptor).initCapacity(analyser.arena.allocator(), entries.len);
