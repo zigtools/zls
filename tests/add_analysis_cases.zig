@@ -2,9 +2,8 @@ const std = @import("std");
 
 pub fn addCases(
     b: *std.Build,
+    test_step: *std.Build.Step,
     test_filters: []const []const u8,
-    steps1: *std.ArrayListUnmanaged(*std.Build.Step.Run),
-    steps2: *std.ArrayListUnmanaged(*std.Build.Step.Run),
 ) void {
     const cases_dir = b.path("tests/analysis");
     const cases_path_from_root = b.pathFromRoot("tests/analysis");
@@ -34,18 +33,15 @@ pub fn addCases(
             if (std.mem.indexOf(u8, entry.name, test_filter) != null) break;
         } else if (test_filters.len > 0) continue;
 
-        // We create two runs steps, one for `zig build test` and another for `zig build coverage`
-        for ([_]*std.ArrayListUnmanaged(*std.Build.Step.Run){ steps1, steps2 }) |steps| {
-            const run_check = std.Build.Step.Run.create(b, b.fmt("run analysis on {s}", .{entry.name}));
-            run_check.producer = check_exe;
-            run_check.addArtifactArg(check_exe);
-            run_check.addArg("--zig-exe-path");
-            run_check.addFileArg(.{ .cwd_relative = b.graph.zig_exe });
-            run_check.addArg("--zig-lib-path");
-            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
-            run_check.addFileArg(cases_dir.path(b, entry.name));
+        const run_check = std.Build.Step.Run.create(b, b.fmt("run analysis on {s}", .{entry.name}));
+        run_check.producer = check_exe;
+        run_check.addArtifactArg(check_exe);
+        run_check.addArg("--zig-exe-path");
+        run_check.addFileArg(.{ .cwd_relative = b.graph.zig_exe });
+        run_check.addArg("--zig-lib-path");
+        run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
+        run_check.addFileArg(cases_dir.path(b, entry.name));
 
-            steps.append(b.allocator, run_check) catch @panic("OOM");
-        }
+        test_step.dependOn(&run_check.step);
     }
 }

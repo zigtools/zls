@@ -51,6 +51,7 @@ pub fn build(b: *Build) !void {
     const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
+    const coverage = b.option(bool, "coverage", "Generate a coverage report with kcov") orelse false;
 
     const resolved_zls_version = getVersion(b);
 
@@ -243,25 +244,37 @@ pub fn build(b: *Build) !void {
         .use_lld = use_llvm,
     });
 
-    var coverage_test_analysis_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
-
-    { // zig build test, zig build test-build-runner, zig build test-analysis
-        const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
-        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
-
-        const test_analysis_step = b.step("test-analysis", "Run all the analysis tests");
-        var test_analysis_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
-        @import("tests/add_analysis_cases.zig").addCases(b, test_filters, &test_analysis_steps, &coverage_test_analysis_steps);
-        for (test_analysis_steps.items) |run| test_analysis_step.dependOn(&run.step);
-
+    blk: { // zig build test, zig build test-build-runner, zig build test-analysis
         const test_step = b.step("test", "Run all the tests");
+        const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
+        const test_analysis_step = b.step("test-analysis", "Run all the analysis tests");
+
+        // Create run steps
+        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
+        @import("tests/add_analysis_cases.zig").addCases(b, test_analysis_step, test_filters);
+
+        const run_tests = b.addRunArtifact(tests);
+        const run_src_tests = b.addRunArtifact(src_tests);
+
+        // Setup dependencies of `zig build test`
+        test_step.dependOn(&run_tests.step);
+        test_step.dependOn(&run_src_tests.step);
         test_step.dependOn(test_build_runner_step);
         test_step.dependOn(test_analysis_step);
-        test_step.dependOn(&b.addRunArtifact(tests).step);
-        test_step.dependOn(&b.addRunArtifact(src_tests).step);
-    }
 
-    { // zig build coverage
+        if (!coverage) break :blk;
+
+        // Collect all run steps into one ArrayList
+        var run_test_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
+        run_test_steps.append(b.allocator, run_tests) catch @panic("OOM");
+        run_test_steps.append(b.allocator, run_src_tests) catch @panic("OOM");
+        for (test_build_runner_step.dependencies.items) |step| {
+            run_test_steps.append(b.allocator, step.cast(std.Build.Step.Run).?) catch @panic("OOM");
+        }
+        for (test_analysis_step.dependencies.items) |step| {
+            run_test_steps.append(b.allocator, step.cast(std.Build.Step.Run).?) catch @panic("OOM");
+        }
+
         const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
 
         const merge_step = std.Build.Step.Run.create(b, "merge coverage");
@@ -269,16 +282,7 @@ pub fn build(b: *Build) !void {
         merge_step.rename_step_with_output_arg = false;
         const merged_coverage_output = merge_step.addOutputFileArg(".");
 
-        for ([_]*std.Build.Step.Compile{ tests, src_tests }) |test_exe| {
-            const kcov_collect = std.Build.Step.Run.create(b, b.fmt("run {s} (collect coverage)", .{test_exe.name}));
-            kcov_collect.addArgs(&.{ kcov_bin, "--collect-only" });
-            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(test_exe.name));
-            kcov_collect.addArtifactArg(test_exe);
-            kcov_collect.enableTestRunnerMode();
-        }
-
-        for (coverage_test_analysis_steps.items) |run_step| {
+        for (run_test_steps.items) |run_step| {
             run_step.setName(b.fmt("{s} (collect coverage)", .{run_step.step.name}));
 
             // prepend the kcov exec args
@@ -294,8 +298,7 @@ pub fn build(b: *Build) !void {
             .install_dir = .{ .custom = "coverage" },
             .install_subdir = "",
         });
-        const coverage_step = b.step("coverage", "Generate a coverage report with kcov");
-        coverage_step.dependOn(&install_coverage.step);
+        test_step.dependOn(&install_coverage.step);
     }
 }
 
