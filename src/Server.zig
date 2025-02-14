@@ -62,6 +62,8 @@ ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
+/// The underlying memory has been allocated with `config_arena`.
+runtime_zig_version: ?std.SemanticVersion = null,
 /// Every changed configuration will increase the amount of memory allocated by the arena,
 /// This is unlikely to cause any big issues since the user is probably not going set settings
 /// often in one session,
@@ -770,14 +772,12 @@ const Workspace = struct {
 
     fn refreshBuildOnSave(workspace: *Workspace, args: struct {
         server: *Server,
-        /// If null, build on save will be disabled
-        runtime_zig_version: ?std.SemanticVersion,
         /// Whether the build on save process should be restarted if it is already running.
         restart: bool,
     }) error{OutOfMemory}!void {
         comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
 
-        if (args.runtime_zig_version) |runtime_zig_version| {
+        if (args.server.runtime_zig_version) |runtime_zig_version| {
             workspace.build_on_save_mode = switch (BuildOnSaveSupport.isSupportedRuntime(runtime_zig_version)) {
                 .supported => .watch,
                 // If if build on save has been explicitly enabled, fallback to the implementation with manual updates
@@ -833,6 +833,18 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
     log.info("added Workspace Folder: {s}", .{uri});
+
+    if (BuildOnSaveSupport.isSupportedComptime() and
+        // Don't initialize build on save until initialization finished.
+        // If the client supports the `workspace/configuration` request, wait
+        // until we have received workspace configuration from the server.
+        (server.status == .initialized and !server.client_capabilities.supports_configuration))
+    {
+        try server.workspaces.items[server.workspaces.items.len - 1].refreshBuildOnSave(.{
+            .server = server,
+            .restart = false,
+        });
+    }
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
@@ -927,6 +939,7 @@ pub fn updateConfiguration(
         if (!options.resolve) break :blk ResolveConfigurationResult.unresolved;
         const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_config);
         server.validateConfiguration(&new_config);
+        server.runtime_zig_version = resolve_result.zig_runtime_version;
         break :blk resolve_result;
     };
     defer resolve_result.deinit();
@@ -1012,7 +1025,6 @@ pub fn updateConfiguration(
         for (server.workspaces.items) |*workspace| {
             try workspace.refreshBuildOnSave(.{
                 .server = server,
-                .runtime_zig_version = resolve_result.zig_runtime_version,
                 .restart = should_restart,
             });
         }
@@ -1299,7 +1311,8 @@ fn resolveConfiguration(
             }
         }
 
-        result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
+        const version_string_duped = try config_arena.dupe(u8, env.value.version);
+        result.zig_runtime_version = std.SemanticVersion.parse(version_string_duped) catch |err| {
             log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
             break :blk;
         };
