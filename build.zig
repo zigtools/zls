@@ -243,13 +243,20 @@ pub fn build(b: *Build) !void {
         .use_lld = use_llvm,
     });
 
-    { // zig build test
-        const test_step = b.step("test", "Run all the tests");
+    var coverage_test_analysis_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
 
+    { // zig build test, zig build test-build-runner, zig build test-analysis
         const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
         @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
 
+        const test_analysis_step = b.step("test-analysis", "Run all the analysis tests");
+        var test_analysis_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
+        @import("tests/add_analysis_cases.zig").addCases(b, test_filters, &test_analysis_steps, &coverage_test_analysis_steps);
+        for (test_analysis_steps.items) |run| test_analysis_step.dependOn(&run.step);
+
+        const test_step = b.step("test", "Run all the tests");
         test_step.dependOn(test_build_runner_step);
+        test_step.dependOn(test_analysis_step);
         test_step.dependOn(&b.addRunArtifact(tests).step);
         test_step.dependOn(&b.addRunArtifact(src_tests).step);
     }
@@ -263,12 +270,23 @@ pub fn build(b: *Build) !void {
         const merged_coverage_output = merge_step.addOutputFileArg(".");
 
         for ([_]*std.Build.Step.Compile{ tests, src_tests }) |test_exe| {
-            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
+            const kcov_collect = std.Build.Step.Run.create(b, b.fmt("run {s} (collect coverage)", .{test_exe.name}));
             kcov_collect.addArgs(&.{ kcov_bin, "--collect-only" });
             kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
             merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(test_exe.name));
             kcov_collect.addArtifactArg(test_exe);
             kcov_collect.enableTestRunnerMode();
+        }
+
+        for (coverage_test_analysis_steps.items) |run_step| {
+            run_step.setName(b.fmt("{s} (collect coverage)", .{run_step.step.name}));
+
+            // prepend the kcov exec args
+            const argv = run_step.argv.toOwnedSlice(b.allocator) catch @panic("OOM");
+            run_step.addArgs(&.{ kcov_bin, "--collect-only" });
+            run_step.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+            merge_step.addDirectoryArg(run_step.addOutputFileArg(run_step.producer.?.name));
+            run_step.argv.appendSlice(b.allocator, argv) catch @panic("OOM");
         }
 
         const install_coverage = b.addInstallDirectory(.{
