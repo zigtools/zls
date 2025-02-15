@@ -15,13 +15,13 @@ const one_u32_slice_len_0_5 = one_u32[0..5];
 //    ^^^^^^^^^^^^^^^^^^^^^ (unknown)()
 
 const one_u32_slice_len_0_0 = one_u32[0..0];
-// TODO   ^^^^^^^^^^^^^^^^^^^^^ (*const [0]u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^ (*const [0]u32)()
 
 const one_u32_slice_len_0_1 = one_u32[0..1];
-// TODO   ^^^^^^^^^^^^^^^^^^^^^ (*const [1]u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^ (*const [1]u32)()
 
 const one_u32_slice_len_1_1 = one_u32[1..1];
-// TODO   ^^^^^^^^^^^^^^^^^^^^^ (*const [0]u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^ (*const [0]u32)()
 
 const one_u32_slice_open = one_u32[1..];
 //    ^^^^^^^^^^^^^^^^^^ (unknown)()

@@ -1106,7 +1106,34 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
                     const inner_ty: Type = .{ .data = .{ .array = array_info }, .is_type_val = false };
                     return analyser.resolveBracketAccessType(inner_ty, rhs);
                 },
-                else => return null,
+                else => switch (rhs) {
+                    .single, .open => return null,
+                    .range => |range_maybe| {
+                        const start, const end = range_maybe orelse return null;
+                        if (start > end or start > 1 or end > 1) return null;
+                        const elem_count = end - start;
+                        return .{
+                            .data = .{
+                                .pointer = .{
+                                    .size = .one,
+                                    .sentinel = .none,
+                                    .is_const = info.is_const,
+                                    .elem_ty = try analyser.allocType(.{
+                                        .data = .{
+                                            .array = .{
+                                                .elem_count = elem_count,
+                                                .sentinel = .none,
+                                                .elem_ty = info.elem_ty,
+                                            },
+                                        },
+                                        .is_type_val = true,
+                                    }),
+                                },
+                            },
+                            .is_type_val = false,
+                        };
+                    },
+                },
             },
             .many => switch (rhs) {
                 .single => info.elem_ty.instanceTypeVal(analyser),
