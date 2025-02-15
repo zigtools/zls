@@ -1016,6 +1016,14 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
             .for_range => return Type.fromIP(analyser, .usize_type, null),
             else => return null,
         },
+        .tuple => |fields| switch (rhs) {
+            .single => |index_maybe| {
+                const index = index_maybe orelse return null;
+                if (index >= fields.len) return null;
+                return fields[index];
+            },
+            .open, .range => return null,
+        },
         .array => |info| switch (rhs) {
             .single => return info.elem_ty.instanceTypeVal(analyser),
             .open => |start_maybe| {
