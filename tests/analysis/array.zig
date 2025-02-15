@@ -19,7 +19,7 @@ const some_unsized_array: [unknown_length]u8 = undefined;
 //    ^^^^^^^^^^^^^^^^^^ ([?]u8)()
 
 const some_array_len = some_array.len;
-//    ^^^^^^^^^^^^^^ (usize)()
+//    ^^^^^^^^^^^^^^ (usize)(3)
 
 const some_unsized_array_len = some_unsized_array.len;
 //    ^^^^^^^^^^^^^^^^^^^^^^ (usize)()
