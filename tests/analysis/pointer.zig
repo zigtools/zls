@@ -45,9 +45,8 @@ const many_u32_deref = many_u32.*;
 const many_u32_indexing = many_u32[0];
 //    ^^^^^^^^^^^^^^^^^ (u32)()
 
-// TODO this should be `*const [2]u32`
 const many_u32_slice_len_comptime = many_u32[0..2];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
 
 const many_u32_slice_len_runtime = many_u32[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
@@ -74,9 +73,8 @@ const slice_u32_deref = slice_u32.*;
 const slice_u32_indexing = slice_u32[0];
 //    ^^^^^^^^^^^^^^^^^^ (u32)()
 
-// TODO this should be `*const [2]u32`
 const slice_u32_slice_len_comptime = slice_u32[0..2];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
 
 const slice_u32_slice_len_runtime = slice_u32[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
@@ -104,9 +102,8 @@ const c_u32_deref = c_u32.*;
 const c_u32_indexing = c_u32[0];
 //    ^^^^^^^^^^^^^^ (u32)()
 
-// TODO this should be `*const [2]u32`
 const c_u32_slice_len_comptime = c_u32[0..2];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
 
 const c_u32_slice_len_runtime = c_u32[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()

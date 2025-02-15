@@ -706,7 +706,7 @@ test "sentinel values" {
         \\const range = array[0..2]
         \\```
         \\```zig
-        \\([]u8)
+        \\(*[?]u8)
         \\```
     );
     try testHover(
@@ -717,7 +717,7 @@ test "sentinel values" {
         \\const open = array[1..]
         \\```
         \\```zig
-        \\([:0]u8)
+        \\(*[?:0]u8)
         \\```
     );
     // try testHover(
