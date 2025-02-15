@@ -1704,7 +1704,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .struct_init_comma,
                 .struct_init_one,
                 .struct_init_one_comma,
-                => base_type.instanceTypeVal(analyser),
+                => {
+                    var buffer: [2]Ast.Node.Index = undefined;
+                    const struct_init_info = tree.fullStructInit(&buffer, node).?;
+                    if (base_type.data == .array and base_type.data.array.elem_count == null) {
+                        var ty = base_type;
+                        ty.data.array.elem_count = struct_init_info.ast.fields.len;
+                        return ty.instanceTypeVal(analyser);
+                    }
+                    return base_type.instanceTypeVal(analyser);
+                },
                 .slice,
                 .slice_sentinel,
                 .slice_open,
@@ -1814,6 +1823,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             if (array_init_info.ast.type_expr != 0) blk: {
                 const array_ty = try analyser.resolveTypeOfNode(.{ .node = array_init_info.ast.type_expr, .handle = handle }) orelse break :blk;
+                if (array_ty.data == .array and array_ty.data.array.elem_count == null) {
+                    var ty = array_ty;
+                    ty.data.array.elem_count = array_init_info.ast.elements.len;
+                    return ty.instanceTypeVal(analyser);
+                }
                 return array_ty.instanceTypeVal(analyser);
             }
 

@@ -71,9 +71,9 @@ const array_slice_with_sentinel = some_array[0..runtime_index :0];
 const array_init = [length]u8{};
 //    ^^^^^^^^^^ ([3]u8)()
 const array_init_inferred_len_0 = [_]u8{};
-// TODO   ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
 const array_init_inferred_len_3 = [_]u8{ 1, 2, 3 };
-// TODO   ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([3]u8)()
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:
