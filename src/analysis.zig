@@ -2118,7 +2118,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
                 either.appendAssumeCapacity(.{ .type = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
 
-            return Type.fromEither(analyser.arena.allocator(), either.constSlice());
+            return Type.fromEither(analyser, either.constSlice());
         },
         .@"switch",
         .switch_comma,
@@ -2144,7 +2144,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     });
             }
 
-            return Type.fromEither(analyser.arena.allocator(), either.items);
+            return Type.fromEither(analyser, either.items);
         },
         .@"while",
         .while_simple,
@@ -2722,12 +2722,22 @@ pub const Type = struct {
         descriptor: []const u8,
     };
 
-    pub fn fromEither(arena: std.mem.Allocator, entries: []const TypeWithDescriptor) error{OutOfMemory}!?Type {
+    pub fn fromEither(analyser: *Analyser, entries: []const TypeWithDescriptor) error{OutOfMemory}!?Type {
+        const arena = analyser.arena.allocator();
         if (entries.len == 0)
             return null;
 
         if (entries.len == 1)
             return entries[0].type;
+
+        peer_type_resolution: {
+            var chosen = entries[0].type;
+            for (entries[1..]) |entry| {
+                const candidate = entry.type;
+                chosen = try resolvePeerTypes(analyser, chosen, candidate) orelse break :peer_type_resolution;
+            }
+            return chosen;
+        }
 
         // Note that we don't hash/equate descriptors to remove
         // duplicates
@@ -2772,6 +2782,31 @@ pub const Type = struct {
             .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
             .is_type_val = has_type_val,
         };
+    }
+
+    fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
+        if (a.is_type_val or b.is_type_val) return null;
+        if (a.eql(b)) return a;
+
+        switch (a.data) {
+            .optional => |a_type| {
+                if (a_type.eql(b.typeOf(analyser))) {
+                    return a;
+                }
+            },
+            else => {},
+        }
+
+        switch (b.data) {
+            .optional => |b_type| {
+                if (b_type.eql(a.typeOf(analyser))) {
+                    return b;
+                }
+            },
+            else => {},
+        }
+
+        return null;
     }
 
     /// Resolves possible types of a type (single for all except either)
@@ -4153,7 +4188,7 @@ pub const DeclWithHandle = struct {
                         });
                     }
 
-                    const maybe_type = try Type.fromEither(analyser.arena.allocator(), possible.items);
+                    const maybe_type = try Type.fromEither(analyser, possible.items);
                     if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
                     break :blk maybe_type;
                 }
