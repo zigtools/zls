@@ -7,6 +7,7 @@
 //! - `lookupSymbolContainer`
 //!
 
+const builtin = @import("builtin");
 const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
@@ -2787,6 +2788,12 @@ pub const Type = struct {
     fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
         if (a.is_type_val or b.is_type_val) return null;
         if (a.eql(b)) return a;
+
+        if (a.data == .ip_index and b.data == .ip_index) {
+            const types = [_]InternPool.Index{ a.data.ip_index.type, b.data.ip_index.type };
+            const resolved_type = try analyser.ip.resolvePeerTypes(analyser.gpa, &types, builtin.target);
+            return fromIP(analyser, resolved_type, null);
+        }
 
         switch (a.data) {
             .optional => |a_type| {
