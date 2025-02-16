@@ -2801,6 +2801,16 @@ pub const Type = struct {
                     return a;
                 }
             },
+            .ip_index => |a_payload| switch (a_payload.type) {
+                .null_type => switch (b.data) {
+                    .optional => return b,
+                    else => return .{
+                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
+                        .is_type_val = false,
+                    },
+                },
+                else => {},
+            },
             else => {},
         }
 
@@ -2809,6 +2819,16 @@ pub const Type = struct {
                 if (b_type.eql(a.typeOf(analyser))) {
                     return b;
                 }
+            },
+            .ip_index => |b_payload| switch (b_payload.type) {
+                .null_type => switch (a.data) {
+                    .optional => return a,
+                    else => return .{
+                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
+                        .is_type_val = false,
+                    },
+                },
+                else => {},
             },
             else => {},
         }
