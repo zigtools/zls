@@ -316,10 +316,8 @@ pub fn getAutofixMode(server: *Server) enum {
 } {
     if (server.client_capabilities.supports_code_action_fixall) return .@"source.fixall";
     if (!server.config.force_autofix) return .none;
-    if (server.client_capabilities.supports_apply_edits) {
-        if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
-        return .on_save;
-    }
+    if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
+    if (server.client_capabilities.supports_apply_edits) return .on_save;
     return .none;
 }
 
