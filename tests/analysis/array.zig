@@ -19,7 +19,7 @@ const some_unsized_array: [unknown_length]u8 = undefined;
 //    ^^^^^^^^^^^^^^^^^^ ([?]u8)()
 
 const some_array_len = some_array.len;
-//    ^^^^^^^^^^^^^^ (usize)()
+//    ^^^^^^^^^^^^^^ (usize)(3)
 
 const some_unsized_array_len = some_unsized_array.len;
 //    ^^^^^^^^^^^^^^^^^^^^^^ (usize)()
@@ -29,22 +29,22 @@ const array_indexing = some_array[0];
 
 // TODO this should be `*const [2]u8`
 const array_slice_open_1 = some_array[1..];
-//    ^^^^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*[2]u8)()
 
 // TODO this should be `*const [0]u8`
 const array_slice_open_3 = some_array[3..];
-//    ^^^^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*[0]u8)()
 
 // TODO this should be `*const [?]u8`
 const array_slice_open_4 = some_array[4..];
-//    ^^^^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*[?]u8)()
 
 const array_slice_open_runtime = some_array[runtime_index..];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]u8)()
 
 // TODO this should be `*const [2]u8`
 const array_slice_0_2 = some_array[0..2];
-//    ^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^ (*[2]u8)()
 
 // TODO this should be `*const [2 :0]u8`
 const array_slice_0_2_sentinel = some_array[0..2 :0];
@@ -52,11 +52,11 @@ const array_slice_0_2_sentinel = some_array[0..2 :0];
 
 // TODO this should be `*const [?]u8`
 const array_slice_0_5 = some_array[0..5];
-//    ^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^ (*[?]u8)()
 
 // TODO this should be `*const [?]u8`
 const array_slice_3_2 = some_array[3..2];
-//    ^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^ (*[?]u8)()
 
 const array_slice_0_runtime = some_array[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^ ([]u8)()
@@ -71,9 +71,9 @@ const array_slice_with_sentinel = some_array[0..runtime_index :0];
 const array_init = [length]u8{};
 //    ^^^^^^^^^^ ([3]u8)()
 const array_init_inferred_len_0 = [_]u8{};
-// TODO   ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
 const array_init_inferred_len_3 = [_]u8{ 1, 2, 3 };
-// TODO   ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([3]u8)()
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:
