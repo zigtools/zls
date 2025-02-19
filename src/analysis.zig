@@ -1020,7 +1020,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
                 if (index >= fields.len) return null;
-                return fields[index];
+                return fields[@intCast(index)];
             },
             .open, .range => return null,
         },
