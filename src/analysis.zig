@@ -2047,6 +2047,67 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return ty.instanceTypeVal(analyser);
             }
 
+            const float_map: std.StaticStringMap(void) = .initComptime(.{
+                .{"@sqrt"},
+                .{"@sin"},
+                .{"@cos"},
+                .{"@tan"},
+                .{"@exp"},
+                .{"@exp2"},
+                .{"@log"},
+                .{"@log2"},
+                .{"@log10"},
+                .{"@floor"},
+                .{"@ceil"},
+                .{"@trunc"},
+                .{"@round"},
+            });
+            if (float_map.has(call_name)) {
+                if (params.len != 1) return null;
+                const ty = (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = params[0],
+                    .handle = handle,
+                })) orelse return null;
+                const payload = switch (ty.data) {
+                    .ip_index => |payload| payload,
+                    else => return null,
+                };
+                const valid_type = switch (analyser.ip.indexToKey(payload.type)) {
+                    .vector_type => |info| analyser.ip.isFloat(info.child),
+                    else => analyser.ip.isFloat(payload.type),
+                };
+                if (!valid_type) return null;
+                return Type.fromIP(analyser, payload.type, null);
+            }
+
+            if (std.mem.eql(u8, call_name, "@abs")) {
+                if (params.len != 1) return null;
+
+                const ty = try analyser.resolveTypeOfNodeInternal(.{
+                    .node = params[0],
+                    .handle = handle,
+                }) orelse return null;
+
+                const payload = switch (ty.data) {
+                    .ip_index => |payload| payload,
+                    else => return null,
+                };
+
+                // Based on Sema.zirAbs
+                const operand_ty = payload.type;
+                const scalar_ty = analyser.ip.scalarType(operand_ty);
+                const result_ty = switch (analyser.ip.zigTypeTag(scalar_ty)) {
+                    .comptime_float, .float, .comptime_int => operand_ty,
+                    .int => if (analyser.ip.isSignedInt(scalar_ty, builtin.target))
+                        try analyser.ip.toUnsigned(analyser.gpa, operand_ty, builtin.target)
+                    else
+                        operand_ty,
+                    else => return null,
+                };
+
+                return Type.fromIP(analyser, result_ty, null);
+            }
+
             // Almost the same as the above, return a type value though.
             // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
