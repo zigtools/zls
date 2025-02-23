@@ -120,7 +120,6 @@ fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        .error_set_decl,
         .block,
         .block_semicolon,
         .block_two,
@@ -143,7 +142,6 @@ pub const Declaration = union(enum) {
     ///   - `.root`
     ///   - `.container_decl`
     ///   - `.tagged_union`
-    ///   - `.error_set_decl`
     ///   - `.container_field`
     ///   - `.fn_proto`
     ///   - `.fn_decl`
