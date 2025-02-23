@@ -871,6 +871,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 return;
             };
             const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+            if (lhs_type.isErrorSetType(builder.analyser)) {
+                try writeToken(builder, data.rhs, .errorTag);
+                return;
+            }
             if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
@@ -885,10 +889,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                                 return;
                             }
                         }
-                    },
-                    .error_token => {
-                        try writeToken(builder, data.rhs, .errorTag);
-                        return;
                     },
                     else => {},
                 }

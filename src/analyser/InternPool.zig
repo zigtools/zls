@@ -3780,6 +3780,8 @@ const FormatContext = struct {
 // TODO add options for controlling how types show be formatted
 pub const FormatOptions = struct {
     debug: bool = false,
+    // TODO: truncate structs, unions, enums
+    truncate_container: bool = false,
 };
 
 fn format(
@@ -3927,6 +3929,10 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             if (error_set_info.owner_decl.unwrap()) |decl_index| {
                 const decl = ip.getDecl(decl_index);
                 try writer.print("{}", .{ip.fmtId(decl.name)});
+                return null;
+            }
+            if (options.truncate_container and error_set_info.names.len > 2) {
+                try writer.writeAll("error{...}");
                 return null;
             }
             try writer.writeAll("error{");

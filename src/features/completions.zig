@@ -127,18 +127,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 });
             }
         },
-        .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
-            .merge_error_sets => {
-                const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.lhs, .handle = node_handle.handle })) |lhs_ty| {
-                    try typeToCompletion(builder, lhs_ty);
-                }
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.rhs, .handle = node_handle.handle })) |rhs_ty| {
-                    try typeToCompletion(builder, rhs_ty);
-                }
-            },
-            else => {},
-        },
         .ip_index => |payload| try analyser_completions.dotCompletions(
             builder.arena,
             &builder.completions,
@@ -153,6 +141,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
         },
         .error_union,
         .union_tag,
+        .other,
         .compile_error,
         => {},
     }
