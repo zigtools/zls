@@ -424,13 +424,6 @@ pub fn getVariableSignature(
     };
 
     const end_token = switch (tree.nodeTag(init_node)) {
-        .merge_error_sets => {
-            if (!include_name) return "error";
-            return try std.fmt.allocPrint(arena, "{s} error", .{
-                offsets.tokensToSlice(tree, start_token, tree.firstToken(init_node) - 1),
-            });
-        },
-        .error_set_decl => tree.firstToken(init_node),
         .container_decl,
         .container_decl_trailing,
         .container_decl_arg,
@@ -1972,10 +1965,44 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             };
         },
 
-        // TODO represent through InternPool
-        .merge_error_sets => return Type.typeVal(node_handle),
+        .merge_error_sets => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = lhs, .handle = handle }) orelse return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = rhs, .handle = handle }) orelse return null;
+            if (!lhs_ty.is_type_val) return null;
+            if (!rhs_ty.is_type_val) return null;
+            const lhs_index = switch (lhs_ty.data) {
+                .ip_index => |payload| payload.index orelse return null,
+                else => return null,
+            };
+            const rhs_index = switch (rhs_ty.data) {
+                .ip_index => |payload| payload.index orelse return null,
+                else => return null,
+            };
+            if (analyser.ip.zigTypeTag(lhs_index) != .error_set) return null;
+            if (analyser.ip.zigTypeTag(rhs_index) != .error_set) return null;
+            const ip_index = try analyser.ip.errorSetMerge(analyser.gpa, lhs_index, rhs_index);
+            return Type.fromIP(analyser, .type_type, ip_index);
+        },
 
-        .error_set_decl, // TODO represent through InternPool
+        .error_set_decl => {
+            const lbrace, const rbrace = tree.nodeData(node).token_and_token;
+            var strings: std.ArrayListUnmanaged(InternPool.String) = .empty;
+            defer strings.deinit(analyser.gpa);
+            var i: usize = 0;
+            for (lbrace + 1..rbrace) |tok_i| {
+                if (tree.tokenTag(@intCast(tok_i)) != .identifier) continue;
+                const identifier_token: Ast.TokenIndex = @intCast(tok_i);
+                defer i += 1;
+                const name = offsets.tokenToSlice(tree, identifier_token);
+                const index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
+                try strings.append(analyser.gpa, index);
+            }
+            const names = try analyser.ip.getStringSlice(analyser.gpa, strings.items);
+            const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
+            return Type.fromIP(analyser, .type_type, ip_index);
+        },
+
         .container_decl,
         .container_decl_arg,
         .container_decl_arg_trailing,
@@ -2668,10 +2695,8 @@ pub const Type = struct {
         /// - `enum {}`
         /// - `union {}`
         /// - `opaque {}`
-        /// - `error {}`
         container: ScopeWithHandle,
 
-        /// - Error type: `Foo || Bar`, `Foo!Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
         /// - `start..end`
         other: NodeWithHandle,
@@ -3076,6 +3101,17 @@ pub const Type = struct {
         }
     }
 
+    pub fn isErrorSetType(self: Type, analyser: *Analyser) bool {
+        if (!self.is_type_val) return false;
+        switch (self.data) {
+            .ip_index => |payload| {
+                const ip_index = payload.index orelse return false;
+                return analyser.ip.zigTypeTag(ip_index) == .error_set;
+            },
+            else => return false,
+        }
+    }
+
     pub fn isEnumLiteral(self: Type) bool {
         switch (self.data) {
             .ip_index => |payload| return payload.type == .enum_literal_type,
@@ -3302,7 +3338,6 @@ pub const Type = struct {
                     .container_decl_trailing,
                     .container_decl_two,
                     .container_decl_two_trailing,
-                    .error_set_decl,
                     .tagged_union,
                     .tagged_union_trailing,
                     .tagged_union_two,
@@ -3340,32 +3375,6 @@ pub const Type = struct {
 
                         if (!ctx.options.truncate_container_decls) {
                             try writer.writeAll(offsets.nodeToSlice(tree, node));
-                            return;
-                        }
-
-                        if (tree.nodeTag(node) == .error_set_decl) {
-                            const field_count = ast.errorSetFieldCount(tree, node);
-                            if (field_count > 2) {
-                                try writer.writeAll("error{...}");
-                                return;
-                            }
-
-                            try writer.writeAll("error{");
-                            const lbrace, const rbrace = tree.nodeData(node).token_and_token;
-                            var i: usize = 0;
-                            for (lbrace + 1..rbrace) |tok_i| {
-                                if (tree.tokenTag(@intCast(tok_i)) != .identifier) continue;
-                                const identifier_token: Ast.TokenIndex = @intCast(tok_i);
-                                defer i += 1;
-
-                                if (i != 0) {
-                                    try writer.writeByte(',');
-                                }
-                                const name = offsets.tokenToSlice(tree, identifier_token);
-                                try writer.writeAll(name);
-                            }
-                            try writer.writeByte('}');
-
                             return;
                         }
 
@@ -3416,10 +3425,14 @@ pub const Type = struct {
                         .snippet_placeholders = false,
                     })});
                 },
-                .merge_error_sets => if (ctx.options.truncate_container_decls) try writer.writeAll("error{...}") else try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
                 else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             },
-            .ip_index => |payload| try analyser.ip.print(payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type), writer, .{}),
+            .ip_index => |payload| {
+                const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
+                try analyser.ip.print(ip_index, writer, .{
+                    .truncate_container = ctx.options.truncate_container_decls,
+                });
+            },
             .either => try writer.writeAll("either type"), // TODO
             .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
         }
@@ -5530,7 +5543,6 @@ fn addReferencedTypes(
                 .container_decl_trailing,
                 .container_decl_two,
                 .container_decl_two_trailing,
-                .error_set_decl,
                 .tagged_union,
                 .tagged_union_trailing,
                 .tagged_union_two,

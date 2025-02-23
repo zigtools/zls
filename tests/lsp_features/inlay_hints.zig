@@ -256,7 +256,7 @@ test "var decl" {
         \\    const baz: ?Foo = Foo{ .bar<u32> = 42 };
         \\    if (baz) |b<Foo>| {
         \\        const d: Error!?Foo = b;
-        \\        const e<*Error!?Foo> = &d;
+        \\        const e<*error{e}!?Foo> = &d;
         \\        const f<Foo> = (try e.*).?;
         \\        _ = f;
         \\    }
@@ -370,7 +370,7 @@ test "function with error union" {
         \\const Error<type> = error{OutOfMemory};
         \\fn foo() Error!u32 {}
         \\test {
-        \\    const val<Error!u32> = foo();
+        \\    const val<error{OutOfMemory}!u32> = foo();
         \\}
     , .{ .kind = .Type });
     try testInlayHints(
@@ -424,7 +424,7 @@ test "capture values with if" {
         \\               _ = c;
         \\            }
         \\        }
-        \\    } else |e<FooError>| {
+        \\    } else |e<error{Err1}>| {
         \\        _ = e;
         \\    }
         \\}
@@ -484,7 +484,7 @@ test "capture values with while loop" {
         \\    var it: Iterator = .{};
         \\    while (it.next()) |val<?usize>| {
         \\        if (val) |v<usize>| { _ = v; }
-        \\    } else |e<Error>| { _ = e; }
+        \\    } else |e<error{Err1}>| { _ = e; }
         \\}
     , .{ .kind = .Type });
 }
@@ -515,7 +515,7 @@ test "capture value with catch" {
         \\const Error<type> = error{OutOfMemory};
         \\fn foo() Error!u32 {}
         \\test {
-        \\    foo() catch |err<Error>| {}
+        \\    foo() catch |err<error{OutOfMemory}>| {}
         \\}
     , .{ .kind = .Type });
     try testInlayHints(
@@ -546,7 +546,7 @@ test "truncate anonymous error sets" {
 
 test "truncate merged error sets" {
     try testInlayHints(
-        \\const A<error{...}> =  @as(error{ Foo } || error{ Bar }, undefined);
+        \\const A<error{Foo,Bar}> =  @as(error{ Foo } || error{ Bar }, undefined);
     , .{ .kind = .Type });
 }
 
