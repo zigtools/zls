@@ -1044,7 +1044,7 @@ test "function" {
         \\fn foo(a: A, b: B) E!C
         \\```
         \\
-        \\Go to [A](file:///test.zig#L1) | [B](file:///test.zig#L2) | [E](file:///test.zig#L4) | [C](file:///test.zig#L3)
+        \\Go to [A](file:///test.zig#L1) | [B](file:///test.zig#L2) | [C](file:///test.zig#L3)
     );
     try testHover(
         \\const S = struct { a: i32 };
@@ -1055,7 +1055,7 @@ test "function" {
         \\fn foo(a: S, b: S) E!S
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1) | [E](file:///test.zig#L2)
+        \\Go to [S](file:///test.zig#L1)
     );
     try testHover(
         \\fn foo(b<cursor>ar: enum { fizz, buzz }) void {}
@@ -1212,10 +1212,10 @@ test "error union" {
         \\const foo: E!S = undefined
         \\```
         \\```zig
-        \\(E!S)
+        \\(error{A,B}!S)
         \\```
         \\
-        \\Go to [E](file:///test.zig#L2) | [S](file:///test.zig#L1)
+        \\Go to [S](file:///test.zig#L1)
     );
 }
 
