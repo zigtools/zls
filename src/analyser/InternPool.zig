@@ -1518,6 +1518,56 @@ pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
     return ip.unions.at(@intFromEnum(index));
 }
 
+pub fn createDeclFromVarDecl(
+    ip: *InternPool,
+    gpa: Allocator,
+    index: InternPool.Index,
+    tree: std.zig.Ast,
+    node_idx: std.zig.Ast.Node.Index,
+    var_decl: std.zig.Ast.full.VarDecl,
+) Allocator.Error!Decl.Index {
+    const main_tokens = tree.nodes.items(.main_token);
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+
+    const align_node = var_decl.ast.align_node;
+    const addrspace_node = var_decl.ast.addrspace_node;
+
+    var alignment: ?u16 = null;
+    if (align_node != 0 and node_tags[align_node] == .number_literal) {
+        const s = tree.tokenSlice(main_tokens[align_node]);
+        alignment = std.fmt.parseInt(u16, s, 0) catch null;
+    }
+
+    var address_space: ?std.builtin.AddressSpace = null;
+    if (addrspace_node != 0 and node_tags[addrspace_node] == .enum_literal) {
+        const s = tree.tokenSlice(main_tokens[addrspace_node]);
+        address_space = std.meta.stringToEnum(std.builtin.AddressSpace, s);
+    }
+
+    var is_pub = false;
+    if (var_decl.visib_token) |token| {
+        is_pub = token_tags[token] == .keyword_pub;
+    }
+
+    var is_exported = false;
+    if (var_decl.extern_export_token) |token| {
+        is_exported = token_tags[token] == .keyword_export;
+    }
+
+    const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+    return ip.createDecl(gpa, .{
+        .name = try ip.string_pool.getOrPutString(gpa, name),
+        .node_idx = node_idx,
+        .index = index,
+        .alignment = alignment orelse 0,
+        .address_space = address_space orelse .generic,
+        .src_namespace = .none, // TODO
+        .is_pub = is_pub,
+        .is_exported = is_exported,
+    });
+}
+
 pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: Decl) Allocator.Error!Decl.Index {
     ip.lock.lock();
     defer ip.lock.unlock();

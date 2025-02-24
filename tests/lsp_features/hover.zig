@@ -1189,7 +1189,7 @@ test "error union" {
         \\const foo: E!S = undefined
         \\```
         \\```zig
-        \\(error{A,B}!S)
+        \\(E!S)
         \\```
         \\
         \\Go to [S](file:///test.zig#L1)

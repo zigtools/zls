@@ -1576,7 +1576,25 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             if (var_decl.ast.init_node != 0) blk: {
                 const value: NodeWithHandle = .{ .node = var_decl.ast.init_node, .handle = handle };
-                return try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
+                const ty = try analyser.resolveTypeOfNodeInternal(value) orelse break :blk;
+                switch (ty.data) {
+                    .ip_index => |payload| {
+                        const index = payload.index orelse return ty;
+                        switch (analyser.ip.indexToKey(index)) {
+                            .error_set_type => |info| {
+                                if (info.owner_decl != .none) return ty;
+                                const decl = try analyser.ip.createDeclFromVarDecl(analyser.gpa, index, tree, node, var_decl);
+                                const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{
+                                    .owner_decl = decl.toOptional(),
+                                    .names = info.names,
+                                } });
+                                return Type.fromIP(analyser, .type_type, ip_index);
+                            },
+                            else => return ty,
+                        }
+                    },
+                    else => return ty,
+                }
             }
 
             return fallback_type;
