@@ -2655,6 +2655,7 @@ pub const Type = struct {
             },
             .tuple => |a_slice| {
                 const b_slice = b.data.tuple;
+                if (a_slice.len != b_slice.len) return false;
                 for (a_slice, b_slice) |a_type, b_type| {
                     if (!a_type.eql(b_type)) return false;
                 }
@@ -2792,6 +2793,7 @@ pub const Type = struct {
         if (a.data == .ip_index and b.data == .ip_index) {
             const types = [_]InternPool.Index{ a.data.ip_index.type, b.data.ip_index.type };
             const resolved_type = try analyser.ip.resolvePeerTypes(analyser.gpa, &types, builtin.target);
+            if (resolved_type == .none) return null;
             return fromIP(analyser, resolved_type, null);
         }
 

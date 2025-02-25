@@ -7,38 +7,40 @@ pub fn main() void {
     var runtime_bool: bool = undefined;
 
     const widened_int_0 = if (runtime_bool) @as(i8, undefined) else @as(i16, undefined);
-    //    ^^^^^^^^^^^^^ (i16)()
+    _ = widened_int_0;
+    //  ^^^^^^^^^^^^^ (i16)()
 
     const widened_int_1 = if (runtime_bool) @as(i16, undefined) else @as(i8, undefined);
-    //    ^^^^^^^^^^^^^ (i16)()
+    _ = widened_int_1;
+    //  ^^^^^^^^^^^^^ (i16)()
 
     const optional_0 = if (runtime_bool) @as(S, undefined) else @as(?S, undefined);
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_0;
+    //  ^^^^^^^^^^ (?S)()
 
     const optional_1 = if (runtime_bool) @as(?S, undefined) else @as(S, undefined);
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_1;
+    //  ^^^^^^^^^^ (?S)()
 
     const optional_2 = if (runtime_bool) null else @as(S, undefined);
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_2;
+    //  ^^^^^^^^^^ (?S)()
 
     const optional_3 = if (runtime_bool) @as(S, undefined) else null;
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_3;
+    //  ^^^^^^^^^^ (?S)()
 
     const optional_4 = if (runtime_bool) null else @as(?S, undefined);
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_4;
+    //  ^^^^^^^^^^ (?S)()
 
     const optional_5 = if (runtime_bool) @as(?S, undefined) else null;
-    //    ^^^^^^^^^^ (?S)()
+    _ = optional_5;
+    //  ^^^^^^^^^^ (?S)()
 
-    // Use @compileLog to verify the expected type with the compiler:
-    @compileLog(widened_int_0);
-    @compileLog(widened_int_1);
-    @compileLog(optional_0);
-    @compileLog(optional_1);
-    @compileLog(optional_2);
-    @compileLog(optional_3);
-    @compileLog(optional_4);
-    @compileLog(optional_5);
+    const comptime_int_and_void = if (runtime_bool) 0 else {};
+    _ = comptime_int_and_void;
+    //  ^^^^^^^^^^^^^^^^^^^^^ (either type)()
 
     runtime_bool = undefined;
 }
