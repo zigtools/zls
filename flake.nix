@@ -1,56 +1,54 @@
 {
-  inputs =
-    {
-      nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
 
-      zig-overlay.url = "github:mitchellh/zig-overlay";
-      zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    zig-overlay.url = "github:mitchellh/zig-overlay";
+    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-      gitignore.url = "github:hercules-ci/gitignore.nix";
-      gitignore.inputs.nixpkgs.follows = "nixpkgs";
-    };
+    gitignore.url = "github:hercules-ci/gitignore.nix";
+    gitignore.inputs.nixpkgs.follows = "nixpkgs";
+  };
 
-  outputs = { self, nixpkgs, zig-overlay, gitignore }: let
-    inherit (nixpkgs) lib;
-
-    # flake-utils polyfill
-    eachSystem = systems: fn:
-      lib.foldl' (
-        acc: system:
-          lib.recursiveUpdate
-          acc
-          (lib.mapAttrs (_: value: {${system} = value;}) (fn system))
-      ) {}
-      systems;
-
-    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
-  in eachSystem systems (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}.master;
-        gitignoreSource = gitignore.lib.gitignoreSource;
-      in
-      rec {
-        formatter = pkgs.nixpkgs-fmt;
-        packages.default = packages.zls;
-        packages.zls = pkgs.stdenvNoCC.mkDerivation {
-          name = "zls";
-          version = "master";
-          meta.mainProgram = "zls";
-          src = gitignoreSource ./.;
-          nativeBuildInputs = [ zig ];
-          dontConfigure = true;
-          dontInstall = true;
-          doCheck = true;
-          buildPhase = ''
-            NO_COLOR=1 # prevent escape codes from messing up the `nix log`
-            PACKAGE_DIR=${pkgs.callPackage ./deps.nix { zig = zig; }}
-            zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dcpu=baseline -Doptimize=ReleaseSafe --prefix $out
-          '';
-          checkPhase = ''
-            zig build test --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dcpu=baseline
-          '';
-        };
-      }
+  outputs = {
+    self,
+    nixpkgs,
+    zig-overlay,
+    gitignore,
+  }:
+    builtins.foldl' nixpkgs.lib.recursiveUpdate {} (
+      builtins.map
+      (
+        system: let
+          pkgs = nixpkgs.legacyPackages.${system};
+          zig = zig-overlay.packages.${system}.master;
+          gitignoreSource = gitignore.lib.gitignoreSource;
+          target = builtins.replaceStrings ["darwin"] ["macos"] system;
+          revision = self;
+        in {
+          formatter.${system} = pkgs.alejandra;
+          packages.${system} = rec {
+            default = zls;
+            zls = pkgs.stdenvNoCC.mkDerivation {
+              name = "zls";
+              version = "master";
+              meta.mainProgram = "zls";
+              src = gitignoreSource ./.;
+              nativeBuildInputs = [zig];
+              dontConfigure = true;
+              dontInstall = true;
+              doCheck = true;
+              buildPhase = ''
+                NO_COLOR=1 # prevent escape codes from messing up the `nix log`
+                PACKAGE_DIR=${pkgs.callPackage ./deps.nix {zig = zig;}}
+                zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe --prefix $out
+              '';
+              checkPhase = ''
+                zig build test --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dtarget=${target}
+              '';
+            };
+          };
+        }
+      )
+      ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"]
     );
 }
