@@ -80,8 +80,11 @@ pub fn getSignatureInfo(
     // We start by finding the token that includes the current cursor position
     const last_token = blk: {
         const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
+        // Determine whether index is after the token
+        const passed = tree.tokens.items(.start)[last_token] < absolute_index;
         switch (token_tags[last_token]) {
             .l_brace, .l_paren, .l_bracket => break :blk last_token,
+            .comma => break :blk if (passed) last_token else last_token -| 1,
             else => break :blk last_token -| 1,
         }
     };
