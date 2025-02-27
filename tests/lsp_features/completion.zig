@@ -3915,8 +3915,7 @@ fn testCompletionWithOptions(
         }
 
         blk: {
-            const actual_deprecated =
-                if (actual_completion.tags) |tags|
+            const actual_deprecated = if (actual_completion.tags) |tags|
                 std.mem.indexOfScalar(types.CompletionItemTag, tags, .Deprecated) != null
             else
                 false;

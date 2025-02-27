@@ -225,8 +225,7 @@ fn colorIdentifierBasedOnType(
     tok_mod: TokenModifiers,
 ) !void {
     if (type_node.is_type_val) {
-        const token_type: TokenType =
-            if (type_node.isNamespace())
+        const token_type: TokenType = if (type_node.isNamespace())
             .namespace
         else if (type_node.isStructType())
             .@"struct"

@@ -2617,9 +2617,8 @@ fn coerceInMemoryAllowed(
             }
 
             const ok_sent = dest_info.sentinel == Index.none or
-                (src_info.sentinel != Index.none and
-                dest_info.sentinel == src_info.sentinel // is this enough for a value equality check?
-            );
+                // is this enough for a value equality check?
+                (src_info.sentinel != Index.none and dest_info.sentinel == src_info.sentinel);
             if (!ok_sent) {
                 return .{ .array_sentinel = .{
                     .actual = src_info.sentinel,
