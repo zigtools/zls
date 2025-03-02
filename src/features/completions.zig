@@ -49,7 +49,18 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                     ),
                 });
 
-                if (info.size == .c) return;
+                if (info.size == .c) {
+                    builder.completions.appendAssumeCapacity(.{
+                        .label = "?",
+                        .kind = .Operator,
+                        .detail = try std.fmt.allocPrint(
+                            builder.arena,
+                            "{}",
+                            .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                        ),
+                    });
+                    return;
+                }
 
                 if (try builder.analyser.resolveDerefType(ty)) |child_ty| {
                     try typeToCompletion(builder, child_ty);

@@ -561,6 +561,7 @@ test "pointer deref" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "u32" },
+        .{ .label = "?", .kind = .Operator, .detail = "[*c]u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -583,6 +584,7 @@ test "pointer deref" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "?", .kind = .Operator, .detail = "[*c]S" },
     });
 }
 
