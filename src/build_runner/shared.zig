@@ -150,19 +150,15 @@ pub const BuildOnSaveSupport = union(enum) {
     supported,
     invalid_linux_kernel_version: if (builtin.os.tag == .linux) std.meta.FieldType(std.posix.utsname, .release) else noreturn,
     unsupported_linux_kernel_version: if (builtin.os.tag == .linux) std.SemanticVersion else noreturn,
-    unsupported_zig_version: if (@TypeOf(minimum_zig_version) != void) void else noreturn,
-    unsupported_os: if (@TypeOf(minimum_zig_version) == void) void else noreturn,
-
-    const linux_support_version = std.SemanticVersion.parse("0.14.0-dev.283+1d20ff11d") catch unreachable;
-    const windows_support_version = std.SemanticVersion.parse("0.14.0-dev.625+2de0e2eca") catch unreachable;
-    const kqueue_support_version = std.SemanticVersion.parse("0.14.0-dev.2046+b8795b4d0") catch unreachable;
+    unsupported_zig_version: if (@TypeOf(os_support) == std.SemanticVersion) void else noreturn,
+    unsupported_os: if (@TypeOf(os_support) == bool and !os_support) void else noreturn,
 
     // We can't rely on `std.Build.Watch.have_impl` because we need to
     // check the runtime Zig version instead of Zig version that ZLS
     // has been built with.
-    pub const minimum_zig_version = switch (builtin.os.tag) {
-        .linux => linux_support_version,
-        .windows => windows_support_version,
+    pub const os_support = switch (builtin.os.tag) {
+        .linux,
+        .windows,
         .dragonfly,
         .freebsd,
         .netbsd,
@@ -173,8 +169,8 @@ pub const BuildOnSaveSupport = union(enum) {
         .visionos,
         .watchos,
         .haiku,
-        => kqueue_support_version,
-        else => {},
+        => true,
+        else => false,
     };
 
     /// std.build.Watch requires `AT_HANDLE_FID` which is Linux 6.5+
@@ -204,12 +200,18 @@ pub const BuildOnSaveSupport = union(enum) {
             };
         }
 
-        if (@TypeOf(minimum_zig_version) == void) {
-            return .unsupported_os;
-        }
-
-        if (runtime_zig_version.order(minimum_zig_version) == .lt) {
-            return .unsupported_zig_version;
+        switch (@TypeOf(os_support)) {
+            bool => {
+                if (!os_support) {
+                    return .unsupported_os;
+                }
+            },
+            std.SemanticVersion => {
+                if (runtime_zig_version.order(os_support) == .lt) {
+                    return .unsupported_zig_version;
+                }
+            },
+            else => unreachable,
         }
 
         return .supported;
