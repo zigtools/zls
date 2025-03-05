@@ -1,7 +1,7 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
 //! This build runner is targeting compatibility with the following Zig versions:
-//!   - master (0.14.0-dev.2046+b8795b4d0 and later)
+//!   - 0.14.0
 //!
 //! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
 //!
@@ -26,8 +26,6 @@ const Allocator = std.mem.Allocator;
 pub const dependencies = @import("@dependencies");
 
 // ----------- List of Zig versions that introduced breaking changes -----------
-
-const replace_pop_or_null_version = std.SemanticVersion.parse("0.14.0-dev.3181+914248237") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -1026,10 +1024,7 @@ fn extractBuildInformation(
             stack.appendAssumeCapacity(&tls.step);
         }
 
-        while (switch (comptime builtin.zig_version.order(replace_pop_or_null_version)) {
-            .lt => stack.popOrNull(),
-            .eq, .gt => stack.pop(),
-        }) |step| {
+        while (stack.pop()) |step| {
             const gop = try steps.getOrPut(gpa, step);
             if (gop.found_existing) continue;
 
