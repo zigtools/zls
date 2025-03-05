@@ -249,8 +249,11 @@ pub fn build(b: *Build) !void {
         const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
         const test_analysis_step = b.step("test-analysis", "Run all the analysis tests");
 
+        const latest_build_runner_version = std.meta.fieldNames(@import("src/build_runner/BuildRunnerVersion.zig").BuildRunnerVersion)[0];
+        const build_runner = b.path(b.fmt("src/build_runner/{s}.zig", .{latest_build_runner_version}));
+
         // Create run steps
-        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
+        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters, build_runner);
         @import("tests/add_analysis_cases.zig").addCases(b, test_analysis_step, test_filters);
 
         const run_tests = b.addRunArtifact(tests);
