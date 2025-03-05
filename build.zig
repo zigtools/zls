@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 /// Must match the `version` in `build.zig.zon`.
 /// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
-const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
+const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0 };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// implement new package hash format: `$name-$semver-$hash`
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.3445+6c3cbb0c8";
+const minimum_build_zig_version = "0.14.0";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// std.Build: add new functions to create artifacts/Step.Compile from existing module
@@ -25,7 +25,7 @@ const minimum_build_zig_version = "0.14.0-dev.3445+6c3cbb0c8";
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.14.0-dev.2534+12d64c456";
+const minimum_runtime_zig_version = "0.14.0";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },

@@ -19,7 +19,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v1
         with:
-          version: master
+          version: 0.14.0
 
       - name: Run zig fmt
         if: matrix.os == 'ubuntu-latest'

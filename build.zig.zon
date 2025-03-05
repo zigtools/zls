@@ -1,10 +1,10 @@
 .{
     .name = .zls,
     // Must match the `zls_version` in `build.zig`
-    .version = "0.14.0-dev",
+    .version = "0.14.0",
     // Must be kept in line with the `minimum_build_zig_version` in `build.zig`.
     // Should be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
-    .minimum_zig_version = "0.14.0-dev.3445+6c3cbb0c8",
+    .minimum_zig_version = "0.14.0",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
