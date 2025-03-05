@@ -246,36 +246,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "env")) { // env
                 try @"zls env"(allocator);
-            } else if (std.mem.eql(u8, arg, "--show-config-path")) { // --show-config-path
-                comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-                log.warn("--show-config-path has been deprecated. Use 'zls env' instead!", .{});
-
-                var config_result = try zls.configuration.load(allocator);
-                defer config_result.deinit(allocator);
-
-                switch (config_result) {
-                    .success => |config_with_path| {
-                        try stdout.writeAll(config_with_path.path);
-                        try stdout.writeByte('\n');
-                    },
-                    .failure => |payload| blk: {
-                        const message = try payload.toMessage(allocator) orelse break :blk;
-                        defer allocator.free(message);
-                        log.err("Failed to load configuration options.", .{});
-                        log.err("{s}", .{message});
-                    },
-                    .not_found => log.info("No config file zls.json found.", .{}),
-                }
-
-                log.info("A path to the local configuration folder will be printed instead.", .{});
-                const local_config_path = zls.configuration.getLocalConfigPath(allocator) catch null orelse {
-                    log.err("failed to find local zls.json", .{});
-                    std.process.exit(1);
-                };
-                defer allocator.free(local_config_path);
-                try stdout.writeAll(local_config_path);
-                try stdout.writeByte('\n');
-                std.process.exit(0);
             }
         }
 
@@ -286,9 +256,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
             };
             if (result.config_path) |old_config_path| allocator.free(old_config_path);
             result.config_path = try allocator.dupe(u8, path);
-        } else if (std.mem.eql(u8, arg, "--enable-message-tracing")) { // --enable-message-tracing
-            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-            log.warn("--enable-message-tracing has been deprecated.", .{});
         } else if (std.mem.eql(u8, arg, "--log-file")) { // --log-file
             const path = args_it.next() orelse {
                 log.err("Expected configuration file path after --log-file argument.", .{});
@@ -309,10 +276,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
             result.enable_stderr_logs = true;
         } else if (std.mem.eql(u8, arg, "--disable-lsp-logs")) { // --disable-lsp-logs
             result.disable_lsp_logs = true;
-        } else if (std.mem.eql(u8, arg, "--enable-debug-log")) { // --enable-debug-log
-            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-            log.warn("--enable-debug-log has been deprecated. Use --log-level instead!", .{});
-            result.log_level = .debug;
         } else {
             log.err("Unrecognized argument: '{s}'", .{arg});
             std.process.exit(1);
