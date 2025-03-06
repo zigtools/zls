@@ -496,7 +496,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
             const compress_cmd = std.Build.Step.Run.create(b, "compress artifact");
             compress_cmd.step.max_rss = switch (extension) {
                 .zip => 160 * 1024 * 1024, // 160 MiB
-                .@"tar.xz" => 256 * 1024 * 1024, // 256 MiB
+                .@"tar.xz" => 512 * 1024 * 1024, // 512 MiB
                 .@"tar.gz" => 16 * 1024 * 1024, // 12 MiB
             };
             switch (extension) {
