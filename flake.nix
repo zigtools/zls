@@ -15,7 +15,6 @@
     zig-overlay,
     gitignore,
   }:
-    builtins.abort "This flake is currently broken because Zig 0.14.0 is temporarily unavailable in https://github.com/mitchellh/zig-overlay. Apologies for the disturbance, this will be addressed as soon as possible."
     builtins.foldl' nixpkgs.lib.recursiveUpdate {} (
       builtins.map
       (
