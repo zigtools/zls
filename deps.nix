@@ -97,7 +97,7 @@ linkFarm name [
     };
   }
   {
-    name = "1220102cb2c669d82184fb1dc5380193d37d68b54e8d75b76b2d155b9af7d7e2e76d";
+    name = "N-V-__8AABhrAQAQLLLGadghhPsdxTgBk9N9aLVOjXW3ay0V";
     path = fetchZigArtifact {
       name = "diffz";
       url = "https://github.com/ziglibs/diffz/archive/ef45c00d655e5e40faf35afbbde81a1fa5ed7ffb.tar.gz";
@@ -110,14 +110,6 @@ linkFarm name [
       name = "lsp-codegen";
       url = "https://github.com/zigtools/zig-lsp-codegen/archive/063a98c13a2293d8654086140813bdd1de6501bc.tar.gz";
       hash = "sha256-7rnQLdnlt/riREREl31XhqQZn4FJHGAcQaz/zcslHNs=";
-    };
-  }
-  {
-    name = "122022a478dccaed1309fb5d022f4041eec45d40c93a855ed24fad970774c2426d91";
-    path = fetchZigArtifact {
-      name = "tracy";
-      url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz";
-      hash = "sha256-LBHKgW8rdWvicw+GsAkpIEGfPavHpxc4Kf/Yl9kYiKE=";
     };
   }
 ]
