@@ -1,7 +1,7 @@
 .{
     .name = .zls,
     // Must match the `zls_version` in `build.zig`
-    .version = "0.14.0",
+    .version = "0.15.0-dev",
     // Must be kept in line with the `minimum_build_zig_version` in `build.zig`.
     // Should be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
     .minimum_zig_version = "0.14.0",
