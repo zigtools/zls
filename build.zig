@@ -184,7 +184,7 @@ pub fn build(b: *Build) !void {
             });
         }
 
-        release(b, &release_targets, &release_artifacts);
+        release(b, &release_artifacts);
     }
 
     const exe_module = b.createModule(.{
@@ -421,7 +421,7 @@ fn getTracyModule(
 /// - compress them (.tar.xz or .zip)
 /// - optionally sign them with minisign (https://github.com/jedisct1/minisign)
 /// - send a http `multipart/form-data` request to a Cloudflare worker at https://github.com/zigtools/release-worker
-fn release(b: *Build, target_queries: []const std.Target.Query, release_artifacts: []const *Build.Step.Compile) void {
+fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
     std.debug.assert(release_artifacts.len > 0);
     for (release_artifacts) |compile| std.debug.assert(compile.version != null);
 
@@ -478,7 +478,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 
     var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
 
-    for (target_queries, release_artifacts) |target_query, exe| {
+    for (release_artifacts) |exe| {
         const resolved_target = exe.root_module.resolved_target.?.result;
         const is_windows = resolved_target.os.tag == .windows;
         const exe_name = b.fmt("{s}{s}", .{ exe.name, resolved_target.exeFileExt() });
@@ -486,9 +486,13 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         const extensions: []const FileExtension = if (is_windows) &.{.zip} else &.{ .@"tar.xz", .@"tar.gz" };
 
         for (extensions) |extension| {
+            const cpu_arch_name = switch (resolved_target.cpu.arch) {
+                .arm => "armv7a", // To match the https://ziglang.org/download/ tarballs
+                else => |arch| @tagName(arch),
+            };
             const file_name = b.fmt("zls-{s}-{s}-{}.{s}", .{
-                @tagName(target_query.os_tag.?),
-                @tagName(target_query.cpu_arch.?),
+                @tagName(resolved_target.os.tag),
+                cpu_arch_name,
                 exe.version.?,
                 @tagName(extension),
             });
