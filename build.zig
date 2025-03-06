@@ -117,7 +117,7 @@ pub fn build(b: *Build) !void {
         gen_version_data_cmd.addArgs(&.{ "--langref-version", version });
 
         gen_version_data_cmd.addArg("--langref-path");
-        gen_version_data_cmd.addFileArg(b.path(b.fmt("src/tools/langref_{s}.html.in", .{version})));
+        gen_version_data_cmd.addFileArg(b.path("src/tools/langref.html.in"));
 
         gen_version_data_cmd.addArg("--generate-version-data");
         const version_data_path = gen_version_data_cmd.addOutputFileArg("version_data.zig");
