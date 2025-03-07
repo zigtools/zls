@@ -49,6 +49,7 @@ pub fn build(b: *Build) !void {
 
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
+    const strip = b.option(bool, "strip", "Strip executable");
     const enable_tracy = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
     const enable_tracy_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
@@ -193,6 +194,7 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
         .single_threaded = single_threaded,
         .pic = pie,
+        .strip = strip,
         .imports = &.{
             .{ .name = "exe_options", .module = exe_options },
             .{ .name = "known-folders", .module = known_folders_module },
