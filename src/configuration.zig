@@ -244,6 +244,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
             const stat = file.stat() catch break :stat_failed;
             if (stat.kind == .directory) {
                 logger.warn("ignoring entry in PATH '{s}' because it is a directory", .{full_path});
+                continue;
             }
         }
 
