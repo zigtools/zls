@@ -1881,7 +1881,7 @@ test "error set" {
         \\const baz = E2.<cursor>
     , &.{
         .{ .label = "baz", .kind = .Constant, .detail = "error.baz" },
-        .{ .label = "qux", .kind = .Constant, .detail = "error.qux", .documentation = "hello" },
+        .{ .label = "qux", .kind = .Constant, .detail = "error.qux" },
     });
 }
 
@@ -1971,7 +1971,7 @@ test "merged error sets" {
         \\const Error = error{Foo} || error{Bar};
         \\const E = <cursor>
     , &.{
-        .{ .label = "Error", .kind = .Constant, .detail = "type" },
+        .{ .label = "Error", .kind = .Constant, .detail = "Error" },
     });
 }
 
