@@ -7,6 +7,9 @@
 /// Enables snippet completions when the client also supports them
 enable_snippets: bool = true,
 
+/// Uses insertText completion items and lets the client handle filtering
+insert_completions: bool = false,
+
 /// Whether to enable function argument placeholder completions
 enable_argument_placeholders: bool = true,
 

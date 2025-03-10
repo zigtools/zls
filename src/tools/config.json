@@ -7,6 +7,12 @@
             "default": true
         },
         {
+            "name": "insert_completions",
+            "description": "Uses insertText completion items and lets the client handle filtering",
+            "type": "bool",
+            "default": false
+        },
+        {
             "name": "enable_argument_placeholders",
             "description": "Whether to enable function argument placeholder completions",
             "type": "bool",

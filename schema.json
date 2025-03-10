@@ -9,6 +9,11 @@
             "type": "boolean",
             "default": true
         },
+        "insert_completions": {
+            "description": "Uses insertText completion items and lets the client handle filtering",
+            "type": "boolean",
+            "default": false
+        },
         "enable_argument_placeholders": {
             "description": "Whether to enable function argument placeholder completions",
             "type": "boolean",
