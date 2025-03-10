@@ -938,13 +938,28 @@ pub fn completionAtIndex(
     const replace_range = offsets.locToRange(source, .{ .start = start_index, .end = end_index }, server.offset_encoding);
 
     for (completions) |*item| {
-        if (item.textEdit == null) {
-            item.textEdit = if (server.client_capabilities.supports_completion_insert_replace_support)
-                .{ .InsertReplaceEdit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
-            else
-                .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
+        switch (builder.server.config.insert_completions) {
+            false => {
+                if (item.textEdit == null) {
+                    item.textEdit = if (server.client_capabilities.supports_completion_insert_replace_support)
+                        .{ .InsertReplaceEdit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
+                    else
+                        .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
+                }
+                item.insertText = null;
+            },
+            true => {
+                if (item.insertText == null) {
+                    if (item.textEdit != null) {
+                        item.insertText = item.textEdit.?.TextEdit.newText;
+                    }
+                    else {
+                        item.insertText = item.label;
+                    }
+                }
+                item.textEdit = null;
+            }
         }
-        item.insertText = null;
 
         if (item.detail) |det| {
             if (det.len > server.client_capabilities.max_detail_length) {
