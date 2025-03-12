@@ -322,7 +322,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
     if (zls_version.pre == null and zls_version.build == null) return zls_version;
 
     const argv: []const []const u8 = &.{
-        "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags",
+        "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
