@@ -532,7 +532,7 @@ test rangeToSlice {
 }
 
 pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
-    return tokensToLoc(tree, tree.firstToken(node), ast.lastToken(tree, node));
+    return tokensToLoc(tree, tree.firstToken(node), tree.lastToken(node));
 }
 
 pub fn nodeToSlice(tree: Ast, node: Ast.Node.Index) []const u8 {

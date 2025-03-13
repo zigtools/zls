@@ -138,13 +138,13 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 });
             }
         },
-        .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
+        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
             .merge_error_sets => {
-                const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.lhs, .handle = node_handle.handle })) |lhs_ty| {
+                const lhs, const rhs = node_handle.handle.tree.nodeData(node_handle.node).node_and_node;
+                if (try builder.analyser.resolveTypeOfNode(.{ .node = lhs, .handle = node_handle.handle })) |lhs_ty| {
                     try typeToCompletion(builder, lhs_ty);
                 }
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.rhs, .handle = node_handle.handle })) |rhs_ty| {
+                if (try builder.analyser.resolveTypeOfNode(.{ .node = rhs, .handle = node_handle.handle })) |rhs_ty| {
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
@@ -227,8 +227,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         const params = ast.builtinCallParams(tree, node_with_handle.node, &buffer) orelse break :blk null;
         if (params.len != 1) break :blk null;
 
-        if (tree.nodes.items(.tag)[params[0]] == .string_literal) {
-            const literal = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
+        if (tree.nodeTag(params[0]) == .string_literal) {
+            const literal = tree.tokenSlice(tree.nodeMainToken(params[0]));
             break :blk literal[1 .. literal.len - 1];
         }
         break :blk "";
@@ -418,8 +418,8 @@ fn functionTypeCompletion(
         })});
 
         const description = description: {
-            if (func.ast.return_type == 0) break :description null;
-            const return_type_str = offsets.nodeToSlice(tree, func.ast.return_type);
+            if (func.ast.return_type.unwrap() == null) break :description null;
+            const return_type_str = offsets.nodeToSlice(tree, func.ast.return_type.unwrap().?);
 
             break :description if (ast.hasInferredError(tree, func))
                 try std.fmt.allocPrint(builder.arena, "!{s}", .{return_type_str})
@@ -637,9 +637,9 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
     var used_members_set: std.BufSet = .init(builder.arena);
 
     var depth: usize = 0;
-    var i: Ast.Node.Index = @max(dot_token_index, 2);
+    var i: Ast.TokenIndex = @max(dot_token_index, 2);
     while (i > 0) : (i -= 1) {
-        switch (token_tags[i]) {
+        switch (tree.tokenTag(i)) {
             .r_brace => {
                 depth += 1;
             },
@@ -1318,7 +1318,7 @@ fn collectContainerFields(
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        const completion_item: types.CompletionItem = switch (tree.nodes.items(.tag)[decl.ast_node]) {
+        const completion_item: types.CompletionItem = switch (tree.nodeTag(decl.ast_node)) {
             .container_field_init,
             .container_field_align,
             .container_field,
@@ -1626,11 +1626,11 @@ fn collectFieldAccessContainerNodes(
         };
         const param = param_decl.get(fn_node_handle.handle.tree) orelse continue;
 
-        if (param.type_expr == 0) continue;
+        if (param.type_expr == null) continue;
         const param_rcts = try collectContainerNodes(
             builder,
             fn_node_handle.handle,
-            offsets.nodeToLoc(fn_node_handle.handle.tree, param.type_expr).end,
+            offsets.nodeToLoc(fn_node_handle.handle.tree, param.type_expr.?).end,
             dot_context,
         );
         for (param_rcts) |prct| try types_with_handles.append(arena, prct);

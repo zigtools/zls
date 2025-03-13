@@ -29,7 +29,7 @@ fn labelReferences(
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
     const first_tok = decl.decl.label.identifier;
-    const last_tok = ast.lastToken(tree, decl.decl.label.block);
+    const last_tok = tree.lastToken(decl.decl.label.block);
 
     var locations: std.ArrayListUnmanaged(types.Location) = .empty;
     errdefer locations.deinit(allocator);
@@ -106,10 +106,7 @@ const Builder = struct {
         const builder = self.builder;
         const handle = self.handle;
 
-        const node_tags = tree.nodes.items(.tag);
-        const datas = tree.nodes.items(.data);
-
-        switch (node_tags[node]) {
+        switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
             => |tag| {
@@ -135,14 +132,15 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle }) orelse return;
+                const field_access_lhs, const field_name_ident = tree.nodeData(node).node_and_token;
+                const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = field_access_lhs, .handle = handle }) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.identifierTokenToNameSlice(tree, datas[node].rhs);
+                const symbol = offsets.identifierTokenToNameSlice(tree, field_name_ident);
                 const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
-                    try builder.add(handle, datas[node].rhs);
+                    try builder.add(handle, field_name_ident);
                 }
             },
             .struct_init_one,
@@ -216,7 +214,7 @@ fn gatherReferences(
             .get_or_load => analyser.store.getOrLoadHandle(uri),
         } orelse continue;
 
-        try builder.collectReferences(handle, 0);
+        try builder.collectReferences(handle, .root);
     }
 }
 
@@ -249,7 +247,7 @@ fn symbolReferences(
 
     switch (decl_handle.decl) {
         .ast_node => {
-            try builder.collectReferences(curr_handle, 0);
+            try builder.collectReferences(curr_handle, .root);
 
             const source_index = offsets.tokenToIndex(decl_handle.handle.tree, decl_handle.nameToken());
             // highlight requests only pertain to the current document, otherwise we can try to narrow things down
@@ -273,7 +271,7 @@ fn symbolReferences(
         .assign_destructure,
         .switch_payload,
         => {
-            try builder.collectReferences(curr_handle, 0);
+            try builder.collectReferences(curr_handle, .root);
         },
         .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
         .label => unreachable, // handled separately by labelReferences
@@ -323,11 +321,9 @@ const CallBuilder = struct {
         const builder = self.builder;
         const handle = self.handle;
 
-        const node_tags = tree.nodes.items(.tag);
-        const datas = tree.nodes.items(.data);
         const starts = tree.tokens.items(.start);
 
-        switch (node_tags[node]) {
+        switch (tree.nodeTag(node)) {
             .call,
             .call_comma,
             .async_call,
@@ -342,7 +338,7 @@ const CallBuilder = struct {
 
                 const called_node = call.ast.fn_expr;
 
-                switch (node_tags[called_node]) {
+                switch (tree.nodeTag(called_node)) {
                     .identifier => {
                         const identifier_token = ast.identifierTokenFromIdentifierNode(tree, called_node) orelse return;
 
@@ -357,10 +353,11 @@ const CallBuilder = struct {
                         }
                     },
                     .field_access => {
-                        const lhs = (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return;
+                        const field_access_lhs, const field_name_ident = tree.nodeData(called_node).node_and_token;
+                        const lhs = (try builder.analyser.resolveTypeOfNode(.{ .node = field_access_lhs, .handle = handle })) orelse return;
                         const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                        const symbol = offsets.tokenToSlice(tree, datas[called_node].rhs);
+                        const symbol = offsets.tokenToSlice(tree, field_name_ident);
                         const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                         if (builder.decl_handle.eql(child)) {
@@ -399,9 +396,10 @@ pub fn callsiteReferences(
     errdefer builder.deinit();
 
     const curr_handle = decl_handle.handle;
-    if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
+    // TODO: The below cast from a token index to AST node index is highly suspicious.
+    if (include_decl) try builder.add(curr_handle, @enumFromInt(decl_handle.nameToken()));
 
-    try builder.collectReferences(curr_handle, 0);
+    try builder.collectReferences(curr_handle, .root);
 
     if (!workspace) return builder.callsites;
 

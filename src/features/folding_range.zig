@@ -67,7 +67,7 @@ const Builder = struct {
         start_reach: Inclusivity,
         end_reach: Inclusivity,
     ) error{OutOfMemory}!void {
-        try builder.add(kind, builder.tree.firstToken(node), ast.lastToken(builder.tree, node), start_reach, end_reach);
+        try builder.add(kind, builder.tree.firstToken(node), builder.tree.lastToken(node), start_reach, end_reach);
     }
 
     fn getRanges(builder: Builder) error{OutOfMemory}![]types.FoldingRange {
@@ -116,7 +116,6 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     const token_tags = tree.tokens.items(.tag);
     const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
 
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
@@ -148,7 +147,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     // TODO add folding range for top level `@Import()`
 
     for (node_tags, 0..) |node_tag, i| {
-        const node: Ast.Node.Index = @intCast(i);
+        const node: Ast.Node.Index = @enumFromInt(i);
 
         switch (node_tag) {
             .root => continue,
@@ -187,9 +186,9 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             .@"switch",
             .switch_comma,
             => {
-                const lhs = tree.nodes.items(.data)[node].lhs;
-                const start_tok = ast.lastToken(tree, lhs) + 2; // lparen + rbrace
-                const end_tok = ast.lastToken(tree, node);
+                const lhs, _ = tree.nodeData(node).node_and_extra;
+                const start_tok = tree.lastToken(lhs) + 2; // lparen + rbrace
+                const end_tok = tree.lastToken(node);
                 try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
             },
 
@@ -203,8 +202,8 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     const first_value = switch_case.values[0];
                     const last_value = switch_case.values[switch_case.values.len - 1];
 
-                    const last_token = ast.lastToken(tree, last_value);
-                    const last_value_has_comma = last_token + 1 < tree.tokens.len and token_tags[last_token + 1] == .comma;
+                    const last_token = tree.lastToken(last_value);
+                    const last_value_has_comma = last_token + 1 < tree.tokens.len and tree.tokenTag(last_token + 1) == .comma;
 
                     const start_tok = tree.firstToken(first_value);
                     const end_tok = last_token + @intFromBool(last_value_has_comma);
@@ -231,16 +230,16 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     const first_member = container_decl.ast.members[0];
                     var start_tok = tree.firstToken(first_member) -| 1;
                     while (start_tok != 0 and
-                        (token_tags[start_tok] == .doc_comment or token_tags[start_tok] == .container_doc_comment))
+                        (tree.tokenTag(start_tok) == .doc_comment or tree.tokenTag(start_tok) == .container_doc_comment))
                     {
                         start_tok -= 1;
                     }
-                    const end_tok = ast.lastToken(tree, node);
+                    const end_tok = tree.lastToken(node);
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 } else { // no members (yet), ie `const T = type {};`
                     var start_tok = tree.firstToken(node);
                     while (token_tags[start_tok] != .l_brace) start_tok += 1;
-                    const end_tok = ast.lastToken(tree, node);
+                    const end_tok = tree.lastToken(node);
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 }
             },
@@ -254,8 +253,8 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             .async_call_one,
             .async_call_one_comma,
             => {
-                const lparen = main_tokens[node];
-                try builder.add(null, lparen, ast.lastToken(tree, node), .exclusive, .exclusive);
+                const lparen = tree.nodeMainToken(node);
+                try builder.add(null, lparen, tree.lastToken(node), .exclusive, .exclusive);
             },
 
             // everything after here is mostly untested

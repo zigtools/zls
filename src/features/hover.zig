@@ -49,7 +49,7 @@ fn hoverSymbolRecursive(
                 return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 
-            switch (tree.nodes.items(.tag)[node]) {
+            switch (tree.nodeTag(node)) {
                 .global_var_decl,
                 .local_var_decl,
                 .aligned_var_decl,
@@ -57,20 +57,23 @@ fn hoverSymbolRecursive(
                 => {
                     const var_decl = tree.fullVarDecl(node).?;
                     var struct_init_buf: [2]Ast.Node.Index = undefined;
-                    var type_node: Ast.Node.Index = 0;
+                    var type_node: ?Ast.Node.Index = null;
 
-                    if (var_decl.ast.type_node != 0) {
-                        type_node = var_decl.ast.type_node;
-                    } else if (tree.fullStructInit(&struct_init_buf, var_decl.ast.init_node)) |struct_init| {
-                        if (struct_init.ast.type_expr != 0)
-                            type_node = struct_init.ast.type_expr;
+                    if (var_decl.ast.type_node.unwrap()) |tn| {
+                        type_node = tn;
+                    } else if (var_decl.ast.init_node.unwrap()) |init_node| {
+                        if (tree.fullStructInit(&struct_init_buf, init_node)) |struct_init| {
+                            if (struct_init.ast.type_expr.unwrap()) |type_expr|
+                                type_node = type_expr;
+                        }
                     }
 
-                    if (type_node != 0)
+                    if (type_node) |tn| {
                         try analyser.referencedTypesFromNode(
-                            .{ .node = type_node, .handle = handle },
+                            .{ .node = tn, .handle = handle },
                             &reference_collector,
                         );
+                    }
 
                     break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
                 },
@@ -80,12 +83,13 @@ fn hoverSymbolRecursive(
                 => {
                     const field = tree.fullContainerField(node).?;
                     var converted = field;
-                    converted.convertToNonTupleLike(tree.nodes);
-                    if (converted.ast.type_expr != 0)
+                    converted.convertToNonTupleLike(&tree);
+                    if (converted.ast.type_expr.unwrap()) |type_expr| {
                         try analyser.referencedTypesFromNode(
-                            .{ .node = converted.ast.type_expr, .handle = handle },
+                            .{ .node = type_expr, .handle = handle },
                             &reference_collector,
                         );
+                    }
 
                     break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
                 },
@@ -113,11 +117,12 @@ fn hoverSymbolRecursive(
         .function_parameter => |pay| def: {
             const param = pay.get(tree).?;
 
-            if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
+            if (param.type_expr) |type_expr| { // null for `anytype` and extern C varargs `...`
                 try analyser.referencedTypesFromNode(
-                    .{ .node = param.type_expr, .handle = handle },
+                    .{ .node = type_expr, .handle = handle },
                     &reference_collector,
                 );
+            }
 
             break :def ast.paramSlice(tree, param, false);
         },
@@ -222,7 +227,7 @@ fn hoverDefinitionBuiltin(
 
     if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
+            const main_token = handle.tree.nodeMainToken(cimport_node);
             const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
             if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
         } else break :blk;

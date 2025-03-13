@@ -28,14 +28,10 @@ const Context = struct {
 };
 
 fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
-    if (node == 0) return;
-
-    const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-    const token_tags = tree.tokens.items(.tag);
+    if (node == .root) return;
 
     var new_ctx = ctx.*;
-    const maybe_symbol: ?Symbol = switch (node_tags[node]) {
+    const maybe_symbol: ?Symbol = switch (tree.nodeTag(node)) {
         .global_var_decl,
         .local_var_decl,
         .simple_var_decl,
@@ -49,7 +45,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
 
             new_ctx.last_var_decl_name = var_decl_name;
 
-            const kind: types.SymbolKind = switch (token_tags[main_tokens[node]]) {
+            const kind: types.SymbolKind = switch (tree.tokenTag(tree.nodeMainToken(node))) {
                 .keyword_var => .Variable,
                 .keyword_const => .Constant,
                 else => unreachable,
@@ -96,10 +92,10 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
         .container_field_align,
         .container_field,
         => blk: {
-            const container_kind = token_tags[main_tokens[ctx.parent_container]];
+            const container_kind = tree.tokenTag(tree.nodeMainToken(ctx.parent_container));
             const is_struct = container_kind == .keyword_struct;
 
-            const kind: types.SymbolKind = switch (node_tags[ctx.parent_container]) {
+            const kind: types.SymbolKind = switch (tree.nodeTag(ctx.parent_container)) {
                 .root => .Field,
                 .container_decl,
                 .container_decl_trailing,
@@ -238,12 +234,12 @@ pub fn getDocumentSymbols(
     var ctx: Context = .{
         .arena = arena,
         .last_var_decl_name = null,
-        .parent_node = 0, // root-node
-        .parent_container = 0, // root-node
+        .parent_node = .root,
+        .parent_container = .root,
         .parent_symbols = &root_symbols,
         .total_symbol_count = &total_symbol_count,
     };
-    try ast.iterateChildren(tree, 0, &ctx, error{OutOfMemory}, callback);
+    try ast.iterateChildren(tree, .root, &ctx, error{OutOfMemory}, callback);
 
     return try convertSymbols(arena, tree, root_symbols.items, ctx.total_symbol_count.*, encoding);
 }

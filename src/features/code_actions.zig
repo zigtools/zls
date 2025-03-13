@@ -94,7 +94,6 @@ pub const Builder = struct {
         defer tracy_zone.end();
 
         const tree = builder.handle.tree;
-        const token_tags = tree.tokens.items(.tag);
 
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
@@ -104,12 +103,12 @@ pub const Builder = struct {
         var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
 
         // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
-        switch (token_tags[token_idx]) {
+        switch (tree.tokenTag(token_idx)) {
             .string_literal, .multiline_string_literal_line => {},
             else => token_idx -|= 1,
         }
 
-        switch (token_tags[token_idx]) {
+        switch (tree.tokenTag(token_idx)) {
             .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
             .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
             else => {},
@@ -320,9 +319,6 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-    const node_datas = tree.nodes.items(.data);
-    const node_tokens = tree.nodes.items(.main_token);
 
     const token_tags = tree.tokens.items(.tag);
 
@@ -337,9 +333,9 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
         else => return,
     };
 
-    std.debug.assert(node_tags[payload.func] == .fn_decl);
+    std.debug.assert(tree.nodeTag(payload.func) == .fn_decl);
 
-    const block = node_datas[payload.func].rhs;
+    const block = tree.nodeData(payload.func).node_and_node.@"1";
 
     // If we are on the "last parameter" that requires a discard, then we need to append a newline,
     // as well as any relevant indentations, such that the next line is indented to the same column.
@@ -359,10 +355,10 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     const found_comma = potential_comma_token < tree.tokens.len and token_tags[potential_comma_token] == .comma;
 
     const potential_r_paren_token = potential_comma_token + @intFromBool(found_comma);
-    const is_last_param = potential_r_paren_token < tree.tokens.len and token_tags[potential_r_paren_token] == .r_paren;
+    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokenTag(potential_r_paren_token) == .r_paren;
 
-    const insert_token = node_tokens[block];
-    const add_suffix_newline = is_last_param and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const insert_token = tree.nodeMainToken(block);
+    const add_suffix_newline = is_last_param and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
     if (builder.wantKind(.@"source.fixAll")) {
@@ -404,7 +400,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
         else => return,
     };
 
-    const insert_token = ast.lastToken(tree, node) + 1;
+    const insert_token = tree.lastToken(node) + 1;
 
     if (insert_token >= tree.tokens.len) return;
     if (token_tags[insert_token] != .semicolon) return;
@@ -765,10 +761,8 @@ pub const ImportDecl = struct {
     }
 
     pub fn getSourceEndIndex(self: ImportDecl, tree: Ast, include_line_break: bool) usize {
-        const token_tags = tree.tokens.items(.tag);
-
-        var last_token = ast.lastToken(tree, self.var_decl);
-        if (last_token + 1 < tree.tokens.len - 1 and token_tags[last_token + 1] == .semicolon) {
+        var last_token = tree.lastToken(self.var_decl);
+        if (last_token + 1 < tree.tokens.len - 1 and tree.tokenTag(last_token + 1) == .semicolon) {
             last_token += 1;
         }
 
@@ -788,11 +782,6 @@ pub const ImportDecl = struct {
 
 pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
     const tree = builder.handle.tree;
-
-    const node_tags = tree.nodes.items(.tag);
-    const node_data = tree.nodes.items(.data);
-    const node_tokens = tree.nodes.items(.main_token);
-
     const root_decls = tree.rootDecls();
 
     var skip_set: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, root_decls.len);
@@ -814,29 +803,33 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
 
             if (skip_set.isSet(root_decl_index)) continue;
 
-            if (node_tags[node] != .simple_var_decl) continue;
+            if (tree.nodeTag(node) != .simple_var_decl) continue;
             const var_decl = tree.simpleVarDecl(node);
 
-            var current_node = var_decl.ast.init_node;
+            var current_node = var_decl.ast.init_node.unwrap() orelse continue :next_decl;
             const import: ImportDecl = found_decl: while (true) {
-                const token = node_tokens[current_node];
-                switch (node_tags[current_node]) {
+                const token = tree.nodeMainToken(current_node);
+                switch (tree.nodeTag(current_node)) {
                     .builtin_call_two, .builtin_call_two_comma => {
                         // `>@import("string")<` case
                         const builtin_name = offsets.tokenToSlice(tree, token);
                         if (!std.mem.eql(u8, builtin_name, "@import")) continue :next_decl;
                         // TODO what about @embedFile ?
 
-                        if (node_data[current_node].lhs == 0 or node_data[current_node].rhs != 0) continue :next_decl;
-                        const param_node = node_data[current_node].lhs;
-                        if (node_tags[param_node] != .string_literal) continue :next_decl;
+                        const opt_lhs, const opt_rhs = tree.nodeData(current_node).opt_node_and_opt_node;
+                        if (opt_lhs.unwrap() == null or opt_rhs.unwrap() != null) continue :next_decl;
+                        const param_node = opt_lhs.unwrap().?;
+                        if (tree.nodeTag(param_node) != .string_literal) continue :next_decl;
 
                         const name_token = var_decl.ast.mut_token + 1;
-                        const value_token = node_tokens[param_node];
+                        const value_token = tree.nodeMainToken(param_node);
 
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(
+                                tree.tokens.items(.tag),
+                                tree.nodeMainToken(node),
+                            ),
                             .name = offsets.tokenToSlice(tree, name_token),
                             .value = offsets.tokenToSlice(tree, value_token),
                         };
@@ -844,7 +837,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                     .field_access => {
                         // `@import("foo").>bar<` or `foo.>bar<` case
                         // drill down to the base import
-                        current_node = node_data[current_node].lhs;
+                        current_node = tree.nodeData(current_node).node_and_token.@"0";
                         continue;
                     },
                     .identifier => {
@@ -876,7 +869,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         const var_name = offsets.tokenToSlice(tree, ident_name_token);
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), tree.nodeMainToken(node)),
                             .name = var_name,
                             .value = var_name,
                             .parent_name = import_decl.getSortName(),
