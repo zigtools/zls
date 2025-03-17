@@ -138,13 +138,13 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 });
             }
         },
-        .other => |node_handle| switch (node_handle.handle.tree.nodes.items(.tag)[node_handle.node]) {
+        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
             .merge_error_sets => {
-                const node_data = node_handle.handle.tree.nodes.items(.data)[node_handle.node];
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.lhs, .handle = node_handle.handle })) |lhs_ty| {
+                const lhs, const rhs = node_handle.handle.tree.nodeData(node_handle.node).node_and_node;
+                if (try builder.analyser.resolveTypeOfNode(.{ .node = lhs, .handle = node_handle.handle })) |lhs_ty| {
                     try typeToCompletion(builder, lhs_ty);
                 }
-                if (try builder.analyser.resolveTypeOfNode(.{ .node = node_data.rhs, .handle = node_handle.handle })) |rhs_ty| {
+                if (try builder.analyser.resolveTypeOfNode(.{ .node = rhs, .handle = node_handle.handle })) |rhs_ty| {
                     try typeToCompletion(builder, rhs_ty);
                 }
             },
@@ -224,11 +224,11 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         const tree = node_with_handle.handle.tree;
 
         var buffer: [2]Ast.Node.Index = undefined;
-        const params = ast.builtinCallParams(tree, node_with_handle.node, &buffer) orelse break :blk null;
+        const params = tree.builtinCallParams(&buffer, node_with_handle.node) orelse break :blk null;
         if (params.len != 1) break :blk null;
 
-        if (tree.nodes.items(.tag)[params[0]] == .string_literal) {
-            const literal = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
+        if (tree.nodeTag(params[0]) == .string_literal) {
+            const literal = tree.tokenSlice(tree.nodeMainToken(params[0]));
             break :blk literal[1 .. literal.len - 1];
         }
         break :blk "";
@@ -418,8 +418,8 @@ fn functionTypeCompletion(
         })});
 
         const description = description: {
-            if (func.ast.return_type == 0) break :description null;
-            const return_type_str = offsets.nodeToSlice(tree, func.ast.return_type);
+            const return_type = func.ast.return_type.unwrap() orelse break :description null;
+            const return_type_str = offsets.nodeToSlice(tree, return_type);
 
             break :description if (ast.hasInferredError(tree, func))
                 try std.fmt.allocPrint(builder.arena, "!{s}", .{return_type_str})
@@ -632,14 +632,13 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
         else => return .init(builder.arena),
     }
     const tree = builder.orig_handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     var used_members_set: std.BufSet = .init(builder.arena);
 
     var depth: usize = 0;
-    var i: Ast.Node.Index = @max(dot_token_index, 2);
+    var i: Ast.TokenIndex = @max(dot_token_index, 2);
     while (i > 0) : (i -= 1) {
-        switch (token_tags[i]) {
+        switch (tree.tokenTag(i)) {
             .r_brace => {
                 depth += 1;
             },
@@ -649,7 +648,7 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
             },
             .equal, .equal_angle_bracket_right, .comma => {
                 if (depth > 0) continue;
-                if (token_tags[i - 1] == .identifier and token_tags[i - 2] == .period) {
+                if (tree.tokenTag(i - 1) == .identifier and tree.tokenTag(i - 2) == .period) {
                     try used_members_set.insert(tree.tokenSlice(i - 1));
                     i -= 1;
                 }
@@ -660,8 +659,7 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
     depth = 0;
     i = @max(dot_token_index, 2);
     while (i < tree.tokens.len) : (i += 1) {
-        const tag = token_tags[i];
-        switch (tag) {
+        switch (tree.tokenTag(i)) {
             .l_brace => {
                 depth += 1;
             },
@@ -671,7 +669,7 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
             },
             .equal, .equal_angle_bracket_right, .comma => {
                 if (depth > 0) continue;
-                if (token_tags[i - 1] == .identifier and token_tags[i - 2] == .period) {
+                if (tree.tokenTag(i - 1) == .identifier and tree.tokenTag(i - 2) == .period) {
                     try used_members_set.insert(tree.tokenSlice(i - 1));
                 }
             },
@@ -687,7 +685,6 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     defer tracy_zone.end();
 
     const tree = builder.orig_handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start);
     if (dot_token_index < 2) return;
@@ -711,7 +708,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     // Prevent compl for float numbers, eg `1.`
     //  Ideally this would also `or token_tags[dot_token_index - 1] != .equal`,
     //  which would mean the only possibility left would be `var enum_val = .`.
-    if (token_tags[dot_token_index - 1] == .number_literal or token_tags[dot_token_index - 1] != .equal) return;
+    if (tree.tokenTag(dot_token_index - 1) == .number_literal or tree.tokenTag(dot_token_index - 1) != .equal) return;
 
     // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
     try globalSetCompletions(builder, .enum_set);
@@ -1089,10 +1086,8 @@ fn getEnumLiteralContext(
     tree: Ast,
     dot_token_index: Ast.TokenIndex,
 ) ?EnumLiteralContext {
-    const token_tags = tree.tokens.items(.tag);
-
     // Allow using `1.` (parser workaround)
-    var token_index = if (token_tags[dot_token_index - 1] == .number_literal)
+    var token_index = if (tree.tokenTag(dot_token_index - 1) == .number_literal)
         (dot_token_index - 2)
     else
         (dot_token_index - 1);
@@ -1100,10 +1095,10 @@ fn getEnumLiteralContext(
 
     var dot_context: EnumLiteralContext = .{ .likely = .enum_literal };
 
-    switch (token_tags[token_index]) {
+    switch (tree.tokenTag(token_index)) {
         .equal => {
             token_index -= 1;
-            dot_context.need_ret_type = token_tags[token_index] == .r_paren;
+            dot_context.need_ret_type = tree.tokenTag(token_index) == .r_paren;
             dot_context.likely = .enum_assignment;
             dot_context.identifier_token_index = token_index;
         },
@@ -1129,15 +1124,14 @@ fn getSwitchOrStructInitContext(
 ) ?EnumLiteralContext {
     // at least 3 tokens should be present, `x{.`
     if (dot_index < 2) return null;
-    const token_tags = tree.tokens.items(.tag);
     // pedantic check (can be removed if the "generic exit" conditions below are made to cover more/all cases)
-    if (token_tags[dot_index] != .period) return null;
+    if (tree.tokenTag(dot_index) != .period) return null;
     var upper_index = dot_index - 1;
     // This prevents completions popping up for `x{.field.`
-    if (token_tags[upper_index] == .identifier) return null;
+    if (tree.tokenTag(upper_index) == .identifier) return null;
     // This prevents completions popping up for `x{.field = .`, ie it would suggest `field` again
     // in this case `fn completeDot` would still provide enum completions
-    if (token_tags[upper_index] == .equal) return null;
+    if (tree.tokenTag(upper_index) == .equal) return null;
 
     var likely: EnumLiteralContext.Likely = .struct_field;
 
@@ -1153,23 +1147,23 @@ fn getSwitchOrStructInitContext(
     var braces_depth: i32 = even;
     var parens_depth: i32 = even;
     find_identifier: while (upper_index > 0) : (upper_index -= 1) {
-        switch (token_tags[upper_index]) {
+        switch (tree.tokenTag(upper_index)) {
             .r_brace => braces_depth += 1,
             .l_brace => {
                 braces_depth -= 1;
                 if (braces_depth != one_opening) continue;
                 upper_index -= 1;
-                switch (token_tags[upper_index]) {
+                switch (tree.tokenTag(upper_index)) {
                     // `S{.`
                     .identifier => break :find_identifier,
                     // anon struct init `.{.`
                     .period => {
                         if (upper_index < 3) return null;
                         upper_index -= 1;
-                        if (token_tags[upper_index] == .ampersand) upper_index -= 1; // `&.{.`
-                        if (token_tags[upper_index] == .equal) { // `= .{.`
+                        if (tree.tokenTag(upper_index) == .ampersand) upper_index -= 1; // `&.{.`
+                        if (tree.tokenTag(upper_index) == .equal) { // `= .{.`
                             upper_index -= 1; // eat the `=`
-                            switch (token_tags[upper_index]) {
+                            switch (tree.tokenTag(upper_index)) {
                                 .identifier, // `const s: S = .{.`, `S{.name = .`
                                 .period_asterisk, //  `s.* = .{.`
                                 => break :find_identifier,
@@ -1181,7 +1175,7 @@ fn getSwitchOrStructInitContext(
                         braces_depth = even; // not actually looking for/expecting an uneven number of braces, just making use of the helpful const
                         parens_depth = even;
                         while (upper_index > 0) : (upper_index -= 1) {
-                            switch (token_tags[upper_index]) {
+                            switch (tree.tokenTag(upper_index)) {
                                 .r_brace => braces_depth += 1,
                                 .l_brace => {
                                     braces_depth -= 1;
@@ -1190,7 +1184,7 @@ fn getSwitchOrStructInitContext(
                                 .r_paren => parens_depth += 1,
                                 .l_paren => {
                                     parens_depth -= 1;
-                                    if (parens_depth == one_opening and switch (token_tags[upper_index - 1]) {
+                                    if (parens_depth == one_opening and switch (tree.tokenTag(upper_index - 1)) {
                                         .identifier,
                                         .builtin,
                                         => true,
@@ -1216,12 +1210,12 @@ fn getSwitchOrStructInitContext(
                         parens_depth = even;
                         // Walk backwards counting parens until one_opening then check the preceding token's tag
                         while (token_index > 0) : (token_index -= 1) {
-                            switch (token_tags[token_index]) {
+                            switch (tree.tokenTag(token_index)) {
                                 .r_paren => parens_depth += 1,
                                 .l_paren => {
                                     parens_depth -= 1;
                                     if (parens_depth == one_opening)
-                                        switch (token_tags[token_index - 1]) {
+                                        switch (tree.tokenTag(token_index - 1)) {
                                             .keyword_switch => {
                                                 likely = .switch_case;
                                                 upper_index -= 1; // eat the switch's .r_paren
@@ -1251,7 +1245,7 @@ fn getSwitchOrStructInitContext(
                 if (parens_depth != one_opening) continue;
                 if (braces_depth != even) return null;
                 upper_index -= 1;
-                switch (token_tags[upper_index]) {
+                switch (tree.tokenTag(upper_index)) {
                     // `f(.`
                     .identifier,
                     .builtin,
@@ -1268,7 +1262,7 @@ fn getSwitchOrStructInitContext(
                 fn_arg_index += 1;
             },
             // Have we arrived at an .identifier matching the criteria?
-            .identifier => switch (token_tags[upper_index + 1]) {
+            .identifier => switch (tree.tokenTag(upper_index + 1)) {
                 .l_brace => if (braces_depth == one_opening) break :find_identifier, // `S{.`
                 .l_paren => if (braces_depth == even and parens_depth == one_opening) { // `f(.`
                     likely = .enum_arg;
@@ -1318,7 +1312,7 @@ fn collectContainerFields(
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        const completion_item: types.CompletionItem = switch (tree.nodes.items(.tag)[decl.ast_node]) {
+        const completion_item: types.CompletionItem = switch (tree.nodeTag(decl.ast_node)) {
             .container_field_init,
             .container_field_align,
             .container_field,
@@ -1626,11 +1620,11 @@ fn collectFieldAccessContainerNodes(
         };
         const param = param_decl.get(fn_node_handle.handle.tree) orelse continue;
 
-        if (param.type_expr == 0) continue;
+        const type_expr = param.type_expr orelse continue;
         const param_rcts = try collectContainerNodes(
             builder,
             fn_node_handle.handle,
-            offsets.nodeToLoc(fn_node_handle.handle.tree, param.type_expr).end,
+            offsets.nodeToLoc(fn_node_handle.handle.tree, type_expr).end,
             dot_context,
         );
         for (param_rcts) |prct| try types_with_handles.append(arena, prct);

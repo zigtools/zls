@@ -154,20 +154,20 @@ fn collectWarnStyleDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var node: u32 = 0;
-    while (node < tree.nodes.len) : (node += 1) {
+    for (0..tree.nodes.len) |i| {
+        const node: Ast.Node.Index = @enumFromInt(i);
         if (ast.isBuiltinCall(tree, node)) {
-            const builtin_token = tree.nodes.items(.main_token)[node];
+            const builtin_token = tree.nodeMainToken(node);
             const call_name = tree.tokenSlice(builtin_token);
 
             if (!std.mem.eql(u8, call_name, "@import")) continue;
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const params = ast.builtinCallParams(tree, node, &buffer).?;
+            const params = tree.builtinCallParams(&buffer, node).?;
 
             if (params.len != 1) continue;
 
-            const import_str_token = tree.nodes.items(.main_token)[params[0]];
+            const import_str_token = tree.nodeMainToken(params[0]);
             const import_str = tree.tokenSlice(import_str_token);
 
             if (std.mem.startsWith(u8, import_str, "\"./")) {
@@ -185,7 +185,7 @@ fn collectWarnStyleDiagnostics(
     // TODO: style warnings for types, values and declarations below root scope
     if (tree.errors.len == 0) {
         for (tree.rootDecls()) |decl_idx| {
-            const decl = tree.nodes.items(.tag)[decl_idx];
+            const decl = tree.nodeTag(decl_idx);
             switch (decl) {
                 .fn_proto,
                 .fn_proto_multi,
@@ -235,11 +235,9 @@ fn collectGlobalVarDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const main_tokens = tree.nodes.items(.main_token);
-    const tags = tree.tokens.items(.tag);
     for (tree.rootDecls()) |decl| {
-        const decl_tag = tree.nodes.items(.tag)[decl];
-        const decl_main_token = tree.nodes.items(.main_token)[decl];
+        const decl_tag = tree.nodeTag(decl);
+        const decl_main_token = tree.nodeMainToken(decl);
 
         switch (decl_tag) {
             .simple_var_decl,
@@ -247,7 +245,7 @@ fn collectGlobalVarDiagnostics(
             .local_var_decl,
             .global_var_decl,
             => {
-                if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
+                if (tree.tokenTag(tree.nodeMainToken(decl)) != .keyword_var) continue; // skip anything immutable
                 // uncomment this to get a list :)
                 //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
                 try diagnostics.append(arena, .{

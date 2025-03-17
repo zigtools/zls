@@ -141,18 +141,16 @@ fn testIndexPosition(text: []const u8, index: usize, line: u32, characters: [3]u
 pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     std.debug.assert(source_index <= tree.source.len);
 
-    const tokens_start = tree.tokens.items(.start);
-
     // at which point to stop dividing and just iterate
     // good results w/ 256 as well, anything lower/higher and the cost of
     // dividing overruns the cost of iterating and vice versa
     const threshold = 336;
 
-    var upper_index: Ast.TokenIndex = @intCast(tokens_start.len - 1); // The Ast always has a .eof token
+    var upper_index: Ast.TokenIndex = @intCast(tree.tokens.len - 1); // The Ast always has a .eof token
     var lower_index: Ast.TokenIndex = 0;
     while (upper_index - lower_index > threshold) {
         const mid = lower_index + (upper_index - lower_index) / 2;
-        if (tokens_start[mid] < source_index) {
+        if (tree.tokenStart(mid) < source_index) {
             lower_index = mid;
         } else {
             upper_index = mid;
@@ -160,13 +158,13 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     }
 
     while (upper_index > 0) : (upper_index -= 1) {
-        const token_start = tokens_start[upper_index];
+        const token_start = tree.tokenStart(upper_index);
         if (token_start > source_index) continue; // checking for equality here is suboptimal
         // Handle source_index being > than the last possible token_start (max_token_start < source_index < tree.source.len)
-        if (upper_index == tokens_start.len - 1) break;
+        if (upper_index == tree.tokens.len - 1) break;
         // Check if source_index is within current token
         // (`token_start - 1` to include it's loc.start source_index and avoid the equality part of the check)
-        const is_within_current_token = (source_index > (token_start - 1)) and (source_index < tokens_start[upper_index + 1]);
+        const is_within_current_token = (source_index > (token_start - 1)) and (source_index < tree.tokenStart(upper_index + 1));
         if (!is_within_current_token) upper_index += 1; // gone 1 past
         break;
     }
@@ -282,46 +280,25 @@ pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []con
 }
 
 pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc {
-    std.debug.assert(switch (tree.tokens.items(.tag)[identifier_token]) {
+    std.debug.assert(switch (tree.tokenTag(identifier_token)) {
         .builtin => true, // The Zig parser likes to emit .builtin where a identifier would be expected
         .identifier => true,
         else => false,
     });
-    return identifierIndexToNameLoc(tree.source, tree.tokens.items(.start)[identifier_token]);
+    return identifierIndexToNameLoc(tree.source, tree.tokenStart(identifier_token));
 }
 
 pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) []const u8 {
     return locToSlice(tree.source, identifierTokenToNameLoc(tree, identifier_token));
 }
 
-pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
-    return tree.tokens.items(.start)[token_index];
-}
-
-test tokenToIndex {
-    var tree = try std.zig.Ast.parse(std.testing.allocator, "🠁↉¶\na", .zig);
-    defer tree.deinit(std.testing.allocator);
-
-    try std.testing.expectEqualSlices(std.zig.Token.Tag, &.{
-        .invalid, // 🠁↉¶
-        .identifier, // a
-        .eof,
-    }, tree.tokens.items(.tag));
-
-    try std.testing.expectEqual(0, tokenToIndex(tree, 0)); // 🠁↉¶
-    try std.testing.expectEqual(10, tokenToIndex(tree, 1)); // a
-    try std.testing.expectEqual(11, tokenToIndex(tree, 2)); // EOF
-}
-
 pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
-    return .{ .start = tokenToIndex(tree, first_token), .end = tokenToLoc(tree, last_token).end };
+    return .{ .start = tree.tokenStart(first_token), .end = tokenToLoc(tree, last_token).end };
 }
 
 pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
-    const token_starts = tree.tokens.items(.start);
-    const token_tags = tree.tokens.items(.tag);
-    const start = token_starts[token_index];
-    const tag = token_tags[token_index];
+    const start = tree.tokenStart(token_index);
+    const tag = tree.tokenTag(token_index);
 
     // Many tokens can be determined entirely by their tag.
     if (tag == .identifier) {
@@ -337,13 +314,13 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
         // source location that contains complete code units
         // this assumes that `tree.source` is valid utf8
         var begin = token_index;
-        while (begin > 0 and token_tags[begin - 1] == .invalid) : (begin -= 1) {}
+        while (begin > 0 and tree.tokenTag(begin - 1) == .invalid) : (begin -= 1) {}
 
         var end = token_index;
-        while (end < tree.tokens.len and token_tags[end] == .invalid) : (end += 1) {}
+        while (end < tree.tokens.len and tree.tokenTag(end) == .invalid) : (end += 1) {}
         return .{
-            .start = token_starts[begin],
-            .end = token_starts[end],
+            .start = tree.tokenStart(begin),
+            .end = tree.tokenStart(end),
         };
     }
 
@@ -388,7 +365,7 @@ pub fn tokensToSlice(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.Tok
 }
 
 pub fn tokenToPosition(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) types.Position {
-    const start = tokenToIndex(tree, token_index);
+    const start = tree.tokenStart(token_index);
     return indexToPosition(tree.source, start, encoding);
 }
 

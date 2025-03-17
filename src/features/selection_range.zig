@@ -28,7 +28,7 @@ pub fn generateSelectionRanges(
 
         locs.clearRetainingCapacity();
         for (0..handle.tree.nodes.len, handle.tree.nodes.items(.tag)) |i, tag| {
-            const node: Ast.Node.Index = @intCast(i);
+            const node: Ast.Node.Index = @enumFromInt(i);
             const loc = offsets.nodeToLoc(handle.tree, node);
 
             if (!(loc.start <= index and index <= loc.end)) continue;

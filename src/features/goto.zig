@@ -125,8 +125,8 @@ fn gotoDefinitionBuiltin(
     if (std.mem.eql(u8, name, "@cImport")) {
         const tree = handle.tree;
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = tree.nodes.items(.main_token)[cimport_node];
-            if (loc.start == offsets.tokenToIndex(tree, main_token)) break index;
+            const main_token = tree.nodeMainToken(cimport_node);
+            if (loc.start == tree.tokenStart(main_token)) break index;
         } else return null;
         const hash = handle.cimports.items(.hash)[index];
 

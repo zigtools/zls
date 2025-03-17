@@ -49,28 +49,27 @@ fn hoverSymbolRecursive(
                 return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 
-            switch (tree.nodes.items(.tag)[node]) {
+            switch (tree.nodeTag(node)) {
                 .global_var_decl,
                 .local_var_decl,
                 .aligned_var_decl,
                 .simple_var_decl,
                 => {
                     const var_decl = tree.fullVarDecl(node).?;
-                    var struct_init_buf: [2]Ast.Node.Index = undefined;
-                    var type_node: Ast.Node.Index = 0;
+                    const opt_type_node: ?Ast.Node.Index = blk: {
+                        if (var_decl.ast.type_node.unwrap()) |type_node| break :blk type_node;
+                        const init_node = var_decl.ast.init_node.unwrap() orelse break :blk null;
+                        var struct_init_buf: [2]Ast.Node.Index = undefined;
+                        const struct_init = tree.fullStructInit(&struct_init_buf, init_node) orelse break :blk null;
+                        break :blk struct_init.ast.type_expr.unwrap();
+                    };
 
-                    if (var_decl.ast.type_node != 0) {
-                        type_node = var_decl.ast.type_node;
-                    } else if (tree.fullStructInit(&struct_init_buf, var_decl.ast.init_node)) |struct_init| {
-                        if (struct_init.ast.type_expr != 0)
-                            type_node = struct_init.ast.type_expr;
-                    }
-
-                    if (type_node != 0)
+                    if (opt_type_node) |type_node| {
                         try analyser.referencedTypesFromNode(
                             .{ .node = type_node, .handle = handle },
                             &reference_collector,
                         );
+                    }
 
                     break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
                 },
@@ -80,12 +79,13 @@ fn hoverSymbolRecursive(
                 => {
                     const field = tree.fullContainerField(node).?;
                     var converted = field;
-                    converted.convertToNonTupleLike(tree.nodes);
-                    if (converted.ast.type_expr != 0)
+                    converted.convertToNonTupleLike(&tree);
+                    if (converted.ast.type_expr.unwrap()) |type_expr| {
                         try analyser.referencedTypesFromNode(
-                            .{ .node = converted.ast.type_expr, .handle = handle },
+                            .{ .node = type_expr, .handle = handle },
                             &reference_collector,
                         );
+                    }
 
                     break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
                 },
@@ -113,11 +113,12 @@ fn hoverSymbolRecursive(
         .function_parameter => |pay| def: {
             const param = pay.get(tree).?;
 
-            if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
+            if (param.type_expr) |type_expr| { // null for `anytype` and extern C varargs `...`
                 try analyser.referencedTypesFromNode(
-                    .{ .node = param.type_expr, .handle = handle },
+                    .{ .node = type_expr, .handle = handle },
                     &reference_collector,
                 );
+            }
 
             break :def ast.paramSlice(tree, param, false);
         },
@@ -159,7 +160,7 @@ fn hoverSymbolRecursive(
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
                 try writer.print(" | ", .{});
-            const source_index = offsets.tokenToIndex(ref.handle.tree, ref.token);
+            const source_index = ref.handle.tree.tokenStart(ref.token);
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
@@ -222,7 +223,7 @@ fn hoverDefinitionBuiltin(
 
     if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
+            const main_token = handle.tree.nodeMainToken(cimport_node);
             const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
             if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
         } else break :blk;
@@ -374,10 +375,10 @@ fn hoverNumberLiteral(
 ) error{OutOfMemory}!?[]const u8 {
     const tree = handle.tree;
     // number literals get tokenized separately from their minus sign
-    const is_negative = tree.tokens.items(.tag)[token_index -| 1] == .minus;
+    const is_negative = tree.tokenTag(token_index -| 1) == .minus;
     const num_slice = tree.tokenSlice(token_index);
     const number = blk: {
-        if (tree.tokens.items(.tag)[token_index] == .char_literal) {
+        if (tree.tokenTag(token_index) == .char_literal) {
             switch (std.zig.parseCharLiteral(num_slice)) {
                 .success => |value| break :blk value,
                 else => return null,

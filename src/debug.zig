@@ -5,41 +5,6 @@ const std = @import("std");
 const offsets = @import("offsets.zig");
 const DocumentScope = @import("DocumentScope.zig");
 
-pub fn printTree(tree: std.zig.Ast) void {
-    if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
-
-    std.debug.print(
-        \\printTree:
-        \\nodes   tag                  lhs         rhs         token
-        \\-----------------------------------------------------------
-        \\
-    , .{});
-    for (
-        tree.nodes.items(.tag),
-        tree.nodes.items(.data),
-        tree.nodes.items(.main_token),
-        0..,
-    ) |tag, data, main_token, i| {
-        std.debug.print(
-            "    {d:<3} {s:<20} {d:<11} {d:<11} {d:<5} {s}\n",
-            .{ i, @tagName(tag), data.lhs, data.rhs, main_token, offsets.tokenToSlice(tree, main_token) },
-        );
-    }
-
-    std.debug.print(
-        \\
-        \\tokens  tag                  start
-        \\----------------------------------
-        \\
-    , .{});
-    for (tree.tokens.items(.tag), tree.tokens.items(.start), 0..) |tag, start, i| {
-        std.debug.print(
-            "    {d:<3} {s:<20} {d:<}\n",
-            .{ i, @tagName(tag), start },
-        );
-    }
-}
-
 pub fn printDocumentScope(doc_scope: DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 

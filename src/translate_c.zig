@@ -33,16 +33,14 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const main_tokens = tree.nodes.items(.main_token);
-
     std.debug.assert(ast.isBuiltinCall(tree, node));
-    std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport"));
+    std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, tree.nodeMainToken(node)), "@cImport"));
 
     var output: std.ArrayListUnmanaged(u8) = .empty;
     errdefer output.deinit(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
-    for (ast.builtinCallParams(tree, node, &buffer).?) |child| {
+    for (tree.builtinCallParams(&buffer, node).?) |child| {
         try convertCIncludeInternal(allocator, tree, child, &output);
     }
 
@@ -55,23 +53,20 @@ fn convertCIncludeInternal(
     node: Ast.Node.Index,
     output: *std.ArrayListUnmanaged(u8),
 ) error{ OutOfMemory, Unsupported }!void {
-    const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-
     var writer = output.writer(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
-    if (ast.blockStatements(tree, node, &buffer)) |statements| {
+    if (tree.blockStatements(&buffer, node)) |statements| {
         for (statements) |statement| {
             try convertCIncludeInternal(allocator, tree, statement, output);
         }
-    } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
+    } else if (tree.builtinCallParams(&buffer, node)) |params| {
         if (params.len < 1) return;
 
-        const call_name = Ast.tokenSlice(tree, main_tokens[node]);
+        const call_name = Ast.tokenSlice(tree, tree.nodeMainToken(node));
 
-        if (node_tags[params[0]] != .string_literal) return error.Unsupported;
-        const first = extractString(Ast.tokenSlice(tree, main_tokens[params[0]]));
+        if (tree.nodeTag(params[0]) != .string_literal) return error.Unsupported;
+        const first = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[0])));
 
         if (std.mem.eql(u8, call_name, "@cInclude")) {
             try writer.print("#include <{s}>\n", .{first});
@@ -79,13 +74,13 @@ fn convertCIncludeInternal(
             if (params.len < 2) return;
 
             var buffer2: [2]Ast.Node.Index = undefined;
-            const is_void = if (ast.blockStatements(tree, params[1], &buffer2)) |block| block.len == 0 else false;
+            const is_void = if (tree.blockStatements(&buffer2, params[1])) |block| block.len == 0 else false;
 
             if (is_void) {
                 try writer.print("#define {s}\n", .{first});
             } else {
-                if (node_tags[params[1]] != .string_literal) return error.Unsupported;
-                const second = extractString(Ast.tokenSlice(tree, main_tokens[params[1]]));
+                if (tree.nodeTag(params[1]) != .string_literal) return error.Unsupported;
+                const second = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[1])));
                 try writer.print("#define {s} {s}\n", .{ first, second });
             }
         } else if (std.mem.eql(u8, call_name, "@cUndef")) {
