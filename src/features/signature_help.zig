@@ -78,7 +78,7 @@ pub fn getSignatureInfo(
     const first_token = tree.firstToken(innermost_block);
     // We start by finding the token that includes the current cursor position
     const last_token = blk: {
-        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
+        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index).preferRight(&tree);
         // Determine whether index is after the token
         const passed = tree.tokenStart(last_token) < absolute_index;
         switch (tree.tokenTag(last_token)) {

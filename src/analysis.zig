@@ -611,7 +611,7 @@ pub fn isSnakeCase(name: []const u8) bool {
 /// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
 /// if the `source_index` points to `@"name"`, the source location of `name` is returned.
 pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
-    const token = offsets.sourceIndexToTokenIndex(tree, source_index);
+    const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, &tree) orelse return null;
     switch (tree.tokenTag(token)) {
         .identifier,
         .builtin,
@@ -3810,7 +3810,7 @@ pub fn getPositionContext(
     defer stack.deinit(allocator);
     var should_do_lookahead = lookahead;
 
-    var current_token = offsets.sourceIndexToTokenIndex(tree, line_loc.start);
+    var current_token = offsets.sourceIndexToTokenIndex(tree, line_loc.start).preferLeft();
 
     while (true) : (current_token += 1) {
         var tok: std.zig.Token = .{

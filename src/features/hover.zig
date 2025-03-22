@@ -434,7 +434,7 @@ fn hoverDefinitionNumberLiteral(
     defer tracy_zone.end();
 
     const tree = handle.tree;
-    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index);
+    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number_literal, .char_literal }, &tree) orelse return null;
     const num_loc = offsets.tokenToLoc(tree, token_index);
     const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind, client_name)) orelse return null;
 

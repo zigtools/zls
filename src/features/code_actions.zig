@@ -100,7 +100,7 @@ pub const Builder = struct {
         const ctx = try Analyser.getPositionContext(builder.arena, builder.handle.tree, source_index, true);
         if (ctx != .string_literal) return;
 
-        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
+        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, &tree) orelse return;
 
         // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
         switch (tree.tokenTag(token_idx)) {
@@ -430,7 +430,7 @@ fn handleUnusedCapture(
 
     const source = tree.source;
 
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start);
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.identifier}, &tree) orelse return;
     if (tree.tokenTag(identifier_token) != .identifier) return;
 
     const identifier_name = offsets.locToSlice(source, loc);

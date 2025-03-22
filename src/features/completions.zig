@@ -686,7 +686,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 
     const tree = builder.orig_handle.tree;
 
-    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start);
+    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, &tree) orelse return;
     if (dot_token_index < 2) return;
 
     blk: {
@@ -1640,7 +1640,7 @@ fn collectEnumLiteralContainerNodes(
     const analyser = builder.analyser;
     const arena = builder.arena;
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
-    const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);
+    const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
     const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index) orelse return;
     const containers = try collectContainerNodes(
         builder,
