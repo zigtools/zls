@@ -97,11 +97,11 @@ linkFarm name [
     };
   }
   {
-    name = "N-V-__8AABhrAQAQLLLGadghhPsdxTgBk9N9aLVOjXW3ay0V";
+    name = "diffz-0.0.1-G2tlIQrOAQCfH15jdyaLyrMgV8eGPouFhkCeYFTmJaLk";
     path = fetchZigArtifact {
       name = "diffz";
-      url = "https://github.com/ziglibs/diffz/archive/ef45c00d655e5e40faf35afbbde81a1fa5ed7ffb.tar.gz";
-      hash = "sha256-Hdj0Z4Fxv9JHaqdHQ+SLzhCq0rkMLfA406xrDvN/w7o=";
+      url = "https://github.com/ziglibs/diffz/archive/a20dd1f11b10819a6f570f98b42e1c91e3704357.tar.gz";
+      hash = "sha256-xP6dBiTKWpSZ/EWS5ATu25STRJHvIU5Rmb5hxEHXwHQ=";
     };
   }
   {
