@@ -15,7 +15,7 @@ const URI = @import("../uri.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const analyser_completions = @import("../analyser/completions.zig");
 
-const data = @import("version_data");
+const version_data = @import("version_data");
 const snipped_data = @import("../snippets.zig");
 
 const Builder = struct {
@@ -547,8 +547,8 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
-    try builder.completions.ensureUnusedCapacity(builder.arena, data.builtins.kvs.len);
-    for (data.builtins.keys(), data.builtins.values()) |name, builtin| {
+    try builder.completions.ensureUnusedCapacity(builder.arena, version_data.builtins.kvs.len);
+    for (version_data.builtins.keys(), version_data.builtins.values()) |name, builtin| {
         const new_text, const insertTextFormat: types.InsertTextFormat = switch (new_text_format) {
             .only_name => .{ name, .PlainText },
             .snippet => blk: {
@@ -1319,15 +1319,30 @@ fn collectContainerFields(
             => blk: {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
-                const insert_text = if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like)
-                    if (use_snippets)
-                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
-                    else
-                        try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name})
-                else if (!use_snippets or field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
-                    name
-                else
-                    try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
+                const insert_text = insert_text: {
+                    if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
+                        if (use_snippets)
+                            break :insert_text try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
+                        else
+                            break :insert_text try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name});
+                    }
+
+                    if (!use_snippets)
+                        break :insert_text name;
+
+                    if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+                        break :insert_text name;
+
+                    const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(tree, builder.source_index)) {
+                        .none => |data| if (data.right) |right| tree.tokenTag(right) == .equal else false,
+                        .one => |token| token + 1 < tree.tokens.len and tree.tokenTag(token + 1) == .equal,
+                        .between => |data| tree.tokenTag(data.right) == .equal,
+                    };
+                    if (is_following_by_equal_token)
+                        break :insert_text name;
+
+                    break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
+                };
 
                 break :blk .{
                     .label = name,

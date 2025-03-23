@@ -3600,6 +3600,16 @@ test "insert replace behaviour - struct literal" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = ",
+        .expected_replace_line = "const foo: S = .{ .alpha = ",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
         \\const foo: S = .<cursor>
         ,
         .label = "alpha",
@@ -3614,6 +3624,39 @@ test "insert replace behaviour - struct literal" {
         .label = "alpha",
         .expected_insert_line = "const foo: S = .{ .alpha = $1 }$0",
         .expected_replace_line = "const foo: S = .{ .alpha = $1 }$0",
+        .enable_snippets = true,
+    });
+}
+
+test "insert replace behaviour - struct literal - check for equal sign" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor> = 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = 5 };",
+        .expected_replace_line = "const foo: S = .{ .alpha = 5 };",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ . <cursor> = 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ . alpha = 5 };",
+        .expected_replace_line = "const foo: S = .{ . alpha = 5 };",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor>= 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha= 5 };",
+        .expected_replace_line = "const foo: S = .{ .alpha= 5 };",
         .enable_snippets = true,
     });
 }
