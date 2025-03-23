@@ -19,6 +19,7 @@ pub const analyser = @import("analyser/analyser.zig");
 pub const configuration = @import("configuration.zig");
 pub const DocumentScope = @import("DocumentScope.zig");
 pub const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig");
+pub const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 
 pub const signature_help = @import("features/signature_help.zig");
 pub const references = @import("features/references.zig");

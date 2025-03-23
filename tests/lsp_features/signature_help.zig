@@ -47,6 +47,97 @@ test "simple" {
         \\    foo(0,55<cursor>)
         \\}
     , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32, c: u32) void {
+        \\    foo(0, 1, <cursor>)
+        \\}
+    , "fn foo(a: u32, b: u32, c: u32) void", 2);
+}
+
+test "no right paren" {
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(<cursor>
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(<cursor>,0
+        \\}
+    , "fn foo(a: u32, b: u32) void", 0);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,<cursor>
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,<cursor>55
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,5<cursor>5
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32) void {
+        \\    foo(0,55<cursor>
+        \\}
+    , "fn foo(a: u32, b: u32) void", 1);
+    try testSignatureHelp(
+        \\fn foo(a: u32, b: u32, c: u32) void {
+        \\    foo(0, 1, <cursor>
+        \\}
+    , "fn foo(a: u32, b: u32, c: u32) void", 2);
+}
+
+test "multiline" {
+    try testSignatureHelp(
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void {
+        \\    foo(<cursor>)
+        \\}
+    ,
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void
+    , 0);
+    try testSignatureHelp(
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void {
+        \\    foo(<cursor>,0)
+        \\}
+    ,
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void
+    , 0);
+    try testSignatureHelp(
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void {
+        \\    foo(0,<cursor>)
+        \\}
+    ,
+        \\fn foo(
+        \\    /// a is important
+        \\    a: u32,
+        \\    b: u32,
+        \\) void
+    , 1);
 }
 
 test "syntax error resistance" {

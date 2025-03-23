@@ -37,6 +37,16 @@ test "function call" {
     , .{ .kind = .Parameter });
 }
 
+test "function call with multiline string literal" {
+    try testInlayHints(
+        \\fn foo(bar: []const u8) void {}
+        \\const _ = foo(<bar>
+        \\    \\alpha
+        \\    \\beta
+        \\);
+    , .{ .kind = .Parameter });
+}
+
 test "extern function call" {
     try testInlayHints(
         \\extern fn foo(u32, beta: bool, []const u8) void;
@@ -128,6 +138,15 @@ test "builtin call" {
         .kind = .Parameter,
         .show_builtin = false,
     });
+}
+
+test "builtin call with multiline string literal" {
+    try testInlayHints(
+        \\const _ = @compileError(<msg>
+        \\    \\foo
+        \\    \\bar
+        \\);
+    , .{ .kind = .Parameter });
 }
 
 test "exclude single argument" {
@@ -528,6 +547,35 @@ test "truncate anonymous error sets" {
 test "truncate merged error sets" {
     try testInlayHints(
         \\const A<error{...}> =  @as(error{ Foo } || error{ Bar }, undefined);
+    , .{ .kind = .Type });
+}
+
+test "tuples" {
+    try testInlayHints(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const tmp<struct { i64, f32 }> = .{ b, a };
+        \\}
+    , .{ .kind = .Type });
+}
+
+test "tuple fields" {
+    try testInlayHints(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const tmp<struct { i64, f32 }> = .{ b, a };
+        \\    const x<i64> = tmp.@"0";
+        \\    const y<f32> = tmp.@"1";
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\fn foo() void {
+        \\    const tmp: struct { i64, f32 } = .{ 1, 0 };
+        \\    const x<i64> = tmp.@"0";
+        \\    const y<f32> = tmp.@"1";
+        \\}
     , .{ .kind = .Type });
 }
 

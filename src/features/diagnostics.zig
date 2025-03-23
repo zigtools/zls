@@ -1,6 +1,7 @@
 //! Implementation of [`textDocument/publishDiagnostics`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics)
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.diag);
 
@@ -153,20 +154,20 @@ fn collectWarnStyleDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var node: u32 = 0;
-    while (node < tree.nodes.len) : (node += 1) {
+    for (0..tree.nodes.len) |i| {
+        const node: Ast.Node.Index = @enumFromInt(i);
         if (ast.isBuiltinCall(tree, node)) {
-            const builtin_token = tree.nodes.items(.main_token)[node];
+            const builtin_token = tree.nodeMainToken(node);
             const call_name = tree.tokenSlice(builtin_token);
 
             if (!std.mem.eql(u8, call_name, "@import")) continue;
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const params = ast.builtinCallParams(tree, node, &buffer).?;
+            const params = tree.builtinCallParams(&buffer, node).?;
 
             if (params.len != 1) continue;
 
-            const import_str_token = tree.nodes.items(.main_token)[params[0]];
+            const import_str_token = tree.nodeMainToken(params[0]);
             const import_str = tree.tokenSlice(import_str_token);
 
             if (std.mem.startsWith(u8, import_str, "\"./")) {
@@ -184,7 +185,7 @@ fn collectWarnStyleDiagnostics(
     // TODO: style warnings for types, values and declarations below root scope
     if (tree.errors.len == 0) {
         for (tree.rootDecls()) |decl_idx| {
-            const decl = tree.nodes.items(.tag)[decl_idx];
+            const decl = tree.nodeTag(decl_idx);
             switch (decl) {
                 .fn_proto,
                 .fn_proto_multi,
@@ -234,11 +235,9 @@ fn collectGlobalVarDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const main_tokens = tree.nodes.items(.main_token);
-    const tags = tree.tokens.items(.tag);
     for (tree.rootDecls()) |decl| {
-        const decl_tag = tree.nodes.items(.tag)[decl];
-        const decl_main_token = tree.nodes.items(.main_token)[decl];
+        const decl_tag = tree.nodeTag(decl);
+        const decl_main_token = tree.nodeMainToken(decl);
 
         switch (decl_tag) {
             .simple_var_decl,
@@ -246,7 +245,7 @@ fn collectGlobalVarDiagnostics(
             .local_var_decl,
             .global_var_decl,
             => {
-                if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
+                if (tree.tokenTag(tree.nodeMainToken(decl)) != .keyword_var) continue; // skip anything immutable
                 // uncomment this to get a list :)
                 //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
                 try diagnostics.append(arena, .{
@@ -430,10 +429,9 @@ fn getErrorBundleFromAstCheck(
     return try error_bundle.toOwnedBundle("");
 }
 
-/// This struct is not relocatable after initilization.
 pub const BuildOnSave = struct {
     allocator: std.mem.Allocator,
-    child_process: std.process.Child,
+    child_process: *std.process.Child,
     thread: std.Thread,
 
     const shared = @import("../build_runner/shared.zig");
@@ -452,8 +450,9 @@ pub const BuildOnSave = struct {
         collection: *DiagnosticsCollection,
     };
 
-    pub fn init(self: *BuildOnSave, options: InitOptions) !void {
-        self.* = undefined;
+    pub fn init(options: InitOptions) !?BuildOnSave {
+        const child_process = try options.allocator.create(std.process.Child);
+        errdefer options.allocator.destroy(child_process);
 
         const base_args: []const []const u8 = &.{
             options.zig_exe_path,
@@ -474,59 +473,54 @@ pub const BuildOnSave = struct {
         if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
         argv.appendSliceAssumeCapacity(options.build_on_save_args);
 
-        var child_process: std.process.Child = .init(argv.items, options.allocator);
+        child_process.* = .init(argv.items, options.allocator);
         child_process.stdin_behavior = .Pipe;
         child_process.stdout_behavior = .Pipe;
         child_process.stderr_behavior = .Pipe;
         child_process.cwd = options.workspace_path;
 
         child_process.spawn() catch |err| {
+            options.allocator.destroy(child_process);
             log.err("failed to spawn zig build process: {}", .{err});
-            return;
+            return null;
         };
 
         errdefer {
             _ = terminateChildProcessReportError(
-                &child_process,
+                child_process,
                 options.allocator,
                 "zig build runner",
                 .kill,
             );
         }
 
-        self.* = .{
-            .allocator = options.allocator,
-            .child_process = child_process,
-            .thread = undefined, // set below
-        };
-
         const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
         errdefer options.allocator.free(duped_workspace_path);
 
-        self.thread = try std.Thread.spawn(.{ .allocator = options.allocator }, loop, .{
-            self,
+        const thread = try std.Thread.spawn(.{ .allocator = options.allocator }, loop, .{
+            options.allocator,
+            child_process,
             options.collection,
             duped_workspace_path,
         });
+        errdefer comptime unreachable;
+
+        return .{
+            .allocator = options.allocator,
+            .child_process = child_process,
+            .thread = thread,
+        };
     }
 
     pub fn deinit(self: *BuildOnSave) void {
-        // this write tells the child process to exit
-        self.child_process.stdin.?.writeAll("\xaa") catch |err| {
-            if (err != error.BrokenPipe) {
-                log.warn("failed to send message to zig build runner: {}", .{err});
-            }
-            _ = terminateChildProcessReportError(
-                &self.child_process,
-                self.allocator,
-                "zig build runner",
-                .kill,
-            );
-            return;
-        };
+        defer self.* = undefined;
+        defer self.allocator.destroy(self.child_process);
+
+        self.child_process.stdin.?.close();
+        self.child_process.stdin = null;
 
         const success = terminateChildProcessReportError(
-            &self.child_process,
+            self.child_process,
             self.allocator,
             "zig build runner",
             .wait,
@@ -534,25 +528,29 @@ pub const BuildOnSave = struct {
         if (!success) return;
 
         self.thread.join();
-        self.* = undefined;
+    }
+
+    pub fn sendManualWatchUpdate(self: *BuildOnSave) void {
+        self.child_process.stdin.?.writeAll("\x00") catch {};
     }
 
     fn loop(
-        self: *BuildOnSave,
+        allocator: std.mem.Allocator,
+        child_process: *std.process.Child,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
     ) void {
-        defer self.allocator.free(workspace_path);
+        defer allocator.free(workspace_path);
 
         var transport: Transport = .init(.{
-            .gpa = self.allocator,
-            .in = self.child_process.stdout.?,
-            .out = self.child_process.stdin.?,
+            .gpa = allocator,
+            .in = child_process.stdout.?,
+            .out = child_process.stdin.?,
         });
         defer transport.deinit();
 
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
-        defer diagnostic_tags.deinit(self.allocator);
+        defer diagnostic_tags.deinit(allocator);
 
         defer {
             for (diagnostic_tags.keys()) |tag| collection.clearErrorBundle(tag);
@@ -574,7 +572,7 @@ pub const BuildOnSave = struct {
             switch (@as(ServerToClient.Tag, @enumFromInt(header.tag))) {
                 .watch_error_bundle => {
                     handleWatchErrorBundle(
-                        self,
+                        allocator,
                         &transport,
                         collection,
                         workspace_path,
@@ -592,7 +590,7 @@ pub const BuildOnSave = struct {
     }
 
     fn handleWatchErrorBundle(
-        self: *BuildOnSave,
+        allocator: std.mem.Allocator,
         transport: *Transport,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
@@ -600,11 +598,11 @@ pub const BuildOnSave = struct {
     ) !void {
         const header = try transport.reader().readStructEndian(ServerToClient.ErrorBundle, .little);
 
-        const extra = try transport.receiveSlice(self.allocator, u32, header.extra_len);
-        defer self.allocator.free(extra);
+        const extra = try transport.receiveSlice(allocator, u32, header.extra_len);
+        defer allocator.free(extra);
 
-        const string_bytes = try transport.receiveBytes(self.allocator, header.string_bytes_len);
-        defer self.allocator.free(string_bytes);
+        const string_bytes = try transport.receiveBytes(allocator, header.string_bytes_len);
+        defer allocator.free(string_bytes);
 
         const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
 
@@ -614,7 +612,7 @@ pub const BuildOnSave = struct {
 
         const diagnostic_tag: DiagnosticsCollection.Tag = @enumFromInt(@as(u32, @truncate(hasher.final())));
 
-        try diagnostic_tags.put(self.allocator, diagnostic_tag, {});
+        try diagnostic_tags.put(allocator, diagnostic_tag, {});
 
         try collection.pushErrorBundle(diagnostic_tag, header.cycle, workspace_path, error_bundle);
         try collection.publishDiagnostics();

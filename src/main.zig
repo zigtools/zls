@@ -5,7 +5,6 @@ const exe_options = @import("exe_options");
 
 const tracy = @import("tracy");
 const known_folders = @import("known-folders");
-const binned_allocator = @import("binned_allocator.zig");
 
 const log = std.log.scoped(.main);
 
@@ -135,7 +134,7 @@ const Env = struct {
     ///
     /// The semantic version can have one of the following formats:
     /// - `MAJOR.MINOR.PATCH` is a tagged release of ZLS
-    /// - `MAJOR.MINOR.PATCH-dev.COMMIT_HEIGHT-SHORT_COMMIT_HASH` is a development build of ZLS
+    /// - `MAJOR.MINOR.PATCH-dev.COMMIT_HEIGHT+SHORT_COMMIT_HASH` is a development build of ZLS
     /// - `MAJOR.MINOR.PATCH-dev` is a development build of ZLS where the exact version could not be resolved.
     ///
     version: []const u8,
@@ -247,36 +246,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "env")) { // env
                 try @"zls env"(allocator);
-            } else if (std.mem.eql(u8, arg, "--show-config-path")) { // --show-config-path
-                comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-                log.warn("--show-config-path has been deprecated. Use 'zls env' instead!", .{});
-
-                var config_result = try zls.configuration.load(allocator);
-                defer config_result.deinit(allocator);
-
-                switch (config_result) {
-                    .success => |config_with_path| {
-                        try stdout.writeAll(config_with_path.path);
-                        try stdout.writeByte('\n');
-                    },
-                    .failure => |payload| blk: {
-                        const message = try payload.toMessage(allocator) orelse break :blk;
-                        defer allocator.free(message);
-                        log.err("Failed to load configuration options.", .{});
-                        log.err("{s}", .{message});
-                    },
-                    .not_found => log.info("No config file zls.json found.", .{}),
-                }
-
-                log.info("A path to the local configuration folder will be printed instead.", .{});
-                const local_config_path = zls.configuration.getLocalConfigPath(allocator) catch null orelse {
-                    log.err("failed to find local zls.json", .{});
-                    std.process.exit(1);
-                };
-                defer allocator.free(local_config_path);
-                try stdout.writeAll(local_config_path);
-                try stdout.writeByte('\n');
-                std.process.exit(0);
             }
         }
 
@@ -287,9 +256,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
             };
             if (result.config_path) |old_config_path| allocator.free(old_config_path);
             result.config_path = try allocator.dupe(u8, path);
-        } else if (std.mem.eql(u8, arg, "--enable-message-tracing")) { // --enable-message-tracing
-            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-            log.warn("--enable-message-tracing has been deprecated.", .{});
         } else if (std.mem.eql(u8, arg, "--log-file")) { // --log-file
             const path = args_it.next() orelse {
                 log.err("Expected configuration file path after --log-file argument.", .{});
@@ -310,10 +276,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
             result.enable_stderr_logs = true;
         } else if (std.mem.eql(u8, arg, "--disable-lsp-logs")) { // --disable-lsp-logs
             result.disable_lsp_logs = true;
-        } else if (std.mem.eql(u8, arg, "--enable-debug-log")) { // --enable-debug-log
-            comptime std.debug.assert(zls.build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // This flag should be removed before 0.14.0 gets tagged
-            log.warn("--enable-debug-log has been deprecated. Use --log-level instead!", .{});
-            result.log_level = .debug;
         } else {
             log.err("Unrecognized argument: '{s}'", .{arg});
             std.process.exit(1);
@@ -329,20 +291,23 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
     return result;
 }
 
-const stack_frames = switch (zig_builtin.mode) {
-    .Debug => 10,
-    else => 0,
-};
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !u8 {
-    var allocator_state: if (exe_options.use_gpa)
-        std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames })
-    else
-        binned_allocator.BinnedAllocator(.{}) = .init;
-    defer _ = allocator_state.deinit();
+    const base_allocator, const is_debug = gpa: {
+        if (exe_options.debug_gpa) break :gpa .{ debug_allocator.allocator(), true };
+        if (zig_builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
+        break :gpa switch (zig_builtin.mode) {
+            .Debug => .{ debug_allocator.allocator(), true },
+            .ReleaseSafe, .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
 
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else {};
-    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(base_allocator) else {};
+    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else base_allocator;
 
     var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.debug.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else {};
     const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;

@@ -90,7 +90,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
 
             if (!std.mem.eql(u8, offsets.tokenToSlice(tree, token), "@cImport")) continue;
 
-            break :blk @intCast(i);
+            break :blk @enumFromInt(i);
         }
         return error.TestUnexpectedResult; // source doesn't contain a cImport
     };
@@ -109,7 +109,13 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    var result = (try translate_c.translate(allocator, zls.DocumentStore.Config.fromMainConfig(ctx.server.config), &.{}, c_source)).?;
+    var result = (try translate_c.translate(
+        allocator,
+        zls.DocumentStore.Config.fromMainConfig(ctx.server.config),
+        &.{},
+        &.{},
+        c_source,
+    )).?;
     errdefer result.deinit(allocator);
 
     switch (result) {

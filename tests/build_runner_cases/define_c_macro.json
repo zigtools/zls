@@ -2,10 +2,6 @@
   "deps_build_roots": [],
   "packages": [
     {
-      "name": "bar",
-      "path": "root.zig"
-    },
-    {
       "name": "root",
       "path": "root.zig"
     }
@@ -16,5 +12,7 @@
     "uninstall"
   ],
   "available_options": {},
-  "c_macros": []
+  "c_macros": [
+    "-Dkey=value"
+  ]
 }

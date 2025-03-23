@@ -3,10 +3,10 @@ const builtin = @import("builtin");
 
 /// Must match the `version` in `build.zig.zon`.
 /// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
-const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0, .pre = "dev" };
+const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// std.builtin.Type renames, and make it easier to modify std.builtin
+/// Release 0.14.0
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,28 +15,31 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 14, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.14.0-dev.2801+4d8c24c6c";
+const minimum_build_zig_version = "0.15.0-dev.56+d0911786c";
 
 /// Specify the minimum Zig version that is required to run ZLS:
-/// make zig compiler processes live across rebuilds
+/// Release 0.14.0
 ///
 /// Examples of reasons that would cause the minimum runtime version to be bumped are:
 ///   - breaking change to the Zig Syntax
 ///   - breaking change to AstGen (i.e `zig ast-check`)
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.14.0-dev.310+9d38e82b5";
+const minimum_runtime_zig_version = "0.14.0";
 
 const release_targets = [_]std.Target.Query{
-    .{ .cpu_arch = .x86_64, .os_tag = .windows },
-    .{ .cpu_arch = .x86_64, .os_tag = .linux },
-    .{ .cpu_arch = .x86_64, .os_tag = .macos },
-    .{ .cpu_arch = .x86, .os_tag = .windows },
-    .{ .cpu_arch = .x86, .os_tag = .linux },
-    .{ .cpu_arch = .aarch64, .os_tag = .windows },
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
+    .{ .cpu_arch = .aarch64, .os_tag = .windows },
     .{ .cpu_arch = .arm, .os_tag = .linux },
+    .{ .cpu_arch = .loongarch64, .os_tag = .linux },
+    .{ .cpu_arch = .powerpc64le, .os_tag = .linux },
+    .{ .cpu_arch = .riscv64, .os_tag = .linux },
+    .{ .cpu_arch = .x86, .os_tag = .linux },
+    .{ .cpu_arch = .x86, .os_tag = .windows },
+    .{ .cpu_arch = .x86_64, .os_tag = .linux },
+    .{ .cpu_arch = .x86_64, .os_tag = .macos },
+    .{ .cpu_arch = .x86_64, .os_tag = .windows },
     .{ .cpu_arch = .wasm32, .os_tag = .wasi },
 };
 
@@ -46,21 +49,22 @@ pub fn build(b: *Build) !void {
 
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
+    const strip = b.option(bool, "strip", "Strip executable");
     const enable_tracy = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
     const enable_tracy_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
     const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
+    const coverage = b.option(bool, "coverage", "Generate a coverage report with kcov") orelse false;
 
     const resolved_zls_version = getVersion(b);
-    const resolved_zls_version_string = b.fmt("{}", .{resolved_zls_version});
 
     const build_options = blk: {
         const build_options = b.addOptions();
         build_options.step.name = "ZLS build options";
 
         build_options.addOption(std.SemanticVersion, "version", resolved_zls_version);
-        build_options.addOption([]const u8, "version_string", resolved_zls_version_string);
+        build_options.addOption([]const u8, "version_string", b.fmt("{}", .{resolved_zls_version}));
         build_options.addOption([]const u8, "minimum_runtime_zig_version_string", minimum_runtime_zig_version);
 
         break :blk build_options.createModule();
@@ -71,7 +75,7 @@ pub fn build(b: *Build) !void {
 
         exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable-failing-allocator", "Whether to use a randomly failing allocator.") orelse false);
         exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable-failing-allocator-likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
-        exe_options.addOption(bool, "use_gpa", b.option(bool, "use-gpa", "Good for debugging") orelse (optimize == .Debug));
+        exe_options.addOption(bool, "debug_gpa", b.option(bool, "debug-allocator", "Force the DebugAllocator to be used in all release modes") orelse false);
 
         break :blk exe_options.createModule();
     };
@@ -114,7 +118,7 @@ pub fn build(b: *Build) !void {
         gen_version_data_cmd.addArgs(&.{ "--langref-version", version });
 
         gen_version_data_cmd.addArg("--langref-path");
-        gen_version_data_cmd.addFileArg(b.path(b.fmt("src/tools/langref_{s}.html.in", .{version})));
+        gen_version_data_cmd.addFileArg(b.path("src/tools/langref.html.in"));
 
         gen_version_data_cmd.addArg("--generate-version-data");
         const version_data_path = gen_version_data_cmd.addOutputFileArg("version_data.zig");
@@ -181,7 +185,7 @@ pub fn build(b: *Build) !void {
             });
         }
 
-        release(b, &release_targets, &release_artifacts);
+        release(b, &release_artifacts);
     }
 
     const exe_module = b.createModule(.{
@@ -190,6 +194,7 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
         .single_threaded = single_threaded,
         .pic = pie,
+        .strip = strip,
         .imports = &.{
             .{ .name = "exe_options", .module = exe_options },
             .{ .name = "known-folders", .module = known_folders_module },
@@ -244,31 +249,56 @@ pub fn build(b: *Build) !void {
         .use_lld = use_llvm,
     });
 
-    { // zig build test
+    blk: { // zig build test, zig build test-build-runner, zig build test-analysis
         const test_step = b.step("test", "Run all the tests");
-
         const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
-        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters);
+        const test_analysis_step = b.step("test-analysis", "Run all the analysis tests");
 
+        const latest_build_runner_version = std.meta.fieldNames(@import("src/build_runner/BuildRunnerVersion.zig").BuildRunnerVersion)[0];
+        const build_runner = b.path(b.fmt("src/build_runner/{s}.zig", .{latest_build_runner_version}));
+
+        // Create run steps
+        @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters, build_runner);
+        @import("tests/add_analysis_cases.zig").addCases(b, test_analysis_step, test_filters);
+
+        const run_tests = b.addRunArtifact(tests);
+        const run_src_tests = b.addRunArtifact(src_tests);
+
+        // Setup dependencies of `zig build test`
+        test_step.dependOn(&run_tests.step);
+        test_step.dependOn(&run_src_tests.step);
         test_step.dependOn(test_build_runner_step);
-        test_step.dependOn(&b.addRunArtifact(tests).step);
-        test_step.dependOn(&b.addRunArtifact(src_tests).step);
-    }
+        test_step.dependOn(test_analysis_step);
 
-    { // zig build coverage
+        if (!coverage) break :blk;
+
+        // Collect all run steps into one ArrayList
+        var run_test_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
+        run_test_steps.append(b.allocator, run_tests) catch @panic("OOM");
+        run_test_steps.append(b.allocator, run_src_tests) catch @panic("OOM");
+        for (test_build_runner_step.dependencies.items) |step| {
+            run_test_steps.append(b.allocator, step.cast(std.Build.Step.Run).?) catch @panic("OOM");
+        }
+        for (test_analysis_step.dependencies.items) |step| {
+            run_test_steps.append(b.allocator, step.cast(std.Build.Step.Run).?) catch @panic("OOM");
+        }
+
+        const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
 
         const merge_step = std.Build.Step.Run.create(b, "merge coverage");
-        merge_step.addArgs(&.{ "kcov", "--merge" });
+        merge_step.addArgs(&.{ kcov_bin, "--merge" });
         merge_step.rename_step_with_output_arg = false;
         const merged_coverage_output = merge_step.addOutputFileArg(".");
 
-        for ([_]*std.Build.Step.Compile{ tests, src_tests }) |test_exe| {
-            const kcov_collect = std.Build.Step.Run.create(b, "collect coverage");
-            kcov_collect.addArgs(&.{ "kcov", "--collect-only" });
-            kcov_collect.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
-            merge_step.addDirectoryArg(kcov_collect.addOutputFileArg(test_exe.name));
-            kcov_collect.addArtifactArg(test_exe);
-            kcov_collect.enableTestRunnerMode();
+        for (run_test_steps.items) |run_step| {
+            run_step.setName(b.fmt("{s} (collect coverage)", .{run_step.step.name}));
+
+            // prepend the kcov exec args
+            const argv = run_step.argv.toOwnedSlice(b.allocator) catch @panic("OOM");
+            run_step.addArgs(&.{ kcov_bin, "--collect-only" });
+            run_step.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+            merge_step.addDirectoryArg(run_step.addOutputFileArg(run_step.producer.?.name));
+            run_step.argv.appendSlice(b.allocator, argv) catch @panic("OOM");
         }
 
         const install_coverage = b.addInstallDirectory(.{
@@ -276,24 +306,33 @@ pub fn build(b: *Build) !void {
             .install_dir = .{ .custom = "coverage" },
             .install_subdir = "",
         });
-        const coverage_step = b.step("coverage", "Generate a coverage report with kcov");
-        coverage_step.dependOn(&install_coverage.step);
+        test_step.dependOn(&install_coverage.step);
     }
 }
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
 fn getVersion(b: *Build) std.SemanticVersion {
+    const version_string = b.option([]const u8, "version-string", "Override the version of this build. Must be a semantic version.");
+    if (version_string) |semver_string| {
+        return std.SemanticVersion.parse(semver_string) catch |err| {
+            std.debug.panic("Expected -Dversion-string={s} to be a semantic version: {}", .{ semver_string, err });
+        };
+    }
+
     if (zls_version.pre == null and zls_version.build == null) return zls_version;
 
     const argv: []const []const u8 = &.{
-        "git", "-C", b.pathFromRoot("."), "describe", "--match", "*.*.*", "--tags",
+        "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
         const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
-        std.log.warn("Failed to run git describe to resolve ZLS version: {}\ncommand: {s}", .{
-            err, argv_joined,
-        });
+        std.log.warn(
+            \\Failed to run git describe to resolve ZLS version: {}
+            \\command: {s}
+            \\
+            \\Consider passing the -Dversion-string flag to specify the ZLS version.
+        , .{ err, argv_joined });
         return zls_version;
     };
 
@@ -384,7 +423,7 @@ fn getTracyModule(
 /// - compress them (.tar.xz or .zip)
 /// - optionally sign them with minisign (https://github.com/jedisct1/minisign)
 /// - send a http `multipart/form-data` request to a Cloudflare worker at https://github.com/zigtools/release-worker
-fn release(b: *Build, target_queries: []const std.Target.Query, release_artifacts: []const *Build.Step.Compile) void {
+fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
     std.debug.assert(release_artifacts.len > 0);
     for (release_artifacts) |compile| std.debug.assert(compile.version != null);
 
@@ -441,7 +480,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
 
     var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
 
-    for (target_queries, release_artifacts) |target_query, exe| {
+    for (release_artifacts) |exe| {
         const resolved_target = exe.root_module.resolved_target.?.result;
         const is_windows = resolved_target.os.tag == .windows;
         const exe_name = b.fmt("{s}{s}", .{ exe.name, resolved_target.exeFileExt() });
@@ -449,9 +488,13 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
         const extensions: []const FileExtension = if (is_windows) &.{.zip} else &.{ .@"tar.xz", .@"tar.gz" };
 
         for (extensions) |extension| {
+            const cpu_arch_name = switch (resolved_target.cpu.arch) {
+                .arm => "armv7a", // To match the https://ziglang.org/download/ tarballs
+                else => |arch| @tagName(arch),
+            };
             const file_name = b.fmt("zls-{s}-{s}-{}.{s}", .{
-                @tagName(target_query.os_tag.?),
-                @tagName(target_query.cpu_arch.?),
+                @tagName(resolved_target.os.tag),
+                cpu_arch_name,
                 exe.version.?,
                 @tagName(extension),
             });
@@ -459,7 +502,7 @@ fn release(b: *Build, target_queries: []const std.Target.Query, release_artifact
             const compress_cmd = std.Build.Step.Run.create(b, "compress artifact");
             compress_cmd.step.max_rss = switch (extension) {
                 .zip => 160 * 1024 * 1024, // 160 MiB
-                .@"tar.xz" => 256 * 1024 * 1024, // 256 MiB
+                .@"tar.xz" => 512 * 1024 * 1024, // 512 MiB
                 .@"tar.gz" => 16 * 1024 * 1024, // 12 MiB
             };
             switch (extension) {

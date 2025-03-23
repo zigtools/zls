@@ -24,7 +24,6 @@ fn labelReferences(
     std.debug.assert(decl.decl == .label); // use `symbolReferences` instead
     const handle = decl.handle;
     const tree = handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
@@ -44,11 +43,11 @@ fn labelReferences(
 
     var curr_tok = first_tok + 1;
     while (curr_tok < last_tok - 2) : (curr_tok += 1) {
-        const curr_id = token_tags[curr_tok];
+        const curr_id = tree.tokenTag(curr_tok);
 
         if (curr_id != .keyword_break and curr_id != .keyword_continue) continue;
-        if (token_tags[curr_tok + 1] != .colon) continue;
-        if (token_tags[curr_tok + 2] != .identifier) continue;
+        if (tree.tokenTag(curr_tok + 1) != .colon) continue;
+        if (tree.tokenTag(curr_tok + 2) != .identifier) continue;
 
         if (!std.mem.eql(u8, tree.tokenSlice(curr_tok + 2), tree.tokenSlice(first_tok))) continue;
 
@@ -106,18 +105,15 @@ const Builder = struct {
         const builder = self.builder;
         const handle = self.handle;
 
-        const node_tags = tree.nodes.items(.tag);
-        const datas = tree.nodes.items(.data);
-
-        switch (node_tags[node]) {
+        switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
             => |tag| {
                 const name_token = switch (tag) {
                     .identifier => ast.identifierTokenFromIdentifierNode(tree, node) orelse return,
                     .test_decl => blk: {
-                        const name_token = ast.testDeclNameToken(tree, node) orelse return;
-                        if (tree.tokens.items(.tag)[name_token] != .identifier) return;
+                        const name_token = tree.nodeData(node).opt_token_and_node[0].unwrap() orelse return;
+                        if (tree.tokenTag(name_token) != .identifier) return;
                         break :blk name_token;
                     },
                     else => unreachable,
@@ -127,7 +123,7 @@ const Builder = struct {
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
                     name,
-                    tree.tokens.items(.start)[name_token],
+                    tree.tokenStart(name_token),
                 ) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
@@ -135,14 +131,15 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle }) orelse return;
+                const lhs_node, const field_name = tree.nodeData(node).node_and_token;
+                const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.identifierTokenToNameSlice(tree, datas[node].rhs);
+                const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
                 const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
-                    try builder.add(handle, datas[node].rhs);
+                    try builder.add(handle, field_name);
                 }
             },
             .struct_init_one,
@@ -216,7 +213,7 @@ fn gatherReferences(
             .get_or_load => analyser.store.getOrLoadHandle(uri),
         } orelse continue;
 
-        try builder.collectReferences(handle, 0);
+        try builder.collectReferences(handle, .root);
     }
 }
 
@@ -249,9 +246,9 @@ fn symbolReferences(
 
     switch (decl_handle.decl) {
         .ast_node => {
-            try builder.collectReferences(curr_handle, 0);
+            try builder.collectReferences(curr_handle, .root);
 
-            const source_index = offsets.tokenToIndex(decl_handle.handle.tree, decl_handle.nameToken());
+            const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
             // highlight requests only pertain to the current document, otherwise we can try to narrow things down
             const workspace = if (request == .highlight) false else blk: {
                 const doc_scope = try curr_handle.getDocumentScope();
@@ -273,7 +270,7 @@ fn symbolReferences(
         .assign_destructure,
         .switch_payload,
         => {
-            try builder.collectReferences(curr_handle, 0);
+            try builder.collectReferences(curr_handle, .root);
         },
         .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
         .label => unreachable, // handled separately by labelReferences
@@ -323,11 +320,7 @@ const CallBuilder = struct {
         const builder = self.builder;
         const handle = self.handle;
 
-        const node_tags = tree.nodes.items(.tag);
-        const datas = tree.nodes.items(.data);
-        const starts = tree.tokens.items(.start);
-
-        switch (node_tags[node]) {
+        switch (tree.nodeTag(node)) {
             .call,
             .call_comma,
             .async_call,
@@ -342,14 +335,14 @@ const CallBuilder = struct {
 
                 const called_node = call.ast.fn_expr;
 
-                switch (node_tags[called_node]) {
+                switch (tree.nodeTag(called_node)) {
                     .identifier => {
                         const identifier_token = ast.identifierTokenFromIdentifierNode(tree, called_node) orelse return;
 
                         const child = (try builder.analyser.lookupSymbolGlobal(
                             handle,
                             offsets.identifierTokenToNameSlice(tree, identifier_token),
-                            starts[identifier_token],
+                            tree.tokenStart(identifier_token),
                         )) orelse return;
 
                         if (builder.decl_handle.eql(child)) {
@@ -357,10 +350,11 @@ const CallBuilder = struct {
                         }
                     },
                     .field_access => {
-                        const lhs = (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return;
+                        const lhs_node, const field_name = tree.nodeData(called_node).node_and_token;
+                        const lhs = (try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle })) orelse return;
                         const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                        const symbol = offsets.tokenToSlice(tree, datas[called_node].rhs);
+                        const symbol = offsets.tokenToSlice(tree, field_name);
                         const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                         if (builder.decl_handle.eql(child)) {
@@ -379,8 +373,6 @@ pub fn callsiteReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
     decl_handle: Analyser.DeclWithHandle,
-    /// add `decl_handle` as a references
-    include_decl: bool,
     /// exclude references from the std library
     skip_std_references: bool,
     /// search other files for references
@@ -399,13 +391,12 @@ pub fn callsiteReferences(
     errdefer builder.deinit();
 
     const curr_handle = decl_handle.handle;
-    if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
-    try builder.collectReferences(curr_handle, 0);
+    try builder.collectReferences(curr_handle, .root);
 
     if (!workspace) return builder.callsites;
 
-    try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get_or_load);
+    try gatherReferences(allocator, analyser, curr_handle, skip_std_references, false, &builder, .get_or_load);
 
     return builder.callsites;
 }

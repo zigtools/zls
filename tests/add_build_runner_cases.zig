@@ -4,8 +4,8 @@ pub fn addCases(
     b: *std.Build,
     test_step: *std.Build.Step,
     test_filters: []const []const u8,
+    build_runner: std.Build.LazyPath,
 ) void {
-    const build_runner = b.path("src/build_runner/master.zig");
     const cases_dir = b.path("tests/build_runner_cases");
     const cases_path_from_root = b.pathFromRoot("tests/build_runner_cases");
 

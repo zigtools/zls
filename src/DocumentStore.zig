@@ -28,7 +28,11 @@ cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?lsp.AnyTransport = null,
-supports_work_done_progress: bool = false,
+lsp_capabilities: struct {
+    supports_work_done_progress: bool = false,
+    supports_semantic_tokens_refresh: bool = false,
+    supports_inlay_hints_refresh: bool = false,
+} = .{},
 
 pub const Uri = []const u8;
 
@@ -482,7 +486,7 @@ pub const Handle = struct {
                     const tracy_zone_inner = tracy.traceNamed(@src(), "ZonGen.generate");
                     defer tracy_zone_inner.end();
 
-                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree);
+                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree, .{});
                     errdefer zoir.deinit(self.impl.allocator);
 
                     self.impl.zoir = zoir;
@@ -851,7 +855,7 @@ fn sendMessageToClient(allocator: std.mem.Allocator, transport: lsp.AnyTransport
 }
 
 fn notifyBuildStart(self: *DocumentStore) void {
-    if (!self.supports_work_done_progress) return;
+    if (!self.lsp_capabilities.supports_work_done_progress) return;
 
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
@@ -895,7 +899,7 @@ fn notifyBuildStart(self: *DocumentStore) void {
 const EndStatus = enum { success, failed };
 
 fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
-    if (!self.supports_work_done_progress) return;
+    if (!self.lsp_capabilities.supports_work_done_progress) return;
 
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
@@ -943,6 +947,31 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
     };
     build_file.setBuildConfig(build_config);
 
+    if (self.transport) |transport| {
+        if (self.lsp_capabilities.supports_semantic_tokens_refresh) {
+            sendMessageToClient(
+                self.allocator,
+                transport,
+                lsp.TypedJsonRPCRequest(?void){
+                    .id = .{ .string = "semantic_tokens_refresh" },
+                    .method = "workspace/semanticTokens/refresh",
+                    .params = @as(?void, null),
+                },
+            ) catch {};
+        }
+        if (self.lsp_capabilities.supports_inlay_hints_refresh) {
+            sendMessageToClient(
+                self.allocator,
+                transport,
+                lsp.TypedJsonRPCRequest(?void){
+                    .id = .{ .string = "inlay_hints_refresh" },
+                    .method = "workspace/inlayHint/refresh",
+                    .params = @as(?void, null),
+                },
+            ) catch {};
+        }
+    }
+
     // Looks like a useless assignment, but alters deffered onEnd
     end_status = .success;
 }
@@ -971,7 +1000,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
         try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
     }
 
-    while (queue.popOrNull()) |uri| {
+    while (queue.pop()) |uri| {
         const handle_index = self.handles.getIndex(uri) orelse continue;
         if (reachable.isSet(handle_index)) continue;
         reachable.set(handle_index);
@@ -1588,6 +1617,34 @@ pub fn collectIncludeDirs(
     return collected_all;
 }
 
+/// returns `true` if all c macro definitions could be collected
+/// may return `false` because macros from a build.zig may not have been resolved already
+/// **Thread safe** takes a shared lock
+pub fn collectCMacros(
+    store: *DocumentStore,
+    allocator: std.mem.Allocator,
+    handle: *Handle,
+    c_macros: *std.ArrayListUnmanaged([]const u8),
+) !bool {
+    const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
+        .none => true,
+        .unresolved => false,
+        .resolved => |build_file_uri| blk: {
+            const build_file = store.getBuildFile(build_file_uri).?;
+            const build_config = build_file.tryLockConfig() orelse break :blk false;
+            defer build_file.unlockConfig();
+
+            try c_macros.ensureUnusedCapacity(allocator, build_config.c_macros.len);
+            for (build_config.c_macros) |c_macro| {
+                c_macros.appendAssumeCapacity(try allocator.dupe(u8, c_macro));
+            }
+            break :blk true;
+        },
+    };
+
+    return collected_all;
+}
+
 /// returns the document behind `@cImport()` where `node` is the `cImport` node
 /// if a cImport can't be translated e.g. requires computing a
 /// comptime value `resolveCImport` will return null
@@ -1632,10 +1689,24 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         return null;
     };
 
+    var c_macros: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer {
+        for (c_macros.items) |c_macro| {
+            self.allocator.free(c_macro);
+        }
+        c_macros.deinit(self.allocator);
+    }
+
+    const collected_all_c_macros = self.collectCMacros(self.allocator, handle, &c_macros) catch |err| {
+        log.err("failed to resolve include paths: {}", .{err});
+        return null;
+    };
+
     const maybe_result = translate_c.translate(
         self.allocator,
         self.config,
         include_dirs.items,
+        c_macros.items,
         source,
     ) catch |err| switch (err) {
         error.OutOfMemory => |e| return e,
@@ -1646,7 +1717,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     };
     var result = maybe_result orelse return null;
 
-    if (result == .failure and !collected_all_include_dirs) {
+    if (result == .failure and (!collected_all_include_dirs or !collected_all_c_macros)) {
         result.deinit(self.allocator);
         return null;
     }

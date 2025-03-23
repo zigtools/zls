@@ -8,7 +8,7 @@ const build_options = @import("build_options");
 ///
 /// The GitHub matrix in `.github\workflows\build_runner.yml` should be updated to check Zig master with the latest build runner file.
 pub const BuildRunnerVersion = enum {
-    master,
+    @"0.14.0",
 
     pub fn isTaggedRelease(version: BuildRunnerVersion) bool {
         return !@hasField(BuildRunnerVersion, "master") or version != .master;

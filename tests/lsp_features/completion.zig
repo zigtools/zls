@@ -202,15 +202,6 @@ test "assign destructure" {
     });
     try testCompletion(
         \\test {
-        \\    const S, const E = .{struct{}, enum{}};
-        \\    <cursor>
-        \\}
-    , &.{
-        .{ .label = "S", .kind = .Struct, .detail = "type" },
-        .{ .label = "E", .kind = .Enum, .detail = "type" },
-    });
-    try testCompletion(
-        \\test {
         \\    var foo: u32 = undefined;
         \\    foo, const bar: u64, var baz = [_]u32{1, 2, 3};
         \\    <cursor>
@@ -570,6 +561,7 @@ test "pointer deref" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "u32" },
+        .{ .label = "?", .kind = .Operator, .detail = "[*c]u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
@@ -592,6 +584,7 @@ test "pointer deref" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "*", .kind = .Operator, .detail = "S" },
+        .{ .label = "?", .kind = .Operator, .detail = "[*c]S" },
     });
 }
 
@@ -821,6 +814,29 @@ test "array type" {
         \\const foo = [3]u32;
         \\const bar = foo.<cursor>
     , &.{});
+}
+
+test "tuple fields" {
+    try testCompletion(
+        \\fn foo() void {
+        \\    var a: f32 = 0;
+        \\    var b: i64 = 1;
+        \\    const foo = .{ b, a };
+        \\    const bar = foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "@\"0\"", .kind = .Field, .detail = "i64" },
+        .{ .label = "@\"1\"", .kind = .Field, .detail = "f32" },
+    });
+    try testCompletion(
+        \\fn foo() void {
+        \\    const foo: struct { i64, f32 } = .{ 1, 0 };
+        \\    const bar = foo.<cursor>
+        \\}
+    , &.{
+        .{ .label = "@\"0\"", .kind = .Field, .detail = "i64" },
+        .{ .label = "@\"1\"", .kind = .Field, .detail = "f32" },
+    });
 }
 
 test "if/for/while/catch scopes" {
@@ -1546,18 +1562,22 @@ test "decl literal" {
         \\    field: u32,
         \\
         \\    pub const foo: error{OutOfMemory}!S = .{};
-        \\    var bar: @This() = .{};
-        \\    var baz: u32 = .{};
+        \\    const bar: *const S = &.{};
+        \\    var baz: @This() = .{};
+        \\    var qux: u32 = .{};
         \\
         \\    fn init() ?S {}
+        \\    fn create() !*S {}
         \\    fn func() void {}
         \\};
         \\const s: S = .<cursor>;
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Constant },
-        .{ .label = "bar", .kind = .Struct },
+        .{ .label = "bar", .kind = .Constant },
+        .{ .label = "baz", .kind = .Struct },
         .{ .label = "init", .kind = .Function, .detail = "fn () ?S" },
+        .{ .label = "create", .kind = .Function, .detail = "fn () !*S" },
     });
 }
 
@@ -3580,6 +3600,16 @@ test "insert replace behaviour - struct literal" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = ",
+        .expected_replace_line = "const foo: S = .{ .alpha = ",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
         \\const foo: S = .<cursor>
         ,
         .label = "alpha",
@@ -3594,6 +3624,39 @@ test "insert replace behaviour - struct literal" {
         .label = "alpha",
         .expected_insert_line = "const foo: S = .{ .alpha = $1 }$0",
         .expected_replace_line = "const foo: S = .{ .alpha = $1 }$0",
+        .enable_snippets = true,
+    });
+}
+
+test "insert replace behaviour - struct literal - check for equal sign" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor> = 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha = 5 };",
+        .expected_replace_line = "const foo: S = .{ .alpha = 5 };",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ . <cursor> = 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ . alpha = 5 };",
+        .expected_replace_line = "const foo: S = .{ . alpha = 5 };",
+        .enable_snippets = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = .{ .<cursor>= 5 };
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: S = .{ .alpha= 5 };",
+        .expected_replace_line = "const foo: S = .{ .alpha= 5 };",
         .enable_snippets = true,
     });
 }
@@ -3897,8 +3960,7 @@ fn testCompletionWithOptions(
         }
 
         blk: {
-            const actual_deprecated =
-                if (actual_completion.tags) |tags|
+            const actual_deprecated = if (actual_completion.tags) |tags|
                 std.mem.indexOfScalar(types.CompletionItemTag, tags, .Deprecated) != null
             else
                 false;

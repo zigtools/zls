@@ -114,15 +114,11 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     };
     defer builder.deinit();
 
-    const token_tags = tree.tokens.items(.tag);
-    const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
-    for (token_tags, 0..) |tag, i| {
+    for (0..tree.tokens.len) |i| {
         const token: Ast.TokenIndex = @intCast(i);
-        switch (tag) {
+        switch (tree.tokenTag(token)) {
             .doc_comment,
             .container_doc_comment,
             => {
@@ -147,10 +143,10 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     // TODO add folding range for top level `@Import()`
 
-    for (node_tags, 0..) |node_tag, i| {
-        const node: Ast.Node.Index = @intCast(i);
+    for (0..tree.nodes.len) |i| {
+        const node: Ast.Node.Index = @enumFromInt(i);
 
-        switch (node_tag) {
+        switch (tree.nodeTag(node)) {
             .root => continue,
             // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
 
@@ -171,7 +167,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
                 const list_start_tok = fn_proto.lparen;
                 const last_param_tok = ast.paramLastToken(tree, last_param orelse continue);
-                const param_has_comma = last_param_tok + 1 < tree.tokens.len and token_tags[last_param_tok + 1] == .comma;
+                const param_has_comma = last_param_tok + 1 < tree.tokens.len and tree.tokenTag(last_param_tok + 1) == .comma;
                 const list_end_tok = last_param_tok + @intFromBool(param_has_comma);
 
                 try builder.add(null, list_start_tok, list_end_tok, .exclusive, .inclusive);
@@ -187,7 +183,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             .@"switch",
             .switch_comma,
             => {
-                const lhs = tree.nodes.items(.data)[node].lhs;
+                const lhs = tree.nodeData(node).node_and_extra[0];
                 const start_tok = ast.lastToken(tree, lhs) + 2; // lparen + rbrace
                 const end_tok = ast.lastToken(tree, node);
                 try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
@@ -204,7 +200,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     const last_value = switch_case.values[switch_case.values.len - 1];
 
                     const last_token = ast.lastToken(tree, last_value);
-                    const last_value_has_comma = last_token + 1 < tree.tokens.len and token_tags[last_token + 1] == .comma;
+                    const last_value_has_comma = last_token + 1 < tree.tokens.len and tree.tokenTag(last_token + 1) == .comma;
 
                     const start_tok = tree.firstToken(first_value);
                     const end_tok = last_token + @intFromBool(last_value_has_comma);
@@ -231,8 +227,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     const first_member = container_decl.ast.members[0];
                     var start_tok = tree.firstToken(first_member) -| 1;
                     while (start_tok != 0 and
-                        (token_tags[start_tok] == .doc_comment or
-                        token_tags[start_tok] == .container_doc_comment))
+                        (tree.tokenTag(start_tok) == .doc_comment or tree.tokenTag(start_tok) == .container_doc_comment))
                     {
                         start_tok -= 1;
                     }
@@ -240,7 +235,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 } else { // no members (yet), ie `const T = type {};`
                     var start_tok = tree.firstToken(node);
-                    while (token_tags[start_tok] != .l_brace) start_tok += 1;
+                    while (tree.tokenTag(start_tok) != .l_brace) start_tok += 1;
                     const end_tok = ast.lastToken(tree, node);
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 }
@@ -255,7 +250,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             .async_call_one,
             .async_call_one_comma,
             => {
-                const lparen = main_tokens[node];
+                const lparen = tree.nodeMainToken(node);
                 try builder.add(null, lparen, ast.lastToken(tree, node), .exclusive, .exclusive);
             },
 
@@ -304,7 +299,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
         if (std.mem.startsWith(u8, tree.source[possible_region..], "//#region")) {
             try stack.append(allocator, possible_region);
         } else if (std.mem.startsWith(u8, tree.source[possible_region..], "//#endregion")) {
-            const start_index = stack.popOrNull() orelse break; // null means there are more endregions than regions
+            const start_index = stack.pop() orelse break; // null means there are more endregions than regions
             const end_index = offsets.lineLocAtIndex(tree.source, possible_region).end;
             const is_same_line = std.mem.indexOfScalar(u8, tree.source[start_index..end_index], '\n') == null;
             if (is_same_line) continue;

@@ -72,16 +72,18 @@ pub fn getSignatureInfo(
     const document_scope = try handle.getDocumentScope();
     const innermost_block = Analyser.innermostBlockScope(document_scope, absolute_index);
     const tree = handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     // Use the innermost scope to determine the earliest token we would need
     //   to scan up to find a function or builtin call
     const first_token = tree.firstToken(innermost_block);
     // We start by finding the token that includes the current cursor position
     const last_token = blk: {
-        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index);
-        switch (token_tags[last_token]) {
+        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index).preferRight(&tree);
+        // Determine whether index is after the token
+        const passed = tree.tokenStart(last_token) < absolute_index;
+        switch (tree.tokenTag(last_token)) {
             .l_brace, .l_paren, .l_bracket => break :blk last_token,
+            .comma => break :blk if (passed) last_token else last_token -| 1,
             else => break :blk last_token -| 1,
         }
     };
@@ -120,10 +122,10 @@ pub fn getSignatureInfo(
     var comma_stack: std.ArrayListUnmanaged(u32) = try .initCapacity(arena, 4);
     var curr_token = last_token;
     while (curr_token >= first_token and curr_token != 0) : (curr_token -= 1) {
-        switch (token_tags[curr_token]) {
+        switch (tree.tokenTag(curr_token)) {
             .comma => curr_commas += 1,
             .l_brace => {
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {
@@ -140,7 +142,7 @@ pub fn getSignatureInfo(
                 try symbol_stack.append(arena, .l_brace);
             },
             .l_bracket => {
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {
@@ -158,7 +160,7 @@ pub fn getSignatureInfo(
             },
             .l_paren => {
                 const paren_commas = curr_commas;
-                curr_commas = comma_stack.popOrNull() orelse 0;
+                curr_commas = comma_stack.pop() orelse 0;
                 if (symbol_stack.items.len != 0) {
                     const peek_sym = symbol_stack.items[symbol_stack.items.len - 1];
                     switch (peek_sym) {
@@ -178,7 +180,7 @@ pub fn getSignatureInfo(
                     return null;
 
                 const expr_last_token = curr_token - 1;
-                if (token_tags[expr_last_token] == .builtin) {
+                if (tree.tokenTag(expr_last_token) == .builtin) {
                     // Builtin token, find the builtin and construct signature information.
                     const builtin = data.builtins.get(tree.tokenSlice(expr_last_token)) orelse return null;
                     const param_infos = try arena.alloc(
@@ -207,21 +209,21 @@ pub fn getSignatureInfo(
                 var i = expr_last_token;
                 const expr_first_token = while (i > first_token) : (i -= 1) {
                     switch (state) {
-                        .in_bracket => |*count| if (token_tags[i] == .r_bracket) {
+                        .in_bracket => |*count| if (tree.tokenTag(i) == .r_bracket) {
                             count.* += 1;
-                        } else if (token_tags[i] == .l_bracket) {
+                        } else if (tree.tokenTag(i) == .l_bracket) {
                             count.* -= 1;
                             if (count.* == 0)
                                 state = .any;
                         },
-                        .in_paren => |*count| if (token_tags[i] == .r_paren) {
+                        .in_paren => |*count| if (tree.tokenTag(i) == .r_paren) {
                             count.* += 1;
-                        } else if (token_tags[i] == .l_paren) {
+                        } else if (tree.tokenTag(i) == .l_paren) {
                             count.* -= 1;
                             if (count.* == 0)
                                 state = .any;
                         },
-                        .any => switch (token_tags[i]) {
+                        .any => switch (tree.tokenTag(i)) {
                             .r_bracket => state = .{ .in_bracket = 1 },
                             .r_paren => state = .{ .in_paren = 1 },
                             .identifier,
@@ -240,7 +242,7 @@ pub fn getSignatureInfo(
 
                 var loc = offsets.tokensToLoc(tree, expr_first_token, expr_last_token);
 
-                var ty = switch (tree.tokens.items(.tag)[expr_first_token]) {
+                var ty = switch (tree.tokenTag(expr_first_token)) {
                     .period => blk: { // decl literal
                         loc.start += 1;
                         const decl = try analyser.getSymbolEnumLiteral(

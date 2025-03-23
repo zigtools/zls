@@ -10,20 +10,17 @@ const dmp: DiffMatchPatch = .{
     .diff_timeout = 250,
 };
 
-pub const Error = error{OutOfMemory};
-
 pub fn edits(
     allocator: std.mem.Allocator,
     before: []const u8,
     after: []const u8,
     encoding: offsets.Encoding,
-) Error!std.ArrayListUnmanaged(types.TextEdit) {
+) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var arena: std.heap.ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-    const diffs = try dmp.diff(arena.allocator(), before, after, true);
+    var diffs = try dmp.diff(allocator, before, after, true);
+    defer DiffMatchPatch.deinitDiffList(allocator, &diffs);
 
     var edit_count: usize = 0;
     for (diffs.items) |diff| {
@@ -34,8 +31,7 @@ pub fn edits(
         }
     }
 
-    var eds: std.ArrayListUnmanaged(types.TextEdit) = .empty;
-    try eds.ensureTotalCapacity(allocator, edit_count);
+    var eds: std.ArrayListUnmanaged(types.TextEdit) = try .initCapacity(allocator, edit_count);
     errdefer {
         for (eds.items) |edit| allocator.free(edit.newText);
         eds.deinit(allocator);

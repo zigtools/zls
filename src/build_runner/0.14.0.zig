@@ -1,17 +1,16 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
 //! This build runner is targeting compatibility with the following Zig versions:
-//!   - master (0.14.0-dev.2046+b8795b4d0 and later)
+//!   - 0.14.0
 //!
 //! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
-//! As an example, see how `child_type_coercion_version` is used to deal with breaking changes.
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
-//! `zig build --build-runner src/build_runner/master.zig`
+//! `zig build --build-runner src/build_runner/0.14.0.zig`
 //!
 //! You can also test the build runner on any other `build.zig` with the following command:
-//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/master.zig`
-//! `zig build --build-runner /path/to/zls/src/build_runner/master.zig` (if the cwd contains build.zig)
+//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/0.14.0.zig`
+//! `zig build --build-runner /path/to/zls/src/build_runner/0.14.0.zig` (if the cwd contains build.zig)
 //!
 
 const root = @import("@build");
@@ -22,17 +21,11 @@ const mem = std.mem;
 const process = std.process;
 const ArrayList = std.ArrayList;
 const Step = std.Build.Step;
-const Watch = std.Build.Watch;
 const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
 
 // ----------- List of Zig versions that introduced breaking changes -----------
-
-const child_type_coercion_version =
-    std.SemanticVersion.parse("0.14.0-dev.2506+32354d119") catch unreachable;
-const accept_root_module_version =
-    std.SemanticVersion.parse("0.14.0-dev.2534+12d64c456") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -317,9 +310,7 @@ pub fn main() !void {
         var prog_node = main_progress_node.start("Configure", 0);
         defer prog_node.end();
         try builder.runBuild(root);
-        if (comptime builtin.zig_version.order(accept_root_module_version) != .lt) {
-            createModuleDependencies(builder) catch @panic("OOM");
-        }
+        createModuleDependencies(builder) catch @panic("OOM");
     }
 
     if (graph.needed_lazy_dependencies.entries.len != 0) {
@@ -384,18 +375,22 @@ pub fn main() !void {
         return;
     }
 
-    const suicide_thread = try std.Thread.spawn(.{}, struct {
-        fn do() void {
-            _ = std.io.getStdIn().reader().readByte() catch process.exit(1);
-            process.exit(0);
-        }
-    }.do, .{});
-    suicide_thread.detach();
-
-    if (!shared.isBuildOnSaveSupportedComptime()) return;
-    if (!shared.isBuildOnSaveSupportedRuntime(builtin.zig_version)) return;
-
     var w = try Watch.init();
+
+    const message_thread = try std.Thread.spawn(.{}, struct {
+        fn do(ww: *Watch) void {
+            while (std.io.getStdIn().reader().readByte()) |tag| {
+                switch (tag) {
+                    '\x00' => ww.trigger(),
+                    else => process.exit(1),
+                }
+            } else |err| switch (err) {
+                error.EndOfStream => process.exit(0),
+                else => process.exit(1),
+            }
+        }
+    }.do, .{&w});
+    message_thread.detach();
 
     const gpa = arena;
     var transport = Transport.init(.{
@@ -436,7 +431,7 @@ pub fn main() !void {
         // if any more events come in. After the debounce interval has passed,
         // trigger a rebuild on all steps with modified inputs, as well as their
         // recursive dependants.
-        var debounce_timeout: Watch.Timeout = .none;
+        var debounce_timeout: std.Build.Watch.Timeout = .none;
         while (true) switch (try w.wait(gpa, debounce_timeout)) {
             .timeout => {
                 markFailedStepsDirty(gpa, step_stack.keys());
@@ -462,6 +457,57 @@ fn markFailedStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
         else => continue,
     };
 }
+
+/// A wrapper around `std.Build.Watch` that supports manually triggering recompilations.
+const Watch = struct {
+    fs_watch: std.Build.Watch,
+    supports_fs_watch: bool,
+    manual_event: std.Thread.ResetEvent,
+    steps: []const *Step,
+
+    fn init() !Watch {
+        return .{
+            .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init() else {},
+            .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
+            .manual_event = .{},
+            .steps = &.{},
+        };
+    }
+
+    fn update(w: *Watch, gpa: Allocator, steps: []const *Step) !void {
+        if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
+            return try w.fs_watch.update(gpa, steps);
+        }
+        w.steps = steps;
+    }
+
+    fn trigger(w: *Watch) void {
+        if (w.supports_fs_watch) {
+            @panic("received manualy filesystem event even though std.Build.Watch is supported");
+        }
+        w.manual_event.set();
+    }
+
+    fn wait(w: *Watch, gpa: Allocator, timeout: std.Build.Watch.Timeout) !std.Build.Watch.WaitResult {
+        if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
+            return try w.fs_watch.wait(gpa, timeout);
+        }
+        switch (timeout) {
+            .none => w.manual_event.wait(),
+            .ms => |ms| w.manual_event.timedWait(@as(u64, ms) * std.time.ns_per_ms) catch return .timeout,
+        }
+        w.manual_event.reset();
+        markStepsDirty(gpa, w.steps);
+        return .dirty;
+    }
+
+    fn markStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
+        for (all_steps) |step| switch (step.state) {
+            .precheck_done => continue,
+            else => step.recursiveReset(gpa),
+        };
+    }
+};
 
 const Run = struct {
     max_rss: u64,
@@ -768,25 +814,20 @@ fn workerMakeOneStep(
     }
 }
 
-const ArgsType = if (builtin.zig_version.order(child_type_coercion_version) == .lt)
-    [][:0]const u8
-else
-    []const [:0]const u8;
-
-fn nextArg(args: ArgsType, idx: *usize) ?[:0]const u8 {
+fn nextArg(args: []const [:0]const u8, idx: *usize) ?[:0]const u8 {
     if (idx.* >= args.len) return null;
     defer idx.* += 1;
     return args[idx.*];
 }
 
-fn nextArgOrFatal(args: ArgsType, idx: *usize) [:0]const u8 {
+fn nextArgOrFatal(args: []const [:0]const u8, idx: *usize) [:0]const u8 {
     return nextArg(args, idx) orelse {
         std.debug.print("expected argument after '{s}'\n  access the help menu with 'zig build -h'\n", .{args[idx.* - 1]});
         process.exit(1);
     };
 }
 
-fn argsRest(args: ArgsType, idx: usize) ?ArgsType {
+fn argsRest(args: []const [:0]const u8, idx: usize) ?[]const [:0]const u8 {
     if (idx >= args.len) return null;
     return args[idx..];
 }
@@ -983,7 +1024,7 @@ fn extractBuildInformation(
             stack.appendAssumeCapacity(&tls.step);
         }
 
-        while (stack.popOrNull()) |step| {
+        while (stack.pop()) |step| {
             const gop = try steps.getOrPut(gpa, step);
             if (gop.found_existing) continue;
 
@@ -1037,13 +1078,19 @@ fn extractBuildInformation(
             name: []const u8,
             packages: *Packages,
             include_dirs: *std.StringArrayHashMapUnmanaged(void),
+            c_macros: *std.StringArrayHashMapUnmanaged(void),
         ) !void {
             if (module.root_source_file) |root_source_file| {
                 _ = try packages.addPackage(name, root_source_file.getPath(module.owner));
             }
 
             if (compile) |exe| {
-                try processPkgConfig(allocator, include_dirs, exe);
+                try processPkgConfig(allocator, include_dirs, c_macros, exe);
+            }
+
+            try c_macros.ensureUnusedCapacity(allocator, module.c_macros.items.len);
+            for (module.c_macros.items) |c_macro| {
+                c_macros.putAssumeCapacity(c_macro, {});
             }
 
             for (module.include_dirs.items) |include_dir| {
@@ -1088,15 +1135,8 @@ fn extractBuildInformation(
     var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
     defer step_dependencies.deinit(gpa);
 
-    const DependencyItem = struct {
-        compile: ?*std.Build.Step.Compile,
-        module: *std.Build.Module,
-    };
-
-    var dependency_set: std.AutoArrayHashMapUnmanaged(DependencyItem, []const u8) = .{};
-    defer dependency_set.deinit(gpa);
-
-    if (comptime builtin.zig_version.order(accept_root_module_version) != .lt) {
+    // collect step dependencies
+    {
         var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .{};
         defer modules.deinit(gpa);
 
@@ -1119,46 +1159,6 @@ fn extractBuildInformation(
         for (modules.keys()) |module| {
             try helper.addModuleDependencies(gpa, &step_dependencies, module);
         }
-    } else {
-        var dependency_iterator: std.Build.Module.DependencyIterator = .{
-            .allocator = gpa,
-            .index = 0,
-            .set = .{},
-            .chase_dyn_libs = true,
-        };
-        defer dependency_iterator.deinit();
-
-        // collect root modules of `Step.Compile`
-        for (steps.keys()) |step| {
-            const compile = step.cast(Step.Compile) orelse continue;
-
-            dependency_iterator.set.ensureUnusedCapacity(arena, compile.root_module.import_table.count() + 1) catch @panic("OOM");
-            dependency_iterator.set.putAssumeCapacity(.{
-                .module = &compile.root_module,
-                .compile = compile,
-            }, "root");
-        }
-
-        // collect public modules
-        for (b.modules.values()) |module| {
-            dependency_iterator.set.ensureUnusedCapacity(gpa, module.import_table.count() + 1) catch @panic("OOM");
-            dependency_iterator.set.putAssumeCapacity(.{
-                .module = module,
-                .compile = null,
-            }, "root");
-        }
-
-        var dependency_items: std.ArrayListUnmanaged(std.Build.Module.DependencyIterator.Item) = .{};
-        defer dependency_items.deinit(gpa);
-
-        // collect all dependencies
-        while (dependency_iterator.next()) |item| {
-            try helper.addModuleDependencies(gpa, &step_dependencies, item.module);
-            _ = try dependency_set.fetchPut(gpa, .{
-                .module = item.module,
-                .compile = item.compile,
-            }, item.name);
-        }
     }
 
     prepare(gpa, b, &step_dependencies, run, seed) catch |err| switch (err) {
@@ -1177,37 +1177,31 @@ fn extractBuildInformation(
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(gpa);
 
+    var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
+    defer c_macros.deinit(gpa);
+
     var packages: Packages = .{ .allocator = gpa };
     defer packages.deinit();
 
     // extract packages and include paths
-    if (comptime builtin.zig_version.order(accept_root_module_version) == .lt) {
-        for (dependency_set.keys(), dependency_set.values()) |item, name| {
-            try helper.processItem(gpa, item.module, item.compile, name, &packages, &include_dirs);
-            for (item.module.import_table.keys(), item.module.import_table.values()) |import_name, import| {
-                if (import.root_source_file) |root_source_file| {
-                    _ = try packages.addPackage(import_name, root_source_file.getPath(item.module.owner));
-                }
-            }
-        }
-    } else {
+    {
         for (steps.keys()) |step| {
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
-            try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs);
+            try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
                 for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs);
+                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
             }
         }
 
         for (b.modules.values()) |root_module| {
             const graph = root_module.getGraph();
-            try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs);
+            try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
                 for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs);
+                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
             }
         }
@@ -1257,6 +1251,7 @@ fn extractBuildInformation(
             .include_dirs = include_dirs.keys(),
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = available_options,
+            .c_macros = c_macros.keys(),
         },
         .{
             .whitespace = .indent_2,
@@ -1268,6 +1263,7 @@ fn extractBuildInformation(
 fn processPkgConfig(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    c_macros: *std.StringArrayHashMapUnmanaged(void),
     exe: *Step.Compile,
 ) !void {
     for (exe.root_module.link_objects.items) |link_object| {
@@ -1276,7 +1272,7 @@ fn processPkgConfig(
 
         if (system_lib.use_pkg_config == .no) continue;
 
-        getPkgConfigIncludes(allocator, include_dirs, exe, system_lib.name) catch |err| switch (err) {
+        const args = copied_from_zig.runPkgConfig(exe, system_lib.name) catch |err| switch (err) {
             error.PkgConfigInvalidOutput,
             error.PkgConfigCrashed,
             error.PkgConfigFailed,
@@ -1285,31 +1281,25 @@ fn processPkgConfig(
             => switch (system_lib.use_pkg_config) {
                 .yes => {
                     // pkg-config failed, so zig will not add any include paths
+                    continue;
                 },
                 .force => {
                     std.log.warn("pkg-config failed for library {s}", .{system_lib.name});
+                    continue;
                 },
                 .no => unreachable,
             },
             else => |e| return e,
         };
-    }
-}
-
-fn getPkgConfigIncludes(
-    allocator: std.mem.Allocator,
-    include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *Step.Compile,
-    name: []const u8,
-) !void {
-    if (copied_from_zig.runPkgConfig(exe, name)) |args| {
         for (args) |arg| {
             if (std.mem.startsWith(u8, arg, "-I")) {
                 const candidate = arg[2..];
                 try include_dirs.put(allocator, candidate, {});
+            } else if (std.mem.startsWith(u8, arg, "-D")) {
+                try c_macros.put(allocator, arg, {});
             }
         }
-    } else |err| return err;
+    }
 }
 
 // TODO: Having a copy of this is not very nice

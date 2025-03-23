@@ -19,17 +19,19 @@ pub const Builder = struct {
     offset_encoding: offsets.Encoding,
     only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
 
+    actions: std.ArrayListUnmanaged(types.CodeAction) = .empty,
+    fixall_text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty,
+
     pub fn generateCodeAction(
         builder: *Builder,
         error_bundle: std.zig.ErrorBundle,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
         var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .empty;
 
-        try handleUnorganizedImport(builder, actions);
+        try handleUnorganizedImport(builder);
 
         if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
         for (error_bundle.getMessages()) |msg_index| {
@@ -47,26 +49,34 @@ pub const Builder = struct {
 
             switch (kind) {
                 .unused => |id| switch (id) {
-                    .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
-                    .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                    .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                    .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                    .@"function parameter" => try handleUnusedFunctionParameter(builder, loc),
+                    .@"local constant" => try handleUnusedVariableOrConstant(builder, loc),
+                    .@"local variable" => try handleUnusedVariableOrConstant(builder, loc),
+                    .@"switch tag capture", .capture => try handleUnusedCapture(builder, loc, &remove_capture_actions),
                 },
-                .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
-                .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
+                .non_camelcase_fn => try handleNonCamelcaseFunction(builder, loc),
+                .pointless_discard => try handlePointlessDiscard(builder, loc),
                 .omit_discard => |id| switch (id) {
                     .@"error capture; omit it instead" => {},
-                    .@"error capture" => try handleUnusedCapture(builder, actions, loc, &remove_capture_actions),
+                    .@"error capture" => try handleUnusedCapture(builder, loc, &remove_capture_actions),
                 },
                 // the undeclared identifier may be a discard
-                .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
+                .undeclared_identifier => try handlePointlessDiscard(builder, loc),
                 .unreachable_code => {
                     // TODO
                     // autofix: comment out code
                     // fix: remove code
                 },
-                .var_never_mutated => try handleVariableNeverMutated(builder, actions, loc),
+                .var_never_mutated => try handleVariableNeverMutated(builder, loc),
             }
+        }
+
+        if (builder.fixall_text_edits.items.len != 0) {
+            try builder.actions.append(builder.arena, .{
+                .title = "apply fixall",
+                .kind = .@"source.fixAll",
+                .edit = try builder.createWorkspaceEdit(builder.fixall_text_edits.items),
+            });
         }
     }
 
@@ -79,30 +89,28 @@ pub const Builder = struct {
     pub fn generateCodeActionsInRange(
         builder: *Builder,
         range: types.Range,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
     ) error{OutOfMemory}!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
         const tree = builder.handle.tree;
-        const token_tags = tree.tokens.items(.tag);
 
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
         const ctx = try Analyser.getPositionContext(builder.arena, builder.handle.tree, source_index, true);
         if (ctx != .string_literal) return;
 
-        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index);
+        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, &tree) orelse return;
 
         // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
-        switch (token_tags[token_idx]) {
+        switch (tree.tokenTag(token_idx)) {
             .string_literal, .multiline_string_literal_line => {},
             else => token_idx -|= 1,
         }
 
-        switch (token_tags[token_idx]) {
-            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx, actions),
-            .string_literal => try generateStringLiteralCodeActions(builder, token_idx, actions),
+        switch (tree.tokenTag(token_idx)) {
+            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
+            .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
             else => {},
         }
     }
@@ -128,21 +136,20 @@ pub const Builder = struct {
 pub fn generateStringLiteralCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (!builder.wantKind(.refactor)) return;
 
-    const tags = builder.handle.tree.tokens.items(.tag);
-    switch (tags[token -| 1]) {
+    const tree = builder.handle.tree;
+    switch (tree.tokenTag(token -| 1)) {
         // Not covered by position context
         .keyword_test, .keyword_extern => return,
         else => {},
     }
 
-    const token_text = offsets.tokenToSlice(builder.handle.tree, token); // Includes quotes
+    const token_text = offsets.tokenToSlice(tree, token); // Includes quotes
     const parsed = std.zig.string_literal.parseAlloc(builder.arena, token_text) catch |err| switch (err) {
         error.InvalidLiteral => return,
         else => |other| return other,
@@ -160,8 +167,8 @@ pub fn generateStringLiteralCodeActions(
     result.appendSliceAssumeCapacity(with_slashes);
     result.appendAssumeCapacity('\n');
 
-    const loc = offsets.tokenToLoc(builder.handle.tree, token);
-    try actions.append(builder.arena, .{
+    const loc = offsets.tokenToLoc(tree, token);
+    try builder.actions.append(builder.arena, .{
         .title = "convert to a multiline string literal",
         .kind = .refactor,
         .isPreferred = false,
@@ -172,25 +179,24 @@ pub fn generateStringLiteralCodeActions(
 pub fn generateMultilineStringCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (!builder.wantKind(.refactor)) return;
 
-    const token_tags = builder.handle.tree.tokens.items(.tag);
-    std.debug.assert(.multiline_string_literal_line == token_tags[token]);
+    const tree = builder.handle.tree;
+    std.debug.assert(.multiline_string_literal_line == tree.tokenTag(token));
     // Collect (exclusive) token range of the literal (one token per literal line)
-    const start = if (std.mem.lastIndexOfNone(Token.Tag, token_tags[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
-    const end = std.mem.indexOfNonePos(Token.Tag, token_tags, token, &.{.multiline_string_literal_line}) orelse token_tags.len;
+    const start = if (std.mem.lastIndexOfNone(Token.Tag, tree.tokens.items(.tag)[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
+    const end = std.mem.indexOfNonePos(Token.Tag, tree.tokens.items(.tag), token, &.{.multiline_string_literal_line}) orelse tree.tokens.len;
 
     // collect the text in the literal
     const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
     var str_escaped: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, 2 * (loc.end - loc.start));
     str_escaped.appendAssumeCapacity('"');
     for (start..end) |i| {
-        std.debug.assert(token_tags[i] == .multiline_string_literal_line);
+        std.debug.assert(tree.tokenTag(@intCast(i)) == .multiline_string_literal_line);
         const string_part = offsets.tokenToSlice(builder.handle.tree, @intCast(i));
         // Iterate without the leading \\
         for (string_part[2..]) |c| {
@@ -211,7 +217,7 @@ pub fn generateMultilineStringCodeActions(
 
     // Get Loc of the whole literal to delete it
     // Multiline string literal ends before the \n or \r, but it must be deleted too
-    const first_token_start = builder.handle.tree.tokens.items(.start)[start];
+    const first_token_start = builder.handle.tree.tokenStart(@intCast(start));
     const last_token_end = std.mem.indexOfNonePos(
         u8,
         builder.handle.tree.source,
@@ -220,7 +226,7 @@ pub fn generateMultilineStringCodeActions(
     ) orelse builder.handle.tree.source.len;
     const remove_loc: offsets.Loc = .{ .start = first_token_start, .end = last_token_end };
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "convert to a string literal",
         .kind = .refactor,
         .isPreferred = false,
@@ -246,9 +252,6 @@ pub fn collectAutoDiscardDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const token_tags = tree.tokens.items(.tag);
-    const token_starts = tree.tokens.items(.start);
-
     // search for the following pattern:
     // _ = some_identifier; // autofix
 
@@ -256,7 +259,7 @@ pub fn collectAutoDiscardDiagnostics(
     while (i < tree.tokens.len) {
         const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
             Token.Tag,
-            token_tags,
+            tree.tokens.items(.tag),
             i,
             &.{ .identifier, .equal, .identifier, .semicolon },
         ) orelse break);
@@ -268,7 +271,7 @@ pub fn collectAutoDiscardDiagnostics(
 
         if (!std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) continue;
 
-        const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, token_starts[semicolon_token] + 1, " ") orelse continue;
+        const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, tree.tokenStart(semicolon_token) + 1, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) continue;
         const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
@@ -284,7 +287,7 @@ pub fn collectAutoDiscardDiagnostics(
     }
 }
 
-fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -296,17 +299,15 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const new_text = try createCamelcaseText(builder.arena, identifier_name);
 
-    const action1: types.CodeAction = .{
+    try builder.actions.append(builder.arena, .{
         .title = "make function name camelCase",
         .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
-    };
-
-    try actions.append(builder.arena, action1);
+    });
 }
 
-fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -315,11 +316,6 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-    const node_datas = tree.nodes.items(.data);
-    const node_tokens = tree.nodes.items(.main_token);
-
-    const token_tags = tree.tokens.items(.tag);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -332,9 +328,9 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         else => return,
     };
 
-    std.debug.assert(node_tags[payload.func] == .fn_decl);
+    std.debug.assert(tree.nodeTag(payload.func) == .fn_decl);
 
-    const block = node_datas[payload.func].rhs;
+    const block = tree.nodeData(payload.func).node_and_node[1];
 
     // If we are on the "last parameter" that requires a discard, then we need to append a newline,
     // as well as any relevant indentations, such that the next line is indented to the same column.
@@ -351,29 +347,23 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const last_param_token = ast.paramLastToken(tree, fn_proto_param);
 
     const potential_comma_token = last_param_token + 1;
-    const found_comma = potential_comma_token < tree.tokens.len and token_tags[potential_comma_token] == .comma;
+    const found_comma = potential_comma_token < tree.tokens.len and tree.tokenTag(potential_comma_token) == .comma;
 
     const potential_r_paren_token = potential_comma_token + @intFromBool(found_comma);
-    const is_last_param = potential_r_paren_token < tree.tokens.len and token_tags[potential_r_paren_token] == .r_paren;
+    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokenTag(potential_r_paren_token) == .r_paren;
 
-    const insert_token = node_tokens[block];
-    const add_suffix_newline = is_last_param and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const insert_token = tree.nodeMainToken(block);
+    const add_suffix_newline = is_last_param and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
-    try actions.ensureUnusedCapacity(builder.arena, 2);
-
     if (builder.wantKind(.@"source.fixAll")) {
-        actions.insertAssumeCapacity(0, .{
-            .title = "discard function parameter",
-            .kind = .@"source.fixAll",
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-        });
+        try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
     }
 
     if (builder.wantKind(.quickfix)) {
+        // TODO add no `// autofix` comment
         // TODO fix formatting
-        actions.appendAssumeCapacity(.{
+        try builder.actions.append(builder.arena, .{
             .title = "remove function parameter",
             .kind = .quickfix,
             .isPreferred = false,
@@ -382,16 +372,15 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     }
 }
 
-fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!builder.wantKind(.@"source.fixAll")) return;
+    if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -408,21 +397,27 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const insert_token = ast.lastToken(tree, node) + 1;
 
     if (insert_token >= tree.tokens.len) return;
-    if (token_tags[insert_token] != .semicolon) return;
+    if (tree.tokenTag(insert_token) != .semicolon) return;
 
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, false);
 
-    try actions.append(builder.arena, .{
-        .title = "discard value",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-    });
+    if (builder.wantKind(.@"source.fixAll")) {
+        try builder.fixall_text_edits.append(builder.arena, builder.createTextEditPos(insert_index, new_text));
+    }
+
+    if (builder.wantKind(.quickfix)) {
+        // TODO add no `// autofix` comment
+        try builder.actions.append(builder.arena, .{
+            .title = "discard value",
+            .kind = .quickfix,
+            .isPreferred = true,
+            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
+        });
+    }
 }
 
 fn handleUnusedCapture(
     builder: *Builder,
-    actions: *std.ArrayListUnmanaged(types.CodeAction),
     loc: offsets.Loc,
     remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
 ) !void {
@@ -432,12 +427,11 @@ fn handleUnusedCapture(
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const tree = builder.handle.tree;
-    const token_tags = tree.tokens.items(.tag);
 
     const source = tree.source;
 
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start);
-    if (token_tags[identifier_token] != .identifier) return;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.identifier}, &tree) orelse return;
+    if (tree.tokenTag(identifier_token) != .identifier) return;
 
     const identifier_name = offsets.locToSlice(source, loc);
 
@@ -445,13 +439,12 @@ fn handleUnusedCapture(
     // https://github.com/ziglang/zig/pull/22209
     if (std.mem.eql(u8, identifier_name, "_")) return;
 
-    try actions.ensureUnusedCapacity(builder.arena, 3);
-
     if (builder.wantKind(.quickfix)) {
         const capture_loc = getCaptureLoc(source, loc) orelse return;
 
         const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
-        actions.appendAssumeCapacity(.{
+
+        try builder.actions.append(builder.arena, .{
             .title = "discard capture name",
             .kind = .quickfix,
             .isPreferred = false,
@@ -462,7 +455,7 @@ fn handleUnusedCapture(
         // search for a matching action by comparing ranges.
         const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
         if (!gop.found_existing) {
-            actions.appendAssumeCapacity(.{
+            try builder.actions.append(builder.arena, .{
                 .title = "remove capture",
                 .kind = .quickfix,
                 .isPreferred = false,
@@ -473,20 +466,25 @@ fn handleUnusedCapture(
 
     if (!builder.wantKind(.@"source.fixAll")) return;
 
-    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(Token.Tag, token_tags, identifier_token, .pipe) orelse return);
+    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(
+        Token.Tag,
+        tree.tokens.items(.tag),
+        identifier_token,
+        .pipe,
+    ) orelse return);
 
     var lbrace_token = capture_end + 1;
 
     // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
-    if (token_tags[capture_end + 1] == .colon) {
+    if (tree.tokenTag(capture_end + 1) == .colon) {
         var token_index = capture_end + 2;
-        if (token_index >= token_tags.len) return;
-        if (token_tags[token_index] != .l_paren) return;
+        if (token_index >= tree.tokens.len) return;
+        if (tree.tokenTag(token_index) != .l_paren) return;
         token_index += 1;
 
         var depth: u32 = 1;
         while (true) : (token_index += 1) {
-            const tag = token_tags[token_index];
+            const tag = tree.tokenTag(token_index);
             switch (tag) {
                 .eof => return,
                 .l_paren => {
@@ -506,43 +504,44 @@ fn handleUnusedCapture(
     }
 
     if (lbrace_token + 1 >= tree.tokens.len) return;
-    if (token_tags[lbrace_token] != .l_brace) return;
+    if (tree.tokenTag(lbrace_token) != .l_brace) return;
 
-    const is_last_capture = token_tags[identifier_token + 1] == .pipe;
+    const is_last_capture = tree.tokenTag(identifier_token + 1) == .pipe;
 
     const insert_token = lbrace_token;
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const add_suffix_newline = is_last_capture and token_tags[insert_token + 1] == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const add_suffix_newline = is_last_capture and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
     const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
 
-    actions.insertAssumeCapacity(0, .{
-        .title = "discard capture",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(insert_index, new_text)}),
-    });
+    try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
 }
 
-fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!builder.wantKind(.@"source.fixAll")) return;
+    if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const edit_loc = getDiscardLoc(builder.handle.tree.source, loc) orelse return;
 
-    try actions.append(builder.arena, .{
-        .title = "remove pointless discard",
-        .kind = .@"source.fixAll",
-        .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{
-            builder.createTextEditLoc(edit_loc, ""),
-        }),
-    });
+    if (builder.wantKind(.@"source.fixAll")) {
+        try builder.fixall_text_edits.append(builder.arena, builder.createTextEditLoc(edit_loc, ""));
+    }
+
+    if (builder.wantKind(.quickfix)) {
+        try builder.actions.append(builder.arena, .{
+            .title = "remove pointless discard",
+            .kind = .@"source.fixAll",
+            .isPreferred = true,
+            .edit = try builder.createWorkspaceEdit(&.{
+                builder.createTextEditLoc(edit_loc, ""),
+            }),
+        });
+    }
 }
 
-fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -559,7 +558,7 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
 
     if (!std.mem.eql(u8, offsets.locToSlice(source, var_keyword_loc), "var")) return;
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "use 'const'",
         .kind = .quickfix,
         .isPreferred = true,
@@ -569,7 +568,7 @@ fn handleVariableNeverMutated(builder: *Builder, actions: *std.ArrayListUnmanage
     });
 }
 
-fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction)) !void {
+fn handleUnorganizedImport(builder: *Builder) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -579,6 +578,8 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
     if (tree.errors.len != 0) return;
 
     const imports = try getImportsDecls(builder, builder.arena);
+
+    if (imports.len == 0) return;
 
     // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
@@ -602,8 +603,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
         }
         try writer.writeByte('\n');
 
-        const tokens = tree.tokens.items(.tag);
-        const first_token = std.mem.indexOfNone(Token.Tag, tokens, &.{.container_doc_comment}) orelse tokens.len;
+        const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
         const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
 
         try edits.append(builder.arena, .{
@@ -632,7 +632,7 @@ fn handleUnorganizedImport(builder: *Builder, actions: *std.ArrayListUnmanaged(t
 
     const workspace_edit = try builder.createWorkspaceEdit(edits.items);
 
-    try actions.append(builder.arena, .{
+    try builder.actions.append(builder.arena, .{
         .title = "organize @import",
         .kind = .@"source.organizeImports",
         .isPreferred = true,
@@ -684,10 +684,8 @@ pub const ImportDecl = struct {
 
         if (sort_public_decls_first) {
             const node_tokens = context.nodes.items(.main_token);
-            const token_tags = context.tokens.items(.tag);
-
-            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and token_tags[node_tokens[lhs.var_decl] - 1] == .keyword_pub;
-            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and token_tags[node_tokens[rhs.var_decl] - 1] == .keyword_pub;
+            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and context.tokenTag(node_tokens[lhs.var_decl] - 1) == .keyword_pub;
+            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and context.tokenTag(node_tokens[rhs.var_decl] - 1) == .keyword_pub;
             if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
         }
 
@@ -754,14 +752,12 @@ pub const ImportDecl = struct {
     }
 
     pub fn getSourceStartIndex(self: ImportDecl, tree: Ast) usize {
-        return offsets.tokenToIndex(tree, self.first_comment_token orelse tree.firstToken(self.var_decl));
+        return tree.tokenStart(self.first_comment_token orelse tree.firstToken(self.var_decl));
     }
 
     pub fn getSourceEndIndex(self: ImportDecl, tree: Ast, include_line_break: bool) usize {
-        const token_tags = tree.tokens.items(.tag);
-
         var last_token = ast.lastToken(tree, self.var_decl);
-        if (last_token + 1 < tree.tokens.len - 1 and token_tags[last_token + 1] == .semicolon) {
+        if (last_token + 1 < tree.tokens.len - 1 and tree.tokenTag(last_token + 1) == .semicolon) {
             last_token += 1;
         }
 
@@ -781,10 +777,6 @@ pub const ImportDecl = struct {
 
 pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
     const tree = builder.handle.tree;
-
-    const node_tags = tree.nodes.items(.tag);
-    const node_data = tree.nodes.items(.data);
-    const node_tokens = tree.nodes.items(.main_token);
 
     const root_decls = tree.rootDecls();
 
@@ -807,29 +799,30 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
 
             if (skip_set.isSet(root_decl_index)) continue;
 
-            if (node_tags[node] != .simple_var_decl) continue;
+            if (tree.nodeTag(node) != .simple_var_decl) continue;
             const var_decl = tree.simpleVarDecl(node);
 
-            var current_node = var_decl.ast.init_node;
+            var current_node = var_decl.ast.init_node.unwrap() orelse continue;
             const import: ImportDecl = found_decl: while (true) {
-                const token = node_tokens[current_node];
-                switch (node_tags[current_node]) {
+                const token = tree.nodeMainToken(current_node);
+                switch (tree.nodeTag(current_node)) {
                     .builtin_call_two, .builtin_call_two_comma => {
                         // `>@import("string")<` case
                         const builtin_name = offsets.tokenToSlice(tree, token);
                         if (!std.mem.eql(u8, builtin_name, "@import")) continue :next_decl;
                         // TODO what about @embedFile ?
 
-                        if (node_data[current_node].lhs == 0 or node_data[current_node].rhs != 0) continue :next_decl;
-                        const param_node = node_data[current_node].lhs;
-                        if (node_tags[param_node] != .string_literal) continue :next_decl;
+                        const first_param, const second_param = tree.nodeData(current_node).opt_node_and_opt_node;
+                        const param_node = first_param.unwrap() orelse continue :next_decl;
+                        if (second_param != .none) continue :next_decl;
+                        if (tree.nodeTag(param_node) != .string_literal) continue :next_decl;
 
                         const name_token = var_decl.ast.mut_token + 1;
-                        const value_token = node_tokens[param_node];
+                        const value_token = tree.nodeMainToken(param_node);
 
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(&tree, tree.nodeMainToken(node)),
                             .name = offsets.tokenToSlice(tree, name_token),
                             .value = offsets.tokenToSlice(tree, value_token),
                         };
@@ -837,7 +830,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                     .field_access => {
                         // `@import("foo").>bar<` or `foo.>bar<` case
                         // drill down to the base import
-                        current_node = node_data[current_node].lhs;
+                        current_node = tree.nodeData(current_node).node_and_token[0];
                         continue;
                     },
                     .identifier => {
@@ -869,7 +862,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         const var_name = offsets.tokenToSlice(tree, ident_name_token);
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(&tree, tree.nodeMainToken(node)),
                             .name = var_name,
                             .value = var_name,
                             .parent_name = import_decl.getSortName(),
@@ -961,7 +954,7 @@ fn createDiscardText(
 } {
     const tree = builder.handle.tree;
     const insert_token_end = offsets.tokenToLoc(tree, insert_token).end;
-    const source_until_next_token = tree.source[0..tree.tokens.items(.start)[insert_token + 1]];
+    const source_until_next_token = tree.source[0..tree.tokenStart(insert_token + 1)];
     // skip comments between the insert tokena and the token after it
     const insert_index = std.mem.indexOfScalarPos(u8, source_until_next_token, insert_token_end, '\n') orelse source_until_next_token.len;
 

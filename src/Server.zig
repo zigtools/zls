@@ -36,6 +36,9 @@ const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
+const BuildOnSave = diagnostics_gen.BuildOnSave;
+const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
+
 const log = std.log.scoped(.server);
 
 // public fields
@@ -59,6 +62,8 @@ ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
+/// The underlying memory has been allocated with `config_arena`.
+runtime_zig_version: ?std.SemanticVersion = null,
 /// Every changed configuration will increase the amount of memory allocated by the arena,
 /// This is unlikely to cause any big issues since the user is probably not going set settings
 /// often in one session,
@@ -311,10 +316,8 @@ pub fn getAutofixMode(server: *Server) enum {
 } {
     if (server.client_capabilities.supports_code_action_fixall) return .@"source.fixall";
     if (!server.config.force_autofix) return .none;
-    if (server.client_capabilities.supports_apply_edits) {
-        if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
-        return .on_save;
-    }
+    if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
+    if (server.client_capabilities.supports_apply_edits) return .on_save;
     return .none;
 }
 
@@ -340,25 +343,13 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         }),
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
-    try builder.generateCodeAction(error_bundle, &actions);
-
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
-    for (actions.items) |action| {
-        std.debug.assert(action.kind != null);
-        std.debug.assert(action.kind.? == .@"source.fixAll");
-        std.debug.assert(action.edit != null);
-        std.debug.assert(action.edit.?.changes != null);
-
-        const changes = action.edit.?.changes.?.map;
-        if (changes.count() != 1) continue;
-
-        const edits: []const types.TextEdit = changes.get(handle.uri) orelse continue;
-
-        try text_edits.appendSlice(arena, edits);
+    try builder.generateCodeAction(error_bundle);
+    for (builder.actions.items) |action| {
+        std.debug.assert(action.kind.?.eql(.@"source.fixAll")); // We request only source.fixall code actions
     }
 
-    return text_edits;
+    defer builder.fixall_text_edits = .empty;
+    return builder.fixall_text_edits;
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -389,26 +380,15 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     }
 
     if (request.capabilities.general) |general| {
-        var supports_utf8 = false;
-        var supports_utf16 = false;
-        var supports_utf32 = false;
         if (general.positionEncodings) |position_encodings| {
-            for (position_encodings) |encoding| {
+            server.offset_encoding = outer: for (position_encodings) |encoding| {
                 switch (encoding) {
-                    .@"utf-8" => supports_utf8 = true,
-                    .@"utf-16" => supports_utf16 = true,
-                    .@"utf-32" => supports_utf32 = true,
+                    .@"utf-8" => break :outer .@"utf-8",
+                    .@"utf-16" => break :outer .@"utf-16",
+                    .@"utf-32" => break :outer .@"utf-32",
                     .custom_value => {},
                 }
-            }
-        }
-
-        if (supports_utf8) {
-            server.offset_encoding = .@"utf-8";
-        } else if (supports_utf32) {
-            server.offset_encoding = .@"utf-32";
-        } else {
-            server.offset_encoding = .@"utf-16";
+            } else server.offset_encoding;
         }
     }
     server.diagnostics_collection.offset_encoding = server.offset_encoding;
@@ -491,7 +471,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
     if (request.capabilities.window) |window| {
         if (window.workDoneProgress) |wdp| {
-            server.document_store.supports_work_done_progress = wdp;
+            server.document_store.lsp_capabilities.supports_work_done_progress = wdp;
         }
     }
 
@@ -502,6 +482,12 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             if (did_change.dynamicRegistration orelse false) {
                 server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
+        }
+        if (workspace.semanticTokens) |workspace_semantic_tokens| {
+            server.document_store.lsp_capabilities.supports_semantic_tokens_refresh = workspace_semantic_tokens.refreshSupport orelse false;
+        }
+        if (workspace.inlayHint) |inlay_hint| {
+            server.document_store.lsp_capabilities.supports_inlay_hints_refresh = inlay_hint.refreshSupport orelse false;
         }
     }
 
@@ -739,7 +725,8 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
 const Workspace = struct {
     uri: types.URI,
-    build_on_save: if (build_runner_shared.isBuildOnSaveSupportedComptime()) ?diagnostics_gen.BuildOnSave else void,
+    build_on_save: if (BuildOnSaveSupport.isSupportedComptime()) ?BuildOnSave else void,
+    build_on_save_mode: if (BuildOnSaveSupport.isSupportedComptime()) ?enum { watch, manual } else void,
 
     fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
         const duped_uri = try server.allocator.dupe(u8, uri);
@@ -747,28 +734,46 @@ const Workspace = struct {
 
         return .{
             .uri = duped_uri,
-            .build_on_save = if (build_runner_shared.isBuildOnSaveSupportedComptime()) null else {},
+            .build_on_save = if (BuildOnSaveSupport.isSupportedComptime()) null else {},
+            .build_on_save_mode = if (BuildOnSaveSupport.isSupportedComptime()) null else {},
         };
     }
 
     fn deinit(workspace: *Workspace, allocator: std.mem.Allocator) void {
-        if (build_runner_shared.isBuildOnSaveSupportedComptime()) {
+        if (BuildOnSaveSupport.isSupportedComptime()) {
             if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
         }
         allocator.free(workspace.uri);
     }
 
+    fn sendManualWatchUpdate(workspace: *Workspace) void {
+        comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
+
+        const build_on_save = if (workspace.build_on_save) |*build_on_save| build_on_save else return;
+        const mode = workspace.build_on_save_mode orelse return;
+        if (mode != .manual) return;
+
+        build_on_save.sendManualWatchUpdate();
+    }
+
     fn refreshBuildOnSave(workspace: *Workspace, args: struct {
         server: *Server,
-        /// If null, build on save will be disabled
-        runtime_zig_version: ?std.SemanticVersion,
         /// Whether the build on save process should be restarted if it is already running.
         restart: bool,
     }) error{OutOfMemory}!void {
-        comptime std.debug.assert(build_runner_shared.isBuildOnSaveSupportedComptime());
-        comptime std.debug.assert(build_options.version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .lt); // Update `isBuildOnSaveSupportedRuntime` and build runner
+        comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
 
-        const build_on_save_supported = if (args.runtime_zig_version) |version| build_runner_shared.isBuildOnSaveSupportedRuntime(version) else false;
+        if (args.server.runtime_zig_version) |runtime_zig_version| {
+            workspace.build_on_save_mode = switch (BuildOnSaveSupport.isSupportedRuntime(runtime_zig_version)) {
+                .supported => .watch,
+                // If if build on save has been explicitly enabled, fallback to the implementation with manual updates
+                else => if (args.server.config.enable_build_on_save orelse false) .manual else null,
+            };
+        } else {
+            workspace.build_on_save_mode = null;
+        }
+
+        const build_on_save_supported = workspace.build_on_save_mode != null;
         const build_on_save_wanted = args.server.config.enable_build_on_save orelse true;
         const enable = build_on_save_supported and build_on_save_wanted;
 
@@ -791,8 +796,8 @@ const Workspace = struct {
         };
         defer args.server.allocator.free(workspace_path);
 
-        workspace.build_on_save = @as(diagnostics_gen.BuildOnSave, undefined);
-        workspace.build_on_save.?.init(.{
+        std.debug.assert(workspace.build_on_save == null);
+        workspace.build_on_save = BuildOnSave.init(.{
             .allocator = args.server.allocator,
             .workspace_path = workspace_path,
             .build_on_save_args = args.server.config.build_on_save_args,
@@ -802,7 +807,6 @@ const Workspace = struct {
             .build_runner_path = build_runner_path,
             .collection = &args.server.diagnostics_collection,
         }) catch |err| {
-            workspace.build_on_save = null;
             log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
             return;
         };
@@ -815,6 +819,18 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
     log.info("added Workspace Folder: {s}", .{uri});
+
+    if (BuildOnSaveSupport.isSupportedComptime() and
+        // Don't initialize build on save until initialization finished.
+        // If the client supports the `workspace/configuration` request, wait
+        // until we have received workspace configuration from the server.
+        (server.status == .initialized and !server.client_capabilities.supports_configuration))
+    {
+        try server.workspaces.items[server.workspaces.items.len - 1].refreshBuildOnSave(.{
+            .server = server,
+            .restart = false,
+        });
+    }
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
@@ -909,6 +925,7 @@ pub fn updateConfiguration(
         if (!options.resolve) break :blk ResolveConfigurationResult.unresolved;
         const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_config);
         server.validateConfiguration(&new_config);
+        server.runtime_zig_version = resolve_result.zig_runtime_version;
         break :blk resolve_result;
     };
     defer resolve_result.deinit();
@@ -977,7 +994,7 @@ pub fn updateConfiguration(
         }
     }
 
-    if (build_runner_shared.isBuildOnSaveSupportedComptime() and
+    if (BuildOnSaveSupport.isSupportedComptime() and
         options.resolve and
         // If the client supports the `workspace/configuration` request, defer
         // build on save initialization until after we have received workspace
@@ -994,7 +1011,6 @@ pub fn updateConfiguration(
         for (server.workspaces.items) |*workspace| {
             try workspace.refreshBuildOnSave(.{
                 .server = server,
-                .runtime_zig_version = resolve_result.zig_runtime_version,
                 .restart = should_restart,
             });
         }
@@ -1014,13 +1030,6 @@ pub fn updateConfiguration(
                 try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
             }
         }
-
-        const json_message = try server.sendToClientRequest(
-            .{ .string = "semantic_tokens_refresh" },
-            "workspace/semanticTokens/refresh",
-            {},
-        );
-        server.allocator.free(json_message);
     }
 
     // <---------------------------------------------------------->
@@ -1038,6 +1047,7 @@ pub fn updateConfiguration(
         .resolved, .unresolved_dont_error => {},
         .unresolved => blk: {
             if (!options.resolve) break :blk;
+            if (server.status != .initialized) break :blk;
 
             const zig_version = resolve_result.zig_runtime_version.?;
             const zls_version = build_options.version;
@@ -1076,7 +1086,7 @@ pub fn updateConfiguration(
     }
 
     if (server.config.enable_build_on_save orelse false) {
-        if (!build_runner_shared.isBuildOnSaveSupportedComptime()) {
+        if (!BuildOnSaveSupport.isSupportedComptime()) {
             // This message is not very helpful but it relatively uncommon to happen anyway.
             log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
         } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
@@ -1085,9 +1095,14 @@ pub fn updateConfiguration(
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
         } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
-        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null and !build_runner_shared.isBuildOnSaveSupportedRuntime(resolve_result.zig_runtime_version.?)) {
-            // There is one edge-case where build on save is not supported because of Linux pre 5.17
-            log.warn("'enable_build_on_save' is not supported by Zig {}", .{resolve_result.zig_runtime_version.?});
+        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null) {
+            switch (BuildOnSaveSupport.isSupportedRuntime(resolve_result.zig_runtime_version.?)) {
+                .supported => {},
+                .invalid_linux_kernel_version => |*utsname_release| log.warn("Build-On-Save cannot run in watch mode because it because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
+                .unsupported_linux_kernel_version => |kernel_version| log.warn("Build-On-Save cannot run in watch mode because it is not supported by Linux '{}' (requires at least {})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
+                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), resolve_result.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
+                .unsupported_os => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s}", .{@tagName(zig_builtin.os.tag)}),
+            }
         }
     }
 
@@ -1282,7 +1297,8 @@ fn resolveConfiguration(
             }
         }
 
-        result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
+        const version_string_duped = try config_arena.dupe(u8, env.value.version);
+        result.zig_runtime_version = std.SemanticVersion.parse(version_string_duped) catch |err| {
             log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
             break :blk;
         };
@@ -1461,6 +1477,12 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
             },
         );
         server.allocator.free(json_message);
+    }
+
+    if (BuildOnSaveSupport.isSupportedComptime()) {
+        for (server.workspaces.items) |*workspace| {
+            workspace.sendManualWatchUpdate();
+        }
     }
 }
 
@@ -1744,13 +1766,12 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         .only_kinds = only_kinds,
     };
 
-    var actions: std.ArrayListUnmanaged(types.CodeAction) = .empty;
-    try builder.generateCodeAction(error_bundle, &actions);
-    try builder.generateCodeActionsInRange(request.range, &actions);
+    try builder.generateCodeAction(error_bundle);
+    try builder.generateCodeActionsInRange(request.range);
 
-    const Result = lsp.types.getRequestMetadata("textDocument/codeAction").?.Result;
-    const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
-    for (actions.items, result) |action, *out| {
+    const Result = lsp.ResultType("textDocument/codeAction");
+    const result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), builder.actions.items.len);
+    for (builder.actions.items, result) |action, *out| {
         out.* = .{ .CodeAction = action };
     }
 
@@ -2198,6 +2219,10 @@ fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!
     };
 
     if (std.mem.eql(u8, id, "semantic_tokens_refresh")) {
+        //
+    } else if (std.mem.eql(u8, id, "inlay_hints_refresh")) {
+        //
+    } else if (std.mem.eql(u8, id, "progress")) {
         //
     } else if (std.mem.startsWith(u8, id, "register")) {
         //

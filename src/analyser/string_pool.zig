@@ -272,6 +272,7 @@ test "StringPool - getOrPut on existing string without allocation" {
     var pool: StringPool(.{}) = .empty;
     defer pool.deinit(gpa);
 
+    try pool.bytes.ensureTotalCapacityPrecise(gpa, "hello".len + 1);
     const hello_string = try pool.getOrPutString(gpa, "hello");
 
     try std.testing.expectError(error.OutOfMemory, pool.getOrPutString(failing_gpa.allocator(), "world"));
