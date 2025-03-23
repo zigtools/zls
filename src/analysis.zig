@@ -3510,9 +3510,6 @@ pub const BoundTypeParams = struct {
         if (self.nested_scopes.items.len == 0) {
             return 0;
         }
-        if (self.nested_scopes.items.len > 15) {
-            return error.OutOfMemory;
-        }
         if (self.hashed_state) |hashed_state| {
             return hashed_state;
         }
@@ -3524,12 +3521,12 @@ pub const BoundTypeParams = struct {
         var iter = std.mem.reverseIterator(self.nested_scopes.items);
         while (iter.next()) |params| {
             for (params) |param| {
-                if (seen_symbols.contains(param.symbol)) {
+                const gop = try seen_symbols.getOrPut(arena, param.symbol);
+                if (gop.found_existing) {
                     continue;
                 }
                 hasher.update(param.symbol);
                 param.typ.hashWithHasher(&hasher);
-                try seen_symbols.put(arena, param.symbol, {});
             }
         }
 
@@ -4664,7 +4661,7 @@ fn collectUsingnamespaceDeclarationsOfContainer(
     const key: NodeWithUri = .{
         .node = usingnamespace_node.node,
         .uri = usingnamespace_node.handle.uri,
-        .bound_type_params_state_hash = try analyser.bound_type_params.hash(analyser.arena.allocator()),
+        .bound_type_params_state_hash = 0,
     };
     const gop = try analyser.use_trail.getOrPut(analyser.gpa, key);
     if (gop.found_existing) return;
