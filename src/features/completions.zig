@@ -954,6 +954,8 @@ pub fn completionAtIndex(
                 .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
         }
         item.insertText = null;
+        // https://github.com/microsoft/language-server-protocol/issues/898#issuecomment-593968008
+        item.filterText = item.filterText orelse item.label;
 
         if (item.detail) |det| {
             if (det.len > server.client_capabilities.max_detail_length) {
