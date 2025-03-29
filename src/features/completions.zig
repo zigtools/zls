@@ -129,6 +129,9 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .container => |scope_handle| {
+            const starting_depth = builder.analyser.bound_type_params.depth();
+            try builder.analyser.bound_type_params.push(builder.analyser.gpa, scope_handle.bound_params);
+            defer builder.analyser.bound_type_params.pop(starting_depth);
             var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
             try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
 
@@ -196,6 +199,15 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         doc_comments.appendAssumeCapacity(docs);
     }
 
+    const starting_depth = builder.analyser.bound_type_params.depth();
+    var pushed = false;
+    if (decl_handle.from) |from| {
+        if (from.bound_params.len > 0) {
+            try builder.analyser.bound_type_params.push(builder.analyser.gpa, from.bound_params);
+            pushed = true;
+        }
+    }
+    defer if (pushed) builder.analyser.bound_type_params.pop(starting_depth);
     const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
 
     if (maybe_resolved_ty) |resolve_ty| {
