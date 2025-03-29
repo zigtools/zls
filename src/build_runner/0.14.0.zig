@@ -27,6 +27,8 @@ pub const dependencies = @import("@dependencies");
 
 // ----------- List of Zig versions that introduced breaking changes -----------
 
+const add_embed_path_version = std.SemanticVersion.parse("0.15.0-dev.141+b5a526054") catch unreachable;
+
 // -----------------------------------------------------------------------------
 
 ///! This is a modified build runner to extract information out of build.zig
@@ -926,7 +928,15 @@ fn createModuleDependenciesForStep(step: *Step) Allocator.Error!void {
                 step.dependOn(&other.step);
             },
 
-            .config_header_step => |other| step.dependOn(&other.step),
+            else => {
+                const has_embed_path = comptime builtin.zig_version.order(add_embed_path_version) != .lt;
+                comptime assert(@typeInfo(std.Build.Module.IncludeDir).@"union".fields.len == @as(usize, 7) + @intFromBool(has_embed_path));
+                if (has_embed_path and include_dir == .embed_path) {
+                    include_dir.embed_path.addStepDependencies(step);
+                } else if (include_dir == .config_header_step) {
+                    step.dependOn(&include_dir.config_header_step.step);
+                } else unreachable;
+            },
         };
         for (mod.lib_paths.items) |lp| lp.addStepDependencies(step);
         for (mod.rpaths.items) |rpath| switch (rpath) {
@@ -1033,41 +1043,53 @@ fn extractBuildInformation(
     }
 
     const helper = struct {
-        fn addStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
+        fn addLazyPathStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
             switch (lazy_path) {
                 .src_path, .cwd_relative, .dependency => {},
                 .generated => |gen| try set.put(allocator, gen.file.step, {}),
             }
         }
+        fn addIncludeDirStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), include_dir: std.Build.Module.IncludeDir) !void {
+            switch (include_dir) {
+                .path,
+                .path_system,
+                .path_after,
+                .framework_path,
+                .framework_path_system,
+                => |lazy_path| try addLazyPathStepDependencies(allocator, set, lazy_path),
+                .other_step => |other| {
+                    if (other.generated_h) |header| {
+                        try set.put(allocator, header.step, {});
+                    }
+                    if (other.installed_headers_include_tree) |include_tree| {
+                        try set.put(allocator, include_tree.generated_directory.step, {});
+                    }
+                },
+                else => {
+                    const has_embed_path = comptime builtin.zig_version.order(add_embed_path_version) != .lt;
+                    comptime assert(@typeInfo(std.Build.Module.IncludeDir).@"union".fields.len == @as(usize, 7) + @intFromBool(has_embed_path));
+                    if (has_embed_path and include_dir == .embed_path) {
+                        // This only affects C source files
+                    } else if (include_dir == .config_header_step) {
+                        try set.put(allocator, include_dir.config_header_step.output_file.step, {});
+                    } else unreachable;
+                },
+            }
+        }
+
         fn addModuleDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), module: *std.Build.Module) !void {
             if (module.root_source_file) |root_source_file| {
-                try addStepDependencies(allocator, set, root_source_file);
+                try addLazyPathStepDependencies(allocator, set, root_source_file);
             }
 
             for (module.import_table.values()) |import| {
                 if (import.root_source_file) |root_source_file| {
-                    try addStepDependencies(allocator, set, root_source_file);
+                    try addLazyPathStepDependencies(allocator, set, root_source_file);
                 }
             }
 
             for (module.include_dirs.items) |include_dir| {
-                switch (include_dir) {
-                    .path,
-                    .path_system,
-                    .path_after,
-                    .framework_path,
-                    .framework_path_system,
-                    => |include_path| try addStepDependencies(allocator, set, include_path),
-                    .config_header_step => |config_header| try set.put(allocator, config_header.output_file.step, {}),
-                    .other_step => |other| {
-                        if (other.generated_h) |header| {
-                            try set.put(allocator, header.step, {});
-                        }
-                        if (other.installed_headers_include_tree) |include_tree| {
-                            try set.put(allocator, include_tree.generated_directory.step, {});
-                        }
-                    },
-                }
+                try addIncludeDirStepDependencies(allocator, set, include_dir);
             }
         }
 
@@ -1118,14 +1140,20 @@ fn extractBuildInformation(
                             );
                         }
                     },
-                    .config_header_step => |config_header| {
-                        const full_file_path = config_header.output_file.getPath();
-                        const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
-                        try include_dirs.put(
-                            allocator,
-                            header_dir_path,
-                            {},
-                        );
+                    else => {
+                        const has_embed_path = comptime builtin.zig_version.order(add_embed_path_version) != .lt;
+                        comptime assert(@typeInfo(std.Build.Module.IncludeDir).@"union".fields.len == @as(usize, 7) + @intFromBool(has_embed_path));
+                        if (has_embed_path and include_dir == .embed_path) {
+                            // This only affects C source files
+                        } else if (include_dir == .config_header_step) {
+                            const full_file_path = include_dir.config_header_step.output_file.getPath();
+                            const header_dir_path = full_file_path[0 .. full_file_path.len - include_dir.config_header_step.include_path.len];
+                            try include_dirs.put(
+                                allocator,
+                                header_dir_path,
+                                {},
+                            );
+                        } else unreachable;
                     },
                 }
             }
