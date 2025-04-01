@@ -22,7 +22,7 @@ jobs:
           version: master
 
       - name: Run zig fmt
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: zig fmt --check .
 
       - name: Run Tests
