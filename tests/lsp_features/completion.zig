@@ -370,6 +370,29 @@ test "generic function" {
     });
 }
 
+test "nested generic function" {
+    try testCompletion(
+        \\fn ArrayList(comptime T: type) type {
+        \\    return ArrayListAligned(T, null);
+        \\}
+        \\
+        \\fn ArrayListAligned(comptime T: type) type {
+        \\    return struct {
+        \\        items: []T,
+        \\
+        \\        const empty: @This() = .{
+        \\            .items = &.{},
+        \\        };
+        \\    };
+        \\}
+        \\
+        \\var list: ArrayList(u8) = .<cursor>;
+    , &.{
+        .{ .label = "items", .kind = .Field, .detail = "[]T" },
+        .{ .label = "empty", .kind = .Struct, .detail = "ArrayListAligned((unknown type))" }, // detail should be `ArrayListAligned(u8)`
+    });
+}
+
 test "recursive generic function" {
     try testCompletion(
         \\const S = struct { alpha: u32 };

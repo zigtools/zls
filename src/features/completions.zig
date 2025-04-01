@@ -1312,6 +1312,9 @@ fn collectContainerFields(
         .container => |s| s,
         else => return,
     };
+    const starting_depth = builder.analyser.bound_type_params.depth();
+    try builder.analyser.bound_type_params.push(builder.analyser.gpa, scope_handle.bound_params);
+    defer builder.analyser.bound_type_params.pop(starting_depth);
 
     const document_scope = try scope_handle.handle.getDocumentScope();
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
