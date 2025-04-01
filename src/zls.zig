@@ -5,7 +5,7 @@ pub const build_options = @import("build_options");
 
 pub const ast = @import("ast.zig");
 pub const Analyser = @import("analysis.zig");
-pub const debug = @import("debug.zig");
+pub const testing = @import("testing.zig");
 pub const offsets = @import("offsets.zig");
 pub const Config = @import("Config.zig");
 pub const Server = @import("Server.zig");

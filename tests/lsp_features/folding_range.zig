@@ -311,5 +311,5 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
         return error.InvalidResponse;
     };
 
-    try std.testing.expectEqualSlices(types.FoldingRange, expect, response);
+    try zls.testing.expectEqual(expect, response);
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const zls = @import("zls");
 
 pub fn main() !u8 {
     var general_purpose_allocator: std.heap.GeneralPurposeAllocator(.{}) = .init;
@@ -42,7 +43,7 @@ pub fn main() !u8 {
 
     if (std.mem.eql(u8, expected, actual)) return 0;
 
-    std.testing.expectEqualStrings(expected, actual) catch {};
+    zls.testing.renderLineDiff(gpa, expected, actual);
 
     return 1;
 }

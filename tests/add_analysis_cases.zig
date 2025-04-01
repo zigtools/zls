@@ -10,10 +10,14 @@ pub fn addCases(
 
     const check_exe = b.addExecutable(.{
         .name = "analysis_check",
-        .root_source_file = b.path("tests/analysis_check.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/analysis_check.zig"),
+            .target = b.graph.host,
+            .imports = &.{
+                .{ .name = "zls", .module = b.modules.get("zls").? },
+            },
+        }),
     });
-    check_exe.root_module.addImport("zls", b.modules.get("zls").?);
 
     // https://github.com/ziglang/zig/issues/20605
     var dir = std.fs.openDirAbsolute(b.pathFromRoot(cases_path_from_root), .{ .iterate = true }) catch |err|

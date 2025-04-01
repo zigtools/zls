@@ -11,8 +11,13 @@ pub fn addCases(
 
     const check_exe = b.addExecutable(.{
         .name = "build_runner_check",
-        .root_source_file = b.path("tests/build_runner_check.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/build_runner_check.zig"),
+            .target = b.graph.host,
+            .imports = &.{
+                .{ .name = "zls", .module = b.modules.get("zls").? },
+            },
+        }),
     });
 
     // https://github.com/ziglang/zig/issues/20605
