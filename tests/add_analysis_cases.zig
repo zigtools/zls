@@ -1,3 +1,6 @@
+//! This file is imported by `../build.zig` to add code analysis tests to the build system.
+//! See the `./analysis` subdirectory.
+
 const std = @import("std");
 
 pub fn addCases(

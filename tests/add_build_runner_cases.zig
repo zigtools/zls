@@ -1,3 +1,6 @@
+//! This file is imported by `../build.zig` to add build runner tests to the build system.
+//! See the `./build_runner_cases` subdirectory.
+
 const std = @import("std");
 
 pub fn addCases(

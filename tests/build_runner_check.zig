@@ -1,3 +1,7 @@
+//! This file implements a standalone executable that is used by
+//! `add_build_runner_cases.zig` to run build runner tests.
+//! See the `./build_runner_cases` subdirectory.
+
 const std = @import("std");
 const zls = @import("zls");
 

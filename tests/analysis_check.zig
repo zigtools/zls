@@ -1,3 +1,7 @@
+//! This file implements a standalone executable that is used by
+//! `add_analysis_cases.zig` to run code analysis tests.
+//! See the `./analysis` subdirectory.
+
 const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
