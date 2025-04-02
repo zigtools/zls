@@ -105,6 +105,20 @@ test "struct init" {
     );
 }
 
+test "decl literal on generic type" {
+    try testDefinition(
+        \\fn Box(comptime T: type) type {
+        \\    return <tdef>struct</tdef> {
+        \\        item: T,
+        \\        const <def><decl>init</decl></def>: @This() = undefined;
+        \\    };
+        \\};
+        \\test {
+        \\    const box: Box(u8) = .in<>it;
+        \\}
+    );
+}
+
 test "capture" {
     try testDefinition(
         \\test {

@@ -489,6 +489,29 @@ test "decl literal function" {
     );
 }
 
+test "decl literal on generic type" {
+    try testHover(
+        \\fn Box(comptime T: type) type {
+        \\    return struct {
+        \\        item: T,
+        \\        const init: @This() = undefined;
+        \\    };
+        \\};
+        \\test {
+        \\    const box: Box(u8) = .in<cursor>it;
+        \\}
+    ,
+        \\```zig
+        \\const init: @This() = undefined
+        \\```
+        \\```zig
+        \\(Box)
+        \\```
+        \\
+        \\Go to [@This()](file:///test.zig#L1)
+    );
+}
+
 test "enum" {
     try testHover(
         \\const My<cursor>Enum = enum {

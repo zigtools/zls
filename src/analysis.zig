@@ -5015,6 +5015,10 @@ pub fn lookupSymbolFieldInit(
         .container => |s| s,
         else => return null,
     };
+    const starting_depth = analyser.bound_type_params.depth();
+    try analyser.bound_type_params.push(analyser.gpa, container_scope.bound_params);
+    defer analyser.bound_type_params.pop(starting_depth);
+
     if (is_struct_init) {
         return try analyser.lookupSymbolContainer(container_scope, field_name, .field);
     }
