@@ -165,6 +165,15 @@ const Builder = struct {
                     }
                 }
             },
+            .enum_literal => {
+                const name_token = tree.nodeMainToken(node);
+                const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+                const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
+
+                if (builder.decl_handle.eql(lookup)) {
+                    try builder.add(handle, name_token);
+                }
+            },
             else => {},
         }
     }
@@ -459,7 +468,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             break :z null;
         },
         .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
-        .enum_literal => try analyser.getSymbolEnumLiteral(arena, handle, source_index, name),
+        .enum_literal => try analyser.getSymbolEnumLiteral(handle, source_index, name),
         else => null,
     } orelse return null;
 

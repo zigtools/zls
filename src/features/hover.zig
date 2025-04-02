@@ -317,7 +317,7 @@ fn hoverDefinitionEnumLiteral(
 
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index, name)) orelse return null;
+    const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 
     return .{
         .contents = .{

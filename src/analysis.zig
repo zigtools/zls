@@ -5340,7 +5340,6 @@ pub fn resolveExpressionTypeFromAncestors(
 
 pub fn getSymbolEnumLiteral(
     analyser: *Analyser,
-    arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
     name: []const u8,
@@ -5349,7 +5348,7 @@ pub fn getSymbolEnumLiteral(
     defer tracy_zone.end();
 
     const tree = handle.tree;
-    const nodes = try ast.nodesOverlappingIndex(arena, tree, source_index);
+    const nodes = try ast.nodesOverlappingIndex(analyser.arena.allocator(), tree, source_index);
     if (nodes.len == 0) return null;
     return analyser.lookupSymbolFieldInit(handle, name, nodes);
 }

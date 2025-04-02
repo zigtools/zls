@@ -96,7 +96,6 @@ fn gotoDefinitionGlobal(
 
 fn gotoDefinitionEnumLiteral(
     analyser: *Analyser,
-    arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
     kind: GotoKind,
@@ -107,7 +106,7 @@ fn gotoDefinitionEnumLiteral(
 
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index, name)) orelse return null;
+    const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
@@ -264,7 +263,7 @@ pub fn gotoHandler(
         .embedfile_string_literal,
         => try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding),
         .label_access, .label_decl => |loc| try gotoDefinitionLabel(&analyser, handle, source_index, loc, kind, server.offset_encoding),
-        .enum_literal => try gotoDefinitionEnumLiteral(&analyser, arena, handle, source_index, kind, server.offset_encoding),
+        .enum_literal => try gotoDefinitionEnumLiteral(&analyser, handle, source_index, kind, server.offset_encoding),
         else => null,
     } orelse return null;
 

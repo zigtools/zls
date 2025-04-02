@@ -145,6 +145,20 @@ test "struct multi-field init" {
     );
 }
 
+test "decl literal on generic type" {
+    try testReferences(
+        \\fn Box(comptime T: type) type {
+        \\    return struct {
+        \\        item: T,
+        \\        const <0>: @This() = undefined;
+        \\    };
+        \\};
+        \\test {
+        \\    const box: Box(u8) = .<0>;
+        \\}
+    );
+}
+
 test "while continue expression" {
     try testReferences(
         \\ pub fn foo() void {

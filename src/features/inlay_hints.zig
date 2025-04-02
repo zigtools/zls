@@ -551,7 +551,7 @@ fn writeNodeInlayHint(
                 const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                 const name_loc = offsets.tokenToLoc(tree, name_token);
                 const name = offsets.locToSlice(tree.source, name_loc);
-                const decl = (try builder.analyser.getSymbolEnumLiteral(builder.arena, builder.handle, name_loc.start, name)) orelse continue;
+                const decl = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
                 const ty = try decl.resolveType(builder.analyser) orelse continue;
                 const type_str: []const u8 = try std.fmt.allocPrint(
                     builder.arena,

@@ -246,7 +246,6 @@ pub fn getSignatureInfo(
                     .period => blk: { // decl literal
                         loc.start += 1;
                         const decl = try analyser.getSymbolEnumLiteral(
-                            arena,
                             handle,
                             loc.start,
                             offsets.locToSlice(tree.source, loc),
