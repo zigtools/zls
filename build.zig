@@ -91,9 +91,18 @@ pub fn build(b: *Build) !void {
         break :blk test_options.createModule();
     };
 
-    const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
-    const diffz_module = b.dependency("diffz", .{}).module("diffz");
-    const lsp_module = b.dependency("lsp-codegen", .{}).module("lsp");
+    const known_folders_module = b.dependency("known_folders", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("known-folders");
+    const diffz_module = b.dependency("diffz", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("diffz");
+    const lsp_module = b.dependency("lsp-codegen", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("lsp");
 
     const tracy_module = getTracyModule(b, .{
         .target = target,
@@ -397,7 +406,10 @@ fn getTracyModule(
         .link_libcpp = options.enable,
     });
     if (!options.enable) return tracy_module;
-    const tracy_dependency = b.lazyDependency("tracy", .{}) orelse return tracy_module;
+    const tracy_dependency = b.lazyDependency("tracy", .{
+        .target = options.target,
+        .optimize = options.optimize,
+    }) orelse return tracy_module;
 
     // On mingw, we need to opt into windows 7+ to get some features required by tracy.
     const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
