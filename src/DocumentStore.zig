@@ -814,6 +814,27 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 }
 
+/// Removes a document from the store, unless said document is currently open and
+/// has been synchronized via `textDocument/didOpen`.
+/// **Thread safe** takes an exclusive lock when called on different documents
+/// **Not thread safe** when called on the same document
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !void {
+    {
+        const handle = self.getHandle(uri) orelse return;
+        if (handle.getStatus().open) return;
+    }
+
+    {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const kv = self.handles.fetchSwapRemove(uri) orelse return;
+        log.debug("Closing document {s}", .{kv.key});
+        kv.value.deinit();
+        self.allocator.destroy(kv.value);
+    }
+}
+
 /// Invalidates a build files.
 /// **Thread safe** takes a shared lock
 pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
