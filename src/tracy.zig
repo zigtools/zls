@@ -155,24 +155,24 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
 
         fn allocFn(ptr: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            const result = self.parent_allocator.rawAlloc(len, alignment, ret_addr);
-            if (result) |data| {
-                if (len != 0) {
-                    if (name) |n| {
-                        allocNamed(data, len, n);
-                    } else {
-                        alloc(data, len);
-                    }
-                }
-            } else {
+            const new_memory = self.parent_allocator.rawAlloc(len, alignment, ret_addr) orelse {
                 messageColor("allocation failed", 0xFF0000);
+                return null;
+            };
+            if (len != 0) {
+                if (name) |n| {
+                    allocNamed(new_memory, len, n);
+                } else {
+                    alloc(new_memory, len);
+                }
             }
-            return result;
+            return new_memory;
         }
 
         fn resizeFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            if (self.parent_allocator.rawResize(memory, alignment, new_len, ret_addr)) {
+            if (!self.parent_allocator.rawResize(memory, alignment, new_len, ret_addr)) return false;
+            if (new_len != 0) {
                 if (name) |n| {
                     freeNamed(memory.ptr, n);
                     allocNamed(memory.ptr, new_len, n);
@@ -180,24 +180,21 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
                     free(memory.ptr);
                     alloc(memory.ptr, new_len);
                 }
-
-                return true;
             }
-
-            // during normal operation the compiler hits this case thousands of times due to this
-            // emitting messages for it is both slow and causes clutter
-            return false;
+            return true;
         }
 
         fn remapFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             const new_memory = self.parent_allocator.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
-            if (name) |n| {
-                freeNamed(memory.ptr, n);
-                allocNamed(memory.ptr, new_len, n);
-            } else {
-                free(memory.ptr);
-                alloc(memory.ptr, new_len);
+            if (new_len != 0) {
+                if (name) |n| {
+                    freeNamed(memory.ptr, n);
+                    allocNamed(memory.ptr, new_len, n);
+                } else {
+                    free(memory.ptr);
+                    alloc(memory.ptr, new_len);
+                }
             }
             return new_memory;
         }
