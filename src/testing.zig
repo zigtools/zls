@@ -3,6 +3,8 @@
 const std = @import("std");
 const DocumentScope = @import("DocumentScope.zig");
 
+pub const print_ast = @import("print_ast.zig");
+
 pub fn expectEqual(expected: anytype, actual: anytype) error{TestExpectedEqual}!void {
     var expected_stringified: std.ArrayListUnmanaged(u8) = .empty;
     defer expected_stringified.deinit(std.testing.allocator);
@@ -163,6 +165,7 @@ fn diff(
     defer allocator.free(after_lines);
 
     {
+        // Do not use typewriters and you will be fine.
         var before_line_it = std.mem.splitScalar(u8, before, '\n');
         for (before_lines) |*line| line.* = before_line_it.next().?;
         std.debug.assert(before_line_it.next() == null);
@@ -176,7 +179,7 @@ fn diff(
     defer allocator.free(dp);
     @memset(dp, 0);
 
-    const m = before_lines.len + 1;
+    const m = before_lines.len;
 
     for (1..before_lines.len + 1) |i| {
         for (1..after_lines.len + 1) |j| {
@@ -250,6 +253,7 @@ pub fn renderLineDiff(
         }) catch {};
         printLine(text);
     }
+    tty_config.setColor(stderr.writer(), .reset) catch {};
     stderr.writeAll("␃") catch {}; // End of Text symbol (ETX)
     std.debug.print("\n======================================\n", .{});
 }
@@ -268,4 +272,8 @@ fn printLine(line: []const u8) void {
         else => {},
     };
     std.debug.print("{s}\n", .{line});
+}
+
+comptime {
+    std.testing.refAllDecls(print_ast);
 }
