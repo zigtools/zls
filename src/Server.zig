@@ -17,6 +17,7 @@ const Analyser = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const diff = @import("diff.zig");
+const Uri = @import("uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const known_folders = @import("known-folders");
@@ -91,6 +92,7 @@ const ClientCapabilities = struct {
     label_details_support: bool = false,
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
+    supports_workspace_did_change_watched_files: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
     /// The detail entries for big structs such as std.zig.CrossTarget were
     /// bricking the preview window in Sublime Text.
@@ -483,6 +485,11 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                 server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
         }
+        if (workspace.didChangeWatchedFiles) |did_change| {
+            if (did_change.dynamicRegistration orelse false) {
+                server.client_capabilities.supports_workspace_did_change_watched_files = true;
+            }
+        }
         if (workspace.semanticTokens) |workspace_semantic_tokens| {
             server.document_store.lsp_capabilities.supports_semantic_tokens_refresh = workspace_semantic_tokens.refreshSupport orelse false;
         }
@@ -606,7 +613,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     };
 }
 
-fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types.InitializedParams) Error!void {
+fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: types.InitializedParams) Error!void {
     _ = notification;
 
     if (server.status != .initializing) {
@@ -616,7 +623,20 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
     server.status = .initialized;
 
     if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
-        try server.registerCapability("workspace/didChangeConfiguration");
+        try server.registerCapability("workspace/didChangeConfiguration", null);
+    }
+
+    if (server.client_capabilities.supports_workspace_did_change_watched_files) {
+        // `{ "watchers": [ { "globPattern": "**" } ] }`
+        var watcher = std.json.ObjectMap.init(arena);
+        try watcher.put("globPattern", .{ .string = "**" });
+        var watchers_arr = try std.ArrayList(std.json.Value).initCapacity(arena, 1);
+        watchers_arr.appendAssumeCapacity(.{ .object = watcher });
+        var fs_watcher_obj: std.json.ObjectMap = std.json.ObjectMap.init(arena);
+        try fs_watcher_obj.put("watchers", .{ .array = watchers_arr });
+        const json_val: ?std.json.Value = .{ .object = fs_watcher_obj };
+
+        try server.registerCapability("workspace/didChangeWatchedFiles", json_val);
     }
 
     if (server.client_capabilities.supports_configuration) {
@@ -642,7 +662,7 @@ fn exitHandler(server: *Server, _: std.mem.Allocator, _: void) Error!void {
     };
 }
 
-fn registerCapability(server: *Server, method: []const u8) Error!void {
+fn registerCapability(server: *Server, method: []const u8, registersOptions: ?types.LSPAny) Error!void {
     const id = try std.fmt.allocPrint(server.allocator, "register-{s}", .{method});
     defer server.allocator.free(id);
 
@@ -655,6 +675,7 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
             .{
                 .id = id,
                 .method = method,
+                .registerOptions = registersOptions,
             },
         } },
     );
@@ -843,6 +864,37 @@ fn removeWorkspace(server: *Server, uri: types.URI) void {
         }
     } else {
         log.warn("could not remove Workspace Folder: {s}", .{uri});
+    }
+}
+
+fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
+    for (notification.changes) |change| {
+        if (server.document_store.getHandle(change.uri)) |_| {
+            switch (change.type) {
+                .Deleted => {
+                    server.document_store.closeDocument(change.uri);
+                    log.info("removed watched file: {s}", .{change.uri});
+                },
+                .Changed, .Created => {
+                    const file_path = Uri.parse(arena, change.uri) catch |err| {
+                        log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
+                        continue;
+                    };
+                    const file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+                        log.err("failed to open {s}: {}", .{ file_path, err });
+                        continue;
+                    };
+                    defer file.close();
+                    const source = file.readToEndAlloc(arena, std.math.maxInt(usize)) catch |err| {
+                        log.err("failed to read {s}: {}", .{ file_path, err });
+                        continue;
+                    };
+                    try server.document_store.openDocument(change.uri, source);
+                    log.info("updated watched file: {s}", .{change.uri});
+                },
+                else => {},
+            }
+        }
     }
 }
 
@@ -1822,6 +1874,7 @@ const HandledNotificationParams = union(enum) {
     @"textDocument/didChange": types.DidChangeTextDocumentParams,
     @"textDocument/didSave": types.DidSaveTextDocumentParams,
     @"textDocument/didClose": types.DidCloseTextDocumentParams,
+    @"workspace/didChangeWatchedFiles": types.DidChangeWatchedFilesParams,
     @"workspace/didChangeWorkspaceFolders": types.DidChangeWorkspaceFoldersParams,
     @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
     other: lsp.MethodWithParams,
@@ -1867,6 +1920,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/didChange",
             .@"textDocument/didSave",
             .@"textDocument/didClose",
+            .@"workspace/didChangeWatchedFiles",
             .@"workspace/didChangeWorkspaceFolders",
             .@"workspace/didChangeConfiguration",
             => return true,
@@ -2048,6 +2102,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .@"textDocument/didChange" => try server.changeDocumentHandler(arena, params),
         .@"textDocument/didSave" => try server.saveDocumentHandler(arena, params),
         .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
+        .@"workspace/didChangeWatchedFiles" => try server.didChangeWatchedFilesHandler(arena, params),
         .@"workspace/didChangeWorkspaceFolders" => try server.didChangeWorkspaceFoldersHandler(arena, params),
         .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
         .other => {},
