@@ -1354,15 +1354,15 @@ test "enum" {
         .{ .label = "beta", .kind = .EnumMember },
     });
     try testCompletion(
-        \\const E = enum {
+        \\const E = enum(u8) {
         \\    alpha,
-        \\    beta,
+        \\    beta = 42,
         \\    const bar = 5;
         \\};
         \\const foo: E = .<cursor>
     , &.{
         .{ .label = "alpha", .kind = .EnumMember },
-        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember, .detail = "beta = 42" },
     });
     try testCompletion(
         \\const E = enum {
