@@ -404,6 +404,7 @@ fn getTracyModule(
         },
         .link_libc = options.enable,
         .link_libcpp = options.enable,
+        .sanitize_c = false,
     });
     if (!options.enable) return tracy_module;
     const tracy_dependency = b.lazyDependency("tracy", .{
@@ -411,16 +412,10 @@ fn getTracyModule(
         .optimize = options.optimize,
     }) orelse return tracy_module;
 
-    // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-    const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
-        &.{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
-    else
-        &.{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
-
+    tracy_module.addCMacro("TRACY_ENABLE", "1");
     tracy_module.addIncludePath(tracy_dependency.path(""));
     tracy_module.addCSourceFile(.{
         .file = tracy_dependency.path("public/TracyClient.cpp"),
-        .flags = tracy_c_flags,
     });
 
     if (options.target.result.os.tag == .windows) {
