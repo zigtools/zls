@@ -11,6 +11,8 @@ const ast = @import("../ast.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const tracy = @import("tracy");
+const references = @import("../features/references.zig");
+const Server = @import("../Server.zig");
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
@@ -25,7 +27,20 @@ pub const Builder = struct {
     pub fn generateCodeAction(
         builder: *Builder,
         error_bundle: std.zig.ErrorBundle,
-    ) error{OutOfMemory}!void {
+        server: *Server,
+    ) error{
+        OutOfMemory,
+        ParseError,
+        InvalidRequest,
+        MethodNotFound,
+        InvalidParams,
+        InternalError,
+        ServerNotInitialized,
+        RequestFailed,
+        ServerCancelled,
+        ContentModified,
+        RequestCancelled,
+    }!void {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
@@ -587,19 +602,66 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
+    var keep_imports: std.ArrayListUnmanaged(bool) = try .initCapacity(builder.arena, imports.len);
+    keep_imports.appendNTimesAssumeCapacity(true, imports.len);
+    // Mark duplicate imports for removal
+    {
+        var prev_decl: ?ImportDecl = null;
+        for (sorted_imports, 0..) |import_decl, i| {
+            if (prev_decl) |prev| {
+                // don't treat imports as duplicates if only one is `pub`
+                const const_qual_matches =
+                    std.mem.eql(
+                        u8,
+                        tree.tokenSlice(tree.firstToken(import_decl.var_decl)),
+                        tree.tokenSlice(tree.firstToken(prev.var_decl)),
+                    );
+                if (std.mem.eql(u8, import_decl.name, prev.name) and
+                    std.mem.eql(u8, import_decl.value, prev.value) and
+                    const_qual_matches)
+                {
+                    keep_imports.items[i] = false;
+                }
+            }
+            prev_decl = import_decl;
+        }
+    }
+
+    const workspace_edit = try getImportEdit(builder, tree, sorted_imports, keep_imports.items);
+
+    try builder.actions.append(builder.arena, .{
+        .title = "organize @import",
+        .kind = .@"source.organizeImports",
+        .isPreferred = true,
+        .edit = workspace_edit,
+    });
+}
+        }
+    }
+
     var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
 
-    // add sorted imports
+fn getImportEdit(
+    builder: *Builder,
+    tree: Ast,
+    imports: []ImportDecl,
+    keep_imports: []bool,
+) !types.WorkspaceEdit {
+    var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
+    // add new imports
     {
         var new_text: std.ArrayListUnmanaged(u8) = .empty;
         var writer = new_text.writer(builder.arena);
 
-        for (sorted_imports, 0..) |import_decl, i| {
-            if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
-                try new_text.append(builder.arena, '\n');
+        var prev_decl: ?ImportDecl = null;
+        for (imports, 0..) |import_decl, i| {
+            if (!keep_imports[i]) continue;
+            if (prev_decl) |prev| {
+                if (ImportDecl.addSeperator(prev, import_decl)) try new_text.append(builder.arena, '\n');
             }
 
             try writer.print("{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
+            prev_decl = import_decl;
         }
         try writer.writeByte('\n');
 
@@ -611,9 +673,8 @@ fn handleUnorganizedImport(builder: *Builder) !void {
             .newText = new_text.items,
         });
     }
-
+    // remove previous imports
     {
-        // remove previous imports
         const import_locs = try builder.arena.alloc(offsets.Loc, imports.len);
         for (imports, import_locs) |import_decl, *loc| {
             loc.* = import_decl.getLoc(tree, true);
@@ -630,14 +691,7 @@ fn handleUnorganizedImport(builder: *Builder) !void {
         }
     }
 
-    const workspace_edit = try builder.createWorkspaceEdit(edits.items);
-
-    try builder.actions.append(builder.arena, .{
-        .title = "organize @import",
-        .kind = .@"source.organizeImports",
-        .isPreferred = true,
-        .edit = workspace_edit,
-    });
+    return try builder.createWorkspaceEdit(edits.items);
 }
 
 /// const name_slice = @import(value_slice);

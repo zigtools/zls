@@ -322,7 +322,19 @@ pub fn getAutofixMode(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{
+    OutOfMemory,
+    ParseError,
+    InvalidRequest,
+    MethodNotFound,
+    InvalidParams,
+    InternalError,
+    ServerNotInitialized,
+    RequestFailed,
+    ServerCancelled,
+    ContentModified,
+    RequestCancelled,
+}!std.ArrayListUnmanaged(types.TextEdit) {
     if (handle.tree.errors.len != 0) return .empty;
     if (handle.tree.mode == .zon) return .empty;
 
@@ -343,7 +355,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         }),
     };
 
-    try builder.generateCodeAction(error_bundle);
+    try builder.generateCodeAction(error_bundle, server);
     for (builder.actions.items) |action| {
         std.debug.assert(action.kind.?.eql(.@"source.fixAll")); // We request only source.fixall code actions
     }
@@ -1766,7 +1778,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         .only_kinds = only_kinds,
     };
 
-    try builder.generateCodeAction(error_bundle);
+    try builder.generateCodeAction(error_bundle, server);
     try builder.generateCodeActionsInRange(request.range);
 
     const Result = lsp.ResultType("textDocument/codeAction");
