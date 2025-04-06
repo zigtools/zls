@@ -645,6 +645,103 @@ test "organize imports - edge cases" {
     );
 }
 
+test "organize imports - duplicates" {
+    try testOrganizeImports(
+        \\const std = @import("std");
+        \\const std = @import("std");
+        \\
+        \\fn foo() void { _ = std; }
+    ,
+        \\const std = @import("std");
+        \\
+        \\fn foo() void { _ = std; }
+    );
+    try testOrganizeImports(
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\const xyz = @import("xyz.zig");
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = xyz;
+        \\    _ = abc;
+        \\}
+    ,
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = xyz;
+        \\    _ = abc;
+        \\}
+    );
+    try testOrganizeImports(
+        \\const abc = @import("abc.zig");
+        \\const std = @import("std");
+        \\const abc = @import("abc.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = std;
+        \\    _ = abc;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\
+        \\const abc = @import("abc.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = std;
+        \\    _ = abc;
+        \\}
+    );
+}
+
+test "organize imports - unused" {
+    try testCleanImports(
+        \\const std = @import("std");
+        \\const mem = std.mem;
+        \\const abc = @import("abc.zig");
+    ,
+        \\const std = @import("std");
+        \\
+        \\
+    );
+    // pub decls are preserved
+    try testCleanImports(
+        \\const std = @import("std");
+        \\pub const mem = std.mem;
+        \\const abc = @import("abc.zig");
+    ,
+        \\const std = @import("std");
+        \\pub const mem = std.mem;
+        \\
+        \\
+    );
+    try testCleanImports(
+        \\const abc = @import("abc.zig");
+        \\pub const abc = @import("abc.zig");
+    ,
+        \\pub const abc = @import("abc.zig");
+        \\
+        \\
+    );
+    try testCleanImports(
+        \\const foo = @import("std").foo;
+        \\const bar = @import("bar").bar;
+        \\
+        \\fn main() void {
+        \\    foo();
+        \\}
+    ,
+        \\const foo = @import("std").foo;
+        \\
+        \\fn main() void {
+        \\    foo();
+        \\}
+    );
+}
+
 test "convert multiline string literal" {
     try testConvertString(
         \\const foo = \\Hell<cursor>o
