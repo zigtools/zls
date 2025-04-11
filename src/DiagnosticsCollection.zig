@@ -294,6 +294,8 @@ fn collectLspDiagnosticsForDocument(
     }
 }
 
+pub const collectLspDiagnosticsForDocumentTesting = if (@import("builtin").is_test) collectLspDiagnosticsForDocument else {};
+
 fn convertErrorBundleToLSPDiangostics(
     eb: std.zig.ErrorBundle,
     error_bundle_src_base_path: ?[]const u8,

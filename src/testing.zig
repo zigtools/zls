@@ -14,6 +14,7 @@ pub fn expectEqual(expected: anytype, actual: anytype) error{TestExpectedEqual}!
 
     const options: std.json.StringifyOptions = .{
         .whitespace = .indent_2,
+        .emit_null_optional_fields = false,
     };
 
     std.json.stringify(expected, options, expected_stringified.writer(std.testing.allocator)) catch @panic("OOM");
@@ -179,7 +180,7 @@ fn diff(
     defer allocator.free(dp);
     @memset(dp, 0);
 
-    const m = before_lines.len;
+    const m = after_lines.len + 1;
 
     for (1..before_lines.len + 1) |i| {
         for (1..after_lines.len + 1) |j| {
