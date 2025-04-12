@@ -878,7 +878,7 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
     for (notification.changes) |change| {
         if (!(std.mem.endsWith(u8, change.uri, ".zig") or std.mem.endsWith(u8, change.uri, ".zon"))) continue;
         switch (change.type) {
-            .Changed, .Deleted => {
+            .Created, .Changed, .Deleted => {
                 try server.document_store.refreshDocumentFromFileSystem(change.uri);
                 updated_files += 1;
             },
