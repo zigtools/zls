@@ -47,6 +47,7 @@ pub const Builder = struct {
         var remove_capture_actions: std.AutoHashMapUnmanaged(types.Range, void) = .empty;
 
         try handleUnorganizedImport(builder);
+        try handleUnusedImports(builder, server);
 
         if (error_bundle.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
         for (error_bundle.getMessages()) |msg_index| {
@@ -636,10 +637,54 @@ fn handleUnorganizedImport(builder: *Builder) !void {
         .edit = workspace_edit,
     });
 }
+
+fn handleUnusedImports(builder: *Builder, server: *Server) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.@"source.organizeImports")) return;
+
+    const tree = builder.handle.tree;
+    if (tree.errors.len != 0) return;
+
+    const imports = try getImportsDecls(builder, builder.arena);
+
+    if (imports.len == 0) return;
+
+    const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
+    std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+
+    var keep_imports: std.ArrayListUnmanaged(bool) = try .initCapacity(builder.arena, imports.len);
+    keep_imports.appendNTimesAssumeCapacity(true, imports.len);
+
+    for (imports, 0..) |import_decl, i| {
+        if (std.mem.eql(u8, "pub", tree.tokenSlice(tree.firstToken(import_decl.var_decl)))) continue;
+        const decl_index = tree.tokenStart(tree.firstToken(import_decl.var_decl) + 1);
+        const ref_req: references.GeneralReferencesRequest = .{
+            .references = .{
+                .context = .{ .includeDeclaration = false },
+                .textDocument = .{ .uri = builder.handle.uri },
+                .position = offsets.indexToPosition(
+                    tree.source,
+                    decl_index,
+                    builder.offset_encoding,
+                ),
+            },
+        };
+        if (try references.referencesHandler(server, builder.arena, ref_req)) |refs| {
+            if (refs.references.len == 0) keep_imports.items[i] = false;
         }
     }
 
-    var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
+    const workspace_edit = try getImportEdit(builder, tree, sorted_imports, keep_imports.items);
+
+    try builder.actions.append(builder.arena, .{
+        .title = "remove unused @import",
+        .kind = .@"source.organizeImports",
+        .isPreferred = false,
+        .edit = workspace_edit,
+    });
+}
 
 fn getImportEdit(
     builder: *Builder,

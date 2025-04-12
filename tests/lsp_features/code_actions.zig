@@ -841,6 +841,9 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
 fn testOrganizeImports(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports", .filter_title = "organize @import" });
 }
+
+fn testCleanImports(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports", .filter_title = "remove unused @import" });
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
