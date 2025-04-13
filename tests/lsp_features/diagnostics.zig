@@ -125,7 +125,7 @@ test "autofix comment" {
             .relatedInformation = &.{
                 .{
                     .location = .{
-                        .uri = "file:///nonexistent/test-0.zig",
+                        .uri = "file:///test.zig",
                         .range = .{
                             .start = .{ .line = 1, .character = 10 },
                             .end = .{ .line = 1, .character = 13 },
@@ -150,7 +150,10 @@ fn testDiagnostics(
     var context: Context = try .init();
     defer context.deinit();
 
-    const uri = try context.addDocument(.{ .source = source });
+    const uri = try context.addDocument(.{
+        .uri = "file:///test.zig",
+        .source = source,
+    });
 
     context.server.config.warn_style = options.warn_style;
     context.server.config.highlight_global_var_declarations = options.highlight_global_var_declarations;
