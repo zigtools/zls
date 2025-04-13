@@ -1,3 +1,9 @@
+const OptionalType = ?u32;
+//    ^^^^^^^^^^^^ (type)()
+
+const InvalidOptionalTypeUnwrap = OptionalType.?;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
 const alpha: ?u32 = undefined;
 //    ^^^^^ (?u32)()
 

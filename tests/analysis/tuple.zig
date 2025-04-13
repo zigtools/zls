@@ -1,6 +1,11 @@
 const TupleType = struct { i64, f32 };
 //    ^^^^^^^^^ (type)(struct { i64, f32 })
 
+const InvalidTupleTypeAccess0 = TupleType[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+const InvalidTupleTypeAccess1 = TupleType[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
 const some_tuple: struct { i64, f32 } = undefined;
 //    ^^^^^^^^^^ (struct { i64, f32 })()
 
