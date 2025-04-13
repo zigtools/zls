@@ -3,6 +3,11 @@ const ArrayType = [3]u8;
 const ArrayTypeWithSentinel = [3:0]u8;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)([3:0]u8)
 
+const InvalidArrayTypeAccess0 = ArrayType[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+const InvalidArrayTypeAccess1 = ArrayType[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
 const empty_array: [0]u8 = undefined;
 //    ^^^^^^^^^^^ ([0]u8)()
 const empty_array_len = empty_array.len;

@@ -1,3 +1,9 @@
+const PointerType = *u32;
+//    ^^^^^^^^^^^ (type)()
+
+const InvalidPointerTypeDeref = PointerType.*;
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
 //
 // single item pointer *T
 //

@@ -909,6 +909,8 @@ pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type 
 pub const ErrorUnionSide = enum { error_set, payload };
 
 pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUnionSide) error{OutOfMemory}!?Type {
+    if (ty.is_type_val) return null;
+
     return switch (ty.data) {
         .error_union => |info| switch (side) {
             .error_set => (info.error_set orelse return null).instanceTypeVal(analyser),
