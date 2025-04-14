@@ -879,13 +879,15 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
         if (!(std.mem.endsWith(u8, change.uri, ".zig") or std.mem.endsWith(u8, change.uri, ".zon"))) continue;
         switch (change.type) {
             .Created, .Changed, .Deleted => {
-                try server.document_store.refreshDocumentFromFileSystem(change.uri);
-                updated_files += 1;
+                const did_update_file = try server.document_store.refreshDocumentFromFileSystem(change.uri);
+                updated_files += @intFromBool(did_update_file);
             },
             else => {},
         }
     }
-    log.info("updated {d} watched file(s)", .{updated_files});
+    if (updated_files != 0) {
+        log.info("updated {d} watched file(s)", .{updated_files});
+    }
 }
 
 fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {

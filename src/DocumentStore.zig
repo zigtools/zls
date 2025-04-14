@@ -818,20 +818,21 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 /// has been synchronized via `textDocument/didOpen`.
 /// **Thread safe** takes an exclusive lock when called on different documents
 /// **Not thread safe** when called on the same document
-pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !void {
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
     {
-        const handle = self.getHandle(uri) orelse return;
-        if (handle.getStatus().open) return;
+        const handle = self.getHandle(uri) orelse return false;
+        if (handle.getStatus().open) return false;
     }
 
     {
         self.lock.lock();
         defer self.lock.unlock();
 
-        const kv = self.handles.fetchSwapRemove(uri) orelse return;
+        const kv = self.handles.fetchSwapRemove(uri) orelse return false;
         log.debug("Closing document {s}", .{kv.key});
         kv.value.deinit();
         self.allocator.destroy(kv.value);
+        return true;
     }
 }
 
