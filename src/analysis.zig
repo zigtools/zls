@@ -4115,7 +4115,7 @@ pub fn getPositionContext(
                 else => {},
             },
             .period, .period_asterisk => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .enum_literal = tok.loc },
+                .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                 .enum_literal => curr_ctx.ctx = .empty,
                 .keyword => curr_ctx.ctx = .other, // no keyword can be `.`/`.*` accessed
                 .comment, .other, .field_access, .global_error_set => {},
