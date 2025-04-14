@@ -893,19 +893,6 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
     };
 }
 
-/// Resolves the child type of an optional type
-pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{OutOfMemory}!?Type {
-    _ = analyser;
-    if (!optional_type.is_type_val) return null;
-    switch (optional_type.data) {
-        .optional => |child_ty| {
-            std.debug.assert(child_ty.is_type_val);
-            return child_ty.*;
-        },
-        else => return null,
-    }
-}
-
 pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     return .{
         .data = .{
@@ -1017,7 +1004,7 @@ const BracketAccess = union(enum) {
 /// - `lhs[index]` (single)
 /// - `lhs[start..]` (open)
 /// - `lhs[start..end]` (range)
-fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
+pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
@@ -1268,16 +1255,6 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
     }
 }
 
-pub fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
-    switch (tuple.data) {
-        .tuple => |fields| {
-            if (index >= fields.len) return null;
-            return fields[index].instanceTypeVal(analyser);
-        },
-        else => return null,
-    }
-}
-
 fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
     if (ty.is_type_val)
         return null;
@@ -1323,7 +1300,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
         .tuple => {
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
-            return try analyser.resolveTupleFieldType(ty, index);
+            return try analyser.resolveBracketAccessType(ty, .{ .single = index });
         },
 
         .optional => |child_ty| {
@@ -4534,7 +4511,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
-                    .tuple => try analyser.resolveTupleFieldType(node, pay.index),
+                    .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
                     else => null,
                 };
             },
@@ -5125,8 +5102,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[0],
                 ancestors[1..],
             )) |array_type| {
-                return (try analyser.resolveBracketAccessType(array_type, .{ .single = null })) orelse
-                    (try analyser.resolveTupleFieldType(array_type, element_index));
+                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
             }
 
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
