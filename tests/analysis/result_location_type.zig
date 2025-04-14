@@ -164,16 +164,14 @@ test "assign" {
 // equal_equal, bang_equal
 //
 
-// TODO
-// const equal_0 = .bar == some_enum;
-// //              ^^^^ (EnumType)()
+const equal_0 = .bar == some_enum;
+//              ^^^^ (EnumType)()
 
 const equal_1 = some_enum == .bar;
 //                           ^^^^ (EnumType)()
 
-// TODO
-// const not_equal_0 = .bar != some_enum;
-// //                  ^^^^ (EnumType)()
+const not_equal_0 = .bar != some_enum;
+//                  ^^^^ (EnumType)()
 
 const not_equal_1 = some_enum != .bar;
 //                               ^^^^ (EnumType)()

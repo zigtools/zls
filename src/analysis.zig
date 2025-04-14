@@ -5277,13 +5277,18 @@ pub fn resolveExpressionTypeFromAncestors(
 
         .equal_equal, .bang_equal => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
-            return (try analyser.resolveTypeOfNode(.{
-                .node = lhs,
-                .handle = handle,
-            })) orelse (try analyser.resolveTypeOfNode(.{
-                .node = rhs,
-                .handle = handle,
-            }));
+            if (node == lhs) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = rhs,
+                    .handle = handle,
+                });
+            }
+            if (node == rhs) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                });
+            }
         },
 
         .@"return" => {
