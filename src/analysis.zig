@@ -4995,17 +4995,16 @@ pub fn lookupSymbolFieldInit(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     field_name: []const u8,
-    nodes: []const Ast.Node.Index,
+    node: Ast.Node.Index,
+    ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?DeclWithHandle {
-    if (nodes.len == 0) return null;
-
     var container_type = (try analyser.resolveExpressionType(
         handle,
-        nodes[0],
-        nodes[1..],
+        node,
+        ancestors,
     )) orelse return null;
 
-    const is_struct_init = switch (handle.tree.nodeTag(nodes[0])) {
+    const is_struct_init = switch (handle.tree.nodeTag(node)) {
         .struct_init_one,
         .struct_init_one_comma,
         .struct_init_dot_two,
@@ -5093,7 +5092,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
+                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
                     return try field_decl.resolveType(analyser);
                 }
             }
@@ -5242,8 +5241,15 @@ pub fn resolveExpressionTypeFromAncestors(
 
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
-            const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
-            const fn_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            const fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
+                const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
+                const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
+                const ty = try decl.resolveType(analyser) orelse return null;
+                break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            } else blk: {
+                const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
+                break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            };
             if (fn_type.is_type_val) return null;
 
             const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
@@ -5363,7 +5369,7 @@ pub fn getSymbolEnumLiteral(
     const tree = handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena.allocator(), tree, source_index);
     if (nodes.len == 0) return null;
-    return analyser.lookupSymbolFieldInit(handle, name, nodes);
+    return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
 }
 
 /// Multiple when using branched types

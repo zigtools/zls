@@ -62,9 +62,8 @@ const nested_struct_init = NestedStructType{ .bar = .{ .foo = 1 } };
 const struct_decl_literal_call: StructType = .init();
 //                                           ^^^^^ (fn () StructType)()
 
-// TODO
-// const nested_struct_decl_literal_call: NestedStructType = .init(.{ .foo = 1 });
-// //                                                                 ^^^^ (u32)()
+const nested_struct_decl_literal_call: NestedStructType = .init(.{ .foo = 1 });
+//                                                                 ^^^^ (u32)()
 
 fn call(_: StructType, _: StructType) void {}
 
