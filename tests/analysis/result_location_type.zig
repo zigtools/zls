@@ -27,9 +27,11 @@ const some_error_union: error{}!StructType = .{ .foo = 1 };
 const some_error_union_optional: error{}!?StructType = .{ .foo = 1 };
 //                                                        ^^^^ (u32)()
 
-// TODO
-// const some_optional_error_union: ?error{}!StructType = .{ .foo = 1 };
-// //                                                        ^^^^ (u32)()
+const some_optional_error_union: ?error{}!StructType = .{ .foo = 1 };
+//                                                        ^^^^ (u32)()
+
+const some_optional_optional: ??StructType = .{ .foo = 1 };
+//                                              ^^^^ (u32)()
 
 //
 // var_decl

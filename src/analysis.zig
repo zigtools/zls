@@ -872,6 +872,7 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
 pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Type) error{OutOfMemory}!?Type {
     if (optional.is_type_val) return null;
 
+    // TODO: some uses of this function don't expect C pointers to be unwrapped
     switch (optional.data) {
         .optional => |child_ty| {
             std.debug.assert(child_ty.is_type_val);
@@ -5019,11 +5020,13 @@ pub fn lookupSymbolFieldInit(
         else => false,
     };
 
-    if (try analyser.resolveUnwrapErrorUnionType(container_type, .payload)) |unwrapped|
+    while (true) {
+        const unwrapped =
+            try analyser.resolveUnwrapErrorUnionType(container_type, .payload) orelse
+            try analyser.resolveOptionalUnwrap(container_type) orelse
+            break;
         container_type = unwrapped;
-
-    if (try analyser.resolveOptionalUnwrap(container_type)) |unwrapped|
-        container_type = unwrapped;
+    }
 
     const container_scope = switch (container_type.data) {
         .container => |s| s,
