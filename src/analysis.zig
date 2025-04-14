@@ -5004,6 +5004,8 @@ pub fn lookupSymbolFieldInit(
         ancestors,
     )) orelse return null;
 
+    if (container_type.is_type_val) return null;
+
     const is_struct_init = switch (handle.tree.nodeTag(node)) {
         .struct_init_one,
         .struct_init_one_comma,
@@ -5260,10 +5262,11 @@ pub fn resolveExpressionTypeFromAncestors(
             const param = param_decl.get(fn_node_handle.handle.tree) orelse return null;
             const type_expr = param.type_expr orelse return null;
 
-            return try analyser.resolveTypeOfNode(.{
+            const param_ty = try analyser.resolveTypeOfNode(.{
                 .node = type_expr,
                 .handle = fn_node_handle.handle,
-            });
+            }) orelse return null;
+            return param_ty.instanceTypeVal(analyser);
         },
         .assign => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
@@ -5299,10 +5302,11 @@ pub fn resolveExpressionTypeFromAncestors(
             for (1..ancestors.len) |index| {
                 const func = tree.fullFnProto(&func_buf, ancestors[index]) orelse continue;
                 const return_type = func.ast.return_type.unwrap() orelse continue;
-                return try analyser.resolveTypeOfNode(.{
+                const return_ty = try analyser.resolveTypeOfNode(.{
                     .node = return_type,
                     .handle = handle,
-                });
+                }) orelse return null;
+                return return_ty.instanceTypeVal(analyser);
             }
         },
 

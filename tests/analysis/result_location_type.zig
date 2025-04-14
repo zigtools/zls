@@ -185,11 +185,10 @@ fn return_0() StructType {
     //        ^^^^ (u32)()
 }
 
-// TODO
-// fn return_1() ?StructType {
-//     return .{ .foo = 1 };
-//     //        ^^^^ (u32)()
-// }
+fn return_1() ?StructType {
+    return .{ .foo = 1 };
+    //        ^^^^ (u32)()
+}
 
 fn return_2() Error!?StructType {
     return .{ .foo = 1 };
