@@ -1119,6 +1119,10 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
         },
         .pointer => |info| return switch (info.size) {
             .one => switch (info.elem_ty.data) {
+                .tuple => |tuple_info| {
+                    const inner_ty: Type = .{ .data = .{ .tuple = tuple_info }, .is_type_val = false };
+                    return analyser.resolveBracketAccessType(inner_ty, rhs);
+                },
                 .array => |array_info| {
                     const inner_ty: Type = .{ .data = .{ .array = array_info }, .is_type_val = false };
                     return analyser.resolveBracketAccessType(inner_ty, rhs);
@@ -5131,7 +5135,7 @@ pub fn resolveExpressionTypeFromAncestors(
                     ancestors[1],
                     ancestors[2..],
                 )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = null });
+                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
                 }
             }
         },

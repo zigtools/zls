@@ -104,13 +104,12 @@ const some_slice: []StructType = &.{
     // ^^^^ (u32)()
 };
 
-// TODO
-// const some_tuple_pointer: *const TupleType = &.{
-//     .{ .foo = 1 },
-//     // ^^^^ (u32)()
-//     .{ .bar = 2 },
-//     // ^^^^ (u16)()
-// };
+const some_tuple_pointer: *const TupleType = &.{
+    .{ .foo = 1 },
+    // ^^^^ (u32)()
+    .{ .bar = 2 },
+    // ^^^^ (u16)()
+};
 
 //
 // if
