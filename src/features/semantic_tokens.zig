@@ -255,6 +255,9 @@ fn colorIdentifierBasedOnType(
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
         var new_tok_mod = tok_mod;
+        if (is_parameter) {
+            new_tok_mod.readonly = true;
+        }
         if (type_node.data == .compile_error) {
             new_tok_mod.deprecated = true;
         }
@@ -417,7 +420,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                         .parameter
                 else
                     .parameter;
-                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true });
+                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true, .readonly = true });
 
                 if (param_decl.anytype_ellipsis3) |any_token| {
                     try writeToken(builder, any_token, .type);
@@ -1048,10 +1051,14 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
     try writeToken(builder, var_decl.comptime_token, .keyword);
     try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
+    const token_mod: TokenModifiers = .{
+        .declaration = true,
+        .readonly = builder.handle.tree.tokenTag(var_decl.ast.mut_token) == .keyword_const,
+    };
     if (resolved_type) |decl_type| {
-        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
+        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, token_mod);
     } else {
-        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
+        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, token_mod);
     }
 
     if (var_decl.ast.type_node.unwrap()) |type_node| try writeNodeTokens(builder, type_node);
@@ -1088,11 +1095,14 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
         tree.tokenStart(name_token),
     )) |child| {
         const is_param = child.decl == .function_parameter;
+        const tok_mod: TokenModifiers = .{
+            .readonly = child.isConst(),
+        };
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
-            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});
+            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, tok_mod);
         } else {
-            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, .{});
+            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, tok_mod);
         }
     } else {
         try writeTokenMod(builder, name_token, .variable, .{});
