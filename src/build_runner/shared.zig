@@ -91,7 +91,7 @@ pub const Transport = struct {
         comptime T: type,
         len: usize,
     ) (std.mem.Allocator.Error || std.fs.File.ReadError || error{EndOfStream})![]T {
-        const bytes = try allocator.alignedAlloc(u8, @alignOf(T), len * @sizeOf(T));
+        const bytes = try allocator.alignedAlloc(u8, .of(T), len * @sizeOf(T));
         errdefer allocator.free(bytes);
         const amt = try transport.reader().readAll(bytes);
         if (amt != len * @sizeOf(T)) return error.EndOfStream;

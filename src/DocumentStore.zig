@@ -677,7 +677,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         file_path,
         max_document_size,
         null,
-        @alignOf(u8),
+        .of(u8),
         0,
     ) catch |err| {
         log.err("failed to read document '{s}': {}", .{ file_path, err });
