@@ -479,7 +479,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
             if (switch_case.payload_token) |payload_token| {
                 const actual_payload = payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true, .readonly = true });
             }
             try writeNodeTokens(builder, switch_case.ast.target_expr);
         },
@@ -495,7 +495,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (while_node.payload_token) |payload| {
                 const capture_is_ref = tree.tokenTag(payload) == .asterisk;
                 const name_token = payload + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true, .readonly = true });
             }
             if (while_node.ast.cont_expr.unwrap()) |cont_expr| try writeNodeTokens(builder, cont_expr);
             try writeNodeTokens(builder, while_node.ast.then_expr);
@@ -529,7 +529,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 capture_token = name_token + 2;
 
                 if (tree.tokenTag(name_token) != .identifier) continue;
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true, .readonly = true });
             }
             try writeNodeTokens(builder, for_node.ast.then_expr);
 
@@ -549,7 +549,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (if_node.payload_token) |payload_token| {
                 const capture_is_ref = tree.tokenTag(payload_token) == .asterisk;
                 const actual_payload = payload_token + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
+                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true, .readonly = true });
             }
             try writeNodeTokens(builder, if_node.ast.then_expr);
 
