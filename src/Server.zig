@@ -872,14 +872,21 @@ fn removeWorkspace(server: *Server, uri: types.URI) void {
 }
 
 fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
-    _ = arena;
-
     var updated_files: usize = 0;
     for (notification.changes) |change| {
-        if (!(std.mem.endsWith(u8, change.uri, ".zig") or std.mem.endsWith(u8, change.uri, ".zon"))) continue;
+        const file_path = Uri.parse(arena, change.uri) catch |err| {
+            log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
+            continue;
+        };
+        const file_extension = std.fs.path.extension(file_path);
+        if (!std.mem.eql(u8, file_extension, ".zig") and !std.mem.eql(u8, file_extension, ".zon")) continue;
+
+        // very inefficient way of achieving some basic URI normalization
+        const uri = try Uri.fromPath(arena, file_path);
+
         switch (change.type) {
             .Created, .Changed, .Deleted => {
-                const did_update_file = try server.document_store.refreshDocumentFromFileSystem(change.uri);
+                const did_update_file = try server.document_store.refreshDocumentFromFileSystem(uri);
                 updated_files += @intFromBool(did_update_file);
             },
             else => {},
