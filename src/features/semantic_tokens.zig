@@ -911,7 +911,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
 
             try writeNodeTokens(builder, lhs_node);
-
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
@@ -924,7 +923,11 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, field_name_token, .errorTag);
                 return;
             }
+
             if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
+                const token_mod: TokenModifiers = .{
+                    .readonly = lhs_type.is_type_val and decl_type.isConst(),
+                };
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodeTag(decl_node).isContainerField()) {
@@ -932,9 +935,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                                 .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
                                 else => null,
                             };
-
                             if (tok_type) |tt| {
-                                try writeToken(builder, field_name_token, tt);
+                                try writeTokenMod(builder, field_name_token, tt, token_mod);
                                 return;
                             }
                         }
@@ -943,7 +945,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 }
 
                 if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
-                    try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, .{});
+                    try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, token_mod);
                     return;
                 }
             }
