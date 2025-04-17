@@ -131,8 +131,14 @@ pub fn main() Error!void {
     defer analyser.deinit();
 
     for (annotations) |annotation| {
-        const identifier_loc = annotation.loc;
-        const identifier = offsets.locToSlice(handle.tree.source, identifier_loc);
+        var identifier_loc = annotation.loc;
+        var identifier = offsets.locToSlice(handle.tree.source, annotation.loc);
+
+        const is_enum_literal = identifier[0] == '.';
+        if (is_enum_literal) {
+            identifier_loc.start += 1;
+            identifier = identifier[1..];
+        }
 
         const test_item = parseAnnotatedSourceLoc(annotation) catch |err| {
             try error_builder.msgAtLoc("invalid annotated source location '{s}'", file_path, annotation.loc, .err, .{
@@ -141,7 +147,12 @@ pub fn main() Error!void {
             return err;
         };
 
-        const decl = try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start) orelse {
+        const decl_maybe = if (is_enum_literal)
+            try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier)
+        else
+            try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start);
+
+        const decl = decl_maybe orelse {
             try error_builder.msgAtLoc("failed to find identifier '{s}' here", file_path, annotation.loc, .err, .{
                 annotation.content,
             });

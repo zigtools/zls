@@ -866,12 +866,12 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .simple_var_decl,
                     => {
                         const var_decl = tree.fullVarDecl(lhs_node).?;
-                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
+                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessType(ty, .{ .single = index }) else null;
                         try writeVarDecl(builder, var_decl, field_type);
                     },
                     .identifier => {
                         const name_token = tree.nodeMainToken(lhs_node);
-                        const maybe_type = if (resolved_type) |ty| try builder.analyser.resolveTupleFieldType(ty, index) else null;
+                        const maybe_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessType(ty, .{ .single = index }) else null;
                         const ty = maybe_type orelse {
                             try writeIdentifier(builder, name_token);
                             continue;
