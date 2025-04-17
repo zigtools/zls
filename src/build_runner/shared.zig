@@ -91,12 +91,9 @@ pub const Transport = struct {
         comptime T: type,
         len: usize,
     ) (std.mem.Allocator.Error || std.fs.File.ReadError || error{EndOfStream})![]T {
-        const bytes = try allocator.alignedAlloc(u8, @alignOf(T), len * @sizeOf(T));
-        errdefer allocator.free(bytes);
-        const amt = try transport.reader().readAll(bytes);
-        if (amt != len * @sizeOf(T)) return error.EndOfStream;
-        const result = std.mem.bytesAsSlice(T, bytes);
-        std.debug.assert(result.len == len);
+        const result = try allocator.alloc(T, len);
+        errdefer allocator.free(result);
+        try transport.reader().readNoEof(std.mem.sliceAsBytes(result));
         if (need_bswap) {
             for (result) |*item| {
                 item.* = @byteSwap(item.*);

@@ -106,7 +106,7 @@ pub fn main() Error!void {
     const file = std.fs.openFileAbsolute(file_path, .{}) catch |err| std.debug.panic("failed to open {s}: {}", .{ file_path, err });
     defer file.close();
 
-    const source = file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, @alignOf(u8), 0) catch |err|
+    const source = file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .of(u8), 0) catch |err|
         std.debug.panic("failed to read from {s}: {}", .{ file_path, err });
     defer gpa.free(source);
 
