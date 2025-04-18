@@ -5346,6 +5346,26 @@ pub fn resolveExpressionTypeFromAncestors(
             );
         },
 
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = tree.builtinCallParams(&buffer, ancestors[0]).?;
+            const call_name = tree.tokenSlice(tree.nodeMainToken(ancestors[0]));
+
+            if (std.mem.eql(u8, call_name, "@as")) {
+                if (params.len != 2) return null;
+                if (params[1] != node) return null;
+                const ty = try analyser.resolveTypeOfNode(.{
+                    .node = params[0],
+                    .handle = handle,
+                }) orelse return null;
+                return ty.instanceTypeVal(analyser);
+            }
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 

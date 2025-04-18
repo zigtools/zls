@@ -246,3 +246,10 @@ test "try" {
     //                        ^^^^^^^^^^^^ (fn () !StructType)()
     _ = s;
 }
+
+//
+// builtin_call
+//
+
+const builtin_as = @as(StructType, .{ .foo = 1 });
+//                                    ^^^^ (u32)()
