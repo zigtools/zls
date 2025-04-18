@@ -5377,6 +5377,17 @@ pub fn resolveExpressionTypeFromAncestors(
             }
         },
 
+        .@"catch" => {
+            const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
+            if (node == rhs) {
+                const lhs_ty = try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                }) orelse return null;
+                return try analyser.resolveUnwrapErrorUnionType(lhs_ty, .payload);
+            }
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 

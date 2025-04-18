@@ -260,3 +260,10 @@ const builtin_as = @as(StructType, .{ .foo = 1 });
 
 const @"orelse" = some_optional orelse .{ .foo = 1 };
 //                                        ^^^^ (u32)()
+
+//
+// catch
+//
+
+const @"catch" = some_error_union catch .{ .foo = 1 };
+//                                         ^^^^ (u32)()
