@@ -231,6 +231,13 @@ const break_block: StructType =
     };
 
 //
+// grouped_expression
+//
+
+const grouped_expression: StructType = (.{ .foo = 1 });
+//                                         ^^^^ (u32)()
+
+//
 // try
 //
 

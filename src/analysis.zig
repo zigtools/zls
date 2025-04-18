@@ -5335,7 +5335,10 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[index + 1 ..],
             );
         },
-        .@"try" => {
+
+        .grouped_expression,
+        .@"try",
+        => {
             return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
