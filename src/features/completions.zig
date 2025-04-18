@@ -1339,10 +1339,10 @@ fn collectContainerFields(
                     if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
                         break :insert_text name;
 
-                    const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(tree, builder.source_index)) {
-                        .none => |data| if (data.right) |right| tree.tokenTag(right) == .equal else false,
-                        .one => |token| token + 1 < tree.tokens.len and tree.tokenTag(token + 1) == .equal,
-                        .between => |data| tree.tokenTag(data.right) == .equal,
+                    const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(builder.orig_handle.tree, builder.source_index)) {
+                        .none => |data| if (data.right) |right| builder.orig_handle.tree.tokenTag(right) == .equal else false,
+                        .one => |token| token + 1 < builder.orig_handle.tree.tokens.len and builder.orig_handle.tree.tokenTag(token + 1) == .equal,
+                        .between => |data| builder.orig_handle.tree.tokenTag(data.right) == .equal,
                     };
                     if (is_following_by_equal_token)
                         break :insert_text name;
