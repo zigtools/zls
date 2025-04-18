@@ -1994,7 +1994,7 @@ test "merged error sets" {
         \\const Error = error{Foo} || error{Bar};
         \\const E = <cursor>
     , &.{
-        .{ .label = "Error", .kind = .Constant, .detail = "error{Foo,Bar}" },
+        .{ .label = "Error", .kind = .Constant, .detail = "error{Bar,Foo}" },
     });
 }
 

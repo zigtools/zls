@@ -1980,6 +1980,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
                 try strings.append(analyser.gpa, index);
             }
+            analyser.ip.string_pool.sortSlice(strings.items);
             const names = try analyser.ip.getStringSlice(analyser.gpa, strings.items);
             const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
             return Type.fromIP(analyser, .type_type, ip_index);
