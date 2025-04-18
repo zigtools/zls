@@ -42,6 +42,22 @@ pub fn main() void {
     _ = optional_5;
     //  ^^^^^^^^^^ (?S)()
 
+    const optional_6 = if (runtime_bool) s else @as(??S, s);
+    _ = optional_6;
+    //  ^^^^^^^^^^ (??S)()
+
+    const optional_7 = if (runtime_bool) @as(??S, s) else s;
+    _ = optional_7;
+    //  ^^^^^^^^^^ (??S)()
+
+    const optional_8 = if (runtime_bool) null else @as(??S, s);
+    _ = optional_8;
+    //  ^^^^^^^^^^ (??S)()
+
+    const optional_9 = if (runtime_bool) @as(??S, s) else null;
+    _ = optional_9;
+    //  ^^^^^^^^^^ (??S)()
+
     _ = &runtime_bool;
 }
 
@@ -49,3 +65,9 @@ const comptime_bool: bool = true;
 
 const comptime_int_and_void = if (comptime_bool) 0 else {};
 //    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const optional_i8_or_i16 = if (comptime_bool) @as(?i8, 1) else @as(?i16, 1);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const optional_i16_or_i8 = if (comptime_bool) @as(?i16, 1) else @as(?i8, 1);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
