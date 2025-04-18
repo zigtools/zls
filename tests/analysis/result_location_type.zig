@@ -253,3 +253,10 @@ test "try" {
 
 const builtin_as = @as(StructType, .{ .foo = 1 });
 //                                    ^^^^ (u32)()
+
+//
+// orelse
+//
+
+const @"orelse" = some_optional orelse .{ .foo = 1 };
+//                                        ^^^^ (u32)()
