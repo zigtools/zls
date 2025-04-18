@@ -921,6 +921,32 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, field_name_token, .errorTag);
                 return;
             }
+
+            const token_mod: TokenModifiers = blk: {
+                var left_node = lhs_node;
+                var current_field_name_token = field_name_token;
+                var current_node = node;
+                var left_type = lhs_type;
+                while (true) {
+                    if (left_type.is_type_val) break :blk .{
+                        .static = true,
+                    };
+
+                    if (tree.nodeTag(left_node) != .field_access) {
+                        const left_token = tree.nodeMainToken(left_node);
+                        break :blk .{
+                            .static = try isStaticToken(builder, left_token),
+                        };
+                    }
+                    current_node = left_node;
+                    left_node, current_field_name_token = tree.nodeData(left_node).node_and_token;
+                    left_type = try builder.analyser.resolveTypeOfNode(.{
+                        .node = left_node,
+                        .handle = handle,
+                    }) orelse break :blk .{};
+                    left_type = try builder.analyser.resolveDerefType(left_type) orelse left_type;
+                }
+            };
             if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {
@@ -929,9 +955,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                                 .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
                                 else => null,
                             };
-
                             if (tok_type) |tt| {
-                                try writeToken(builder, field_name_token, tt);
+                                try writeTokenMod(builder, field_name_token, tt, token_mod);
                                 return;
                             }
                         }
@@ -940,12 +965,12 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 }
 
                 if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
-                    try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, .{});
+                    try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, token_mod);
                     return;
                 }
             }
 
-            try writeTokenMod(builder, field_name_token, .variable, .{});
+            try writeTokenMod(builder, field_name_token, .variable, token_mod);
         },
         .ptr_type,
         .ptr_type_aligned,
@@ -1048,10 +1073,15 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
     try writeToken(builder, var_decl.comptime_token, .keyword);
     try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
+    const token_mod: TokenModifiers = .{
+        .declaration = true,
+        .static = try isStaticToken(builder, var_decl.ast.mut_token),
+    };
+
     if (resolved_type) |decl_type| {
-        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
+        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, token_mod);
     } else {
-        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
+        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, token_mod);
     }
 
     if (var_decl.ast.type_node.unwrap()) |type_node| try writeNodeTokens(builder, type_node);
@@ -1065,6 +1095,14 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
         }
         try writeNodeTokens(builder, init_node);
     }
+}
+
+fn isStaticToken(builder: *Builder, token_index: Ast.TokenIndex) error{OutOfMemory}!bool {
+    const source_index = builder.handle.tree.tokenStart(token_index);
+    const document_scope = try builder.handle.getDocumentScope();
+    const scope_index = Analyser.innermostScopeAtIndex(document_scope, source_index);
+    const scope_tag = document_scope.scopes.items(.data)[@intFromEnum(scope_index)].tag;
+    return scope_tag == .container;
 }
 
 fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMemory}!void {
@@ -1088,11 +1126,14 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
         tree.tokenStart(name_token),
     )) |child| {
         const is_param = child.decl == .function_parameter;
+        const tok_mod: TokenModifiers = .{
+            .static = try isStaticToken(builder, child.nameToken()),
+        };
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
-            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});
+            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, tok_mod);
         } else {
-            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, .{});
+            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, tok_mod);
         }
     } else {
         try writeTokenMod(builder, name_token, .variable, .{});
