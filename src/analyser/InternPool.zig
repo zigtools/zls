@@ -2259,6 +2259,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 },
                 else => {},
             },
+            .error_set_type => switch (chosen_key) {
+                .error_set_type => {
+                    chosen = try ip.errorSetMerge(gpa, chosen, candidate);
+                    continue;
+                },
+                else => {},
+            },
             else => {},
         }
 
@@ -5091,6 +5098,39 @@ test "resolvePeerTypes function pointers" {
 
     try ip.testResolvePeerTypes(@"fn(*u32) void", @"fn(*u32) void", @"fn(*u32) void");
     try ip.testResolvePeerTypes(@"fn(*u32) void", @"fn(*const u32) void", @"fn(*u32) void");
+}
+
+test "resolvePeerTypes error sets" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = try .init(gpa);
+    defer ip.deinit(gpa);
+
+    const foo_name = try ip.string_pool.getOrPutString(gpa, "foo");
+    const bar_name = try ip.string_pool.getOrPutString(gpa, "bar");
+
+    const @"error{foo}" = try ip.get(gpa, .{ .error_set_type = .{
+        .owner_decl = .none,
+        .names = try ip.getStringSlice(gpa, &.{foo_name}),
+    } });
+
+    const @"error{bar}" = try ip.get(gpa, .{ .error_set_type = .{
+        .owner_decl = .none,
+        .names = try ip.getStringSlice(gpa, &.{bar_name}),
+    } });
+
+    const @"error{foo,bar}" = try ip.get(gpa, .{ .error_set_type = .{
+        .owner_decl = .none,
+        .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+    } });
+
+    const @"error{bar,foo}" = try ip.get(gpa, .{ .error_set_type = .{
+        .owner_decl = .none,
+        .names = try ip.getStringSlice(gpa, &.{ bar_name, foo_name }),
+    } });
+
+    try ip.testResolvePeerTypesInOrder(@"error{foo}", @"error{bar}", @"error{foo,bar}");
+    try ip.testResolvePeerTypesInOrder(@"error{bar}", @"error{foo}", @"error{bar,foo}");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
