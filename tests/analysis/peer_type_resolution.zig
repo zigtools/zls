@@ -42,6 +42,30 @@ pub fn main() void {
     _ = optional_5;
     //  ^^^^^^^^^^ (?S)()
 
+    const error_set_0 = if (runtime_bool) error.A else @as(error{ A, B }, error.A);
+    _ = error_set_0;
+    //  ^^^^^^^^^^^ (error{A,B})()
+
+    const error_set_1 = if (runtime_bool) @as(error{ A, B }, error.A) else error.A;
+    _ = error_set_1;
+    //  ^^^^^^^^^^^ (error{A,B})()
+
+    const error_set_2 = if (runtime_bool) error.B else error.A;
+    _ = error_set_2;
+    //  ^^^^^^^^^^^ (error{B,A})()
+
+    const error_set_3 = if (runtime_bool) error.A else error.B;
+    _ = error_set_3;
+    //  ^^^^^^^^^^^ (error{A,B})()
+
+    const error_set_4 = if (runtime_bool) @as(error{ B, C }, error.B) else @as(error{ A, B }, error.A);
+    _ = error_set_4;
+    //  ^^^^^^^^^^^ (error{B,C,A})()
+
+    const error_set_5 = if (runtime_bool) @as(error{ A, B }, error.A) else @as(error{ B, C }, error.B);
+    _ = error_set_5;
+    //  ^^^^^^^^^^^ (error{A,B,C})()
+
     _ = &runtime_bool;
 }
 
