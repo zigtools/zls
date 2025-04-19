@@ -2664,6 +2664,31 @@ fn resolveMutability(analyser: *Analyser, node_handle: NodeWithHandle) error{Out
                 return .@"var";
         },
 
+        .field_access => {
+            const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
+
+            const lhs_handle: NodeWithHandle = .{
+                .node = lhs_node,
+                .handle = handle,
+            };
+
+            const lhs = try analyser.resolveTypeOfNodeInternal(lhs_handle) orelse
+                return null;
+
+            const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
+
+            if (!lhs.is_type_val)
+                return try analyser.resolveMutability(lhs_handle);
+
+            const decl = try lhs.lookupSymbol(analyser, symbol) orelse
+                return null;
+
+            if (decl.isConst())
+                return .@"const"
+            else
+                return .@"var";
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
