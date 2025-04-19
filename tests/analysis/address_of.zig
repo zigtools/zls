@@ -20,6 +20,12 @@ const multiline_string_literal_pointer = &
 const error_value_pointer = &error.Foo;
 //    ^^^^^^^^^^^^^^^^^^^ (*const error{Foo})()
 
+const builtin_as_0 = &@as(i32, 0);
+//    ^^^^^^^^^^^^ (*const i32)()
+
+const builtin_as_1 = &@as(StructType, mutable_struct);
+//    ^^^^^^^^^^^^ (*const StructType)()
+
 const StructType = struct {
     foo: i32,
     const const_decl: bool = true;

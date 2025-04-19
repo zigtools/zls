@@ -2718,6 +2718,17 @@ fn resolveMutability(analyser: *Analyser, node_handle: NodeWithHandle) error{Out
         .error_value,
         => return .@"const",
 
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            const call_name = tree.tokenSlice(tree.nodeMainToken(node));
+
+            if (std.mem.eql(u8, call_name, "@as"))
+                return .@"const";
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
