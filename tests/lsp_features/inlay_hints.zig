@@ -243,7 +243,7 @@ test "var decl" {
         \\const foo<@TypeOf(undefined)> = undefined;
     , .{ .kind = .Type });
     try testInlayHints(
-        \\const foo<**const [3:0]u8> = &"Bar";
+        \\const foo<*const *const [3:0]u8> = &"Bar";
     , .{ .kind = .Type });
     try testInlayHints(
         \\const foo: *[]const u8 = &"Bar";

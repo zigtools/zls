@@ -2698,6 +2698,26 @@ fn resolveMutability(analyser: *Analyser, node_handle: NodeWithHandle) error{Out
                 return .@"var";
         },
 
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init,
+        .array_init_comma,
+
+        .array_mult,
+        .array_cat,
+
+        .char_literal,
+        .number_literal,
+        .enum_literal,
+        .string_literal,
+        .multiline_string_literal,
+        .error_value,
+        => return .@"const",
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
