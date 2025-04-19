@@ -5335,12 +5335,57 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[index + 1 ..],
             );
         },
-        .@"try" => {
+
+        .grouped_expression,
+        .@"try",
+        => {
             return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
             );
+        },
+
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = tree.builtinCallParams(&buffer, ancestors[0]).?;
+            const call_name = tree.tokenSlice(tree.nodeMainToken(ancestors[0]));
+
+            if (std.mem.eql(u8, call_name, "@as")) {
+                if (params.len != 2) return null;
+                if (params[1] != node) return null;
+                const ty = try analyser.resolveTypeOfNode(.{
+                    .node = params[0],
+                    .handle = handle,
+                }) orelse return null;
+                return ty.instanceTypeVal(analyser);
+            }
+        },
+
+        .@"orelse" => {
+            const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
+            if (node == rhs) {
+                const lhs_ty = try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                }) orelse return null;
+                return try analyser.resolveOptionalUnwrap(lhs_ty);
+            }
+        },
+
+        .@"catch" => {
+            const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
+            if (node == rhs) {
+                const lhs_ty = try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                }) orelse return null;
+                return try analyser.resolveUnwrapErrorUnionType(lhs_ty, .payload);
+            }
         },
 
         else => {}, // TODO: Implement more expressions; better safe than sorry

@@ -231,6 +231,13 @@ const break_block: StructType =
     };
 
 //
+// grouped_expression
+//
+
+const grouped_expression: StructType = (.{ .foo = 1 });
+//                                         ^^^^ (u32)()
+
+//
 // try
 //
 
@@ -239,3 +246,24 @@ test "try" {
     //                        ^^^^^^^^^^^^ (fn () !StructType)()
     _ = s;
 }
+
+//
+// builtin_call
+//
+
+const builtin_as = @as(StructType, .{ .foo = 1 });
+//                                    ^^^^ (u32)()
+
+//
+// orelse
+//
+
+const @"orelse" = some_optional orelse .{ .foo = 1 };
+//                                        ^^^^ (u32)()
+
+//
+// catch
+//
+
+const @"catch" = some_error_union catch .{ .foo = 1 };
+//                                         ^^^^ (u32)()
