@@ -5021,19 +5021,19 @@ pub fn lookupSymbolFieldInit(
         return try analyser.lookupSymbolContainer(container_scope, field_name, .field);
     }
 
-    // Assume we are doing decl literals
     switch (container_type.getContainerKind() orelse return null) {
-        .keyword_struct => {
-            const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
-            var resolved_type = try decl.resolveType(analyser) orelse return null;
-            resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
-            resolved_type = resolved_type.resolveDeclLiteralResultType();
-            if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
-            return null;
-        },
-        .keyword_enum, .keyword_union => return try analyser.lookupSymbolContainer(container_scope, field_name, .field),
+        .keyword_struct => {},
+        .keyword_enum, .keyword_union => if (try analyser.lookupSymbolContainer(container_scope, field_name, .field)) |ty| return ty,
         else => return null,
     }
+
+    // Assume we are doing decl literals
+    const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
+    var resolved_type = try decl.resolveType(analyser) orelse return null;
+    resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+    resolved_type = resolved_type.resolveDeclLiteralResultType();
+    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
+    return null;
 }
 
 pub fn resolveExpressionType(
