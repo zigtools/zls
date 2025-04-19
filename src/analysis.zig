@@ -893,13 +893,13 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
     };
 }
 
-pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+pub fn resolveAddressOf(analyser: *Analyser, mutability: Mutability, ty: Type) error{OutOfMemory}!?Type {
     return .{
         .data = .{
             .pointer = .{
                 .size = .one,
                 .sentinel = .none,
-                .is_const = false,
+                .is_const = mutability == .@"const",
                 .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
             },
         },
@@ -1810,12 +1810,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return try analyser.resolveUnwrapErrorUnionType(base_type, .payload);
         },
         .address_of => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
+            const expr: NodeWithHandle = .{
                 .node = tree.nodeData(node).node,
                 .handle = handle,
-            }) orelse return null;
+            };
+            const mutability = try analyser.resolveMutability(expr) orelse .@"var";
+            const base_type = try analyser.resolveTypeOfNodeInternal(expr) orelse return null;
 
-            return try analyser.resolveAddressOf(base_type);
+            return try analyser.resolveAddressOf(mutability, base_type);
         },
         .field_access => {
             const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
@@ -2621,6 +2623,50 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .asm_input,
         => {},
     }
+    return null;
+}
+
+const Mutability = enum {
+    @"var",
+    @"const",
+};
+
+fn resolveMutability(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Mutability {
+    const node = node_handle.node;
+    const handle = node_handle.handle;
+    const tree = handle.tree;
+
+    switch (tree.nodeTag(node)) {
+        .identifier => {
+            const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse
+                return null;
+
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
+
+            const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+            if (!is_escaped_identifier) {
+                if (std.mem.eql(u8, name, "_"))
+                    return null;
+
+                if (try analyser.resolvePrimitive(name)) |_|
+                    return .@"const";
+            }
+
+            if (analyser.bound_type_params.resolve(name)) |_|
+                return .@"const";
+
+            const decl = try analyser.lookupSymbolGlobal(handle, name, tree.tokenStart(name_token)) orelse
+                return null;
+
+            if (decl.isConst())
+                return .@"const"
+            else
+                return .@"var";
+        },
+
+        else => {}, // TODO: Implement more expressions; better safe than sorry
+    }
+
     return null;
 }
 
