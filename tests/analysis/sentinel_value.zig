@@ -7,13 +7,11 @@ const slice0: [:0]i1 = undefined;
 const slice1: [:42]u8 = undefined;
 //    ^^^^^^ ([:42]u8)()
 
-// TODO this should be `*const [2]u8`
 const slice2 = array[0..2];
-//    ^^^^^^ (*[2]u8)()
+//    ^^^^^^ (*const [2]u8)()
 
-// TODO this should be `*const [3:0]u8`
 const slice3 = array[1..];
-//    ^^^^^^ (*[3:0]u8)()
+//    ^^^^^^ (*const [3:0]u8)()
 
 const hw = "Hello, World!";
 //    ^^ (*const [13:0]u8)()
