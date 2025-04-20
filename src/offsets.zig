@@ -296,44 +296,35 @@ test "sourceIndexToTokenIndex - token at end" {
     try expectEqual(Result{ .one = 0 }, sourceIndexToTokenIndex(tree, 2));
 }
 
-fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
-    var index: usize = source_index;
-    if (tree.source[index] == '@') {
-        index += 1;
-        std.debug.assert(tree.source[index] == '\"');
-        index += 1;
-        while (true) : (index += 1) {
-            if (tree.source[index] == '\"') {
-                index += 1;
-                break;
-            }
-        }
-    } else {
-        while (true) : (index += 1) {
-            switch (tree.source[index]) {
-                'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
-                else => break,
-            }
-        }
-    }
-    return .{ .start = source_index, .end = index };
-}
+pub const IdentifierIndexRange = enum {
+    /// delimiting `@` and `"`s are excluded
+    name,
+    /// delimiting `@` and `"`s are included
+    full,
+};
 
 /// Support formats:
 /// - `foo`
 /// - `@"foo"`
 /// - `@foo`
-pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
-    if (text[source_index] == '@' and text[source_index + 1] == '\"') {
+pub fn identifierIndexToLoc(text: [:0]const u8, source_index: usize, range: IdentifierIndexRange) Loc {
+    if (text[source_index] == '@' and text[source_index + 1] == '"') {
         const start_index = source_index + 2;
         var index: usize = start_index;
         while (true) : (index += 1) {
             switch (text[index]) {
-                '\n', '\"' => break,
+                '\n' => break,
+                '"' => {
+                    // continue on e.g. `@"\""` but not `@"\\"`
+                    if (text[index - 1] == '\\' and text[index - 2] != '\\') continue;
+                    // include the closing quote
+                    if (range == .full) index += 1;
+                    break;
+                },
                 else => {},
             }
         }
-        return .{ .start = start_index, .end = index };
+        return .{ .start = if (range == .full) source_index else start_index, .end = index };
     } else {
         const start: usize = source_index + @intFromBool(text[source_index] == '@');
         var index = start;
@@ -343,28 +334,33 @@ pub fn identifierIndexToNameLoc(text: [:0]const u8, source_index: usize) Loc {
                 else => break,
             }
         }
-        return .{ .start = start, .end = index };
+        return .{ .start = if (range == .full) source_index else start, .end = index };
     }
 }
 
-test identifierIndexToNameLoc {
-    try std.testing.expectEqualStrings("", identifierIndexToNameSlice("", 0));
-    try std.testing.expectEqualStrings("", identifierIndexToNameSlice(" ", 0));
-    try std.testing.expectEqualStrings("", identifierIndexToNameSlice(" world", 0));
+test identifierIndexToLoc {
+    try std.testing.expectEqualStrings("", identifierIndexToSlice("", 0, .name));
+    try std.testing.expectEqualStrings("", identifierIndexToSlice(" ", 0, .name));
+    try std.testing.expectEqualStrings("", identifierIndexToSlice(" world", 0, .name));
 
-    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("hello", 0));
-    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("hello world", 0));
-    try std.testing.expectEqualStrings("world", identifierIndexToNameSlice("hello world", 6));
+    try std.testing.expectEqualStrings("hello", identifierIndexToSlice("hello", 0, .name));
+    try std.testing.expectEqualStrings("hello", identifierIndexToSlice("hello world", 0, .name));
+    try std.testing.expectEqualStrings("world", identifierIndexToSlice("hello world", 6, .name));
 
-    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@\"hello\"", 0));
-    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@\"hello\" world", 0));
-    try std.testing.expectEqualStrings("world", identifierIndexToNameSlice("@\"hello\" @\"world\"", 9));
+    try std.testing.expectEqualStrings("hello", identifierIndexToSlice("@\"hello\"", 0, .name));
+    try std.testing.expectEqualStrings("hello", identifierIndexToSlice("@\"hello\" world", 0, .name));
+    try std.testing.expectEqualStrings("world", identifierIndexToSlice("@\"hello\" @\"world\"", 9, .name));
 
-    try std.testing.expectEqualStrings("hello", identifierIndexToNameSlice("@hello", 0));
+    try std.testing.expectEqualStrings("hello", identifierIndexToSlice("@hello", 0, .name));
+
+    try std.testing.expectEqualStrings("\\\"", identifierIndexToSlice("@\"\\\"\"", 0, .name));
+
+    try std.testing.expectEqualStrings("@hello", identifierIndexToSlice("@hello", 0, .full));
+    try std.testing.expectEqualStrings("@\"hello\"", identifierIndexToSlice("@\"hello\"", 0, .full));
 }
 
-pub fn identifierIndexToNameSlice(text: [:0]const u8, source_index: usize) []const u8 {
-    return locToSlice(text, identifierIndexToNameLoc(text, source_index));
+pub fn identifierIndexToSlice(text: [:0]const u8, source_index: usize, range: IdentifierIndexRange) []const u8 {
+    return locToSlice(text, identifierIndexToLoc(text, source_index, range));
 }
 
 pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc {
@@ -373,7 +369,7 @@ pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc
         .identifier => true,
         else => false,
     });
-    return identifierIndexToNameLoc(tree.source, tree.tokenStart(identifier_token));
+    return identifierIndexToLoc(tree.source, tree.tokenStart(identifier_token), .name);
 }
 
 pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) []const u8 {
@@ -391,7 +387,7 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     // Many tokens can be determined entirely by their tag.
     if (tag == .identifier) {
         // fast path for identifiers
-        return identifierIndexToLoc(tree, start);
+        return identifierIndexToLoc(tree.source, start, .full);
     } else if (tag.lexeme()) |lexeme| {
         return .{
             .start = start,

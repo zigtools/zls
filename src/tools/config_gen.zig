@@ -763,7 +763,7 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
         } else if (std.mem.eql(u8, tag_name, "a")) {
             const href_part = std.mem.trimLeft(u8, html[tag_start_index + 2 .. content_start - 1], " ");
             std.debug.assert(std.mem.startsWith(u8, href_part, "href=\""));
-            std.debug.assert(href_part[href_part.len - 1] == '\"');
+            std.debug.assert(href_part[href_part.len - 1] == '"');
             const url = href_part["href=\"".len .. href_part.len - 1];
             try writer.print("[{s}]({s})", .{ content, std.mem.trimLeft(u8, url, "@") });
         } else if (std.mem.eql(u8, tag_name, "code")) {
