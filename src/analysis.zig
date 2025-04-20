@@ -1980,6 +1980,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
                 try strings.append(analyser.gpa, index);
             }
+            analyser.ip.string_pool.sortSlice(strings.items);
             const names = try analyser.ip.getStringSlice(analyser.gpa, strings.items);
             const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
             return Type.fromIP(analyser, .type_type, ip_index);
@@ -2923,8 +2924,15 @@ pub const Type = struct {
 
         switch (a.data) {
             .optional => |a_type| {
-                if (a_type.eql(b.typeOf(analyser))) {
+                if (b.data == .ip_index and b.data.ip_index.type == .null_type) {
                     return a;
+                }
+                if (a_type.instanceTypeVal(analyser)) |a_inst| {
+                    if (try resolvePeerTypes(analyser, a_inst, b)) |resolved| {
+                        if (resolved.eql(a_inst)) {
+                            return a;
+                        }
+                    }
                 }
             },
             .ip_index => |a_payload| switch (a_payload.type) {
@@ -2942,13 +2950,20 @@ pub const Type = struct {
 
         switch (b.data) {
             .optional => |b_type| {
-                if (b_type.eql(a.typeOf(analyser))) {
-                    return b;
+                if (a.data == .ip_index and a.data.ip_index.type == .null_type) {
+                    unreachable; // a.ip_index => .null_type => b.optional
+                }
+                if (b_type.instanceTypeVal(analyser)) |b_inst| {
+                    if (try resolvePeerTypes(analyser, a, b_inst)) |resolved| {
+                        if (resolved.eql(b_inst)) {
+                            return b;
+                        }
+                    }
                 }
             },
             .ip_index => |b_payload| switch (b_payload.type) {
                 .null_type => switch (a.data) {
-                    .optional => return a,
+                    .optional => unreachable, // a.optional => b.ip_index => .null_type
                     else => return .{
                         .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
                         .is_type_val = false,

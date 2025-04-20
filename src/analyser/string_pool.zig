@@ -208,6 +208,18 @@ pub fn StringPool(comptime config: Config) type {
             defer locked_string.release(ctx.pool);
             try writer.writeAll(locked_string.slice);
         }
+
+        pub fn sortSlice(pool: *Pool, indexes: []String) void {
+            pool.mutex.lock();
+            defer pool.mutex.unlock();
+            std.mem.sort(String, indexes, pool, stringLessThanUnsafe);
+        }
+
+        fn stringLessThanUnsafe(pool: *Pool, a: String, b: String) bool {
+            const a_slice = pool.stringToSliceUnsafe(a);
+            const b_slice = pool.stringToSliceUnsafe(b);
+            return std.mem.order(u8, a_slice, b_slice).compare(.lt);
+        }
     };
 }
 
