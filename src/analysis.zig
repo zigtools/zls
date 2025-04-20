@@ -1643,7 +1643,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const ptyp = try analyser.arena.allocator().create(Type);
                 ptyp.* = argument_type;
 
-                const symbol = offsets.identifierTokenToNameSlice(func_tree, param.name_token.?);
+                const symbol = if (param.name_token) |name_token| offsets.identifierTokenToNameSlice(func_tree, name_token) else "";
                 meta_params.appendAssumeCapacity(.{ .index = param_index, .symbol = symbol, .typ = ptyp });
             }
 
