@@ -58,6 +58,32 @@ pub const TokenModifiers = packed struct(u16) {
     // non standard token modifiers
     generic: bool = false,
     _: u5 = 0,
+
+    pub fn format(
+        modifiers: TokenModifiers,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, modifiers);
+        _ = options;
+
+        try writer.writeAll(".{");
+        var i: usize = 0;
+        inline for (std.meta.fields(TokenModifiers)) |field| {
+            if ((comptime !std.mem.eql(u8, field.name, "_")) and @field(modifiers, field.name)) {
+                if (i == 0) {
+                    try writer.writeAll(" .");
+                } else {
+                    try writer.writeAll(", .");
+                }
+                try writer.writeAll(field.name);
+                try writer.writeAll(" = true");
+                i += 1;
+            }
+        }
+        try writer.writeAll(" }");
+    }
 };
 
 const Builder = struct {
