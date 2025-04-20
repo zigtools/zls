@@ -308,7 +308,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
-            const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle });
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
             try writeVarDecl(builder, var_decl, resolved_type);
         },
         .@"usingnamespace" => {
@@ -389,7 +389,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
             const func_ty = Analyser.Type{
-                .data = .{ .other = .{ .node = node, .handle = handle } }, // this assumes that function types can only be Ast nodes
+                .data = .{ .other = .of(node, handle) }, // this assumes that function types can only be Ast nodes
                 .is_type_val = true,
             };
 
@@ -593,12 +593,14 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (struct_init.ast.type_expr.unwrap()) |type_expr| {
                 try writeNodeTokens(builder, type_expr);
 
-                field_token_type = if (try builder.analyser.resolveTypeOfNode(
-                    .{ .node = type_expr, .handle = handle },
-                )) |struct_type| switch (struct_type.data) {
-                    .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, false),
-                    else => null,
-                } else null;
+                if (try builder.analyser.resolveTypeOfNode(.of(type_expr, handle))) |struct_type| {
+                    switch (struct_type.data) {
+                        .container => |scope_handle| {
+                            field_token_type = fieldTokenType(scope_handle.toNode(), scope_handle.handle, false);
+                        },
+                        else => {},
+                    }
+                }
             }
 
             for (struct_init.ast.fields) |field_init| {
@@ -857,7 +859,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .assign_destructure => {
             const data = tree.assignDestructure(node);
 
-            const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .node = data.ast.value_expr, .handle = handle });
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(data.ast.value_expr, handle));
 
             for (data.ast.variables, 0..) |lhs_node, index| {
                 switch (tree.nodeTag(lhs_node)) {
@@ -908,7 +910,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
-            const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse {
+            const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse {
                 try writeTokenMod(builder, field_name_token, .variable, .{});
                 return;
             };

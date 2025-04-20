@@ -333,12 +333,9 @@ pub fn isInstanceCall(
     std.debug.assert(!func_ty.is_type_val);
     if (call_handle.tree.nodeTag(call.ast.fn_expr) != .field_access) return false;
 
-    const container_node: NodeWithHandle = .{
-        .node = call_handle.tree.nodeData(call.ast.fn_expr).node_and_token[0],
-        .handle = call_handle,
-    };
+    const container_node, _ = call_handle.tree.nodeData(call.ast.fn_expr).node_and_token;
 
-    const container_ty = if (try analyser.resolveTypeOfNodeInternal(container_node)) |container_instance|
+    const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
         container_instance.typeOf(analyser)
     else blk: {
         const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
@@ -378,10 +375,7 @@ pub fn firstParamIs(
     }
     const type_expr = param.type_expr orelse return false;
 
-    const resolved_type = try analyser.resolveTypeOfNodeInternal(.{
-        .node = type_expr,
-        .handle = func_handle.handle,
-    }) orelse return false;
+    const resolved_type = try analyser.resolveTypeOfNodeInternal(.of(type_expr, func_handle.handle)) orelse return false;
     if (!resolved_type.is_type_val) return false;
 
     const deref_type = switch (resolved_type.data) {
@@ -728,7 +722,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
         },
         .field_access => blk: {
             const lhs, const field_name = tree.nodeData(node_handle.node).node_and_token;
-            const resolved = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
+            const resolved = (try analyser.resolveTypeOfNode(.of(lhs, handle))) orelse return null;
             if (!resolved.is_type_val)
                 return null;
 
@@ -755,7 +749,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
             const base_exp = var_decl.ast.init_node.unwrap() orelse return null;
             if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return null;
 
-            return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle }, node_trail);
+            return try analyser.resolveVarDeclAliasInternal(.of(base_exp, handle), node_trail);
         },
         else => return null,
     } orelse return null;
@@ -773,7 +767,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
         return null;
     }
 
-    if (try analyser.resolveVarDeclAliasInternal(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
+    if (try analyser.resolveVarDeclAliasInternal(.of(resolved_node, resolved.handle), node_trail)) |result| {
         return result;
     } else {
         return resolved;
@@ -843,14 +837,14 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
         // a container declaration, we will return that declaration.
         const return_node = findReturnStatement(tree, body) orelse return null;
         if (tree.nodeData(return_node).opt_node.unwrap()) |return_expr| {
-            return try analyser.resolveTypeOfNodeInternal(.{ .node = return_expr, .handle = func_node_handle.handle });
+            return try analyser.resolveTypeOfNodeInternal(.of(return_expr, func_node_handle.handle));
         }
 
         return null;
     }
 
     const return_type = fn_proto.ast.return_type.unwrap() orelse return null;
-    const ret: NodeWithHandle = .{ .node = return_type, .handle = func_node_handle.handle };
+    const ret: NodeWithHandle = .of(return_type, func_node_handle.handle);
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
     if (!child_type.is_type_val) return null;
@@ -951,10 +945,7 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, ty: Type, symbol: []const u8
     }
 
     if (container_decl.ast.arg.unwrap()) |arg| {
-        const tag_type = (try analyser.resolveTypeOfNode(.{
-            .node = arg,
-            .handle = handle,
-        })) orelse return null;
+        const tag_type = (try analyser.resolveTypeOfNode(.of(arg, handle))) orelse return null;
         return tag_type.instanceTypeVal(analyser);
     }
 
@@ -1556,10 +1547,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var fallback_type: ?Type = null;
 
             if (var_decl.ast.type_node.unwrap()) |type_node| blk: {
-                const decl_type = try analyser.resolveTypeOfNodeInternal(.{
-                    .node = type_node,
-                    .handle = handle,
-                }) orelse break :blk;
+                const decl_type = try analyser.resolveTypeOfNodeInternal(.of(type_node, handle)) orelse break :blk;
                 if (decl_type.isMetaType()) {
                     fallback_type = decl_type;
                     break :blk;
@@ -1568,10 +1556,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             if (var_decl.ast.init_node.unwrap()) |init_node| blk: {
-                return try analyser.resolveTypeOfNodeInternal(.{
-                    .node = init_node,
-                    .handle = handle,
-                }) orelse break :blk;
+                return try analyser.resolveTypeOfNodeInternal(.of(init_node, handle)) orelse break :blk;
             }
 
             return fallback_type;
@@ -1605,7 +1590,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buffer: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&buffer, node).?;
 
-            const callee: NodeWithHandle = .{ .node = call.ast.fn_expr, .handle = handle };
+            const callee: NodeWithHandle = .of(call.ast.fn_expr, handle);
             const ty = try analyser.resolveTypeOfNodeInternal(callee) orelse return null;
             const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
@@ -1637,7 +1622,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const type_expr = param.type_expr orelse continue;
                 if (!isMetaType(func_tree, type_expr)) continue;
 
-                const argument_type = (try analyser.resolveTypeOfNodeInternal(.{ .node = arg, .handle = handle })) orelse continue;
+                const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
 
                 const ptyp = try analyser.arena.allocator().create(Type);
@@ -1654,10 +1639,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             // detect if function is called as foo.bar(...)
             // and foo has comptime state.
             if (tree.nodeTag(call.ast.fn_expr) == .field_access) {
-                if (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = tree.nodeData(call.ast.fn_expr).node_and_token[0],
-                    .handle = handle,
-                })) |field_lhs| {
+                const lhs_node, _ = tree.nodeData(call.ast.fn_expr).node_and_token;
+                if (try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle))) |field_lhs| {
                     switch (field_lhs.data) {
                         .container => |c| {
                             try analyser.bound_type_params.push(analyser.gpa, c.bound_params);
@@ -1693,15 +1676,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     return Type.fromIP(analyser, .void_type, null);
             }
 
-            const base: NodeWithHandle = .{ .node = field.ast.type_expr.unwrap().?, .handle = handle };
+            const base: NodeWithHandle = .of(field.ast.type_expr.unwrap().?, handle);
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
             return base_type.instanceTypeVal(analyser);
         },
         .@"comptime",
         .@"nosuspend",
-        => return try analyser.resolveTypeOfNodeInternal(.{ .node = tree.nodeData(node).node, .handle = handle }),
+        => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)),
         .grouped_expression,
-        => return try analyser.resolveTypeOfNodeInternal(.{ .node = tree.nodeData(node).node_and_token[0], .handle = handle }),
+        => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node_and_token[0], handle)),
         .struct_init,
         .struct_init_comma,
         .struct_init_one,
@@ -1728,102 +1711,77 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const slice = tree.fullSlice(node).?;
 
-            const sliced = try analyser.resolveTypeOfNodeInternal(.{
-                .node = slice.ast.sliced,
-                .handle = handle,
-            }) orelse return null;
+            const sliced = try analyser.resolveTypeOfNodeInternal(.of(slice.ast.sliced, handle)) orelse return null;
 
             const kind: BracketAccess = if (slice.ast.end.unwrap()) |end_node|
                 .{ .range = blk: {
-                    const start = try analyser.resolveIntegerLiteral(u64, .{ .node = slice.ast.start, .handle = handle }) orelse
+                    const start = try analyser.resolveIntegerLiteral(u64, .of(slice.ast.start, handle)) orelse
                         break :blk null;
-                    const end = try analyser.resolveIntegerLiteral(u64, .{ .node = end_node, .handle = handle }) orelse
+                    const end = try analyser.resolveIntegerLiteral(u64, .of(end_node, handle)) orelse
                         break :blk null;
                     break :blk .{ start, end };
                 } }
             else
-                .{ .open = try analyser.resolveIntegerLiteral(u64, .{ .node = slice.ast.start, .handle = handle }) };
+                .{ .open = try analyser.resolveIntegerLiteral(u64, .of(slice.ast.start, handle)) };
             return try analyser.resolveBracketAccessType(sliced, kind);
         },
         .deref => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
-                .node = tree.nodeData(node).node,
-                .handle = handle,
-            }) orelse return null;
+            const expr_node = tree.nodeData(node).node;
+
+            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
 
             return try analyser.resolveDerefType(base_type);
         },
         .unwrap_optional => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
-                .node = tree.nodeData(node).node_and_token[0],
-                .handle = handle,
-            }) orelse return null;
+            const lhs_node, _ = tree.nodeData(node).node_and_token;
+
+            const base_type = try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle)) orelse return null;
 
             return try analyser.resolveOptionalUnwrap(base_type);
         },
         .array_access => {
             const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
 
-            const lhs = try analyser.resolveTypeOfNodeInternal(.{
-                .node = lhs_node,
-                .handle = handle,
-            }) orelse return null;
+            const lhs = try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle)) orelse return null;
 
-            const index = try analyser.resolveIntegerLiteral(u64, .{
-                .node = rhs_node,
-                .handle = handle,
-            });
+            const index = try analyser.resolveIntegerLiteral(u64, .of(rhs_node, handle));
 
             return try analyser.resolveBracketAccessType(lhs, .{ .single = index });
         },
         .@"orelse" => {
             const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
 
-            const lhs = try analyser.resolveTypeOfNodeInternal(.{
-                .node = lhs_node,
-                .handle = handle,
-            }) orelse return null;
+            const lhs = try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle)) orelse return null;
 
-            const rhs = try analyser.resolveTypeOfNodeInternal(.{
-                .node = rhs_node,
-                .handle = handle,
-            }) orelse return try analyser.resolveOptionalUnwrap(lhs);
+            const rhs = try analyser.resolveTypeOfNodeInternal(.of(rhs_node, handle)) orelse return try analyser.resolveOptionalUnwrap(lhs);
 
             return try analyser.resolveOrelseType(lhs, rhs);
         },
         .@"catch" => {
             const lhs_node, _ = tree.nodeData(node).node_and_node;
 
-            const lhs = try analyser.resolveTypeOfNodeInternal(.{
-                .node = lhs_node,
-                .handle = handle,
-            }) orelse return null;
+            const lhs = try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle)) orelse return null;
 
             return try analyser.resolveUnwrapErrorUnionType(lhs, .payload);
         },
         .@"try" => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
-                .node = tree.nodeData(node).node,
-                .handle = handle,
-            }) orelse return null;
+            const expr_node = tree.nodeData(node).node;
+
+            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
 
             return try analyser.resolveUnwrapErrorUnionType(base_type, .payload);
         },
         .address_of => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
-                .node = tree.nodeData(node).node,
-                .handle = handle,
-            }) orelse return null;
+            const expr_node = tree.nodeData(node).node;
+
+            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
 
             return try analyser.resolveAddressOf(base_type);
         },
         .field_access => {
             const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
 
-            const lhs = (try analyser.resolveTypeOfNodeInternal(.{
-                .node = lhs_node,
-                .handle = handle,
-            })) orelse return null;
+            const lhs = (try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle))) orelse return null;
 
             const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
 
@@ -1842,7 +1800,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return try analyser.resolveFieldAccess(lhs, symbol);
         },
         .optional_type => {
-            const child_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = tree.nodeData(node).node, .handle = handle }) orelse return null;
+            const expr_node = tree.nodeData(node).node;
+
+            const child_ty = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
             if (!child_ty.is_type_val) return null;
 
             return .{ .data = .{ .optional = try analyser.allocType(child_ty) }, .is_type_val = true };
@@ -1855,11 +1815,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const ptr_info = ast.fullPtrType(tree, node).?;
 
             const sentinel = if (ptr_info.ast.sentinel.unwrap()) |sentinel|
-                try analyser.resolveInternPoolValue(.{ .node = sentinel, .handle = handle }) orelse .none
+                try analyser.resolveInternPoolValue(.of(sentinel, handle)) orelse .none
             else
                 .none;
 
-            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = ptr_info.ast.child_type, .handle = handle }) orelse return null;
+            const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(ptr_info.ast.child_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
             return .{
@@ -1879,13 +1839,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const array_info = tree.fullArrayType(node).?;
 
-            const elem_count = try analyser.resolveIntegerLiteral(u64, .{ .node = array_info.ast.elem_count, .handle = handle });
+            const elem_count = try analyser.resolveIntegerLiteral(u64, .of(array_info.ast.elem_count, handle));
             const sentinel = if (array_info.ast.sentinel.unwrap()) |sentinel|
-                try analyser.resolveInternPoolValue(.{ .node = sentinel, .handle = handle }) orelse .none
+                try analyser.resolveInternPoolValue(.of(sentinel, handle)) orelse .none
             else
                 .none;
 
-            const elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = array_info.ast.elem_type, .handle = handle }) orelse return null;
+            const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(array_info.ast.elem_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
             return .{
@@ -1910,7 +1870,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const array_init_info = tree.fullArrayInit(&buffer, node).?;
 
             if (array_init_info.ast.type_expr.unwrap()) |type_expr| blk: {
-                const array_ty = try analyser.resolveTypeOfNode(.{ .node = type_expr, .handle = handle }) orelse break :blk;
+                const array_ty = try analyser.resolveTypeOfNode(.of(type_expr, handle)) orelse break :blk;
                 if (array_ty.data == .array and array_ty.data.array.elem_count == null) {
                     var ty = array_ty;
                     ty.data.array.elem_count = array_init_info.ast.elements.len;
@@ -1921,7 +1881,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             const elem_ty_slice = try analyser.arena.allocator().alloc(Type, array_init_info.ast.elements.len);
             for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
-                elem_ty.* = try analyser.resolveTypeOfNodeInternal(.{ .node = element, .handle = handle }) orelse return null;
+                elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
                 elem_ty.* = elem_ty.typeOf(analyser);
             }
             return .{
@@ -1932,10 +1892,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .error_union => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
 
-            const error_set = try analyser.resolveTypeOfNodeInternal(.{ .node = lhs, .handle = handle }) orelse return null;
+            const error_set = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
             if (!error_set.is_type_val) return null;
 
-            const payload = try analyser.resolveTypeOfNodeInternal(.{ .node = rhs, .handle = handle }) orelse return null;
+            const payload = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (!payload.is_type_val) return null;
 
             return .{
@@ -1949,8 +1909,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
         .merge_error_sets => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = lhs, .handle = handle }) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = rhs, .handle = handle }) orelse return null;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (!lhs_ty.is_type_val) return null;
             if (!rhs_ty.is_type_val) return null;
             const lhs_index = switch (lhs_ty.data) {
@@ -2019,7 +1979,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     const container_field = tree.fullContainerField(member_node) orelse break :not_a_tuple;
                     if (!container_field.ast.tuple_like) break :not_a_tuple;
                     const type_expr = container_field.ast.type_expr.unwrap().?;
-                    elem_ty.* = try analyser.resolveTypeOfNodeInternal(.{ .node = type_expr, .handle = handle }) orelse {
+                    elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(type_expr, handle)) orelse {
                         has_unresolved_fields = true;
                         continue;
                     };
@@ -2078,10 +2038,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             });
             if (cast_map.has(call_name)) {
                 if (params.len < 1) return null;
-                const ty = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = params[0],
-                    .handle = handle,
-                })) orelse return null;
+                const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
                 return ty.instanceTypeVal(analyser);
             }
 
@@ -2089,10 +2046,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (params.len < 1) return null;
-                var resolved_type = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = params[0],
-                    .handle = handle,
-                })) orelse return null;
+                var resolved_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
                 return resolved_type.typeOf(analyser);
             }
 
@@ -2150,16 +2104,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (std.mem.eql(u8, call_name, "@FieldType")) {
                 if (params.len < 2) return null;
 
-                const container_type = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = params[0],
-                    .handle = handle,
-                })) orelse return null;
+                const container_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
                 if (container_type.data != .container) return null;
 
-                const field_name = try analyser.resolveStringLiteral(.{
-                    .node = params[1],
-                    .handle = handle,
-                }) orelse return null;
+                const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
 
                 const field = try analyser.lookupSymbolContainer(container_type.data.container, field_name, .field) orelse return null;
                 const result = try field.resolveType(analyser) orelse return null;
@@ -2169,15 +2117,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (std.mem.eql(u8, call_name, "@field")) {
                 if (params.len < 2) return null;
 
-                const lhs = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = params[0],
-                    .handle = handle,
-                })) orelse return null;
+                const lhs = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
 
-                const field_name = try analyser.resolveStringLiteral(.{
-                    .node = params[1],
-                    .handle = handle,
-                }) orelse return null;
+                const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
 
                 return try analyser.resolveFieldAccess(lhs, field_name);
             }
@@ -2192,7 +2134,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (std.mem.eql(u8, call_name, "@Vector")) {
                 if (params.len != 2) return null;
 
-                const child_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = params[1], .handle = handle }) orelse return null;
+                const child_ty = try analyser.resolveTypeOfNodeInternal(.of(params[1], handle)) orelse return null;
                 if (!child_ty.is_type_val) return null;
 
                 const child_ty_ip_index = switch (child_ty.data) {
@@ -2200,7 +2142,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     else => return null,
                 };
 
-                const len = try analyser.resolveIntegerLiteral(u32, .{ .node = params[0], .handle = handle }) orelse
+                const len = try analyser.resolveIntegerLiteral(u32, .of(params[0], handle)) orelse
                     return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
 
                 const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
@@ -2225,7 +2167,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return Type.typeVal(node_handle);
             }
 
-            return .{ .data = .{ .other = .{ .node = node, .handle = handle } }, .is_type_val = false };
+            return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false };
         },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
@@ -2237,16 +2179,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 tree.nodeTag(if_node.ast.cond_expr) == .identifier and
                 std.mem.eql(u8, offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(if_node.ast.cond_expr)), "alignment"))
             blk: {
-                return (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) orelse break :blk;
+                return (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) orelse break :blk;
             }
 
             var either: std.BoundedArray(Type.TypeWithDescriptor, 2) = .{};
 
-            if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) |t| {
+            if (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) |t| {
                 either.appendAssumeCapacity(.{ .type = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
             }
             if (if_node.ast.else_expr.unwrap()) |else_expr| {
-                if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = else_expr })) |t| {
+                if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |t| {
                     either.appendAssumeCapacity(.{ .type = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
                 }
             }
@@ -2267,7 +2209,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(analyser.arena.allocator(), ", ");
                 }
 
-                if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = switch_case.ast.target_expr })) |t|
+                if (try analyser.resolveTypeOfNodeInternal(.of(switch_case.ast.target_expr, handle))) |t|
                     try either.append(analyser.arena.allocator(), .{
                         .type = t,
                         .descriptor = try descriptor.toOwnedSlice(analyser.arena.allocator()),
@@ -2304,7 +2246,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const else_expr = loop.else_expr.unwrap() orelse return null;
 
             // TODO: peer type resolution based on `else` and all `break` statements
-            if (try analyser.resolveTypeOfNodeInternal(.{ .node = else_expr, .handle = handle })) |else_type|
+            if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_type|
                 return else_type;
 
             var context: FindBreaks = .{
@@ -2315,7 +2257,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             defer context.deinit();
             try context.findBreakOperands(tree, loop.then_expr);
             for (context.break_operands.items) |operand| {
-                if (try analyser.resolveTypeOfNodeInternal(.{ .node = operand, .handle = handle })) |operand_type|
+                if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type|
                     return operand_type;
             }
         },
@@ -2345,12 +2287,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             defer context.deinit();
             try context.findBreakOperands(tree, node);
             for (context.break_operands.items) |operand| {
-                if (try analyser.resolveTypeOfNodeInternal(.{ .node = operand, .handle = handle })) |operand_type|
+                if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type|
                     return operand_type;
             }
         },
 
-        .for_range => return .{ .data = .{ .other = .{ .node = node, .handle = handle } }, .is_type_val = false },
+        .for_range => return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false },
 
         .equal_equal,
         .bang_equal,
@@ -2361,9 +2303,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const lhs, _ = tree.nodeData(node).node_and_node;
 
-            const ty = try analyser.resolveTypeOfNodeInternal(
-                .{ .node = lhs, .handle = handle },
-            ) orelse return Type.fromIP(analyser, .bool_type, null);
+            const ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse
+                return Type.fromIP(analyser, .bool_type, null);
             const typeof = ty.typeOf(analyser);
 
             if (typeof.data == .ip_index and typeof.data.ip_index.index != null) {
@@ -2389,7 +2330,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
         .negation,
         .negation_wrap,
-        => return try analyser.resolveTypeOfNodeInternal(.{ .node = tree.nodeData(node).node, .handle = handle }),
+        => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)),
 
         .multiline_string_literal => {
             const start, const end = tree.nodeData(node).token_and_token;
@@ -2534,10 +2475,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .array_mult => {
             const elem_idx, const mult_idx = tree.nodeData(node).node_and_node;
 
-            var elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = elem_idx, .handle = handle }) orelse return null;
+            var elem_ty = try analyser.resolveTypeOfNodeInternal(.of(elem_idx, handle)) orelse return null;
             const arr_data = extractArrayData(&elem_ty.data) orelse return null;
 
-            const mult_lit = try analyser.resolveIntegerLiteral(u64, .{ .node = mult_idx, .handle = handle });
+            const mult_lit = try analyser.resolveIntegerLiteral(u64, .of(mult_idx, handle));
 
             if (arr_data.array.elem_count) |count| {
                 arr_data.array.elem_count = if (mult_lit) |mult| count * mult else null;
@@ -2548,10 +2489,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .array_cat => {
             const l_elem_idx, const r_elem_idx = tree.nodeData(node).node_and_node;
 
-            var l_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = l_elem_idx, .handle = handle }) orelse return null;
+            var l_elem_ty = try analyser.resolveTypeOfNodeInternal(.of(l_elem_idx, handle)) orelse return null;
             const l_arr_data = extractArrayData(&l_elem_ty.data) orelse return null;
 
-            var r_elem_ty = try analyser.resolveTypeOfNodeInternal(.{ .node = r_elem_idx, .handle = handle }) orelse return null;
+            var r_elem_ty = try analyser.resolveTypeOfNodeInternal(.of(r_elem_idx, handle)) orelse return null;
             const r_arr_data = extractArrayData(&r_elem_ty.data) orelse return null;
 
             if (l_arr_data.array.elem_count != null) {
@@ -3647,6 +3588,10 @@ pub const NodeWithHandle = struct {
     node: Ast.Node.Index,
     handle: *DocumentStore.Handle,
 
+    pub fn of(node: Ast.Node.Index, handle: *DocumentStore.Handle) NodeWithHandle {
+        return .{ .node = node, .handle = handle };
+    }
+
     pub fn eql(a: NodeWithHandle, b: NodeWithHandle) bool {
         if (a.node != b.node) return false;
         return std.mem.eql(u8, a.handle.uri, b.handle.uri);
@@ -4206,7 +4151,7 @@ pub const DeclWithHandle = struct {
         if (resolve_alias) {
             switch (self.decl) {
                 .ast_node => |node| {
-                    if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = self.handle })) |result| {
+                    if (try analyser.resolveVarDeclAlias(.of(node, self.handle))) |result| {
                         return result.definitionToken(analyser, resolve_alias);
                     }
                 },
@@ -4234,7 +4179,7 @@ pub const DeclWithHandle = struct {
                 => {
                     const var_decl = tree.fullVarDecl(node).?;
                     const type_node = var_decl.ast.type_node.unwrap() orelse return null;
-                    return .{ .node = type_node, .handle = self.handle };
+                    return .of(type_node, self.handle);
                 },
                 .container_field_init,
                 .container_field_align,
@@ -4242,19 +4187,19 @@ pub const DeclWithHandle = struct {
                 => {
                     const container_field = tree.fullContainerField(node).?;
                     const type_expr = container_field.ast.type_expr.unwrap() orelse return null;
-                    return .{ .node = type_expr, .handle = self.handle };
+                    return .of(type_expr, self.handle);
                 },
                 else => return null,
             },
             .assign_destructure => |payload| {
                 const var_decl = payload.getFullVarDecl(tree);
                 const type_node = var_decl.ast.type_node.unwrap() orelse return null;
-                return .{ .node = type_node, .handle = self.handle };
+                return .of(type_node, self.handle);
             },
             .function_parameter => |payload| {
                 const param = payload.get(tree).?;
                 const type_expr = param.type_expr orelse return null;
-                return .{ .node = type_expr, .handle = self.handle };
+                return .of(type_expr, self.handle);
             },
             .optional_payload,
             .error_union_payload,
@@ -4373,9 +4318,7 @@ pub const DeclWithHandle = struct {
 
         const tree = self.handle.tree;
         const resolved_ty = switch (self.decl) {
-            .ast_node => |node| try analyser.resolveTypeOfNodeInternal(
-                .{ .node = node, .handle = self.handle },
-            ),
+            .ast_node => |node| try analyser.resolveTypeOfNodeInternal(.of(node, self.handle)),
             .function_parameter => |pay| blk: {
                 // the `get` function never fails on declarations from the DocumentScope but
                 // there may be manually created Declarations with invalid parameter indices.
@@ -4461,24 +4404,16 @@ pub const DeclWithHandle = struct {
                     break :blk maybe_type;
                 };
 
-                const param_type = try analyser.resolveTypeOfNodeInternal(
-                    .{ .node = type_expr, .handle = self.handle },
-                ) orelse return null;
+                const param_type = try analyser.resolveTypeOfNodeInternal(.of(type_expr, self.handle)) orelse return null;
 
                 break :blk param_type.instanceTypeVal(analyser);
             },
             .optional_payload => |pay| blk: {
-                const ty = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.condition,
-                    .handle = self.handle,
-                })) orelse return null;
+                const ty = (try analyser.resolveTypeOfNodeInternal(.of(pay.condition, self.handle))) orelse return null;
                 break :blk try analyser.resolveOptionalUnwrap(ty);
             },
             .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
-                (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.condition,
-                    .handle = self.handle,
-                })) orelse return null,
+                (try analyser.resolveTypeOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
                 .payload,
             ),
             .error_union_error => |pay| try analyser.resolveUnwrapErrorUnionType(
@@ -4489,44 +4424,30 @@ pub const DeclWithHandle = struct {
                 .error_set,
             ),
             .for_loop_payload => |pay| try analyser.resolveBracketAccessType(
-                (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.condition,
-                    .handle = self.handle,
-                })) orelse return null,
+                (try analyser.resolveTypeOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
                 .{ .single = null },
             ),
             .assign_destructure => |pay| blk: {
                 const var_decl = pay.getFullVarDecl(tree);
                 if (var_decl.ast.type_node.unwrap()) |type_node| {
-                    if (try analyser.resolveTypeOfNode(.{
-                        .node = type_node,
-                        .handle = self.handle,
-                    })) |ty| break :blk ty.instanceTypeVal(analyser);
+                    if (try analyser.resolveTypeOfNode(.of(type_node, self.handle))) |ty|
+                        break :blk ty.instanceTypeVal(analyser);
                 }
 
                 const init_node = tree.nodeData(pay.node).extra_and_node[1];
-                const node = try analyser.resolveTypeOfNode(.{
-                    .node = init_node,
-                    .handle = self.handle,
-                }) orelse return null;
+                const node = try analyser.resolveTypeOfNode(.of(init_node, self.handle)) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
                     .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
                     else => null,
                 };
             },
-            .label => |decl| try analyser.resolveTypeOfNodeInternal(.{
-                .node = decl.block,
-                .handle = self.handle,
-            }),
+            .label => |decl| try analyser.resolveTypeOfNodeInternal(.of(decl.block, self.handle)),
             .switch_payload => |payload| blk: {
                 const cond = tree.nodeData(payload.node).node_and_extra[0];
                 const case = payload.getCase(tree);
 
-                const switch_expr_type: Type = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = cond,
-                    .handle = self.handle,
-                })) orelse return null;
+                const switch_expr_type: Type = (try analyser.resolveTypeOfNodeInternal(.of(cond, self.handle))) orelse return null;
                 if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
                 if (!switch_expr_type.isUnionType()) return null;
 
@@ -4612,7 +4533,7 @@ pub fn collectDeclarationsOfContainer(
                     if (instance_access) {
                         // allow declarations which evaluate to functions where
                         // the first parameter has the type of the container:
-                        const alias_type = try analyser.resolveTypeOfNode(.{ .node = node, .handle = handle }) orelse continue;
+                        const alias_type = try analyser.resolveTypeOfNode(.of(node, handle)) orelse continue;
                         const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
                         if (!try analyser.firstParamIs(func_ty, .{
@@ -4638,7 +4559,7 @@ pub fn collectDeclarationsOfContainer(
 
     for (document_scope.getScopeUsingnamespaceNodesConst(scope)) |use| {
         try analyser.collectUsingnamespaceDeclarationsOfContainer(
-            .{ .node = use, .handle = handle },
+            .of(use, handle),
             original_handle,
             false,
             decl_collection,
@@ -4728,7 +4649,7 @@ pub fn collectAllSymbolsAtSourceIndex(
 
         for (document_scope.getScopeUsingnamespaceNodesConst(scope_index)) |use| {
             try analyser.collectUsingnamespaceDeclarationsOfContainer(
-                .{ .node = use, .handle = handle },
+                .of(use, handle),
                 handle,
                 false,
                 decl_collection,
@@ -4867,7 +4788,7 @@ fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const
 
         const tree = handle.tree;
 
-        const expr: NodeWithHandle = .{ .node = tree.nodeData(index).node, .handle = handle };
+        const expr: NodeWithHandle = .of(tree.nodeData(index).node, handle);
         const expr_type = (try analyser.resolveTypeOfNodeUncached(expr)) orelse
             continue;
 
@@ -5046,10 +4967,7 @@ pub fn resolveExpressionType(
         handle,
         node,
         ancestors,
-    )) orelse (try analyser.resolveTypeOfNode(.{
-        .node = node,
-        .handle = handle,
-    }));
+    )) orelse (try analyser.resolveTypeOfNode(.of(node, handle)));
 }
 
 pub fn resolveExpressionTypeFromAncestors(
@@ -5121,10 +5039,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             const container_field = tree.fullContainerField(ancestors[0]).?;
             if (node.toOptional() == container_field.ast.value_expr) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = ancestors[0],
-                    .handle = handle,
-                });
+                return try analyser.resolveTypeOfNode(.of(ancestors[0], handle));
             }
         },
         .global_var_decl,
@@ -5134,10 +5049,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             const var_decl = tree.fullVarDecl(ancestors[0]).?;
             if (node.toOptional() == var_decl.ast.init_node) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = ancestors[0],
-                    .handle = handle,
-                });
+                return try analyser.resolveTypeOfNode(.of(ancestors[0], handle));
             }
         },
         .if_simple,
@@ -5197,10 +5109,7 @@ pub fn resolveExpressionTypeFromAncestors(
 
             for (switch_case.ast.values) |value| {
                 if (node == value) {
-                    return try analyser.resolveTypeOfNode(.{
-                        .node = ancestor_switch.ast.condition,
-                        .handle = handle,
-                    });
+                    return try analyser.resolveTypeOfNode(.of(ancestor_switch.ast.condition, handle));
                 }
             }
         },
@@ -5232,7 +5141,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 const ty = try decl.resolveType(analyser) orelse return null;
                 break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             } else blk: {
-                const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
+                const ty = try analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return null;
                 break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             };
             if (fn_type.is_type_val) return null;
@@ -5245,35 +5154,23 @@ pub fn resolveExpressionTypeFromAncestors(
             const param = param_decl.get(fn_node_handle.handle.tree) orelse return null;
             const type_expr = param.type_expr orelse return null;
 
-            const param_ty = try analyser.resolveTypeOfNode(.{
-                .node = type_expr,
-                .handle = fn_node_handle.handle,
-            }) orelse return null;
+            const param_ty = try analyser.resolveTypeOfNode(.of(type_expr, fn_node_handle.handle)) orelse return null;
             return param_ty.instanceTypeVal(analyser);
         },
         .assign => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == rhs) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = lhs,
-                    .handle = handle,
-                });
+                return try analyser.resolveTypeOfNode(.of(lhs, handle));
             }
         },
 
         .equal_equal, .bang_equal => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == lhs) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = rhs,
-                    .handle = handle,
-                });
+                return try analyser.resolveTypeOfNode(.of(rhs, handle));
             }
             if (node == rhs) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = lhs,
-                    .handle = handle,
-                });
+                return try analyser.resolveTypeOfNode(.of(lhs, handle));
             }
         },
 
@@ -5285,10 +5182,7 @@ pub fn resolveExpressionTypeFromAncestors(
             for (1..ancestors.len) |index| {
                 const func = tree.fullFnProto(&func_buf, ancestors[index]) orelse continue;
                 const return_type = func.ast.return_type.unwrap() orelse continue;
-                const return_ty = try analyser.resolveTypeOfNode(.{
-                    .node = return_type,
-                    .handle = handle,
-                }) orelse return null;
+                const return_ty = try analyser.resolveTypeOfNode(.of(return_type, handle)) orelse return null;
                 return return_ty.instanceTypeVal(analyser);
             }
         },
@@ -5358,10 +5252,7 @@ pub fn resolveExpressionTypeFromAncestors(
             if (std.mem.eql(u8, call_name, "@as")) {
                 if (params.len != 2) return null;
                 if (params[1] != node) return null;
-                const ty = try analyser.resolveTypeOfNode(.{
-                    .node = params[0],
-                    .handle = handle,
-                }) orelse return null;
+                const ty = try analyser.resolveTypeOfNode(.of(params[0], handle)) orelse return null;
                 return ty.instanceTypeVal(analyser);
             }
         },
@@ -5369,10 +5260,7 @@ pub fn resolveExpressionTypeFromAncestors(
         .@"orelse" => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == rhs) {
-                const lhs_ty = try analyser.resolveTypeOfNode(.{
-                    .node = lhs,
-                    .handle = handle,
-                }) orelse return null;
+                const lhs_ty = try analyser.resolveTypeOfNode(.of(lhs, handle)) orelse return null;
                 return try analyser.resolveOptionalUnwrap(lhs_ty);
             }
         },
@@ -5380,10 +5268,7 @@ pub fn resolveExpressionTypeFromAncestors(
         .@"catch" => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == rhs) {
-                const lhs_ty = try analyser.resolveTypeOfNode(.{
-                    .node = lhs,
-                    .handle = handle,
-                }) orelse return null;
+                const lhs_ty = try analyser.resolveTypeOfNode(.of(lhs, handle)) orelse return null;
                 return try analyser.resolveUnwrapErrorUnionType(lhs_ty, .payload);
             }
         },
@@ -5493,7 +5378,7 @@ fn referencedTypesFromNodeInternal(
     if (call_maybe) |call|
         node = call.ast.fn_expr;
 
-    if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |decl_handle| {
+    if (try analyser.resolveVarDeclAlias(.of(node, handle))) |decl_handle| {
         try collector.referenced_types.put(analyser.arena.allocator(), .{
             .str = offsets.nodeToSlice(tree, node),
             .handle = decl_handle.handle,
@@ -5503,10 +5388,7 @@ fn referencedTypesFromNodeInternal(
 
     if (call_maybe) |call| {
         for (call.ast.params) |param| {
-            _ = try analyser.addReferencedTypesFromNode(
-                .{ .node = param, .handle = handle },
-                collector.referenced_types,
-            );
+            _ = try analyser.addReferencedTypesFromNode(.of(param, handle), collector.referenced_types);
         }
     }
 }
@@ -5638,17 +5520,11 @@ fn addReferencedTypes(
                 var it = fn_proto.iterate(&tree);
                 while (ast.nextFnParam(&it)) |param| {
                     const type_expr = param.type_expr orelse continue;
-                    try analyser.addReferencedTypesFromNode(
-                        .{ .node = type_expr, .handle = handle },
-                        referenced_types,
-                    );
+                    try analyser.addReferencedTypesFromNode(.of(type_expr, handle), referenced_types);
                 }
 
                 if (fn_proto.ast.return_type.unwrap()) |return_type| {
-                    try analyser.addReferencedTypesFromNode(
-                        .{ .node = return_type, .handle = handle },
-                        referenced_types,
-                    );
+                    try analyser.addReferencedTypesFromNode(.of(return_type, handle), referenced_types);
                 }
             },
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
