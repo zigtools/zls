@@ -575,7 +575,9 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                     .willSaveWaitUntil = true,
                 },
             },
-            .renameProvider = .{ .bool = true },
+            .renameProvider = .{
+                .RenameOptions = .{ .prepareProvider = true },
+            },
             .completionProvider = .{
                 .resolveProvider = false,
                 .triggerCharacters = &.{ ".", ":", "@", "]", "\"", "/" },
@@ -1754,6 +1756,19 @@ fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.Renam
     return if (response) |rep| rep.rename else null;
 }
 
+fn prepareRenameHandler(server: *Server, request: types.PrepareRenameParams) ?types.PrepareRenameResult {
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    return .{
+        .literal_1 = .{
+            .range = offsets.locToRange(handle.tree.source, name_loc, server.offset_encoding),
+            .placeholder = name,
+        },
+    };
+}
+
 fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: types.ReferenceParams) Error!?[]types.Location {
     const response = try references.referencesHandler(server, arena, .{ .references = request });
     return if (response) |rep| rep.references else null;
@@ -1856,6 +1871,7 @@ const HandledRequestParams = union(enum) {
     @"textDocument/documentSymbol": types.DocumentSymbolParams,
     @"textDocument/formatting": types.DocumentFormattingParams,
     @"textDocument/rename": types.RenameParams,
+    @"textDocument/prepareRename": types.PrepareRenameParams,
     @"textDocument/references": types.ReferenceParams,
     @"textDocument/documentHighlight": types.DocumentHighlightParams,
     @"textDocument/codeAction": types.CodeActionParams,
@@ -1902,6 +1918,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/documentSymbol",
             .@"textDocument/formatting",
             .@"textDocument/rename",
+            .@"textDocument/prepareRename",
             .@"textDocument/references",
             .@"textDocument/documentHighlight",
             .@"textDocument/codeAction",
@@ -2074,6 +2091,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/documentSymbol" => try server.documentSymbolsHandler(arena, params),
         .@"textDocument/formatting" => try server.formattingHandler(arena, params),
         .@"textDocument/rename" => try server.renameHandler(arena, params),
+        .@"textDocument/prepareRename" => server.prepareRenameHandler(params),
         .@"textDocument/references" => try server.referencesHandler(arena, params),
         .@"textDocument/documentHighlight" => try server.documentHighlightHandler(arena, params),
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
