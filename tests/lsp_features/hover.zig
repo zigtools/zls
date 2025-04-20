@@ -8,6 +8,79 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
+test "primitive" {
+    try testHover(
+        \\const foo = bool<cursor>;
+    ,
+        \\```zig
+        \\bool
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const foo = true<cursor>;
+    ,
+        \\```zig
+        \\true
+        \\```
+        \\```zig
+        \\(bool)
+        \\```
+    );
+    try testHover(
+        \\const foo = c_int<cursor>;
+    ,
+        \\```zig
+        \\c_int
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const foo = f32<cursor>;
+    ,
+        \\```zig
+        \\f32
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const foo = i64<cursor>;
+    ,
+        \\```zig
+        \\i64
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+    try testHover(
+        \\const foo = null<cursor>;
+    ,
+        \\```zig
+        \\null
+        \\```
+        \\```zig
+        \\(@TypeOf(null))
+        \\```
+    );
+    try testHover(
+        \\const foo = undefined<cursor>;
+    ,
+        \\```zig
+        \\undefined
+        \\```
+        \\```zig
+        \\(@TypeOf(undefined))
+        \\```
+    );
+}
+
 test "char literal" {
     try testHover(
         \\const foo = '<cursor>a';
@@ -778,6 +851,29 @@ test "escaped identifier" {
     ,
         \\```zig
         \\const @"hello  world" = 42
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+}
+
+test "escaped identifier with same name as primitive" {
+    try testHover(
+        \\const @"true"<cursor> = 42;
+    ,
+        \\```zig
+        \\const @"true" = 42
+        \\```
+        \\```zig
+        \\(comptime_int)
+        \\```
+    );
+    try testHover(
+        \\const @"f32"<cursor> = 42;
+    ,
+        \\```zig
+        \\const @"f32" = 42
         \\```
         \\```zig
         \\(comptime_int)

@@ -599,6 +599,11 @@ pub fn isSnakeCase(name: []const u8) bool {
 /// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
 /// if the `source_index` points to `@"name"`, the source location of `name` is returned.
 pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
+    _, const loc = identifierTokenAndLocFromIndex(tree, source_index) orelse return null;
+    return loc;
+}
+
+pub fn identifierTokenAndLocFromIndex(tree: Ast, source_index: usize) ?struct { Ast.TokenIndex, offsets.Loc } {
     const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, &tree) orelse return null;
     switch (tree.tokenTag(token)) {
         .identifier,
@@ -606,7 +611,7 @@ pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
         => {
             const token_loc = offsets.tokenToLoc(tree, token);
             if (!(token_loc.start <= source_index and source_index <= token_loc.end)) return null;
-            return offsets.identifierIndexToLoc(tree.source, tree.tokenStart(token), .name);
+            return .{ token, offsets.identifierIndexToLoc(tree.source, tree.tokenStart(token), .name) };
         },
         else => {},
     }
@@ -622,7 +627,7 @@ pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
     }
 
     if (start == end) return null;
-    return .{ .start = start, .end = end };
+    return .{ token, .{ .start = start, .end = end } };
 }
 
 test identifierLocFromIndex {
