@@ -235,7 +235,7 @@ fn writeCallHint(
 
     const handle = builder.handle;
 
-    const ty = try builder.analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return;
+    const ty = try builder.analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
     const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
 
@@ -339,7 +339,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
-    const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = builder.handle, .node = node }) orelse return null;
+    const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, builder.handle)) orelse return null;
 
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
