@@ -730,7 +730,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     var string_content_loc = pos_context.stringLiteralContentLoc(source);
 
     // the position context is without lookahead so we have to do it ourself
-    string_content_loc.end = std.mem.indexOfAnyPos(u8, source, string_content_loc.end, &.{ 0, '\n', '\r', '\"' }) orelse source.len;
+    string_content_loc.end = std.mem.indexOfAnyPos(u8, source, string_content_loc.end, &.{ 0, '\n', '\r', '"' }) orelse source.len;
 
     if (builder.source_index < string_content_loc.start or string_content_loc.end < builder.source_index) return;
 
