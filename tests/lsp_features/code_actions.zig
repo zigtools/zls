@@ -548,26 +548,29 @@ test "organize imports - comments" {
     );
 }
 
+// Field accesses are limited to imports of the always available "std" and "builtin".
+// If field accesses are made to nonexistent files, the test runner returns an error
+// regardless of the code action's success.
 test "organize imports - field access" {
     // field access on import
     try testOrganizeImports(
-        \\const xyz = @import("xyz.zig").a.long.chain;
-        \\const abc = @import("abc.zig");
+        \\const builtin = @import("builtin").a.long.chain;
+        \\const std = @import("std");
     ,
-        \\const abc = @import("abc.zig");
-        \\const xyz = @import("xyz.zig").a.long.chain;
+        \\const std = @import("std");
+        \\const builtin = @import("builtin").a.long.chain;
         \\
         \\
     );
     // declarations without @import move under the parent import
     try testOrganizeImports(
-        \\const xyz = @import("xyz.zig").a.long.chain;
-        \\const abc = @import("abc.zig");
-        \\const abc_related = abc.related;
+        \\const builtin = @import("builtin").a.long.chain;
+        \\const std = @import("std");
+        \\const std_related = std.related;
     ,
-        \\const abc = @import("abc.zig");
-        \\const abc_related = abc.related;
-        \\const xyz = @import("xyz.zig").a.long.chain;
+        \\const std = @import("std");
+        \\const std_related = std.related;
+        \\const builtin = @import("builtin").a.long.chain;
         \\
         \\
     );
@@ -585,7 +588,7 @@ test "organize imports - field access" {
     );
     // Inverse chain of parents
     try testOrganizeImports(
-        \\const abc = @import("abc.zig");
+        \\const builtin = @import("builtin");
         \\const isLower = ascii.isLower;
         \\const ascii = std.ascii;
         \\const std = @import("std");
@@ -593,24 +596,23 @@ test "organize imports - field access" {
         \\const std = @import("std");
         \\const ascii = std.ascii;
         \\const isLower = ascii.isLower;
-        \\
-        \\const abc = @import("abc.zig");
+        \\const builtin = @import("builtin");
         \\
         \\
     );
     // Parent chains are not mixed
     try testOrganizeImports(
-        \\const xyz = @import("xyz.zig");
-        \\const abc = @import("abc.zig");
-        \\const xyz_related = xyz.related;
+        \\const builtin = @import("builtin");
+        \\const std = @import("std");
+        \\const builtin_related = builtin.related;
         \\/// comment
-        \\const abc_related = abc.related;
+        \\const std_related = std.related;
     ,
-        \\const abc = @import("abc.zig");
+        \\const std = @import("std");
         \\/// comment
-        \\const abc_related = abc.related;
-        \\const xyz = @import("xyz.zig");
-        \\const xyz_related = xyz.related;
+        \\const std_related = std.related;
+        \\const builtin = @import("builtin");
+        \\const builtin_related = builtin.related;
         \\
         \\
     );
@@ -636,11 +638,107 @@ test "organize imports - edge cases" {
         \\const std = @import("std");
     ,
         \\const std = @import("std");
-        \\const std = @import("std");
         \\
         \\const abc = @import("abc.zig");
         \\
         \\
+    );
+}
+
+test "organize imports - duplicates" {
+    try testOrganizeImports(
+        \\const std = @import("std");
+        \\const std = @import("std");
+        \\
+        \\fn foo() void { _ = std; }
+    ,
+        \\const std = @import("std");
+        \\
+        \\fn foo() void { _ = std; }
+    );
+    try testOrganizeImports(
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\const xyz = @import("xyz.zig");
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = xyz;
+        \\    _ = abc;
+        \\}
+    ,
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = xyz;
+        \\    _ = abc;
+        \\}
+    );
+    try testOrganizeImports(
+        \\const abc = @import("abc.zig");
+        \\const std = @import("std");
+        \\const abc = @import("abc.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = std;
+        \\    _ = abc;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\
+        \\const abc = @import("abc.zig");
+        \\
+        \\fn foo() void {
+        \\    _ = std;
+        \\    _ = abc;
+        \\}
+    );
+}
+
+test "organize imports - unused" {
+    try testCleanImports(
+        \\const std = @import("std");
+        \\const mem = std.mem;
+        \\const abc = @import("abc.zig");
+    ,
+        \\const std = @import("std");
+        \\
+        \\
+    );
+    // pub decls are preserved
+    try testCleanImports(
+        \\const std = @import("std");
+        \\pub const mem = std.mem;
+        \\const abc = @import("abc.zig");
+    ,
+        \\const std = @import("std");
+        \\pub const mem = std.mem;
+        \\
+        \\
+    );
+    try testCleanImports(
+        \\const abc = @import("abc.zig");
+        \\pub const abc = @import("abc.zig");
+    ,
+        \\pub const abc = @import("abc.zig");
+        \\
+        \\
+    );
+    try testCleanImports(
+        \\const foo = @import("std").foo;
+        \\const bar = @import("bar").bar;
+        \\
+        \\fn main() void {
+        \\    foo();
+        \\}
+    ,
+        \\const foo = @import("std").foo;
+        \\
+        \\fn main() void {
+        \\    foo();
+        \\}
     );
 }
 
@@ -839,7 +937,11 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
 }
 
 fn testOrganizeImports(before: []const u8, after: []const u8) !void {
-    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports" });
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports", .filter_title = "organize @import" });
+}
+
+fn testCleanImports(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports", .filter_title = "remove unused @import" });
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
