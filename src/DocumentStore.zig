@@ -677,7 +677,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         file_path,
         max_document_size,
         null,
-        @alignOf(u8),
+        .of(u8),
         0,
     ) catch |err| {
         log.err("failed to read document '{s}': {}", .{ file_path, err });
@@ -812,6 +812,28 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     try handle.setSource(new_text);
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
+}
+
+/// Removes a document from the store, unless said document is currently open and
+/// has been synchronized via `textDocument/didOpen`.
+/// **Thread safe** takes an exclusive lock when called on different documents
+/// **Not thread safe** when called on the same document
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
+    {
+        const handle = self.getHandle(uri) orelse return false;
+        if (handle.getStatus().open) return false;
+    }
+
+    {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const kv = self.handles.fetchSwapRemove(uri) orelse return false;
+        log.debug("Closing document {s}", .{kv.key});
+        kv.value.deinit();
+        self.allocator.destroy(kv.value);
+        return true;
+    }
 }
 
 /// Invalidates a build files.

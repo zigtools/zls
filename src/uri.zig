@@ -72,7 +72,7 @@ test fromPath {
 pub fn parse(allocator: std.mem.Allocator, str: []const u8) (std.Uri.ParseError || error{OutOfMemory})![]u8 {
     var uri = try std.Uri.parse(str);
     if (!std.mem.eql(u8, uri.scheme, "file")) return error.InvalidFormat;
-    if (builtin.os.tag == .windows and uri.path.percent_encoded[0] == '/') {
+    if (builtin.os.tag == .windows and uri.path.percent_encoded.len != 0 and uri.path.percent_encoded[0] == '/') {
         uri.path.percent_encoded = uri.path.percent_encoded[1..];
     }
     return try std.fmt.allocPrint(allocator, "{raw}", .{uri.path});

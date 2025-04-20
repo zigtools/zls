@@ -158,7 +158,7 @@ const Builder = struct {
                     const name_loc = offsets.tokenToLoc(tree, name_token);
                     const name = offsets.locToSlice(tree.source, name_loc);
 
-                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, &.{node}) orelse continue;
+                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, node, &.{}) orelse continue;
 
                     if (builder.decl_handle.eql(lookup)) {
                         try builder.add(handle, name_token);
@@ -444,8 +444,6 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
     const handle = server.document_store.getHandle(request.uri()) orelse return null;
     if (handle.tree.mode == .zon) return null;
-
-    if (request.position().character <= 0) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;

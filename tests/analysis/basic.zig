@@ -26,8 +26,8 @@ const nu: type = i1;
 //    ^^ (type)(i1)
 const xi: type = usize;
 //    ^^ (type)(usize)
-const omicron = 0;
-//    ^^^^^^^ ()()
+const omicron = 'e';
+//    ^^^^^^^ (comptime_int)()
 const pi = 3.14159;
 //    ^^ (comptime_float)()
 const rho: type = anyopaque;
@@ -36,13 +36,13 @@ const sigma = noreturn;
 //    ^^^^^ (type)(noreturn)
 const tau = anyerror;
 //    ^^^ (type)(anyerror)
-const upsilon = 0;
-//    ^^^^^^^ ()()
-const phi = 0;
-//    ^^^ ()()
-const chi = 0;
-//    ^^^ ()()
-const psi = 0;
-//    ^^^ ()()
-const omega = 0;
-//    ^^^^^ ()()
+const upsilon = unreachable;
+//    ^^^^^^^ (noreturn)()
+const phi = {};
+//    ^^^ (void)()
+const chi = -lambda;
+//    ^^^ (comptime_int)()
+const psi = -%lambda;
+//    ^^^ (comptime_int)()
+const omega: @Vector(4, u32) = .{ 1, 2, 3, 4 };
+//    ^^^^^ (@Vector(4,u32))()

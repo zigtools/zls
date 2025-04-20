@@ -872,6 +872,7 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
 pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Type) error{OutOfMemory}!?Type {
     if (optional.is_type_val) return null;
 
+    // TODO: some uses of this function don't expect C pointers to be unwrapped
     switch (optional.data) {
         .optional => |child_ty| {
             std.debug.assert(child_ty.is_type_val);
@@ -890,19 +891,6 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
         .optional => rhs,
         else => try analyser.resolveOptionalUnwrap(lhs),
     };
-}
-
-/// Resolves the child type of an optional type
-pub fn resolveOptionalChildType(analyser: *Analyser, optional_type: Type) error{OutOfMemory}!?Type {
-    _ = analyser;
-    if (!optional_type.is_type_val) return null;
-    switch (optional_type.data) {
-        .optional => |child_ty| {
-            std.debug.assert(child_ty.is_type_val);
-            return child_ty.*;
-        },
-        else => return null,
-    }
 }
 
 pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
@@ -1016,7 +1004,7 @@ const BracketAccess = union(enum) {
 /// - `lhs[index]` (single)
 /// - `lhs[start..]` (open)
 /// - `lhs[start..end]` (range)
-fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
+pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
@@ -1118,6 +1106,10 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
         },
         .pointer => |info| return switch (info.size) {
             .one => switch (info.elem_ty.data) {
+                .tuple => |tuple_info| {
+                    const inner_ty: Type = .{ .data = .{ .tuple = tuple_info }, .is_type_val = false };
+                    return analyser.resolveBracketAccessType(inner_ty, rhs);
+                },
                 .array => |array_info| {
                     const inner_ty: Type = .{ .data = .{ .array = array_info }, .is_type_val = false };
                     return analyser.resolveBracketAccessType(inner_ty, rhs);
@@ -1263,16 +1255,6 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) 
     }
 }
 
-pub fn resolveTupleFieldType(analyser: *Analyser, tuple: Type, index: usize) error{OutOfMemory}!?Type {
-    switch (tuple.data) {
-        .tuple => |fields| {
-            if (index >= fields.len) return null;
-            return fields[index].instanceTypeVal(analyser);
-        },
-        else => return null,
-    }
-}
-
 fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
     if (ty.is_type_val)
         return null;
@@ -1318,7 +1300,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
         .tuple => {
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
-            return try analyser.resolveTupleFieldType(ty, index);
+            return try analyser.resolveBracketAccessType(ty, .{ .single = index });
         },
 
         .optional => |child_ty| {
@@ -1661,7 +1643,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const ptyp = try analyser.arena.allocator().create(Type);
                 ptyp.* = argument_type;
 
-                const symbol = offsets.identifierTokenToNameSlice(func_tree, param.name_token.?);
+                const symbol = if (param.name_token) |name_token| offsets.identifierTokenToNameSlice(func_tree, name_token) else "";
                 meta_params.appendAssumeCapacity(.{ .index = param_index, .symbol = symbol, .typ = ptyp });
             }
 
@@ -4115,7 +4097,7 @@ pub fn getPositionContext(
                 else => {},
             },
             .period, .period_asterisk => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .enum_literal = tok.loc },
+                .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                 .enum_literal => curr_ctx.ctx = .empty,
                 .keyword => curr_ctx.ctx = .other, // no keyword can be `.`/`.*` accessed
                 .comment, .other, .field_access, .global_error_set => {},
@@ -4529,7 +4511,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
-                    .tuple => try analyser.resolveTupleFieldType(node, pay.index),
+                    .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
                     else => null,
                 };
             },
@@ -4995,17 +4977,18 @@ pub fn lookupSymbolFieldInit(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     field_name: []const u8,
-    nodes: []const Ast.Node.Index,
+    node: Ast.Node.Index,
+    ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?DeclWithHandle {
-    if (nodes.len == 0) return null;
-
     var container_type = (try analyser.resolveExpressionType(
         handle,
-        nodes[0],
-        nodes[1..],
+        node,
+        ancestors,
     )) orelse return null;
 
-    const is_struct_init = switch (handle.tree.nodeTag(nodes[0])) {
+    if (container_type.is_type_val) return null;
+
+    const is_struct_init = switch (handle.tree.nodeTag(node)) {
         .struct_init_one,
         .struct_init_one_comma,
         .struct_init_dot_two,
@@ -5018,11 +5001,13 @@ pub fn lookupSymbolFieldInit(
         else => false,
     };
 
-    if (try analyser.resolveUnwrapErrorUnionType(container_type, .payload)) |unwrapped|
+    while (true) {
+        const unwrapped =
+            try analyser.resolveUnwrapErrorUnionType(container_type, .payload) orelse
+            try analyser.resolveOptionalUnwrap(container_type) orelse
+            break;
         container_type = unwrapped;
-
-    if (try analyser.resolveOptionalUnwrap(container_type)) |unwrapped|
-        container_type = unwrapped;
+    }
 
     const container_scope = switch (container_type.data) {
         .container => |s| s,
@@ -5036,19 +5021,19 @@ pub fn lookupSymbolFieldInit(
         return try analyser.lookupSymbolContainer(container_scope, field_name, .field);
     }
 
-    // Assume we are doing decl literals
     switch (container_type.getContainerKind() orelse return null) {
-        .keyword_struct => {
-            const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
-            var resolved_type = try decl.resolveType(analyser) orelse return null;
-            resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
-            resolved_type = resolved_type.resolveDeclLiteralResultType();
-            if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
-            return null;
-        },
-        .keyword_enum, .keyword_union => return try analyser.lookupSymbolContainer(container_scope, field_name, .field),
+        .keyword_struct => {},
+        .keyword_enum, .keyword_union => if (try analyser.lookupSymbolContainer(container_scope, field_name, .field)) |ty| return ty,
         else => return null,
     }
+
+    // Assume we are doing decl literals
+    const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
+    var resolved_type = try decl.resolveType(analyser) orelse return null;
+    resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+    resolved_type = resolved_type.resolveDeclLiteralResultType();
+    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
+    return null;
 }
 
 pub fn resolveExpressionType(
@@ -5093,7 +5078,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
+                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
                     return try field_decl.resolveType(analyser);
                 }
             }
@@ -5117,8 +5102,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[0],
                 ancestors[1..],
             )) |array_type| {
-                return (try analyser.resolveBracketAccessType(array_type, .{ .single = null })) orelse
-                    (try analyser.resolveTupleFieldType(array_type, element_index));
+                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
             }
 
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
@@ -5127,7 +5111,7 @@ pub fn resolveExpressionTypeFromAncestors(
                     ancestors[1],
                     ancestors[2..],
                 )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = null });
+                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
                 }
             }
         },
@@ -5242,8 +5226,15 @@ pub fn resolveExpressionTypeFromAncestors(
 
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
-            const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
-            const fn_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            const fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
+                const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
+                const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
+                const ty = try decl.resolveType(analyser) orelse return null;
+                break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            } else blk: {
+                const ty = try analyser.resolveTypeOfNode(.{ .node = call.ast.fn_expr, .handle = handle }) orelse return null;
+                break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            };
             if (fn_type.is_type_val) return null;
 
             const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
@@ -5254,10 +5245,11 @@ pub fn resolveExpressionTypeFromAncestors(
             const param = param_decl.get(fn_node_handle.handle.tree) orelse return null;
             const type_expr = param.type_expr orelse return null;
 
-            return try analyser.resolveTypeOfNode(.{
+            const param_ty = try analyser.resolveTypeOfNode(.{
                 .node = type_expr,
                 .handle = fn_node_handle.handle,
-            });
+            }) orelse return null;
+            return param_ty.instanceTypeVal(analyser);
         },
         .assign => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
@@ -5271,13 +5263,18 @@ pub fn resolveExpressionTypeFromAncestors(
 
         .equal_equal, .bang_equal => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
-            return (try analyser.resolveTypeOfNode(.{
-                .node = lhs,
-                .handle = handle,
-            })) orelse (try analyser.resolveTypeOfNode(.{
-                .node = rhs,
-                .handle = handle,
-            }));
+            if (node == lhs) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = rhs,
+                    .handle = handle,
+                });
+            }
+            if (node == rhs) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                });
+            }
         },
 
         .@"return" => {
@@ -5288,10 +5285,11 @@ pub fn resolveExpressionTypeFromAncestors(
             for (1..ancestors.len) |index| {
                 const func = tree.fullFnProto(&func_buf, ancestors[index]) orelse continue;
                 const return_type = func.ast.return_type.unwrap() orelse continue;
-                return try analyser.resolveTypeOfNode(.{
+                const return_ty = try analyser.resolveTypeOfNode(.{
                     .node = return_type,
                     .handle = handle,
-                });
+                }) orelse return null;
+                return return_ty.instanceTypeVal(analyser);
             }
         },
 
@@ -5337,12 +5335,57 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[index + 1 ..],
             );
         },
-        .@"try" => {
+
+        .grouped_expression,
+        .@"try",
+        => {
             return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
             );
+        },
+
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = tree.builtinCallParams(&buffer, ancestors[0]).?;
+            const call_name = tree.tokenSlice(tree.nodeMainToken(ancestors[0]));
+
+            if (std.mem.eql(u8, call_name, "@as")) {
+                if (params.len != 2) return null;
+                if (params[1] != node) return null;
+                const ty = try analyser.resolveTypeOfNode(.{
+                    .node = params[0],
+                    .handle = handle,
+                }) orelse return null;
+                return ty.instanceTypeVal(analyser);
+            }
+        },
+
+        .@"orelse" => {
+            const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
+            if (node == rhs) {
+                const lhs_ty = try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                }) orelse return null;
+                return try analyser.resolveOptionalUnwrap(lhs_ty);
+            }
+        },
+
+        .@"catch" => {
+            const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
+            if (node == rhs) {
+                const lhs_ty = try analyser.resolveTypeOfNode(.{
+                    .node = lhs,
+                    .handle = handle,
+                }) orelse return null;
+                return try analyser.resolveUnwrapErrorUnionType(lhs_ty, .payload);
+            }
         },
 
         else => {}, // TODO: Implement more expressions; better safe than sorry
@@ -5363,7 +5406,7 @@ pub fn getSymbolEnumLiteral(
     const tree = handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena.allocator(), tree, source_index);
     if (nodes.len == 0) return null;
-    return analyser.lookupSymbolFieldInit(handle, name, nodes);
+    return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
 }
 
 /// Multiple when using branched types

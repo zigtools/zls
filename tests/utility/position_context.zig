@@ -428,6 +428,15 @@ test "enum literal" {
     , .enum_literal, .{});
 }
 
+test "enum literal after break label" {
+    try testContext(
+        \\break :blk <loc>.<cursor>foo</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\break :blk <loc>.foo<cursor></loc>;
+    , .enum_literal, .{});
+}
+
 test "label access" {
     try testContext(
         \\var foo = blk: { break :<loc><cursor>blk</loc> null };
