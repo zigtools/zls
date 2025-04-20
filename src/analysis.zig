@@ -32,7 +32,7 @@ ip: *InternPool,
 // nested scopes with comptime bindings
 bound_type_params: BoundTypeParams = .{},
 resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?Type) = .empty,
-resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Type, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .empty,
+resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Binding, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .empty,
 /// used to detect recursion
 use_trail: NodeSet = .empty,
 collect_callsite_references: bool,
@@ -932,13 +932,13 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
     };
 }
 
-pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Type) error{OutOfMemory}!Type {
     return .{
         .data = .{
             .pointer = .{
                 .size = .one,
                 .sentinel = .none,
-                .is_const = false,
+                .is_const = is_const,
                 .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
             },
         },
@@ -1540,13 +1540,23 @@ const FindBreaks = struct {
 /// Resolves the type of an Ast Node.
 /// Returns `null` if the type could not be resolved.
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    return analyser.resolveTypeOfNodeInternal(node_handle);
+    const binding = try analyser.resolveBindingOfNode(node_handle) orelse return null;
+    return binding.type;
 }
 
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
+    const binding = try analyser.resolveBindingOfNodeInternal(node_handle) orelse return null;
+    return binding.type;
+}
+
+pub fn resolveBindingOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Binding {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    return analyser.resolveBindingOfNodeInternal(node_handle);
+}
+
+fn resolveBindingOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Binding {
     const node_with_uri: NodeWithUri = .{
         .node = node_handle.node,
         .uri = node_handle.handle.uri,
@@ -1558,12 +1568,12 @@ fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) e
     // we insert null before resolving the type so that a recursive definition doesn't result in an infinite loop
     gop.value_ptr.* = null;
 
-    const ty = try analyser.resolveTypeOfNodeUncached(node_handle);
-    if (ty != null) {
-        analyser.resolved_nodes.getPtr(node_with_uri).?.* = ty;
+    const binding = try analyser.resolveBindingOfNodeUncached(node_handle);
+    if (binding != null) {
+        analyser.resolved_nodes.getPtr(node_with_uri).?.* = binding;
     }
 
-    return ty;
+    return binding;
 }
 
 fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Type {
@@ -1594,23 +1604,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             return fallback_type;
-        },
-        .identifier => {
-            const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse return null;
-            const name = offsets.identifierTokenToNameSlice(tree, name_token);
-
-            const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
-            if (!is_escaped_identifier) {
-                if (std.mem.eql(u8, name, "_")) return null;
-                if (try analyser.resolvePrimitive(name)) |primitive| {
-                    return Type.fromIP(analyser, analyser.ip.typeOf(primitive), primitive);
-                }
-            }
-            if (analyser.bound_type_params.resolve(name)) |t| {
-                return t.*;
-            }
-            const child = try analyser.lookupSymbolGlobal(handle, name, tree.tokenStart(name_token)) orelse return null;
-            return try child.resolveType(analyser);
         },
         .call,
         .call_comma,
@@ -1792,13 +1785,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
 
             return try analyser.resolveUnwrapErrorUnionType(base_type, .payload);
-        },
-        .address_of => {
-            const expr_node = tree.nodeData(node).node;
-
-            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
-
-            return try analyser.resolveAddressOf(base_type);
         },
         .field_access => {
             const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
@@ -2722,9 +2708,75 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .asm_output,
         .asm_input,
         => {},
+
+        .identifier,
+        .address_of,
+        => {
+            const binding = try analyser.resolveBindingOfNodeUncached(node_handle) orelse return null;
+            return binding.type;
+        },
     }
     return null;
 }
+
+fn resolveBindingOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Binding {
+    const node = node_handle.node;
+    const handle = node_handle.handle;
+    const tree = handle.tree;
+
+    switch (tree.nodeTag(node)) {
+        .identifier => {
+            const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse return null;
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
+
+            const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+            if (!is_escaped_identifier) {
+                if (std.mem.eql(u8, name, "_")) return null;
+                if (try analyser.resolvePrimitive(name)) |primitive| {
+                    return .{
+                        .type = Type.fromIP(analyser, analyser.ip.typeOf(primitive), primitive),
+                        .is_const = true,
+                    };
+                }
+            }
+
+            if (analyser.bound_type_params.resolve(name)) |t| {
+                return .{
+                    .type = t.*,
+                    .is_const = true,
+                };
+            }
+
+            const child = try analyser.lookupSymbolGlobal(handle, name, tree.tokenStart(name_token)) orelse return null;
+            const child_ty = try child.resolveType(analyser) orelse return null;
+            return .{
+                .type = child_ty,
+                .is_const = child.isConst(),
+            };
+        },
+
+        .address_of => {
+            const expr_node = tree.nodeData(node).node;
+
+            const base_binding = try analyser.resolveBindingOfNodeInternal(.of(expr_node, handle)) orelse return null;
+
+            return .{
+                .type = try analyser.resolveAddressOf(base_binding.is_const, base_binding.type),
+                .is_const = true,
+            };
+        },
+
+        else => return .{
+            .type = try analyser.resolveTypeOfNodeUncached(node_handle) orelse return null,
+            .is_const = false,
+        },
+    }
+}
+
+pub const Binding = struct {
+    type: Type,
+    is_const: bool,
+};
 
 /// Represents a resolved Zig type.
 /// This is the return type of `resolveTypeOfNode`.
