@@ -893,13 +893,13 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
     };
 }
 
-pub fn resolveAddressOf(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+pub fn resolveAddressOf(analyser: *Analyser, mutability: Mutability, ty: Type) error{OutOfMemory}!?Type {
     return .{
         .data = .{
             .pointer = .{
                 .size = .one,
                 .sentinel = .none,
-                .is_const = false,
+                .is_const = mutability == .@"const",
                 .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
             },
         },
@@ -1004,8 +1004,15 @@ const BracketAccess = union(enum) {
 /// - `lhs[index]` (single)
 /// - `lhs[start..]` (open)
 /// - `lhs[start..end]` (range)
-pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
+pub fn resolveBracketAccessType(
+    analyser: *Analyser,
+    mutability: Mutability,
+    lhs: Type,
+    rhs: BracketAccess,
+) error{OutOfMemory}!?Type {
     if (lhs.is_type_val) return null;
+
+    const is_const = mutability == .@"const";
 
     switch (lhs.data) {
         .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
@@ -1034,7 +1041,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
                             .pointer = .{
                                 .size = .one,
                                 .sentinel = .none,
-                                .is_const = false,
+                                .is_const = is_const,
                                 .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
@@ -1055,7 +1062,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
                         .pointer = .{
                             .size = .slice,
                             .sentinel = info.sentinel,
-                            .is_const = false,
+                            .is_const = is_const,
                             .elem_ty = info.elem_ty,
                         },
                     },
@@ -1075,7 +1082,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
                             .pointer = .{
                                 .size = .one,
                                 .sentinel = .none,
-                                .is_const = false,
+                                .is_const = is_const,
                                 .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
@@ -1096,7 +1103,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
                         .pointer = .{
                             .size = .slice,
                             .sentinel = .none,
-                            .is_const = false,
+                            .is_const = is_const,
                             .elem_ty = info.elem_ty,
                         },
                     },
@@ -1108,11 +1115,11 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
             .one => switch (info.elem_ty.data) {
                 .tuple => |tuple_info| {
                     const inner_ty: Type = .{ .data = .{ .tuple = tuple_info }, .is_type_val = false };
-                    return analyser.resolveBracketAccessType(inner_ty, rhs);
+                    return analyser.resolveBracketAccessType(mutability, inner_ty, rhs);
                 },
                 .array => |array_info| {
                     const inner_ty: Type = .{ .data = .{ .array = array_info }, .is_type_val = false };
-                    return analyser.resolveBracketAccessType(inner_ty, rhs);
+                    return analyser.resolveBracketAccessType(mutability, inner_ty, rhs);
                 },
                 else => switch (rhs) {
                     .single, .open => return null,
@@ -1300,7 +1307,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
         .tuple => {
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
-            return try analyser.resolveBracketAccessType(ty, .{ .single = index });
+            return try analyser.resolveBracketAccessType(.@"var", ty, .{ .single = index });
         },
 
         .optional => |child_ty| {
@@ -1728,10 +1735,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const slice = tree.fullSlice(node).?;
 
-            const sliced = try analyser.resolveTypeOfNodeInternal(.{
+            const sliced_handle: NodeWithHandle = .{
                 .node = slice.ast.sliced,
                 .handle = handle,
-            }) orelse return null;
+            };
+            const mutability = try analyser.resolveMutability(sliced_handle) orelse .@"var";
+            const sliced = try analyser.resolveTypeOfNodeInternal(sliced_handle) orelse return null;
 
             const kind: BracketAccess = if (slice.ast.end.unwrap()) |end_node|
                 .{ .range = blk: {
@@ -1743,7 +1752,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 } }
             else
                 .{ .open = try analyser.resolveIntegerLiteral(u64, .{ .node = slice.ast.start, .handle = handle }) };
-            return try analyser.resolveBracketAccessType(sliced, kind);
+            return try analyser.resolveBracketAccessType(mutability, sliced, kind);
         },
         .deref => {
             const base_type = try analyser.resolveTypeOfNodeInternal(.{
@@ -1774,7 +1783,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             });
 
-            return try analyser.resolveBracketAccessType(lhs, .{ .single = index });
+            return try analyser.resolveBracketAccessType(.@"var", lhs, .{ .single = index });
         },
         .@"orelse" => {
             const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
@@ -1810,12 +1819,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             return try analyser.resolveUnwrapErrorUnionType(base_type, .payload);
         },
         .address_of => {
-            const base_type = try analyser.resolveTypeOfNodeInternal(.{
+            const expr: NodeWithHandle = .{
                 .node = tree.nodeData(node).node,
                 .handle = handle,
-            }) orelse return null;
+            };
+            const mutability = try analyser.resolveMutability(expr) orelse .@"var";
+            const base_type = try analyser.resolveTypeOfNodeInternal(expr) orelse return null;
 
-            return try analyser.resolveAddressOf(base_type);
+            return try analyser.resolveAddressOf(mutability, base_type);
         },
         .field_access => {
             const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
@@ -2621,6 +2632,106 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .asm_input,
         => {},
     }
+    return null;
+}
+
+const Mutability = enum {
+    @"var",
+    @"const",
+};
+
+fn resolveMutability(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?Mutability {
+    const node = node_handle.node;
+    const handle = node_handle.handle;
+    const tree = handle.tree;
+
+    switch (tree.nodeTag(node)) {
+        .identifier => {
+            const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse
+                return null;
+
+            const name = offsets.identifierTokenToNameSlice(tree, name_token);
+
+            const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+            if (!is_escaped_identifier) {
+                if (std.mem.eql(u8, name, "_"))
+                    return null;
+
+                if (try analyser.resolvePrimitive(name)) |_|
+                    return .@"const";
+            }
+
+            if (analyser.bound_type_params.resolve(name)) |_|
+                return .@"const";
+
+            const decl = try analyser.lookupSymbolGlobal(handle, name, tree.tokenStart(name_token)) orelse
+                return null;
+
+            if (decl.isConst())
+                return .@"const"
+            else
+                return .@"var";
+        },
+
+        .field_access => {
+            const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
+
+            const lhs_handle: NodeWithHandle = .{
+                .node = lhs_node,
+                .handle = handle,
+            };
+
+            const lhs = try analyser.resolveTypeOfNodeInternal(lhs_handle) orelse
+                return null;
+
+            const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
+
+            if (!lhs.is_type_val)
+                return try analyser.resolveMutability(lhs_handle);
+
+            const decl = try lhs.lookupSymbol(analyser, symbol) orelse
+                return null;
+
+            if (decl.isConst())
+                return .@"const"
+            else
+                return .@"var";
+        },
+
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init,
+        .array_init_comma,
+
+        .array_mult,
+        .array_cat,
+
+        .char_literal,
+        .number_literal,
+        .enum_literal,
+        .string_literal,
+        .multiline_string_literal,
+        .error_value,
+        => return .@"const",
+
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            const call_name = tree.tokenSlice(tree.nodeMainToken(node));
+
+            if (std.mem.eql(u8, call_name, "@as"))
+                return .@"const";
+        },
+
+        else => {}, // TODO: Implement more expressions; better safe than sorry
+    }
+
     return null;
 }
 
@@ -3793,7 +3904,7 @@ pub fn getFieldAccessType(
                     }
                 } else unreachable;
 
-                current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, kind)) orelse return null;
+                current_type = (try analyser.resolveBracketAccessType(.@"var", current_type orelse return null, kind)) orelse return null;
             },
             .builtin => {
                 const binfn_name = tokenizer.buffer[tok.loc.start..tok.loc.end];
@@ -4489,6 +4600,7 @@ pub const DeclWithHandle = struct {
                 .error_set,
             ),
             .for_loop_payload => |pay| try analyser.resolveBracketAccessType(
+                .@"var",
                 (try analyser.resolveTypeOfNodeInternal(.{
                     .node = pay.condition,
                     .handle = self.handle,
@@ -4511,7 +4623,7 @@ pub const DeclWithHandle = struct {
                 }) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
-                    .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
+                    .tuple => try analyser.resolveBracketAccessType(.@"var", node, .{ .single = pay.index }),
                     else => null,
                 };
             },
@@ -5102,7 +5214,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[0],
                 ancestors[1..],
             )) |array_type| {
-                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
+                return (try analyser.resolveBracketAccessType(.@"var", array_type, .{ .single = element_index }));
             }
 
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
@@ -5111,7 +5223,7 @@ pub fn resolveExpressionTypeFromAncestors(
                     ancestors[1],
                     ancestors[2..],
                 )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
+                    return try analyser.resolveBracketAccessType(.@"var", slice_type, .{ .single = element_index });
                 }
             }
         },
