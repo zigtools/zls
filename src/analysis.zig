@@ -4367,6 +4367,28 @@ pub const DeclWithHandle = struct {
         };
     }
 
+    pub fn isStatic(self: DeclWithHandle) error{OutOfMemory}!bool {
+        const tree = self.handle.tree;
+        return switch (self.decl) {
+            .ast_node => |node| switch (tree.nodeTag(node)) {
+                .global_var_decl,
+                .local_var_decl,
+                .simple_var_decl,
+                .aligned_var_decl,
+                => blk: {
+                    const document_scope = try self.handle.getDocumentScope();
+                    const token_index = tree.nodeMainToken(node);
+                    const source_index = tree.tokenStart(token_index);
+                    const scope_index = Analyser.innermostScopeAtIndex(document_scope, source_index);
+                    break :blk document_scope.getScopeTag(scope_index).isContainer();
+                },
+
+                else => false,
+            },
+            else => false,
+        };
+    }
+
     pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) error{OutOfMemory}!?Type {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();

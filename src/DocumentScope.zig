@@ -288,6 +288,13 @@ pub const Scope = struct {
         /// `tree.nodeTag(ast_node)` is Block
         block,
         other,
+
+        pub fn isContainer(self: @This()) bool {
+            return switch (self) {
+                .container, .container_usingnamespace => true,
+                .block, .function, .other => false,
+            };
+        }
     };
 
     pub const Data = packed union {
