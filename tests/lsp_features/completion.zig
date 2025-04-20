@@ -422,6 +422,14 @@ test "recursive generic function" {
     , &.{});
 }
 
+test "generic function without body" {
+    try testCompletion(
+        \\const Foo: fn (type) type = undefined;
+        \\const Bar = Foo(u32);
+        \\const value = Bar.<cursor>;
+    , &.{});
+}
+
 test "std.ArrayList" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
