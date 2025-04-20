@@ -3843,7 +3843,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             .null_type => try writer.writeAll("@TypeOf(null)"),
             .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
             .empty_struct_type => try writer.writeAll("@TypeOf(.{})"),
-            .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
+            .enum_literal_type => try writer.writeAll("@Type(.enum_literal)"),
 
             .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
             .atomic_rmw_op => try writer.writeAll("std.builtin.AtomicRmwOp"),
@@ -4128,7 +4128,7 @@ test "simple types" {
 
     try expectFmt("@TypeOf(null)", "{}", .{null_type.fmt(&ip)});
     try expectFmt("@TypeOf(undefined)", "{}", .{undefined_type.fmt(&ip)});
-    try expectFmt("@TypeOf(.enum_literal)", "{}", .{enum_literal_type.fmt(&ip)});
+    try expectFmt("@Type(.enum_literal)", "{}", .{enum_literal_type.fmt(&ip)});
 
     try expectFmt("undefined", "{}", .{undefined_value.fmt(&ip)});
     try expectFmt("{}", "{}", .{void_value.fmt(&ip)});
