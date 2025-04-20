@@ -2085,6 +2085,40 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return ty.instanceTypeVal(analyser);
             }
 
+            const float_map: std.StaticStringMap(void) = .initComptime(.{
+                .{"@sqrt"},
+                .{"@sin"},
+                .{"@cos"},
+                .{"@tan"},
+                .{"@exp"},
+                .{"@exp2"},
+                .{"@log"},
+                .{"@log2"},
+                .{"@log10"},
+                .{"@abs"},
+                .{"@floor"},
+                .{"@ceil"},
+                .{"@trunc"},
+                .{"@round"},
+            });
+            if (float_map.has(call_name)) {
+                if (params.len != 1) return null;
+                const ty = (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = params[0],
+                    .handle = handle,
+                })) orelse return null;
+                const payload = switch (ty.data) {
+                    .ip_index => |payload| payload,
+                    else => return null,
+                };
+                const valid_type = switch (analyser.ip.indexToKey(payload.type)) {
+                    .vector_type => |info| analyser.ip.isFloat(info.child),
+                    else => analyser.ip.isFloat(payload.type),
+                };
+                if (!valid_type) return null;
+                return Type.fromIP(analyser, payload.type, null);
+            }
+
             // Almost the same as the above, return a type value though.
             // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
