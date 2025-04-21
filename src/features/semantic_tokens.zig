@@ -929,51 +929,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeIdentifier(builder, main_token);
         },
         .field_access => {
-            const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
-
-            const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-
-            try writeNodeTokens(builder, lhs_node);
-
-            // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
-            //      writeToken code.
-            // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
-            const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse {
-                try writeTokenMod(builder, field_name_token, .variable, .{});
-                return;
-            };
-            const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
-            if (lhs_type.isErrorSetType(builder.analyser)) {
-                try writeToken(builder, field_name_token, .errorTag);
-                return;
-            }
-
-            if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| {
-                switch (decl_type.decl) {
-                    .ast_node => |decl_node| {
-                        if (decl_type.handle.tree.nodeTag(decl_node).isContainerField()) {
-                            const tok_type = switch (lhs_type.data) {
-                                .container => |scope_handle| fieldTokenType(scope_handle.toNode(), scope_handle.handle, lhs_type.is_type_val),
-                                else => null,
-                            };
-                            if (tok_type) |tt| {
-                                const token_mod: TokenModifiers = .{ .static = (tt == .variable) and try decl_type.isStatic() };
-                                try writeTokenMod(builder, field_name_token, tt, token_mod);
-                                return;
-                            }
-                        }
-                    },
-                    else => {},
-                }
-
-                if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
-                    const token_mod: TokenModifiers = .{ .static = (!(resolved_type.is_type_val or resolved_type.isFunc()) and try decl_type.isStatic()) };
-                    try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, token_mod);
-                    return;
-                }
-            }
-
-            try writeTokenMod(builder, field_name_token, .variable, .{});
+            try writeFieldAccess(builder, node);
         },
         .ptr_type,
         .ptr_type_aligned,
@@ -1085,14 +1041,24 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
             return scope_tag.isContainer();
         }
     };
-
-    var token_mod: TokenModifiers = .{ .declaration = true };
     if (resolved_type) |decl_type| {
-        if (!(decl_type.is_type_val or decl_type.isFunc())) token_mod.static = try helper.isStatic(builder.handle, var_decl);
-        try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, token_mod);
+        try colorIdentifierBasedOnType(
+            builder,
+            decl_type,
+            var_decl.ast.mut_token + 1,
+            false,
+            .{
+                .declaration = true,
+                .static = !decl_type.isTypeOrFunc() and try helper.isStatic(builder.handle, var_decl),
+            },
+        );
     } else {
-        token_mod.static = try helper.isStatic(builder.handle, var_decl);
-        try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, token_mod);
+        try writeTokenMod(
+            builder,
+            var_decl.ast.mut_token + 1,
+            .variable,
+            .{ .declaration = true, .static = try helper.isStatic(builder.handle, var_decl) },
+        );
     }
 
     if (var_decl.ast.type_node.unwrap()) |type_node| try writeNodeTokens(builder, type_node);
@@ -1131,15 +1097,98 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
         const is_param = child.decl == .function_parameter;
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
-            const tok_mod: TokenModifiers = .{ .static = (!(decl_type.is_type_val or decl_type.isFunc()) and try child.isStatic()) };
-            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, tok_mod);
+            return try colorIdentifierBasedOnType(
+                builder,
+                decl_type,
+                name_token,
+                is_param,
+                .{ .static = !decl_type.isTypeOrFunc() and try child.isStatic() },
+            );
         } else {
-            const tok_mod: TokenModifiers = .{ .static = try child.isStatic() };
-            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, tok_mod);
+            try writeTokenMod(
+                builder,
+                name_token,
+                if (is_param) .parameter else .variable,
+                .{ .static = try child.isStatic() },
+            );
         }
     } else {
         try writeTokenMod(builder, name_token, .variable, .{});
     }
+}
+
+fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+    const handle = builder.handle;
+    const tree = builder.handle.tree;
+    const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
+
+    const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
+
+    try writeNodeTokens(builder, lhs_node);
+
+    const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse {
+        const is_static = static_blk: {
+            const lhs_token = tree.nodeMainToken(lhs_node);
+            const lhs_decl = try builder.analyser.lookupSymbolGlobal(
+                handle,
+                tree.tokenSlice(lhs_token),
+                tree.tokenStart(lhs_token),
+            ) orelse break :static_blk false;
+            break :static_blk try lhs_decl.isStatic();
+        };
+        try writeTokenMod(
+            builder,
+            field_name_token,
+            .variable,
+            .{ .static = is_static },
+        );
+        return;
+    };
+    const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+    if (lhs_type.isErrorSetType(builder.analyser)) {
+        try writeToken(builder, field_name_token, .errorTag);
+        return;
+    }
+
+    if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| decl_blk: {
+        field_blk: {
+            if (decl_type.decl != .ast_node) break :field_blk;
+            const decl_node = decl_type.decl.ast_node;
+            if (!decl_type.handle.tree.nodeTag(decl_node).isContainerField()) break :field_blk;
+            if (lhs_type.data != .container) break :field_blk;
+            const scope_handle = lhs_type.data.container;
+            const tt = fieldTokenType(
+                scope_handle.toNode(),
+                scope_handle.handle,
+                lhs_type.is_type_val,
+            ).?;
+            switch (tt) {
+                //These are the only token types returned by fieldTokenType
+                .property, .enumMember, .errorTag => {},
+                else => unreachable,
+            }
+
+            try writeTokenMod(builder, field_name_token, tt, .{});
+            return;
+        }
+
+        const resolved_type = try decl_type.resolveType(builder.analyser) orelse break :decl_blk;
+        try colorIdentifierBasedOnType(
+            builder,
+            resolved_type,
+            field_name_token,
+            false,
+            .{ .static = !resolved_type.isTypeOrFunc() and try decl_type.isStatic() },
+        );
+        return;
+    }
+
+    try writeTokenMod(
+        builder,
+        field_name_token,
+        .variable,
+        .{},
+    );
 }
 
 /// If `loc` is `null`, semantic tokens will be computed for the entire source range
