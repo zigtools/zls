@@ -967,7 +967,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 }
 
                 if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
-                    const token_mod: TokenModifiers = .{ .static = (!resolved_type.is_type_val) and try decl_type.isStatic() };
+                    const token_mod: TokenModifiers = .{ .static = (!(resolved_type.is_type_val or resolved_type.isFunc()) and try decl_type.isStatic()) };
                     try colorIdentifierBasedOnType(builder, resolved_type, field_name_token, false, token_mod);
                     return;
                 }
@@ -1088,7 +1088,7 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
 
     var token_mod: TokenModifiers = .{ .declaration = true };
     if (resolved_type) |decl_type| {
-        if (!decl_type.is_type_val) token_mod.static = try helper.isStatic(builder.handle, var_decl);
+        if (!(decl_type.is_type_val or decl_type.isFunc())) token_mod.static = try helper.isStatic(builder.handle, var_decl);
         try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, token_mod);
     } else {
         token_mod.static = try helper.isStatic(builder.handle, var_decl);
@@ -1131,7 +1131,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
         const is_param = child.decl == .function_parameter;
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
-            const tok_mod: TokenModifiers = .{ .static = (!decl_type.is_type_val) and try child.isStatic() };
+            const tok_mod: TokenModifiers = .{ .static = (!(decl_type.is_type_val or decl_type.isFunc()) and try child.isStatic()) };
             return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, tok_mod);
         } else {
             const tok_mod: TokenModifiers = .{ .static = try child.isStatic() };
