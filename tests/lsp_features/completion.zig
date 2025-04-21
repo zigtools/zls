@@ -2394,6 +2394,21 @@ test "structinit" {
     });
 }
 
+test "return - enum" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+        \\fn foo() E {
+        \\    return .<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

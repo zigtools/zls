@@ -691,7 +691,8 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     if (dot_token_index < 2) return;
 
     blk: {
-        const dot_context = getEnumLiteralContext(tree, dot_token_index) orelse break :blk;
+        const nodes = try ast.nodesOverlappingIndex(builder.arena, tree, loc.start);
+        const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
         const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
         const containers = try collectContainerNodes(
             builder,
@@ -1088,6 +1089,7 @@ const EnumLiteralContext = struct {
 fn getEnumLiteralContext(
     tree: Ast,
     dot_token_index: Ast.TokenIndex,
+    nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // Allow using `1.` (parser workaround)
     var token_index = if (tree.tokenTag(dot_token_index - 1) == .number_literal)
@@ -1104,6 +1106,9 @@ fn getEnumLiteralContext(
             dot_context.need_ret_type = tree.tokenTag(token_index) == .r_paren;
             dot_context.likely = .enum_assignment;
             dot_context.identifier_token_index = token_index;
+        },
+        .keyword_return => {
+            dot_context.identifier_token_index = getReturnTypeLastToken(tree, nodes) orelse return null;
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;
@@ -1288,6 +1293,18 @@ fn getSwitchOrStructInitContext(
         .fn_arg_index = fn_arg_index,
         .need_ret_type = need_ret_type,
     };
+}
+
+fn getReturnTypeLastToken(tree: Ast, nodes: []const Ast.Node.Index) ?Ast.TokenIndex {
+    const return_type = blk: {
+        var func_buf: [1]Ast.Node.Index = undefined;
+        for (nodes) |node| {
+            const func = tree.fullFnProto(&func_buf, node) orelse continue;
+            break :blk func.ast.return_type.unwrap() orelse return null;
+        }
+        return null;
+    };
+    return ast.lastToken(tree, return_type);
 }
 
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
