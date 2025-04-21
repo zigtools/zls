@@ -1116,7 +1116,7 @@ fn getEnumLiteralContext(
             dot_context.identifier_token_index = token_index;
         },
         .l_brace, .comma, .l_paren => {
-            dot_context = getSwitchOrStructInitContext(tree, dot_token_index) orelse return null;
+            dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return null;
         },
         else => return null,
     }
@@ -1129,6 +1129,7 @@ fn getEnumLiteralContext(
 fn getSwitchOrStructInitContext(
     tree: Ast,
     dot_index: Ast.TokenIndex,
+    nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // at least 3 tokens should be present, `x{.`
     if (dot_index < 2) return null;
@@ -1177,6 +1178,10 @@ fn getSwitchOrStructInitContext(
                                 => break :find_identifier,
                                 else => return null,
                             }
+                        }
+                        if (tree.tokenTag(upper_index) == .keyword_return) { // `return .{.`
+                            upper_index = getReturnTypeLastToken(tree, nodes) orelse return null;
+                            break :find_identifier;
                         }
                         // We never return from this branch/condition to the `find_identifier: while ..` loop, so reset and reuse these
                         fn_arg_index = 0;
@@ -1676,7 +1681,8 @@ fn collectEnumLiteralContainerNodes(
     const arena = builder.arena;
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
-    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index) orelse return;
+    const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, loc.start);
+    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(
         builder,
         handle,
