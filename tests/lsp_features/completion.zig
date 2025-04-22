@@ -1643,7 +1643,7 @@ test "enum literal" {
         \\const literal = .foo;
         \\const foo = <cursor>
     , &.{
-        .{ .label = "literal", .kind = .EnumMember, .detail = "@TypeOf(.enum_literal)" },
+        .{ .label = "literal", .kind = .EnumMember, .detail = "@Type(.enum_literal)" },
     });
 }
 

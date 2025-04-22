@@ -160,7 +160,7 @@ test "char literals" {
         \\var alpha = ' ';
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "' '", .string, .{} },
     });
@@ -172,7 +172,7 @@ test "char literal escape sequences" {
     ,
         &.{
             .{ "var", .keyword, .{} },
-            .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+            .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
             .{ "=", .operator, .{} },
             .{ "'\\n'", .string, .{} },
         },
@@ -183,7 +183,7 @@ test "char literal escape sequences" {
     ,
         &.{
             .{ "var", .keyword, .{} },
-            .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+            .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
             .{ "=", .operator, .{} },
             .{ "'\\n'", .string, .{} },
             .{ "\\n", .escapeSequence, .{} },
@@ -197,7 +197,7 @@ test "var decl" {
         \\var alpha = 3;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
@@ -206,7 +206,7 @@ test "var decl" {
     , &.{
         .{ "threadlocal", .keyword, .{} },
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
@@ -215,7 +215,7 @@ test "var decl" {
     , &.{
         .{ "extern", .keyword, .{} },
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "u32", .type, .{} },
     });
     try testSemanticTokens(
@@ -224,7 +224,7 @@ test "var decl" {
         .{ "pub", .keyword, .{} },
         .{ "extern", .keyword, .{} },
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
@@ -232,7 +232,7 @@ test "var decl" {
         \\var alpha;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
     });
 }
 
@@ -245,11 +245,11 @@ test "assign destructure" {
         .{ "test", .keyword, .{} },
 
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .mutable = true } },
         .{ "bool", .type, .{} },
 
         .{ "var", .keyword, .{} },
-        .{ "beta", .variable, .{ .declaration = true } },
+        .{ "beta", .variable, .{ .declaration = true, .mutable = true } },
 
         .{ "=", .operator, .{} },
         .{ "1", .number, .{} },
@@ -265,19 +265,19 @@ test "assign destructure" {
         .{ "test", .keyword, .{} },
 
         .{ "var", .keyword, .{} },
-        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "foo", .variable, .{ .declaration = true, .mutable = true } },
         .{ "u32", .type, .{} },
         .{ "=", .operator, .{} },
         .{ "undefined", .keywordLiteral, .{} },
 
         .{ "var", .keyword, .{} },
-        .{ "bar", .variable, .{ .declaration = true } },
+        .{ "bar", .variable, .{ .declaration = true, .mutable = true } },
         .{ "u64", .type, .{} },
         .{ "=", .operator, .{} },
         .{ "undefined", .keywordLiteral, .{} },
 
-        .{ "foo", .variable, .{} },
-        .{ "bar", .variable, .{} },
+        .{ "foo", .variable, .{ .mutable = true } },
+        .{ "bar", .variable, .{ .mutable = true } },
         .{ "=", .operator, .{} },
 
         .{ "3", .number, .{} },
@@ -297,7 +297,7 @@ test "local var decl" {
         .{ "=", .operator, .{} },
         .{ "comptime", .keyword, .{} },
         .{ "var", .keyword, .{} },
-        .{ "beta", .variable, .{ .declaration = true } },
+        .{ "beta", .variable, .{ .declaration = true, .mutable = true } },
         .{ "u32", .type, .{} },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
@@ -309,7 +309,7 @@ test "escaped identifier" {
         \\var @"@" = 3;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "@\"@\"", .variable, .{ .declaration = true, .static = true } },
+        .{ "@\"@\"", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
@@ -320,7 +320,7 @@ test "operators" {
         \\var alpha = 3 + 3;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
         .{ "+", .operator, .{} },
@@ -330,7 +330,7 @@ test "operators" {
         \\var alpha = 3 orelse 3;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
         .{ "orelse", .keyword, .{} },
@@ -340,7 +340,7 @@ test "operators" {
         \\var alpha = true and false;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "true", .keywordLiteral, .{} },
         .{ "and", .keyword, .{} },
@@ -350,7 +350,7 @@ test "operators" {
         \\var alpha = (undefined).?.*;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "undefined", .keywordLiteral, .{} },
         // TODO these should be either (.? and .*) or (? and *)
@@ -411,6 +411,27 @@ test "field access" {
         .{ "=", .operator, .{} },
         .{ "S", .namespace, .{} },
         .{ "u32", .variable, .{ .static = true } },
+    });
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    var foo = true;
+        \\};
+        \\const alpha = S.foo;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "var", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true, .static = true, .mutable = true } },
+        .{ "=", .operator, .{} },
+        .{ "true", .keywordLiteral, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "foo", .variable, .{ .mutable = true, .static = true } },
     });
 }
 
@@ -577,7 +598,7 @@ test "catch" {
         \\var alpha = a catch b;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "a", .variable, .{} },
         .{ "catch", .keyword, .{} },
@@ -587,7 +608,7 @@ test "catch" {
         \\var alpha = a catch |err| b;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "a", .variable, .{} },
         .{ "catch", .keyword, .{} },
@@ -601,7 +622,7 @@ test "try" {
         \\var alpha = try undefined;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "try", .keyword, .{} },
         .{ "undefined", .keywordLiteral, .{} },
@@ -613,7 +634,7 @@ test "slicing" {
         \\var alpha = a[0..1];
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "a", .variable, .{} },
         .{ "0", .number, .{} },
@@ -623,7 +644,7 @@ test "slicing" {
         \\var alpha = a[0..1: 2];
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "a", .variable, .{} },
         .{ "0", .number, .{} },
@@ -637,7 +658,7 @@ test "enum literal" {
         \\var alpha = .beta;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "beta", .enumMember, .{} },
     });
@@ -672,7 +693,7 @@ test "error literal" {
         \\var alpha = error.OutOfMemory;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "error", .keyword, .{} },
         .{ "OutOfMemory", .errorTag, .{} },
@@ -684,7 +705,7 @@ test "array literal" {
         \\var alpha = [_]u32{ 1, 2 };
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "u32", .type, .{} },
         .{ "1", .number, .{} },
@@ -694,7 +715,7 @@ test "array literal" {
         \\var alpha = [_:3]u32{};
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
         .{ "u32", .type, .{} },
@@ -706,14 +727,14 @@ test "struct literal" {
         \\var alpha = .{};
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
     });
     try testSemanticTokens(
         \\var alpha = .{1,2};
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "1", .number, .{} },
         .{ "2", .number, .{} },
@@ -722,7 +743,7 @@ test "struct literal" {
         \\var alpha = Unknown{1,2};
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "Unknown", .variable, .{} },
         .{ "1", .number, .{} },
@@ -732,7 +753,7 @@ test "struct literal" {
         \\var alpha = .{ .foo = 1, .bar = 2 };
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true, .static = true } },
+        .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
 
         .{ ".", .property, .{} },

@@ -45,7 +45,7 @@ fn hoverSymbolRecursive(
 
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| def: {
-            if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
+            if (try analyser.resolveVarDeclAlias(.of(node, handle))) |result| {
                 return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 
@@ -65,10 +65,7 @@ fn hoverSymbolRecursive(
                     };
 
                     if (opt_type_node) |type_node| {
-                        try analyser.referencedTypesFromNode(
-                            .{ .node = type_node, .handle = handle },
-                            &reference_collector,
-                        );
+                        try analyser.referencedTypesFromNode(.of(type_node, handle), &reference_collector);
                     }
 
                     break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
@@ -81,10 +78,7 @@ fn hoverSymbolRecursive(
                     var converted = field;
                     converted.convertToNonTupleLike(&tree);
                     if (converted.ast.type_expr.unwrap()) |type_expr| {
-                        try analyser.referencedTypesFromNode(
-                            .{ .node = type_expr, .handle = handle },
-                            &reference_collector,
-                        );
+                        try analyser.referencedTypesFromNode(.of(type_expr, handle), &reference_collector);
                     }
 
                     break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
@@ -114,10 +108,7 @@ fn hoverSymbolRecursive(
             const param = pay.get(tree).?;
 
             if (param.type_expr) |type_expr| { // null for `anytype` and extern C varargs `...`
-                try analyser.referencedTypesFromNode(
-                    .{ .node = type_expr, .handle = handle },
-                    &reference_collector,
-                );
+                try analyser.referencedTypesFromNode(.of(type_expr, handle), &reference_collector);
             }
 
             break :def ast.paramSlice(tree, param, false);
