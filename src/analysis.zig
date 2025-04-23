@@ -173,6 +173,7 @@ fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlace
 }
 
 pub const FormatParameterOptions = struct {
+    referenced: ?*ReferencedType.Set = null,
     info: Type.Data.Parameter,
     index: usize,
 
@@ -198,6 +199,7 @@ pub fn formatParameter(
 
     const analyser = ctx.analyser;
     const data = ctx.options;
+    const referenced = data.referenced;
     const info = data.info;
 
     if (data.index != 0) {
@@ -234,7 +236,10 @@ pub fn formatParameter(
         if (has_parameter_name) try writer.writeAll(": ");
 
         if (info.type) |ty| {
-            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{ .truncate_container_decls = true })});
+            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{
+                .referenced = referenced,
+                .truncate_container_decls = true,
+            })});
         } else {
             try writer.writeAll("anytype");
         }
@@ -250,6 +255,7 @@ pub fn fmtParameter(analyser: *Analyser, options: FormatParameterOptions) std.fm
 }
 
 pub const FormatFunctionOptions = struct {
+    referenced: ?*ReferencedType.Set = null,
     info: Type.Data.Function,
 
     include_fn_keyword: bool,
@@ -285,6 +291,7 @@ pub fn formatFunction(
 
     const analyser = ctx.analyser;
     const data = ctx.options;
+    const referenced = data.referenced;
     const info = data.info;
     var parameters = info.parameters;
 
@@ -322,6 +329,7 @@ pub fn formatFunction(
         .show => |parameter_options| {
             for (parameters, 0..) |param_info, index| {
                 try writer.print("{}", .{fmtParameter(analyser, .{
+                    .referenced = referenced,
                     .info = param_info,
                     .index = index,
                     .include_modifier = parameter_options.include_modifiers,
@@ -349,7 +357,10 @@ pub fn formatFunction(
 
     if (data.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{info.return_type.fmtTypeVal(analyser, .{ .truncate_container_decls = true })});
+        try writer.print("{}", .{info.return_type.fmtTypeVal(analyser, .{
+            .referenced = referenced,
+            .truncate_container_decls = true,
+        })});
     }
 }
 
@@ -3332,6 +3343,7 @@ pub const Type = struct {
     }
 
     pub const FormatOptions = struct {
+        referenced: ?*ReferencedType.Set = null,
         truncate_container_decls: bool,
     };
 
@@ -3351,6 +3363,9 @@ pub const Type = struct {
 
         const ty = ctx.ty;
         const analyser = ctx.analyser;
+        const options = ctx.options;
+        const referenced = options.referenced;
+        const arena = analyser.arena.allocator();
 
         switch (ty.data) {
             .pointer => |info| {
@@ -3415,8 +3430,10 @@ pub const Type = struct {
 
                 switch (handle.tree.nodeTag(node)) {
                     .root => {
-                        const path = URI.parse(analyser.arena.allocator(), handle.uri) catch handle.uri;
-                        try writer.writeAll(std.fs.path.stem(path));
+                        const path = URI.parse(arena, handle.uri) catch handle.uri;
+                        const str = std.fs.path.stem(path);
+                        try writer.writeAll(str);
+                        if (referenced) |r| try r.put(arena, .of(str, handle, tree.firstToken(node)), {});
                     },
 
                     .container_decl,
@@ -3436,12 +3453,14 @@ pub const Type = struct {
                         const token = tree.firstToken(node);
                         // `Foo = struct`
                         if (token >= 2 and tree.tokenTag(token - 2) == .identifier and tree.tokenTag(token - 1) == .equal) {
+                            var str_token = token - 2;
                             // `Foo: type = struct`
                             if (token >= 4 and tree.tokenTag(token - 4) == .identifier and tree.tokenTag(token - 3) == .colon) {
-                                try writer.writeAll(tree.tokenSlice(token - 4));
-                                return;
+                                str_token = token - 4;
                             }
-                            try writer.writeAll(tree.tokenSlice(token - 2));
+                            const str = tree.tokenSlice(str_token);
+                            try writer.writeAll(str);
+                            if (referenced) |r| try r.put(arena, .of(str, handle, str_token), {});
                             return;
                         }
                         if (token >= 1 and tree.tokenTag(token - 1) == .keyword_return) blk: {
@@ -3452,6 +3471,7 @@ pub const Type = struct {
                             const func_name_token = func.name_token orelse break :blk;
                             const func_name = offsets.tokenToSlice(tree, func_name_token);
                             try writer.print("{s}", .{func_name});
+                            if (referenced) |r| try r.put(arena, .of(func_name, handle, func_name_token), {});
                             var first = true;
                             for (scope_handle.bound_params) |param| {
                                 if (!first) {
@@ -3495,13 +3515,14 @@ pub const Type = struct {
             },
             .function => |info| {
                 try writer.print("{}", .{analyser.fmtFunction(.{
+                    .referenced = referenced,
                     .info = info,
                     .include_fn_keyword = true,
                     .include_name = false,
                     .skip_first_param = false,
                     .parameters = .{ .show = .{
                         .include_modifiers = true,
-                        .include_names = true,
+                        .include_names = false,
                         .include_types = true,
                     } },
                     .include_return_type = true,
@@ -5521,10 +5542,13 @@ pub const ReferencedType = struct {
     handle: *DocumentStore.Handle,
     token: Ast.TokenIndex,
 
-    pub const Collector = struct {
-        type_str: ?[]const u8 = null,
-        referenced_types: *Set,
-    };
+    pub fn of(
+        str: []const u8,
+        handle: *DocumentStore.Handle,
+        token: Ast.TokenIndex,
+    ) ReferencedType {
+        return .{ .str = str, .handle = handle, .token = token };
+    }
 
     pub const Set = std.ArrayHashMapUnmanaged(ReferencedType, void, SetContext, true);
 
@@ -5547,167 +5571,3 @@ pub const ReferencedType = struct {
         }
     };
 };
-
-pub fn referencedTypesFromNode(
-    analyser: *Analyser,
-    node_handle: NodeWithHandle,
-    collector: *ReferencedType.Collector,
-) error{OutOfMemory}!void {
-    analyser.resolved_nodes.clearRetainingCapacity();
-    return try analyser.referencedTypesFromNodeInternal(node_handle, collector);
-}
-
-fn referencedTypesFromNodeInternal(
-    analyser: *Analyser,
-    node_handle: NodeWithHandle,
-    collector: *ReferencedType.Collector,
-) error{OutOfMemory}!void {
-    const handle = node_handle.handle;
-    const tree = handle.tree;
-
-    var node = node_handle.node;
-    collector.type_str = offsets.nodeToSlice(tree, node);
-
-    var call_buf: [1]Ast.Node.Index = undefined;
-    const call_maybe = tree.fullCall(&call_buf, node);
-    if (call_maybe) |call|
-        node = call.ast.fn_expr;
-
-    if (try analyser.resolveVarDeclAlias(.of(node, handle))) |decl_handle| {
-        try collector.referenced_types.put(analyser.arena.allocator(), .{
-            .str = offsets.nodeToSlice(tree, node),
-            .handle = decl_handle.handle,
-            .token = decl_handle.nameToken(),
-        }, {});
-    }
-
-    if (call_maybe) |call| {
-        for (call.ast.params) |param| {
-            _ = try analyser.addReferencedTypesFromNode(.of(param, handle), collector.referenced_types);
-        }
-    }
-}
-
-pub fn referencedTypes(
-    analyser: *Analyser,
-    resolved_type: Type,
-    collector: *ReferencedType.Collector,
-) error{OutOfMemory}!void {
-    if (resolved_type.is_type_val) return;
-    analyser.resolved_nodes.clearRetainingCapacity();
-    try analyser.addReferencedTypes(resolved_type, collector.*);
-}
-
-fn addReferencedTypesFromNode(
-    analyser: *Analyser,
-    node_handle: NodeWithHandle,
-    referenced_types: *ReferencedType.Set,
-) error{OutOfMemory}!void {
-    if (analyser.resolved_nodes.contains(.{
-        .node = node_handle.node,
-        .uri = node_handle.handle.uri,
-        .bound_type_params_state_hash = try analyser.bound_type_params.hash(analyser.arena.allocator()),
-    })) return;
-    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return;
-    if (!ty.is_type_val) return;
-    var collector: ReferencedType.Collector = .{ .referenced_types = referenced_types };
-    try analyser.referencedTypesFromNodeInternal(node_handle, &collector);
-    try analyser.addReferencedTypes(ty, collector);
-}
-
-fn addReferencedTypes(
-    analyser: *Analyser,
-    ty: Type,
-    collector: ReferencedType.Collector,
-) error{OutOfMemory}!void {
-    const type_str = collector.type_str;
-    const referenced_types = collector.referenced_types;
-    const arena = analyser.arena.allocator();
-
-    switch (ty.data) {
-        .pointer => |info| try analyser.addReferencedTypes(info.elem_ty.*, .{ .referenced_types = referenced_types }),
-        .array => |info| try analyser.addReferencedTypes(info.elem_ty.*, .{ .referenced_types = referenced_types }),
-        .tuple => {},
-        .optional => |child_ty| try analyser.addReferencedTypes(child_ty.*, .{ .referenced_types = referenced_types }),
-        .error_union => |info| {
-            if (info.error_set) |error_set| {
-                try analyser.addReferencedTypes(error_set.*, .{ .referenced_types = referenced_types });
-            }
-            try analyser.addReferencedTypes(info.payload.*, .{ .referenced_types = referenced_types });
-        },
-        .union_tag => |t| try analyser.addReferencedTypes(t.*, .{ .referenced_types = referenced_types }),
-
-        .container => |scope_handle| {
-            const handle = scope_handle.handle;
-            const tree = handle.tree;
-
-            const doc_scope = try handle.getDocumentScope();
-            const node = scope_handle.toNode();
-
-            switch (tree.nodeTag(node)) {
-                .root => {
-                    const path = URI.parse(arena, handle.uri) catch |err| switch (err) {
-                        error.OutOfMemory => |e| return e,
-                        else => return,
-                    };
-                    const str = std.fs.path.stem(path);
-                    try referenced_types.put(arena, .{
-                        .str = type_str orelse str,
-                        .handle = handle,
-                        .token = tree.firstToken(node),
-                    }, {});
-                },
-                .container_decl,
-                .container_decl_arg,
-                .container_decl_arg_trailing,
-                .container_decl_trailing,
-                .container_decl_two,
-                .container_decl_two_trailing,
-                .tagged_union,
-                .tagged_union_trailing,
-                .tagged_union_two,
-                .tagged_union_two_trailing,
-                .tagged_union_enum_tag,
-                .tagged_union_enum_tag_trailing,
-                => {
-                    // This is a hacky nightmare but it works :P
-                    const token = tree.firstToken(node);
-                    if (token >= 2 and tree.tokenTag(token - 2) == .identifier and tree.tokenTag(token - 1) == .equal) {
-                        const str = tree.tokenSlice(token - 2);
-                        try referenced_types.put(arena, .{
-                            .str = type_str orelse str,
-                            .handle = handle,
-                            .token = token - 2,
-                        }, {});
-                    }
-                    if (token >= 1 and tree.tokenTag(token - 1) == .keyword_return) blk: {
-                        const function_scope = innermostFunctionScopeAtIndex(doc_scope, tree.tokenStart(token - 1)).unwrap() orelse break :blk;
-                        const function_node = doc_scope.getScopeAstNode(function_scope).?;
-                        var buf: [1]Ast.Node.Index = undefined;
-                        const func = tree.fullFnProto(&buf, function_node).?;
-                        const func_name_token = func.name_token orelse break :blk;
-                        const func_name = offsets.tokenToSlice(tree, func_name_token);
-                        try referenced_types.put(arena, .{
-                            .str = type_str orelse func_name,
-                            .handle = handle,
-                            .token = func_name_token,
-                        }, {});
-                    }
-                },
-                else => unreachable,
-            }
-        },
-
-        .function => |info| {
-            for (info.parameters) |param| {
-                const param_ty = param.type orelse continue;
-                try analyser.addReferencedTypes(param_ty, .{ .referenced_types = referenced_types });
-            }
-
-            try analyser.addReferencedTypes(info.return_type.*, .{ .referenced_types = referenced_types });
-        },
-
-        .for_range, .ip_index, .compile_error => {},
-        .either => {}, // TODO
-    }
-}
