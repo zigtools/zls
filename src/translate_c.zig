@@ -120,44 +120,41 @@ pub fn translate(
     defer tracy_zone.end();
 
     const zig_exe_path = config.zig_exe_path.?;
-    const zig_lib_path = config.zig_lib_path.?;
-    const global_cache_path = config.global_cache_path.?;
+    const zig_lib_dir = config.zig_lib_dir.?;
+    const global_cache_dir = config.global_cache_dir.?;
 
     var random_bytes: [16]u8 = undefined;
     std.crypto.random.bytes(&random_bytes);
     var sub_path: [std.fs.base64_encoder.calcSize(16)]u8 = undefined;
     _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
 
-    var global_cache_dir = try std.fs.openDirAbsolute(global_cache_path, .{});
-    defer global_cache_dir.close();
-
-    var sub_dir = try global_cache_dir.makeOpenPath(&sub_path, .{});
+    var sub_dir = try global_cache_dir.handle.makeOpenPath(&sub_path, .{});
     defer sub_dir.close();
 
     sub_dir.writeFile(.{
         .sub_path = "cimport.h",
         .data = source,
     }) catch |err| {
-        log.warn("failed to write to '{s}/{s}/cimport.h': {}", .{ global_cache_path, sub_path, err });
+        log.warn("failed to write to '{s}/{s}/cimport.h': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
         return null;
     };
 
-    defer global_cache_dir.deleteTree(&sub_path) catch |err| {
-        log.warn("failed to delete '{s}/{s}': {}", .{ global_cache_path, sub_path, err });
+    defer global_cache_dir.handle.deleteTree(&sub_path) catch |err| {
+        log.warn("failed to delete '{s}/{s}': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
     };
 
-    const file_path = try std.fs.path.join(allocator, &.{ global_cache_path, &sub_path, "cimport.h" });
+    const file_path = try std.fs.path.join(allocator, &.{ global_cache_dir.path orelse ".", &sub_path, "cimport.h" });
     defer allocator.free(file_path);
 
     const base_args = &[_][]const u8{
         zig_exe_path,
         "translate-c",
         "--zig-lib-dir",
-        zig_lib_path,
+        zig_lib_dir.path orelse ".",
         "--cache-dir",
-        global_cache_path,
+        global_cache_dir.path orelse ".",
         "--global-cache-dir",
-        global_cache_path,
+        global_cache_dir.path orelse ".",
         "-lc",
         "--listen=-",
     };
@@ -220,7 +217,7 @@ pub fn translate(
 
                 const bin_result_path = try zcs.reader().readBytesNoEof(16);
                 const hex_result_path = std.Build.Cache.binToHex(bin_result_path);
-                const result_path = try std.fs.path.join(allocator, &.{ global_cache_path, "o", &hex_result_path, "cimport.zig" });
+                const result_path = try global_cache_dir.join(allocator, &.{ "o", &hex_result_path, "cimport.zig" });
                 defer allocator.free(result_path);
 
                 return .{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };

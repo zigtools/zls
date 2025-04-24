@@ -12,9 +12,9 @@ const default_config: Config = .{
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,
 
-    .zig_exe_path = test_options.zig_exe_path,
-    .zig_lib_path = test_options.zig_lib_path,
-    .global_cache_path = test_options.global_cache_path,
+    .zig_exe_path = if (builtin.target.os.tag != .wasi) test_options.zig_exe_path else null,
+    .zig_lib_path = if (builtin.target.os.tag != .wasi) test_options.zig_lib_path else null,
+    .global_cache_path = if (builtin.target.os.tag != .wasi) test_options.global_cache_path else null,
 };
 
 const allocator = std.testing.allocator;
@@ -24,30 +24,29 @@ pub const Context = struct {
     arena: std.heap.ArenaAllocator,
     file_id: u32 = 0,
 
-    var resolved_config_arena: std.heap.ArenaAllocator.State = undefined;
-    var resolved_config: ?Config = null;
+    var config_arena: std.heap.ArenaAllocator.State = .{};
+    var cached_config: ?Config = null;
+    var cached_resolved_config: ?@FieldType(Server, "resolved_config") = null;
 
     pub fn init() !Context {
         const server = try Server.create(allocator);
         errdefer server.destroy();
 
-        if (resolved_config) |config| {
-            // The configuration has previously been resolved an stored in `resolved_config`
-            try server.updateConfiguration2(config, .{ .resolve = false });
+        if (cached_config == null and cached_resolved_config == null) {
+            try server.updateConfiguration2(default_config, .{ .leaky_config_arena = true });
         } else {
-            try server.updateConfiguration2(default_config, .{});
+            // the configuration has previously been resolved and cached.
+            server.config_arena = config_arena;
+            server.config = cached_config.?;
+            server.resolved_config = cached_resolved_config.?;
 
-            const config_string = try std.json.stringifyAlloc(allocator, server.config, .{ .whitespace = .indent_2 });
-            defer allocator.free(config_string);
-
-            var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-            errdefer arena.deinit();
-
-            const duped_config = try std.json.parseFromSliceLeaky(Config, arena.allocator(), config_string, .{ .allocate = .alloc_always });
-
-            resolved_config_arena = arena.state;
-            resolved_config = duped_config;
+            try server.updateConfiguration2(server.config, .{ .leaky_config_arena = true, .resolve = false });
         }
+
+        std.debug.assert(server.resolved_config.zig_lib_dir != null);
+        std.debug.assert(server.document_store.config.zig_lib_dir != null);
+        std.debug.assert(server.resolved_config.global_cache_dir != null);
+        std.debug.assert(server.document_store.config.global_cache_dir != null);
 
         var context: Context = .{
             .server = server,
@@ -61,6 +60,14 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
+        config_arena = self.server.config_arena;
+        cached_config = self.server.config;
+        cached_resolved_config = self.server.resolved_config;
+
+        self.server.config_arena = .{};
+        self.server.config = .{};
+        self.server.resolved_config = .unresolved;
+
         _ = self.server.sendRequestSync(self.arena.allocator(), "shutdown", {}) catch unreachable;
         self.server.sendNotificationSync(self.arena.allocator(), "exit", {}) catch unreachable;
         std.debug.assert(self.server.status == .exiting_success);

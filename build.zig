@@ -258,6 +258,20 @@ pub fn build(b: *Build) !void {
         .use_lld = use_llvm,
     });
 
+    if (target.result.cpu.arch.isWasm() and b.enable_wasmtime) {
+        // Zig's build system integration with wasmtime does not support adding custom preopen directories so it is done manually.
+        const args: []const ?[]const u8 = &.{
+            "wasmtime",
+            "--dir=.",
+            b.fmt("--dir={}::/lib", .{b.graph.zig_lib_directory}),
+            b.fmt("--dir={s}::/cache", .{b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM")}),
+            "--",
+            null,
+        };
+        tests.setExecCmd(args);
+        src_tests.setExecCmd(args);
+    }
+
     blk: { // zig build test, zig build test-build-runner, zig build test-analysis
         const test_step = b.step("test", "Run all the tests");
         const test_build_runner_step = b.step("test-build-runner", "Run all the build runner tests");
@@ -268,16 +282,19 @@ pub fn build(b: *Build) !void {
 
         // Create run steps
         @import("tests/add_build_runner_cases.zig").addCases(b, test_build_runner_step, test_filters, build_runner);
-        @import("tests/add_analysis_cases.zig").addCases(b, test_analysis_step, test_filters);
+        @import("tests/add_analysis_cases.zig").addCases(b, target, optimize, test_analysis_step, test_filters);
 
         const run_tests = b.addRunArtifact(tests);
         const run_src_tests = b.addRunArtifact(src_tests);
 
+        run_tests.skip_foreign_checks = target.result.cpu.arch.isWasm() and b.enable_wasmtime;
+        run_src_tests.skip_foreign_checks = target.result.cpu.arch.isWasm() and b.enable_wasmtime;
+
         // Setup dependencies of `zig build test`
         test_step.dependOn(&run_tests.step);
         test_step.dependOn(&run_src_tests.step);
-        test_step.dependOn(test_build_runner_step);
         test_step.dependOn(test_analysis_step);
+        if (target.query.eql(b.graph.host.query)) test_step.dependOn(test_build_runner_step);
 
         if (!coverage) break :blk;
 

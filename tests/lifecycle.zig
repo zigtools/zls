@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zls = @import("zls");
 const test_options = @import("test_options");
 
@@ -9,9 +10,9 @@ test "LSP lifecycle" {
     defer server.destroy();
 
     try server.updateConfiguration2(.{
-        .zig_exe_path = test_options.zig_exe_path,
+        .zig_exe_path = if (builtin.target.os.tag != .wasi) test_options.zig_exe_path else null,
         .zig_lib_path = null,
-        .global_cache_path = test_options.global_cache_path,
+        .global_cache_path = if (builtin.target.os.tag != .wasi) test_options.global_cache_path else null,
     }, .{});
 
     var arena_allocator: std.heap.ArenaAllocator = .init(allocator);

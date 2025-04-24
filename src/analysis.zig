@@ -3550,11 +3550,11 @@ pub const BoundTypeParams = struct {
     }
 };
 
-/// Look up `type_name` in 'zig_lib_path/std/builtin.zig' and return it as an instance
+/// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
 pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Type {
-    const zig_lib_path = analyser.store.config.zig_lib_path orelse return null;
-    const builtin_path = try std.fs.path.join(analyser.arena.allocator(), &.{ zig_lib_path, "std", "builtin.zig" });
+    const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
+    const builtin_path = try zig_lib_dir.join(analyser.arena.allocator(), &.{ "std", "builtin.zig" });
     const builtin_uri = try URI.fromPath(analyser.arena.allocator(), builtin_path);
 
     const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;

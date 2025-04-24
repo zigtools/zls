@@ -368,7 +368,6 @@ test "operators" {
 }
 
 test "field access with @import" {
-    if (!std.process.can_spawn) return error.SkipZigTest;
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
         \\const std = @import("std");
