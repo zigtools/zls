@@ -25,5 +25,13 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: zig fmt --check .
 
-      - name: Run Tests
-        run: zig build test --summary all
+      - name: Run zig build check test
+        run: zig build check test --summary all
+
+      - name: Setup wasmtime
+        if: matrix.os == 'ubuntu-22.04'
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+
+      - name: Run zig build check test -Dtarget=wasm32-
+        if: matrix.os == 'ubuntu-22.04'
+        run: zig build check test -Dtarget=wasm32-wasi -fwasmtime --summary all
