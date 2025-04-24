@@ -841,11 +841,11 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         }
 
         try completions.ensureUnusedCapacity(builder.arena, 2);
-        if (store.config.zig_lib_path) |zig_lib_path| {
+        if (store.config.zig_lib_dir) |zig_lib_dir| {
             completions.putAssumeCapacity(.{
                 .label = "std",
                 .kind = .Module,
-                .detail = zig_lib_path,
+                .detail = zig_lib_dir.path,
             }, {});
         }
         if (store.config.builtin_path) |builtin_path| {

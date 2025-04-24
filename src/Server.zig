@@ -63,8 +63,8 @@ ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
-/// The underlying memory has been allocated with `config_arena`.
-runtime_zig_version: ?std.SemanticVersion = null,
+/// Additional information that has been resolved from 'config'.
+resolved_config: ResolvedConfiguration = .unresolved,
 /// Every changed configuration will increase the amount of memory allocated by the arena,
 /// This is unlikely to cause any big issues since the user is probably not going set settings
 /// often in one session,
@@ -790,7 +790,7 @@ const Workspace = struct {
     }) error{OutOfMemory}!void {
         comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
 
-        if (args.server.runtime_zig_version) |runtime_zig_version| {
+        if (args.server.resolved_config.zig_runtime_version) |runtime_zig_version| {
             workspace.build_on_save_mode = switch (BuildOnSaveSupport.isSupportedRuntime(runtime_zig_version)) {
                 .supported => .watch,
                 // If if build on save has been explicitly enabled, fallback to the implementation with manual updates
@@ -938,6 +938,7 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
 
 pub const UpdateConfigurationOptions = struct {
     resolve: bool = true,
+    leaky_config_arena: bool = false,
 };
 
 pub fn updateConfiguration2(
@@ -960,7 +961,7 @@ pub fn updateConfiguration(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var config_arena_allocator = server.config_arena.promote(server.allocator);
+    var config_arena_allocator = server.config_arena.promote(if (options.leaky_config_arena) std.heap.page_allocator else server.allocator);
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
 
@@ -974,14 +975,14 @@ pub fn updateConfiguration(
             @field(server.config, field.name);
     }
 
-    const resolve_result: ResolveConfigurationResult = blk: {
-        if (!options.resolve) break :blk ResolveConfigurationResult.unresolved;
-        const resolve_result = try resolveConfiguration(server.allocator, config_arena, &new_config);
+    resolve: {
+        if (!options.resolve) break :resolve;
+        const resolved_config = try resolveConfiguration(server.allocator, config_arena, &new_config);
         server.validateConfiguration(&new_config);
-        server.runtime_zig_version = resolve_result.zig_runtime_version;
-        break :blk resolve_result;
-    };
-    defer resolve_result.deinit();
+
+        server.resolved_config.deinit();
+        server.resolved_config = resolved_config;
+    }
 
     // <---------------------------------------------------------->
     //                        apply changes
@@ -1037,7 +1038,13 @@ pub fn updateConfiguration(
     const new_build_on_save_args = has_changed[std.meta.fieldIndex(Config, "build_on_save_args").?];
     const new_force_autofix = has_changed[std.meta.fieldIndex(Config, "force_autofix").?];
 
-    server.document_store.config = DocumentStore.Config.fromMainConfig(server.config);
+    server.document_store.config = .{
+        .zig_exe_path = server.config.zig_exe_path,
+        .zig_lib_dir = server.resolved_config.zig_lib_dir,
+        .build_runner_path = server.config.build_runner_path,
+        .builtin_path = server.config.builtin_path,
+        .global_cache_dir = server.resolved_config.global_cache_dir,
+    };
 
     if (new_zig_exe_path or new_build_runner_path) blk: {
         if (!std.process.can_spawn) break :blk;
@@ -1089,45 +1096,53 @@ pub fn updateConfiguration(
     //  don't modify config options after here, only show messages
     // <---------------------------------------------------------->
 
-    // TODO there should a way to suppress this message
-    if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
-        server.showMessage(.Warning, "zig executable could not be found", .{});
-    } else if (std.process.can_spawn and server.status == .initialized and server.config.zig_lib_path == null) {
-        server.showMessage(.Warning, "zig standard library directory could not be resolved", .{});
+    check: {
+        if (!options.resolve) break :check;
+        if (!std.process.can_spawn) break :check;
+        if (server.status != .initialized) break :check;
+
+        // TODO there should a way to suppress this message
+        if (server.config.zig_exe_path == null) {
+            server.showMessage(.Warning, "zig executable could not be found", .{});
+        } else if (server.resolved_config.zig_lib_dir == null) {
+            server.showMessage(.Warning, "zig standard library directory could not be resolved", .{});
+        }
     }
 
-    switch (resolve_result.build_runner_version) {
-        .resolved, .unresolved_dont_error => {},
-        .unresolved => blk: {
-            if (!options.resolve) break :blk;
-            if (server.status != .initialized) break :blk;
+    check: {
+        if (!options.resolve) break :check;
+        if (server.status != .initialized) break :check;
 
-            const zig_version = resolve_result.zig_runtime_version.?;
-            const zls_version = build_options.version;
+        switch (server.resolved_config.build_runner_version) {
+            .resolved, .unresolved_dont_error => break :check,
+            .unresolved => {},
+        }
 
-            const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
-            const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
+        const zig_version = server.resolved_config.zig_runtime_version.?;
+        const zls_version = build_options.version;
 
-            if (zig_version_is_tagged) {
-                server.showMessage(
-                    .Warning,
-                    "ZLS {} does not support Zig {}. A ZLS {}.{} release should be used instead.",
-                    .{ zls_version, zig_version, zig_version.major, zig_version.minor },
-                );
-            } else if (zls_version_is_tagged) {
-                server.showMessage(
-                    .Warning,
-                    "ZLS {} should be used with a Zig {}.{} release but found Zig {}.",
-                    .{ zls_version, zls_version.major, zls_version.minor, zig_version },
-                );
-            } else {
-                server.showMessage(
-                    .Warning,
-                    "ZLS {} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
-                    .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
-                );
-            }
-        },
+        const zig_version_is_tagged = zig_version.pre == null and zig_version.build == null;
+        const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
+
+        if (zig_version_is_tagged) {
+            server.showMessage(
+                .Warning,
+                "ZLS {} does not support Zig {}. A ZLS {}.{} release should be used instead.",
+                .{ zls_version, zig_version, zig_version.major, zig_version.minor },
+            );
+        } else if (zls_version_is_tagged) {
+            server.showMessage(
+                .Warning,
+                "ZLS {} should be used with a Zig {}.{} release but found Zig {}.",
+                .{ zls_version, zls_version.major, zls_version.minor, zig_version },
+            );
+        } else {
+            server.showMessage(
+                .Warning,
+                "ZLS {} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
+                .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
+            );
+        }
     }
 
     if (server.config.prefer_ast_check_as_child_process) {
@@ -1142,18 +1157,18 @@ pub fn updateConfiguration(
         if (!BuildOnSaveSupport.isSupportedComptime()) {
             // This message is not very helpful but it relatively uncommon to happen anyway.
             log.info("'enable_build_on_save' is ignored because build on save is not supported by this ZLS build", .{});
-        } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.config.zig_lib_path == null)) {
+        } else if (server.status == .initialized and (server.config.zig_exe_path == null or server.resolved_config.zig_lib_dir == null)) {
             log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-        } else if (server.status == .initialized and options.resolve and resolve_result.build_runner_version == .unresolved and server.config.build_runner_path == null) {
+        } else if (server.status == .initialized and options.resolve and server.resolved_config.build_runner_version == .unresolved and server.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
-        } else if (server.status == .initialized and options.resolve and resolve_result.zig_runtime_version != null) {
-            switch (BuildOnSaveSupport.isSupportedRuntime(resolve_result.zig_runtime_version.?)) {
+        } else if (server.status == .initialized and options.resolve and server.resolved_config.zig_runtime_version != null) {
+            switch (BuildOnSaveSupport.isSupportedRuntime(server.resolved_config.zig_runtime_version.?)) {
                 .supported => {},
                 .invalid_linux_kernel_version => |*utsname_release| log.warn("Build-On-Save cannot run in watch mode because it because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
                 .unsupported_linux_kernel_version => |kernel_version| log.warn("Build-On-Save cannot run in watch mode because it is not supported by Linux '{}' (requires at least {})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
-                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), resolve_result.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
+                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), server.resolved_config.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
                 .unsupported_os => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s}", .{@tagName(zig_builtin.os.tag)}),
             }
         }
@@ -1280,9 +1295,11 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
     }
 }
 
-const ResolveConfigurationResult = struct {
+const ResolvedConfiguration = struct {
     zig_env: ?std.json.Parsed(configuration.Env),
     zig_runtime_version: ?std.SemanticVersion,
+    zig_lib_dir: ?std.Build.Cache.Directory,
+    global_cache_dir: ?std.Build.Cache.Directory,
     build_runner_version: union(enum) {
         /// If returned, guarantees `zig_runtime_version != null`.
         resolved: BuildRunnerVersion,
@@ -1292,14 +1309,20 @@ const ResolveConfigurationResult = struct {
         unresolved_dont_error,
     },
 
-    pub const unresolved: ResolveConfigurationResult = .{
+    pub const unresolved: ResolvedConfiguration = .{
         .zig_env = null,
         .zig_runtime_version = null,
+        .zig_lib_dir = null,
+        .global_cache_dir = null,
         .build_runner_version = .unresolved_dont_error,
     };
 
-    fn deinit(result: ResolveConfigurationResult) void {
+    fn deinit(result: *ResolvedConfiguration) void {
         if (result.zig_env) |parsed| parsed.deinit();
+        if (zig_builtin.target.os.tag != .wasi) {
+            if (result.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close();
+            if (result.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close();
+        }
     }
 };
 
@@ -1308,20 +1331,16 @@ fn resolveConfiguration(
     /// try leaking as little memory as possible since the ArenaAllocator is only deinit on exit
     config_arena: std.mem.Allocator,
     config: *configuration.Configuration,
-) error{OutOfMemory}!ResolveConfigurationResult {
+) error{OutOfMemory}!ResolvedConfiguration {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var result: ResolveConfigurationResult = .{
-        .zig_env = null,
-        .zig_runtime_version = null,
-        .build_runner_version = .unresolved_dont_error,
-    };
+    var result: ResolvedConfiguration = .unresolved;
     errdefer result.deinit();
 
     if (config.zig_exe_path == null) blk: {
-        if (zig_builtin.is_test) unreachable;
         if (!std.process.can_spawn) break :blk;
+        if (zig_builtin.is_test) unreachable;
         const zig_exe_path = try configuration.findZig(allocator) orelse break :blk;
         defer allocator.free(zig_exe_path);
         config.zig_exe_path = try config_arena.dupe(u8, zig_exe_path);
@@ -1329,7 +1348,7 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        result.zig_env = configuration.getZigEnv(allocator, exe_path);
+        result.zig_env = configuration.getZigEnv(config_arena, exe_path);
         const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
@@ -1357,8 +1376,26 @@ fn resolveConfiguration(
         };
     }
 
+    if (config.zig_lib_path) |zig_lib_path| blk: {
+        if (zig_builtin.target.os.tag == .wasi) {
+            std.log.warn("The 'zig_lib_path' config option is ignored on WASI in favor of preopens.", .{});
+            break :blk;
+        }
+        if (std.fs.openDirAbsolute(zig_lib_path, .{})) |zig_lib_dir| {
+            result.zig_lib_dir = .{
+                .handle = zig_lib_dir,
+                .path = zig_lib_path,
+            };
+        } else |err| {
+            log.err("failed to open zig library directory '{s}': {}", .{ zig_lib_path, err });
+            config.zig_lib_path = null;
+        }
+    }
+
     if (config.global_cache_path == null) blk: {
+        if (zig_builtin.target.os.tag == .wasi) break :blk;
         if (zig_builtin.is_test) unreachable;
+
         const cache_dir_path = known_folders.getPath(allocator, .cache) catch null orelse {
             log.warn("Known-folders could not fetch the cache path", .{});
             break :blk;
@@ -1366,16 +1403,51 @@ fn resolveConfiguration(
         defer allocator.free(cache_dir_path);
 
         config.global_cache_path = try std.fs.path.join(config_arena, &.{ cache_dir_path, "zls" });
+    }
 
-        std.fs.cwd().makePath(config.global_cache_path.?) catch |err| {
-            log.warn("failed to create directory '{s}': {}", .{ config.global_cache_path.?, err });
+    if (config.global_cache_path) |global_cache_path| blk: {
+        if (zig_builtin.target.os.tag == .wasi) {
+            std.log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
+            break :blk;
+        }
+        if (std.fs.cwd().makeOpenPath(global_cache_path, .{})) |global_cache_dir| {
+            result.global_cache_dir = .{
+                .handle = global_cache_dir,
+                .path = global_cache_path,
+            };
+        } else |err| {
+            log.warn("failed to create cache directory '{s}': {}", .{ global_cache_path, err });
             config.global_cache_path = null;
-        };
+        }
+    }
+
+    if (zig_builtin.target.os.tag == .wasi) {
+        const wasi_preopens = try std.fs.wasi.preopensAlloc(allocator);
+        defer {
+            for (wasi_preopens.names[3..]) |name| allocator.free(name);
+            allocator.free(wasi_preopens.names);
+        }
+
+        zig_lib_dir: {
+            const zig_lib_dir_fd = wasi_preopens.find("/lib") orelse {
+                log.warn("failed to resolve '/lib' WASI preopen", .{});
+                break :zig_lib_dir;
+            };
+            result.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
+        }
+
+        global_cache_dir: {
+            const global_cache_dir_fd = wasi_preopens.find("/cache") orelse {
+                log.warn("failed to resolve '/cache' WASI preopen", .{});
+                break :global_cache_dir;
+            };
+            result.global_cache_dir = .{ .handle = .{ .fd = global_cache_dir_fd }, .path = "/cache" };
+        }
     }
 
     if (config.build_runner_path == null) blk: {
         if (!std.process.can_spawn) break :blk;
-        const global_cache_path = config.global_cache_path orelse break :blk;
+        const global_cache_dir = result.global_cache_dir orelse break :blk;
         const zig_version = result.zig_runtime_version orelse break :blk;
 
         const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_version) orelse {
@@ -1394,7 +1466,7 @@ fn resolveConfiguration(
             break :get_hash hasher.finalResult();
         };
 
-        const cache_path = try std.fs.path.join(allocator, &.{ global_cache_path, "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
+        const cache_path = try global_cache_dir.join(allocator, &.{ "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
         defer allocator.free(cache_path);
 
         std.debug.assert(std.fs.path.isAbsolute(cache_path));
@@ -1953,7 +2025,7 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
         .config = .{},
         .document_store = .{
             .allocator = allocator,
-            .config = .fromMainConfig(.{}),
+            .config = .init,
             .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
         },

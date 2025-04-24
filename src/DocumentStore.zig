@@ -51,20 +51,18 @@ pub fn computeHash(bytes: []const u8) Hash {
 
 pub const Config = struct {
     zig_exe_path: ?[]const u8,
-    zig_lib_path: ?[]const u8,
+    zig_lib_dir: ?std.Build.Cache.Directory,
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
-    global_cache_path: ?[]const u8,
+    global_cache_dir: ?std.Build.Cache.Directory,
 
-    pub fn fromMainConfig(config: @import("Config.zig")) Config {
-        return .{
-            .zig_exe_path = config.zig_exe_path,
-            .zig_lib_path = config.zig_lib_path,
-            .build_runner_path = config.build_runner_path,
-            .builtin_path = config.builtin_path,
-            .global_cache_path = config.global_cache_path,
-        };
-    }
+    pub const init: Config = .{
+        .zig_exe_path = null,
+        .zig_lib_dir = null,
+        .build_runner_path = null,
+        .builtin_path = null,
+        .global_cache_dir = null,
+    };
 };
 
 /// Represents a `build.zig`
@@ -672,9 +670,30 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         log.err("file path is not absolute '{s}'", .{file_path});
         return null;
     }
-    const file_contents = std.fs.cwd().readFileAllocOptions(
+
+    const dir, const sub_path = blk: {
+        if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
+            // look up whether the file path refers to a preopen directory.
+            for ([_]?std.Build.Cache.Directory{
+                self.config.zig_lib_dir,
+                self.config.global_cache_dir,
+            }) |opt_preopen_dir| {
+                const preopen_dir = opt_preopen_dir orelse continue;
+                const preopen_path = preopen_dir.path.?;
+                std.debug.assert(std.mem.eql(u8, preopen_path, "/lib") or std.mem.eql(u8, preopen_path, "/cache"));
+
+                if (!std.mem.startsWith(u8, file_path, preopen_path)) continue;
+                if (!std.mem.startsWith(u8, file_path[preopen_path.len..], "/")) continue;
+
+                break :blk .{ preopen_dir.handle, file_path[preopen_path.len + 1 ..] };
+            }
+        }
+        break :blk .{ std.fs.cwd(), file_path };
+    };
+
+    const file_contents = dir.readFileAllocOptions(
         self.allocator,
-        file_path,
+        sub_path,
         max_document_size,
         null,
         .of(u8),
@@ -843,8 +862,8 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
-    if (self.config.global_cache_path == null) return;
-    if (self.config.zig_lib_path == null) return;
+    if (self.config.global_cache_dir == null) return;
+    if (self.config.zig_lib_dir == null) return;
 
     if (builtin.single_threaded) {
         self.invalidateBuildFileWorker(build_file_uri, false);
@@ -1156,7 +1175,12 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
     defer tracy_zone.end();
 
     const base_args = &[_][]const u8{
-        self.config.zig_exe_path.?, "build", "--build-runner", self.config.build_runner_path.?, "--zig-lib-dir", self.config.zig_lib_path.?,
+        self.config.zig_exe_path.?,
+        "build",
+        "--build-runner",
+        self.config.build_runner_path.?,
+        "--zig-lib-dir",
+        self.config.zig_lib_dir.?.path orelse ".",
     };
 
     var args: std.ArrayListUnmanaged([]const u8) = try .initCapacity(self.allocator, base_args.len);
@@ -1189,8 +1213,8 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
 
     std.debug.assert(self.config.zig_exe_path != null);
     std.debug.assert(self.config.build_runner_path != null);
-    std.debug.assert(self.config.global_cache_path != null);
-    std.debug.assert(self.config.zig_lib_path != null);
+    std.debug.assert(self.config.global_cache_dir != null);
+    std.debug.assert(self.config.zig_lib_dir != null);
 
     const build_file_path = try URI.parse(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
@@ -1678,8 +1702,8 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
 
     if (!std.process.can_spawn) return null;
     if (self.config.zig_exe_path == null) return null;
-    if (self.config.zig_lib_path == null) return null;
-    if (self.config.global_cache_path == null) return null;
+    if (self.config.zig_lib_dir == null) return null;
+    if (self.config.global_cache_dir == null) return null;
 
     // TODO regenerate cimports if the header files gets modified
 
@@ -1838,9 +1862,9 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     defer tracy_zone.end();
 
     if (std.mem.eql(u8, import_str, "std")) {
-        const zig_lib_path = self.config.zig_lib_path orelse return null;
+        const zig_lib_dir = self.config.zig_lib_dir orelse return null;
 
-        const std_path = try std.fs.path.join(allocator, &.{ zig_lib_path, "std", "std.zig" });
+        const std_path = try zig_lib_dir.join(allocator, &.{ "std", "std.zig" });
         defer allocator.free(std_path);
 
         return try URI.fromPath(allocator, std_path);

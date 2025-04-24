@@ -5,6 +5,8 @@ const std = @import("std");
 
 pub fn addCases(
     b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
     test_step: *std.Build.Step,
     test_filters: []const []const u8,
 ) void {
@@ -15,7 +17,8 @@ pub fn addCases(
         .name = "analysis_check",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/analysis_check.zig"),
-            .target = b.graph.host,
+            .target = target,
+            .optimize = optimize,
             .imports = &.{
                 .{ .name = "zls", .module = b.modules.get("zls").? },
             },
@@ -42,12 +45,36 @@ pub fn addCases(
 
         const run_check = std.Build.Step.Run.create(b, b.fmt("run analysis on {s}", .{entry.name}));
         run_check.producer = check_exe;
+
+        if (target.result.cpu.arch.isWasm() and b.enable_wasmtime) {
+            run_check.skip_foreign_checks = true;
+            run_check.addArgs(&.{
+                "wasmtime",
+                "--dir=.",
+                b.fmt("--dir={}::/lib", .{b.graph.zig_lib_directory}),
+                "--",
+            });
+        }
+
         run_check.addArtifactArg(check_exe);
-        run_check.addArg("--zig-exe-path");
-        run_check.addFileArg(.{ .cwd_relative = b.graph.zig_exe });
-        run_check.addArg("--zig-lib-path");
-        run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
-        run_check.addFileArg(cases_dir.path(b, entry.name));
+        if (target.query.eql(b.graph.host.query)) {
+            run_check.addArg("--zig-exe-path");
+            run_check.addFileArg(.{ .cwd_relative = b.graph.zig_exe });
+        }
+        if (!target.result.cpu.arch.isWasm()) {
+            run_check.addArg("--zig-lib-path");
+            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
+        }
+
+        const input_file = cases_dir.path(b, entry.name);
+        if (!target.result.cpu.arch.isWasm()) {
+            run_check.addFileArg(input_file);
+        } else {
+            // pass a relative file path when running with wasmtime
+            run_check.setCwd(cases_dir);
+            run_check.addArg(entry.name);
+            run_check.addFileInput(input_file);
+        }
 
         test_step.dependOn(&run_check.step);
     }

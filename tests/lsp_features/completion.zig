@@ -431,7 +431,6 @@ test "generic function without body" {
 }
 
 test "std.ArrayList" {
-    if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
@@ -443,7 +442,6 @@ test "std.ArrayList" {
 }
 
 test "std.ArrayHashMap" {
-    if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
         \\const map: std.StringArrayHashMapUnmanaged(void) = undefined;
@@ -475,7 +473,6 @@ test "std.ArrayHashMap" {
 }
 
 test "std.HashMap" {
-    if (!std.process.can_spawn) return error.SkipZigTest;
     try testCompletion(
         \\const std = @import("std");
         \\const map: std.StringHashMapUnmanaged(void) = undefined;
@@ -3141,6 +3138,8 @@ test "top-level doc comment" {
 }
 
 test "filesystem" {
+    if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
+
     try testCompletion(
         \\const foo = @import("<cursor>");
     , &.{
@@ -3156,6 +3155,8 @@ test "filesystem" {
 }
 
 test "filesystem string literal ends with non ASCII symbol" {
+    if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
+
     try testCompletion(
         \\const foo = @import("<cursor> 🠁
     , &.{

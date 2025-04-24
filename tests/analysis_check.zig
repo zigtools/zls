@@ -44,7 +44,7 @@ pub fn main() Error!void {
 
     const arena = arena_allocator.allocator();
 
-    var config: zls.Config = .{};
+    var config: zls.DocumentStore.Config = .init;
 
     var opt_file_path: ?[]const u8 = null;
 
@@ -67,7 +67,16 @@ pub fn main() Error!void {
                 std.log.err("expected argument after '--zig-lib-path'.", .{});
                 std.process.exit(1);
             };
-            config.zig_lib_path = try arena.dupe(u8, zig_lib_path);
+            var zig_lib_dir = std.fs.cwd().openDir(zig_lib_path, .{}) catch |err| {
+                std.log.err("failed to open zig library directory '{s}: {}'", .{ zig_lib_path, err });
+                std.process.exit(1);
+            };
+            errdefer zig_lib_dir.close();
+
+            config.zig_lib_dir = .{
+                .handle = zig_lib_dir,
+                .path = try arena.dupe(u8, zig_lib_path),
+            };
         } else {
             std.log.err("Unrecognized argument '{s}'.", .{arg});
             std.process.exit(1);
@@ -92,8 +101,8 @@ pub fn main() Error!void {
 
     var document_store: zls.DocumentStore = .{
         .allocator = gpa,
-        .config = .fromMainConfig(config),
-        .thread_pool = &thread_pool,
+        .config = config,
+        .thread_pool = if (builtin.single_threaded) {} else &thread_pool,
         .diagnostics_collection = &diagnostics_collection,
     };
     defer document_store.deinit();
@@ -103,7 +112,7 @@ pub fn main() Error!void {
         std.process.exit(1);
     };
 
-    const file = std.fs.openFileAbsolute(file_path, .{}) catch |err| std.debug.panic("failed to open {s}: {}", .{ file_path, err });
+    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| std.debug.panic("failed to open {s}: {}", .{ file_path, err });
     defer file.close();
 
     const source = file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .of(u8), 0) catch |err|
