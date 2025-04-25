@@ -19,7 +19,7 @@ Building ZLS requires [a build of Zig master](https://ziglang.org/download/).
 ```bash
 git clone https://github.com/zigtools/zls
 cd zls
-zig build -Doptimize=ReleaseSafe
+zig build -Dversion-string=$(zig version) -Doptimize=ReleaseSafe
 ```
 
 ## Features
