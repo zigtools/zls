@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// std: eradicate u29 and embrace std.mem.Alignment
+/// compiler: Allow configuring UBSan mode at the module level.
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.346+f32a5d349";
+const minimum_build_zig_version = "0.15.0-dev.393+5668c8b7b";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.14.0
