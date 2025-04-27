@@ -313,6 +313,14 @@ test "escaped identifier" {
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
+    try testSemanticTokens(
+        \\var @"\"" = 3;
+    , &.{
+        .{ "var", .keyword, .{} },
+        .{ "@\"\\\"\"", .variable, .{ .declaration = true, .mutable = true } },
+        .{ "=", .operator, .{} },
+        .{ "3", .number, .{} },
+    });
 }
 
 test "operators" {

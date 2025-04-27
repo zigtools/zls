@@ -606,7 +606,7 @@ pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
         => {
             const token_loc = offsets.tokenToLoc(tree, token);
             if (!(token_loc.start <= source_index and source_index <= token_loc.end)) return null;
-            return offsets.identifierIndexToNameLoc(tree.source, tree.tokenStart(token));
+            return offsets.identifierIndexToLoc(tree.source, tree.tokenStart(token), .name);
         },
         else => {},
     }
@@ -3620,7 +3620,7 @@ pub fn getFieldAccessType(
         switch (tok.tag) {
             .eof => return current_type,
             .identifier => {
-                const symbol_name = offsets.identifierIndexToNameSlice(tokenizer.buffer, tok.loc.start);
+                const symbol_name = offsets.identifierIndexToSlice(tokenizer.buffer, tok.loc.start, .name);
                 if (try analyser.lookupSymbolGlobal(
                     handle,
                     symbol_name,
@@ -3646,7 +3646,7 @@ pub fn getFieldAccessType(
                             return current_type;
                         }
 
-                        const symbol = offsets.identifierIndexToNameSlice(tokenizer.buffer, after_period.loc.start);
+                        const symbol = offsets.identifierIndexToSlice(tokenizer.buffer, after_period.loc.start, .name);
 
                         current_type = try analyser.resolveFieldAccess(current_type orelse return null, symbol) orelse return null;
                     },
