@@ -1707,6 +1707,29 @@ test "switch" {
         .{ "false", .keywordLiteral, .{} },
     });
     try testSemanticTokens(
+        \\const foo = sw: switch (3) {
+        \\    0 => continue :sw 1,
+        \\    1 => true,
+        \\    else => false,
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "sw", .label, .{ .declaration = true } },
+        .{ "switch", .keyword, .{} },
+        .{ "3", .number, .{} },
+        .{ "0", .number, .{} },
+        .{ "continue", .keyword, .{} },
+        .{ "sw", .label, .{} },
+        .{ "1", .number, .{} },
+        .{ "1", .number, .{} },
+        .{ "true", .keywordLiteral, .{} },
+        .{ "else", .keyword, .{} },
+        .{ "false", .keywordLiteral, .{} },
+    });
+
+    try testSemanticTokens(
         \\const foo = switch (3) {
         \\    inline else => |*val| val,
         \\};
