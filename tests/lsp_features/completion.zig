@@ -2458,6 +2458,28 @@ test "return - structinit" {
     });
 }
 
+test "return - structinit decl literal" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo() S {
+        \\    return .{ .gamma = .<cursor> }
+        \\}
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+        .{ .label = "default", .kind = .Struct },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

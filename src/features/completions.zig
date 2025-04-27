@@ -1405,7 +1405,7 @@ fn collectContainerFields(
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
-                if (!expected_ty.eql(container)) continue;
+                if (!expected_ty.eql(container) and !expected_ty.eql(container.typeOf(builder.analyser))) continue;
                 try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
                 continue;
             },
