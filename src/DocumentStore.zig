@@ -209,21 +209,20 @@ pub const Handle = struct {
             /// The associated build file (build.zig) has not been resolved yet.
             /// Uris that come first have higher priority.
             unresolved: struct {
-                potential_build_files: []const Uri,
+                potential_build_files: []const *BuildFile,
                 /// to avoid checking build files multiple times, a bitset stores whether or
                 /// not the build file should be skipped because it has previously been
                 /// found to be "unassociated" with the handle.
                 has_been_checked: std.DynamicBitSetUnmanaged,
 
                 fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-                    for (self.potential_build_files) |uri| allocator.free(uri);
                     allocator.free(self.potential_build_files);
                     self.has_been_checked.deinit(allocator);
                     self.* = undefined;
                 }
             },
             /// The associated build file (build.zig) has been successfully resolved.
-            resolved: Uri,
+            resolved: *BuildFile,
         } = .none,
     },
 
@@ -323,7 +322,7 @@ pub const Handle = struct {
             .none,
             .unresolved,
             => return null,
-            .resolved => |uri| return uri,
+            .resolved => |build_file| return build_file.uri,
         }
     }
 
@@ -337,7 +336,7 @@ pub const Handle = struct {
         /// The associated build file (build.zig) has not been resolved yet.
         unresolved,
         /// The associated build file (build.zig) has been successfully resolved.
-        resolved: Uri,
+        resolved: *BuildFile,
     } {
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
@@ -345,16 +344,16 @@ pub const Handle = struct {
         const unresolved = switch (self.impl.associated_build_file) {
             .none => return .none,
             .unresolved => |*unresolved| unresolved,
-            .resolved => |uri| return .{ .resolved = uri },
+            .resolved => |build_file| return .{ .resolved = build_file },
         };
 
         // special case when there is only one potential build file
-        if (unresolved.potential_build_files.len == 1) blk: {
-            const build_file = document_store.getOrLoadBuildFile(unresolved.potential_build_files[0]) orelse break :blk;
+        if (unresolved.potential_build_files.len == 1) {
+            const build_file = unresolved.potential_build_files[0];
             log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
-            self.impl.associated_build_file = .{ .resolved = build_file.uri };
-            return .{ .resolved = build_file.uri };
+            self.impl.associated_build_file = .{ .resolved = build_file };
+            return .{ .resolved = build_file };
         }
 
         var has_missing_build_config = false;
@@ -364,8 +363,7 @@ pub const Handle = struct {
             .direction = .reverse,
         });
         while (it.next()) |i| {
-            const build_file_uri = unresolved.potential_build_files[i];
-            const build_file = document_store.getOrLoadBuildFile(build_file_uri) orelse continue;
+            const build_file = unresolved.potential_build_files[i];
             const is_associated = try document_store.uriAssociatedWithBuild(build_file, self.uri) orelse {
                 has_missing_build_config = true;
                 continue;
@@ -379,8 +377,8 @@ pub const Handle = struct {
 
             log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri, build_file.uri });
             unresolved.deinit(document_store.allocator);
-            self.impl.associated_build_file = .{ .resolved = build_file.uri };
-            return .{ .resolved = build_file.uri };
+            self.impl.associated_build_file = .{ .resolved = build_file };
+            return .{ .resolved = build_file };
         }
 
         if (has_missing_build_config) {
@@ -401,7 +399,15 @@ pub const Handle = struct {
 
         switch (self.impl.associated_build_file) {
             .none, .unresolved => return null,
-            .resolved => |uri| return uri,
+            .resolved => |build_file| return build_file.uri,
+        }
+    }
+
+    fn getReferencedBuildFiles(self: *Handle) []const *BuildFile {
+        switch (self.impl.associated_build_file) {
+            .none => return &.{},
+            .unresolved => |unresolved| return unresolved.potential_build_files, // some of these could be removed because of `has_been_checked`
+            .resolved => |build_file| return &.{build_file},
         }
     }
 
@@ -1092,11 +1098,39 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
     var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.build_files.count());
     defer reachable.deinit(self.allocator);
 
-    for (self.handles.values()) |handle| {
-        const build_file_uri = handle.getAssociatedBuildFileUriDontResolve() orelse continue;
-        const build_file_index = self.build_files.getIndex(build_file_uri).?;
+    var queue: std.ArrayListUnmanaged(*BuildFile) = .empty;
+    defer queue.deinit(self.allocator);
 
+    for (self.handles.values()) |handle| {
+        for (handle.getReferencedBuildFiles()) |build_file| {
+            const build_file_index = self.build_files.getIndex(build_file.uri).?;
+            if (reachable.isSet(build_file_index)) continue;
+            try queue.append(self.allocator, build_file);
+        }
+
+        if (isBuildFile(handle.uri)) blk: {
+            const build_file_index = self.build_files.getIndex(handle.uri) orelse break :blk;
+            const build_file = self.build_files.values()[build_file_index];
+            if (reachable.isSet(build_file_index)) break :blk;
+            try queue.append(self.allocator, build_file);
+        }
+    }
+
+    while (queue.pop()) |build_file| {
+        const build_file_index = self.build_files.getIndex(build_file.uri).?;
+        if (reachable.isSet(build_file_index)) continue;
         reachable.set(build_file_index);
+
+        const build_config = build_file.tryLockConfig() orelse continue;
+        defer build_file.unlockConfig();
+
+        try queue.ensureUnusedCapacity(self.allocator, build_config.deps_build_roots.len);
+        for (build_config.deps_build_roots) |dep_build_root| {
+            const dep_build_file_uri = try URI.fromPath(self.allocator, dep_build_root.path);
+            defer self.allocator.free(dep_build_file_uri);
+            const dep_build_file = self.build_files.get(dep_build_file_uri) orelse continue;
+            queue.appendAssumeCapacity(dep_build_file);
+        }
     }
 
     var it = reachable.iterator(.{
@@ -1242,7 +1276,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
         self.allocator,
         zig_run_result.stdout,
         parse_options,
-    ) catch return error.RunFailed;
+    ) catch return error.InvalidBuildConfig;
     errdefer build_config.deinit();
 
     for (build_config.value.packages) |*pkg| {
@@ -1265,12 +1299,9 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// `build.zig` files higher in the filesystem have precedence.
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
-fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]Uri {
-    var potential_build_files: std.ArrayListUnmanaged(Uri) = .empty;
-    errdefer {
-        for (potential_build_files.items) |build_file_uri| self.allocator.free(build_file_uri);
-        potential_build_files.deinit(self.allocator);
-    }
+fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
+    var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
+    errdefer potential_build_files.deinit(self.allocator);
 
     const path = try URI.parse(self.allocator, uri);
     defer self.allocator.free(path);
@@ -1285,19 +1316,17 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]Uri {
         try potential_build_files.ensureUnusedCapacity(self.allocator, 1);
 
         const build_file_uri = try URI.fromPath(self.allocator, build_path);
+        defer self.allocator.free(build_file_uri);
 
-        _ = self.getOrLoadBuildFile(build_file_uri) orelse {
-            self.allocator.free(build_file_uri);
-            continue;
-        };
-        potential_build_files.appendAssumeCapacity(build_file_uri);
+        const build_file = self.getOrLoadBuildFile(build_file_uri) orelse continue;
+        potential_build_files.appendAssumeCapacity(build_file);
     }
     // The potential build files that come first should have higher priority.
     //
     // `build.zig` files that are higher up in the filesystem are more likely
     // to be the `build.zig` of the entire project/package instead of just a
     // sub-project/package.
-    std.mem.reverse([]const u8, potential_build_files.items);
+    std.mem.reverse(*BuildFile, potential_build_files.items);
 
     return try potential_build_files.toOwnedSlice(self.allocator);
 }
@@ -1418,10 +1447,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             log.err("failed to collect potential build files of '{s}'", .{handle.uri});
             break :blk;
         };
-        errdefer {
-            for (potential_build_files) |build_file_uri| self.allocator.free(build_file_uri);
-            self.allocator.free(potential_build_files);
-        }
+        errdefer self.allocator.free(potential_build_files);
 
         var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, potential_build_files.len);
         errdefer has_been_checked.deinit(self.allocator);
@@ -1630,10 +1656,7 @@ pub fn collectIncludeDirs(
     const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
         .none => true,
         .unresolved => false,
-        .resolved => |build_file_uri| blk: {
-            const build_file = store.getBuildFile(build_file_uri).?;
-            break :blk try build_file.collectBuildConfigIncludePaths(allocator, include_dirs);
-        },
+        .resolved => |build_file| try build_file.collectBuildConfigIncludePaths(allocator, include_dirs),
     };
 
     return collected_all;
@@ -1651,8 +1674,7 @@ pub fn collectCMacros(
     const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
         .none => true,
         .unresolved => false,
-        .resolved => |build_file_uri| blk: {
-            const build_file = store.getBuildFile(build_file_uri).?;
+        .resolved => |build_file| blk: {
             const build_config = build_file.tryLockConfig() orelse break :blk false;
             defer build_file.unlockConfig();
 
