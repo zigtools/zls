@@ -2825,7 +2825,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle
 
         else => return .{
             .type = try analyser.resolveTypeOfNodeUncached(node_handle) orelse return null,
-            .is_const = false,
+            .is_const = true,
         },
     }
 }

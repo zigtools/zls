@@ -1,3 +1,31 @@
+const char_literal_pointer = &'a';
+//    ^^^^^^^^^^^^^^^^^^^^ (*const comptime_int)()
+
+const int_literal_pointer = &0;
+//    ^^^^^^^^^^^^^^^^^^^ (*const comptime_int)()
+
+const enum_literal_pointer = &.foo;
+//    ^^^^^^^^^^^^^^^^^^^^ (*const @Type(.enum_literal))()
+
+const string_literal_pointer = &"foo";
+//    ^^^^^^^^^^^^^^^^^^^^^^ (*const *const [3:0]u8)()
+
+// zig fmt: off
+const multiline_string_literal_pointer = &
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const *const [3:0]u8)()
+    \\foo
+;
+// zig fmt: on
+
+const error_value_pointer = &error.Foo;
+//    ^^^^^^^^^^^^^^^^^^^ (*const error{Foo})()
+
+const builtin_as_0 = &@as(i32, 0);
+//    ^^^^^^^^^^^^ (*const i32)()
+
+const builtin_as_1 = &@as(StructType, mutable_struct);
+//    ^^^^^^^^^^^^ (*const StructType)()
+
 const StructType = struct {
     foo: i32,
     const const_decl: bool = true;
