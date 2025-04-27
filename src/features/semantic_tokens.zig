@@ -459,7 +459,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .switch_comma,
         => {
             const switch_node = tree.fullSwitch(node).?;
-            try writeToken(builder, main_token, .keyword);
+            if (switch_node.label_token) |label_token| {
+                try writeTokenMod(builder, label_token, .label, .{ .declaration = true });
+            }
+            try writeToken(builder, switch_node.ast.switch_token, .keyword);
             try writeNodeTokens(builder, switch_node.ast.condition);
             for (switch_node.ast.cases) |case_node| {
                 try writeNodeTokens(builder, case_node);
