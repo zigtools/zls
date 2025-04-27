@@ -237,7 +237,7 @@ fn writeCallHint(
 
     const ty = try builder.analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
-    const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
+    const fn_node = fn_ty.data.function;
 
     var buffer: [1]Ast.Node.Index = undefined;
     const fn_proto = fn_node.handle.tree.fullFnProto(&buffer, fn_node.node).?;

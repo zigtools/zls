@@ -153,9 +153,10 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 try typeToCompletion(builder, entry_ty);
             }
         },
+        .function,
+        .for_range,
         .error_union,
         .union_tag,
-        .other,
         .compile_error,
         => {},
     }
@@ -338,7 +339,7 @@ fn functionTypeCompletion(
 ) error{OutOfMemory}!?types.CompletionItem {
     std.debug.assert(func_ty.isFunc());
 
-    const node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
+    const node_handle = func_ty.data.function;
     const tree = node_handle.handle.tree;
 
     var buf: [1]Ast.Node.Index = undefined;
@@ -1604,7 +1605,7 @@ fn collectVarAccessContainerNodes(
         try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
     }
-    const func_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
+    const func_node_handle = type_expr.data.function;
     const fn_param_decl: Analyser.Declaration = .{ .function_parameter = .{
         .func = func_node_handle.node,
         .param_index = @intCast(dot_context.fn_arg_index),
@@ -1675,7 +1676,7 @@ fn collectFieldAccessContainerNodes(
             }
             break :blk 0; // is `T`, no SelfParam
         };
-        const fn_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
+        const fn_node_handle = node_type.data.function;
         const param_decl: Analyser.Declaration.Param = .{
             .param_index = @truncate(dot_context.fn_arg_index + additional_index),
             .func = fn_node_handle.node,

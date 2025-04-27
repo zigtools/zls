@@ -414,7 +414,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
             const func_ty = Analyser.Type{
-                .data = .{ .other = .of(node, handle) }, // this assumes that function types can only be Ast nodes
+                .data = .{ .function = .of(node, handle) },
                 .is_type_val = true,
             };
 

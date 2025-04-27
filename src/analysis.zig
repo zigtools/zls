@@ -338,7 +338,7 @@ pub fn isInstanceCall(
     const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
         container_instance.typeOf(analyser)
     else blk: {
-        const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
+        const func_node = func_ty.data.function;
         const fn_token = func_node.handle.tree.nodeMainToken(func_node.node);
         break :blk try analyser.innermostContainer(func_node.handle, func_node.handle.tree.tokenStart(fn_token));
     };
@@ -349,7 +349,7 @@ pub fn isInstanceCall(
 }
 
 pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) error{OutOfMemory}!bool {
-    const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
+    const func_node = func_ty.data.function;
     const fn_token = func_node.handle.tree.nodeMainToken(func_node.node);
     const in_container = try analyser.innermostContainer(func_node.handle, func_node.handle.tree.tokenStart(fn_token));
     std.debug.assert(in_container.is_type_val);
@@ -363,7 +363,7 @@ pub fn firstParamIs(
     expected_type: Type,
 ) error{OutOfMemory}!bool {
     std.debug.assert(func_type.isFunc());
-    const func_handle = func_type.data.other;
+    const func_handle = func_type.data.function;
 
     var buffer: [1]Ast.Node.Index = undefined;
     const func = func_handle.handle.tree.fullFnProto(&buffer, func_handle.node).?;
@@ -828,7 +828,7 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
 
 pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOfMemory}!?Type {
     const func_type = try analyser.resolveFuncProtoOfCallable(func_type_param) orelse return null;
-    const func_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
+    const func_node_handle = func_type.data.function;
     const tree = func_node_handle.handle.tree;
     const func_node = func_node_handle.node;
 
@@ -1006,10 +1006,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .for_range => return Type.fromIP(analyser, .usize_type, null),
-            else => return null,
-        },
+        .for_range => return Type.fromIP(analyser, .usize_type, null),
         .tuple => |fields| switch (rhs) {
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
@@ -1309,16 +1306,6 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
         .container => {},
 
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .multiline_string_literal,
-            .string_literal,
-            => if (std.mem.eql(u8, "len", name)) {
-                return Type.fromIP(analyser, .usize_type, null);
-            },
-
-            else => {},
-        },
-
         else => {},
     }
 
@@ -1602,7 +1589,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
 
-            const func_node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
+            const func_node_handle = func_ty.data.function;
             const func_node = func_node_handle.node;
             const func_handle = func_node_handle.handle;
             const func_tree = func_handle.tree;
@@ -2228,10 +2215,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buf: [1]Ast.Node.Index = undefined;
             // This is a function type
             if (tree.fullFnProto(&buf, node).?.name_token == null) {
-                return Type.typeVal(node_handle);
+                return .{ .data = .{ .function = node_handle }, .is_type_val = true };
             }
 
-            return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false };
+            return .{ .data = .{ .function = node_handle }, .is_type_val = false };
         },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
@@ -2356,7 +2343,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
         },
 
-        .for_range => return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false },
+        .for_range => return .{ .data = .{ .for_range = node_handle }, .is_type_val = false },
 
         .equal_equal,
         .bang_equal,
@@ -2685,8 +2672,10 @@ pub const Type = struct {
         container: ScopeWithHandle,
 
         /// - Function: `fn () Foo`, `fn foo() Foo`
+        function: NodeWithHandle,
+
         /// - `start..end`
-        other: NodeWithHandle,
+        for_range: NodeWithHandle,
 
         /// - `@compileError("")`
         compile_error: NodeWithHandle,
@@ -2748,7 +2737,7 @@ pub const Type = struct {
             .container => |scope_handle| {
                 scope_handle.hashWithHasher(hasher);
             },
-            .other, .compile_error => |node_handle| {
+            .function, .for_range, .compile_error => |node_handle| {
                 std.hash.autoHash(hasher, node_handle.node);
                 hasher.update(node_handle.handle.uri);
             },
@@ -2808,7 +2797,8 @@ pub const Type = struct {
                 const b_scope_handle = b.data.container;
                 return a_scope_handle.eql(b_scope_handle);
             },
-            .other => |a_node_handle| return a_node_handle.eql(b.data.other),
+            .function => |a_node_handle| return a_node_handle.eql(b.data.function),
+            .for_range => |a_node_handle| return a_node_handle.eql(b.data.for_range),
             .compile_error => |a_node_handle| return a_node_handle.eql(b.data.compile_error),
             .either => |a_entries| {
                 const b_entries = b.data.either;
@@ -2830,13 +2820,6 @@ pub const Type = struct {
         }
 
         return true;
-    }
-
-    pub fn typeVal(node_handle: NodeWithHandle) Type {
-        return .{
-            .data = .{ .other = node_handle },
-            .is_type_val = true,
-        };
     }
 
     pub fn fromIP(analyser: *Analyser, ty: InternPool.Index, index: ?InternPool.Index) Type {
@@ -3082,7 +3065,6 @@ pub const Type = struct {
     pub fn isMetaType(self: Type) bool {
         if (!self.is_type_val) return false;
         switch (self.data) {
-            .other => |node_handle| return Analyser.isMetaType(node_handle.handle.tree, node_handle.node),
             .ip_index => |payload| return payload.index == .type_type,
             else => return false,
         }
@@ -3121,7 +3103,7 @@ pub const Type = struct {
     pub fn isTypeFunc(self: Type) bool {
         var buf: [1]Ast.Node.Index = undefined;
         return switch (self.data) {
-            .other => |node_handle| if (node_handle.handle.tree.fullFnProto(&buf, node_handle.node)) |fn_proto| blk: {
+            .function => |node_handle| if (node_handle.handle.tree.fullFnProto(&buf, node_handle.node)) |fn_proto| blk: {
                 break :blk isTypeFunction(node_handle.handle.tree, fn_proto);
             } else false,
             else => false,
@@ -3131,7 +3113,7 @@ pub const Type = struct {
     /// Returns whether the given function has a `anytype` parameter.
     pub fn isGenericFunc(self: Type) bool {
         return switch (self.data) {
-            .other => |node_handle| {
+            .function => |node_handle| {
                 var buf: [1]Ast.Node.Index = undefined;
                 const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node) orelse return false;
                 var it = fn_proto.iterate(&node_handle.handle.tree);
@@ -3148,15 +3130,7 @@ pub const Type = struct {
 
     pub fn isFunc(self: Type) bool {
         return switch (self.data) {
-            .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => true,
-                else => false,
-            },
+            .function => true,
             else => false,
         };
     }
@@ -3167,7 +3141,7 @@ pub const Type = struct {
                 .token = scope_handle.handle.tree.firstToken(scope_handle.toNode()),
                 .handle = scope_handle.handle,
             },
-            .other => |node_handle| .{
+            .function => |node_handle| .{
                 .token = node_handle.handle.tree.firstToken(node_handle.node),
                 .handle = node_handle.handle,
             },
@@ -3179,7 +3153,7 @@ pub const Type = struct {
         if (self.is_type_val) {
             switch (self.data) {
                 .container => |scope_handle| return try getDocComments(allocator, scope_handle.handle.tree, scope_handle.toNode()),
-                .other => |node_handle| return try getDocComments(allocator, node_handle.handle.tree, node_handle.node),
+                .function => |node_handle| return try getDocComments(allocator, node_handle.handle.tree, node_handle.node),
                 else => {},
             }
         }
@@ -3387,33 +3361,26 @@ pub const Type = struct {
                     else => unreachable,
                 }
             },
-            .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => {
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node).?;
+            .function => |node_handle| {
+                var buf: [1]Ast.Node.Index = undefined;
+                const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node).?;
 
-                    try writer.print("{}", .{fmtFunction(.{
-                        .fn_proto = fn_proto,
-                        .tree = &node_handle.handle.tree,
-                        .include_fn_keyword = true,
-                        .include_name = false,
-                        .skip_first_param = false,
-                        .parameters = .{ .show = .{
-                            .include_modifiers = true,
-                            .include_names = true,
-                            .include_types = true,
-                        } },
-                        .include_return_type = true,
-                        .snippet_placeholders = false,
-                    })});
-                },
-                else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+                try writer.print("{}", .{fmtFunction(.{
+                    .fn_proto = fn_proto,
+                    .tree = &node_handle.handle.tree,
+                    .include_fn_keyword = true,
+                    .include_name = false,
+                    .skip_first_param = false,
+                    .parameters = .{ .show = .{
+                        .include_modifiers = true,
+                        .include_names = true,
+                        .include_types = true,
+                    } },
+                    .include_return_type = true,
+                    .snippet_placeholders = false,
+                })});
             },
+            .for_range => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             .ip_index => |payload| {
                 const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
                 try analyser.ip.print(ip_index, writer, .{
@@ -5250,7 +5217,7 @@ pub fn resolveExpressionTypeFromAncestors(
             };
             if (fn_type.is_type_val) return null;
 
-            const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
+            const fn_node_handle = fn_type.data.function;
             const param_decl: Declaration.Param = .{
                 .param_index = @truncate(arg_index + @intFromBool(try analyser.hasSelfParam(fn_type))),
                 .func = fn_node_handle.node,
@@ -5607,34 +5574,26 @@ fn addReferencedTypes(
             }
         },
 
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
+        .function => |node_handle| {
+            const node = node_handle.node;
+            const handle = node_handle.handle;
+            const tree = handle.tree;
 
-                var buffer: [1]Ast.Node.Index = undefined;
-                const fn_proto = tree.fullFnProto(&buffer, node).?;
+            var buffer: [1]Ast.Node.Index = undefined;
+            const fn_proto = tree.fullFnProto(&buffer, node).?;
 
-                var it = fn_proto.iterate(&tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    const type_expr = param.type_expr orelse continue;
-                    try analyser.addReferencedTypesFromNode(.of(type_expr, handle), referenced_types);
-                }
+            var it = fn_proto.iterate(&tree);
+            while (ast.nextFnParam(&it)) |param| {
+                const type_expr = param.type_expr orelse continue;
+                try analyser.addReferencedTypesFromNode(.of(type_expr, handle), referenced_types);
+            }
 
-                if (fn_proto.ast.return_type.unwrap()) |return_type| {
-                    try analyser.addReferencedTypesFromNode(.of(return_type, handle), referenced_types);
-                }
-            },
-            else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
+            if (fn_proto.ast.return_type.unwrap()) |return_type| {
+                try analyser.addReferencedTypesFromNode(.of(return_type, handle), referenced_types);
+            }
         },
 
-        .ip_index, .compile_error => {},
+        .for_range, .ip_index, .compile_error => {},
         .either => {}, // TODO
     }
 }
