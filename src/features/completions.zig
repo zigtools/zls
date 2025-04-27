@@ -1086,6 +1086,7 @@ const EnumLiteralContext = struct {
             return switch (likely) {
                 .enum_assignment,
                 .enum_return,
+                .enum_arg,
                 => true,
                 else => false,
             };

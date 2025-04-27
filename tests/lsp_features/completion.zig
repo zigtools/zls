@@ -1649,6 +1649,25 @@ test "decl literal function" {
     });
 }
 
+test "decl literal function call" {
+    try testCompletion(
+        \\const S = struct {
+        \\    field: u32,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo(s: S) void {}
+        \\fn bar() void {
+        \\    foo(.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+        .{ .label = "default", .kind = .Struct },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+    });
+}
+
 test "enum literal" {
     try testCompletion(
         \\const literal = .foo;
