@@ -32,42 +32,37 @@ const some_unsized_array_len = some_unsized_array.len;
 const array_indexing = some_array[0];
 //    ^^^^^^^^^^^^^^ (u8)()
 
-// TODO this should be `*const [2]u8`
 const array_slice_open_1 = some_array[1..];
-//    ^^^^^^^^^^^^^^^^^^ (*[2]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
 
-// TODO this should be `*const [0]u8`
 const array_slice_open_3 = some_array[3..];
-//    ^^^^^^^^^^^^^^^^^^ (*[0]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*const [0]u8)()
 
-// TODO this should be `*const [?]u8`
 const array_slice_open_4 = some_array[4..];
-//    ^^^^^^^^^^^^^^^^^^ (*[?]u8)()
+//    ^^^^^^^^^^^^^^^^^^ (*const [?]u8)()
 
 const array_slice_open_runtime = some_array[runtime_index..];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
 
-// TODO this should be `*const [2]u8`
 const array_slice_0_2 = some_array[0..2];
-//    ^^^^^^^^^^^^^^^ (*[2]u8)()
+//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
 
 // TODO this should be `*const [2 :0]u8`
 const array_slice_0_2_sentinel = some_array[0..2 :0];
-// TODO   ^^^^^^^^^^^^^^^ ([:0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
 
-// TODO this should be `*const [?]u8`
 const array_slice_0_5 = some_array[0..5];
-//    ^^^^^^^^^^^^^^^ (*[?]u8)()
+//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
 
-// TODO this should be `*const [?]u8`
 const array_slice_3_2 = some_array[3..2];
-//    ^^^^^^^^^^^^^^^ (*[?]u8)()
+//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
 
 const array_slice_0_runtime = some_array[0..runtime_index];
-//    ^^^^^^^^^^^^^^^^^^^^^ ([]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
 
+// TODO this should be `[:0]const u8`
 const array_slice_with_sentinel = some_array[0..runtime_index :0];
-// TODO   ^^^^^^^^^^^^^^^^^^^^^^^^^ ([:0]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
 
 //
 // Array init
