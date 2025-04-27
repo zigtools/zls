@@ -1066,6 +1066,8 @@ const EnumLiteralContext = struct {
         enum_literal,
         /// Same as above, but`f() = .` or `identifier.f() = .` are ignored, ie lhs of `=` is a fn call
         enum_assignment,
+        /// `return .`
+        enum_return,
         // `==`, `!=`
         enum_comparison,
         /// the enum is a fn arg, eg `f(.`
@@ -1079,6 +1081,15 @@ const EnumLiteralContext = struct {
         //  ? Would this lead to confusion/perceived as the server not responding? Push an error diag ?
         // / Abort, don't list any enums
         // invalid,
+
+        fn allowsDeclLiterals(likely: Likely) bool {
+            return switch (likely) {
+                .enum_assignment,
+                .enum_return,
+                => true,
+                else => false,
+            };
+        }
     };
     likely: Likely,
     identifier_token_index: Ast.TokenIndex = 0,
@@ -1109,6 +1120,7 @@ fn getEnumLiteralContext(
         },
         .keyword_return => {
             dot_context.identifier_token_index = getReturnTypeLastToken(tree, nodes) orelse return null;
+            dot_context.likely = .enum_return;
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;
@@ -1389,7 +1401,7 @@ fn collectContainerFields(
             .simple_var_decl,
             .aligned_var_decl,
             => {
-                if (likely != .enum_assignment) continue;
+                if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
@@ -1403,7 +1415,7 @@ fn collectContainerFields(
             .fn_proto_simple,
             .fn_decl,
             => blk: {
-                if (likely != .enum_assignment) continue;
+                if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;

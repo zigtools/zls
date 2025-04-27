@@ -2409,6 +2409,26 @@ test "return - enum" {
     });
 }
 
+test "return - decl literal" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo() S {
+        \\    return .<cursor>;
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+        .{ .label = "default", .kind = .Struct },
+    });
+}
+
 test "return - structinit" {
     try testCompletion(
         \\const S = struct {
