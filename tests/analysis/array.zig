@@ -20,6 +20,9 @@ var runtime_index: usize = 5;
 const some_array: [length]u8 = undefined;
 //    ^^^^^^^^^^ ([3]u8)()
 
+const some_array_pointer = &[3]u8{ 1, 2, 3 };
+//    ^^^^^^^^^^^^^^^^^^ (*const [3]u8)()
+
 const some_unsized_array: [unknown_length]u8 = undefined;
 //    ^^^^^^^^^^^^^^^^^^ ([?]u8)()
 
@@ -94,9 +97,8 @@ const array_cat_2 = [_]u8{0} ++ [1]u8{1};
 const array_cat_3 = [1]u8{0} ++ [1]u8{1};
 //    ^^^^^^^^^^^ ([2]u8)()
 
-// TODO this should be `*const [5]u8`
 const array_cat_4 = &[2]u8{ 0, 1 } ++ &[3]u8{ 2, 3, 4 };
-//    ^^^^^^^^^^^ (*[5]u8)()
+//    ^^^^^^^^^^^ (*const [5]u8)()
 
 //
 // Array multiplication
@@ -108,9 +110,8 @@ const array_mult_0 = [_]u8{0} ** 2;
 const array_mult_1 = [1]u8{0} ** 2;
 //    ^^^^^^^^^^^^ ([2]u8)()
 
-// TODO this should be `*const [6]u8`
 const array_mult_2 = &[3]u8{ 0, 1, 2 } ** 2;
-//    ^^^^^^^^^^^^ (*[6]u8)()
+//    ^^^^^^^^^^^^ (*const [6]u8)()
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:
