@@ -3097,11 +3097,6 @@ pub const Type = struct {
         };
     }
 
-    /// If this returns false, the type cannot have the static modifier
-    pub fn isTypeOrFunc(self: Type) bool {
-        return self.is_type_val or self.isFunc() or self.isTypeFunc();
-    }
-
     pub fn typeDefinitionToken(self: Type) !?TokenWithHandle {
         return switch (self.data) {
             .container => |scope_handle| .{

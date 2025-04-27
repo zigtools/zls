@@ -333,9 +333,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = tree.fullVarDecl(node).?;
             const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
-            try writeVarDecl(builder, var_decl, resolved_type);
+            try writeVarDecl(builder, node, resolved_type);
         },
         .@"usingnamespace" => {
             const first_token = tree.firstToken(node);
@@ -894,9 +893,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .aligned_var_decl,
                     .simple_var_decl,
                     => {
-                        const var_decl = tree.fullVarDecl(lhs_node).?;
                         const field_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessType(ty, .{ .single = index }) else null;
-                        try writeVarDecl(builder, var_decl, field_type);
+                        try writeVarDecl(builder, lhs_node, field_type);
                     },
                     .identifier => {
                         const name_token = tree.nodeMainToken(lhs_node);
@@ -1021,23 +1019,19 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     }
 }
 
-fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
+fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
     const tree = builder.handle.tree;
 
+    const var_decl = tree.fullVarDecl(var_decl_node).?;
     try writeToken(builder, var_decl.visib_token, .keyword);
     try writeToken(builder, var_decl.extern_export_token, .keyword);
     try writeToken(builder, var_decl.threadlocal_token, .keyword);
     try writeToken(builder, var_decl.comptime_token, .keyword);
     try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
-    const helper = struct {
-        fn isStatic(h: *DocumentStore.Handle, v: Ast.full.VarDecl) !bool {
-            const source_index = h.tree.tokenStart(v.ast.mut_token);
-            const document_scope = try h.getDocumentScope();
-            const scope_index = Analyser.innermostScopeAtIndex(document_scope, source_index);
-            const scope_tag = document_scope.getScopeTag(scope_index);
-            return scope_tag.isContainer();
-        }
+    const decl: Analyser.DeclWithHandle = .{
+        .decl = .{ .ast_node = var_decl_node },
+        .handle = builder.handle,
     };
 
     const mutable = tree.tokenTag(var_decl.ast.mut_token) == .keyword_var;
@@ -1049,7 +1043,7 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
             false,
             .{
                 .declaration = true,
-                .static = !decl_type.isTypeOrFunc() and try helper.isStatic(builder.handle, var_decl),
+                .static = !(decl_type.is_type_val or decl_type.isFunc()) and try decl.isStatic(),
                 .mutable = mutable,
             },
         );
@@ -1060,7 +1054,7 @@ fn writeVarDecl(builder: *Builder, var_decl: Ast.full.VarDecl, resolved_type: ?A
             .variable,
             .{
                 .declaration = true,
-                .static = try helper.isStatic(builder.handle, var_decl),
+                .static = try decl.isStatic(),
                 .mutable = mutable,
             },
         );
@@ -1108,7 +1102,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
                 name_token,
                 is_param,
                 .{
-                    .static = !decl_type.isTypeOrFunc() and try child.isStatic(),
+                    .static = !(decl_type.is_type_val or decl_type.isFunc()) and try child.isStatic(),
                     .mutable = mutable,
                 },
             );
@@ -1138,23 +1132,10 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
     try writeNodeTokens(builder, lhs_node);
 
     const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse {
-        const is_static = static_blk: {
-            const lhs_token = tree.nodeMainToken(lhs_node);
-            const lhs_decl = try builder.analyser.lookupSymbolGlobal(
-                handle,
-                tree.tokenSlice(lhs_token),
-                tree.tokenStart(lhs_token),
-            ) orelse break :static_blk false;
-            break :static_blk try lhs_decl.isStatic();
-        };
-        try writeTokenMod(
-            builder,
-            field_name_token,
-            .variable,
-            .{ .static = is_static },
-        );
+        try writeToken(builder, field_name_token, .variable);
         return;
     };
+
     const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
     if (lhs_type.isErrorSetType(builder.analyser)) {
         try writeToken(builder, field_name_token, .errorTag);
@@ -1191,7 +1172,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
             false,
             .{
                 .mutable = !decl_type.isConst(),
-                .static = !resolved_type.isTypeOrFunc() and try decl_type.isStatic(),
+                .static = !(resolved_type.is_type_val or resolved_type.isFunc()) and try decl_type.isStatic(),
             },
         );
         return;

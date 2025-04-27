@@ -317,7 +317,7 @@ test "escaped identifier" {
         \\var @"\"" = 3;
     , &.{
         .{ "var", .keyword, .{} },
-        .{ "@\"\\\"\"", .variable, .{ .declaration = true, .mutable = true } },
+        .{ "@\"\\\"\"", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
     });
