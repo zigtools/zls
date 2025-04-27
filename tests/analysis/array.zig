@@ -32,6 +32,9 @@ const some_unsized_array_len = some_unsized_array.len;
 const array_indexing = some_array[0];
 //    ^^^^^^^^^^^^^^ (u8)()
 
+const array_indexing_pointer = &some_array[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^ (*const u8)()
+
 const array_slice_open_1 = some_array[1..];
 //    ^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
 

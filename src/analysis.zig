@@ -1785,15 +1785,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             return try analyser.resolveOptionalUnwrap(base_type);
         },
-        .array_access => {
-            const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
-
-            const lhs = try analyser.resolveTypeOfNodeInternal(.of(lhs_node, handle)) orelse return null;
-
-            const index = try analyser.resolveIntegerLiteral(u64, .of(rhs_node, handle));
-
-            return try analyser.resolveBracketAccessType(lhs, .{ .single = index });
-        },
         .@"orelse" => {
             const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
 
@@ -2725,6 +2716,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .slice,
         .slice_sentinel,
         .slice_open,
+        .array_access,
         => {
             const binding = try analyser.resolveBindingOfNodeUncached(node_handle) orelse return null;
             return binding.type;
@@ -2814,6 +2806,19 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle
 
             return .{
                 .type = try analyser.resolveBracketAccessTypeFromBinding(sliced, kind) orelse return null,
+                .is_const = true,
+            };
+        },
+
+        .array_access => {
+            const lhs_node, const rhs_node = tree.nodeData(node).node_and_node;
+
+            const lhs = try analyser.resolveBindingOfNodeInternal(.of(lhs_node, handle)) orelse return null;
+
+            const index = try analyser.resolveIntegerLiteral(u64, .of(rhs_node, handle));
+
+            return .{
+                .type = try analyser.resolveBracketAccessTypeFromBinding(lhs, .{ .single = index }) orelse return null,
                 .is_const = true,
             };
         },
