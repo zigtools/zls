@@ -2072,11 +2072,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     .ip_index => |payload| payload,
                     else => return null,
                 };
-                const valid_type = switch (analyser.ip.indexToKey(payload.type)) {
-                    .vector_type => |info| analyser.ip.isFloat(info.child),
-                    else => analyser.ip.isFloat(payload.type),
-                };
-                if (!valid_type) return null;
+                if (!analyser.ip.isFloat(analyser.ip.scalarType(payload.type))) return null;
                 return Type.fromIP(analyser, payload.type, null);
             }
 
