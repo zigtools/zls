@@ -1147,7 +1147,7 @@ pub fn updateConfiguration(
 
     if (server.config.prefer_ast_check_as_child_process) {
         if (!std.process.can_spawn) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
+            log.info("'prefer_ast_check_as_child_process' is ignored because the '{s}' operating system can't spawn child processes", .{@tagName(zig_builtin.target.os.tag)});
         } else if (server.status == .initialized and server.config.zig_exe_path == null) {
             log.warn("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
