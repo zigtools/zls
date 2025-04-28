@@ -3250,6 +3250,30 @@ fn isUnknownDeepInternal(
     };
 }
 
+/// Returns true if and only if the type is a fixed-width, signed integer.
+pub fn isSignedInt(ip: *InternPool, ty: Index, target: std.Target) bool {
+    return switch (ty) {
+        .c_char_type => target.cCharSignedness() == .signed,
+        .isize_type, .c_short_type, .c_int_type, .c_long_type, .c_longlong_type => true,
+        else => switch (ip.indexToKey(ty)) {
+            .int_type => |int_type| int_type.signedness == .signed,
+            else => false,
+        },
+    };
+}
+
+/// Returns true if and only if the type is a fixed-width, unsigned integer.
+pub fn isUnsignedInt(ip: *InternPool, ty: Index, target: std.Target) bool {
+    return switch (ty) {
+        .c_char_type => target.cCharSignedness() == .unsigned,
+        .usize_type, .c_ushort_type, .c_uint_type, .c_ulong_type, .c_ulonglong_type => true,
+        else => switch (ip.indexToKey(ty)) {
+            .int_type => |int_type| int_type.signedness == .unsigned,
+            else => false,
+        },
+    };
+}
+
 /// Asserts the type is an integer, enum, error set, packed struct, or vector of one of them.
 pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.Int {
     var index = ty;
@@ -3303,6 +3327,21 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
             },
             else => unreachable,
         },
+    };
+}
+
+/// Asserts the type is an integer or vector of integers.
+pub fn toUnsigned(ip: *InternPool, gpa: Allocator, ty: Index, target: std.Target) Allocator.Error!Index {
+    return switch (ip.zigTypeTag(ty)) {
+        .int => try ip.get(gpa, .{ .int_type = .{
+            .signedness = .unsigned,
+            .bits = ip.intInfo(ty, target).bits,
+        } }),
+        .vector => try ip.get(gpa, .{ .vector_type = .{
+            .len = ip.vectorLen(ty),
+            .child = try ip.toUnsigned(gpa, ip.childType(ty), target),
+        } }),
+        else => unreachable,
     };
 }
 
@@ -3454,6 +3493,14 @@ pub fn elemType(ip: *InternPool, ty: Index) Index {
     };
 }
 
+/// For vectors, returns the element type. Otherwise returns self.
+pub fn scalarType(ip: *InternPool, ty: Index) Index {
+    return switch (ip.zigTypeTag(ty)) {
+        .vector => ip.childType(ty),
+        else => ty,
+    };
+}
+
 pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) Allocator.Error!Index {
     assert(ip.zigTypeTag(a_ty) == .error_set);
     assert(ip.zigTypeTag(b_ty) == .error_set);
@@ -3485,6 +3532,15 @@ pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) 
             .names = try ip.getStringSlice(gpa, set.keys()),
         },
     });
+}
+
+/// Asserts the type is a vector or tuple.
+pub fn vectorLen(ip: *InternPool, ty: Index) u32 {
+    return switch (ip.indexToKey(ty)) {
+        .vector_type => |vector_type| vector_type.len,
+        .tuple_type => |tuple| tuple.types.len,
+        else => unreachable,
+    };
 }
 
 /// Asserts the type is an array, pointer or vector.
@@ -4143,6 +4199,14 @@ test "simple types" {
     try expectFmt("null", "{}", .{null_value.fmt(&ip)});
     try expectFmt("true", "{}", .{bool_true.fmt(&ip)});
     try expectFmt("false", "{}", .{bool_false.fmt(&ip)});
+
+    try expect(!ip.isSignedInt(null_type, builtin.target));
+    try expect(!ip.isSignedInt(undefined_type, builtin.target));
+    try expect(!ip.isSignedInt(enum_literal_type, builtin.target));
+
+    try expect(!ip.isUnsignedInt(null_type, builtin.target));
+    try expect(!ip.isUnsignedInt(undefined_type, builtin.target));
+    try expect(!ip.isUnsignedInt(enum_literal_type, builtin.target));
 }
 
 test "int type" {
@@ -4165,6 +4229,34 @@ test "int type" {
     try expectFmt("i32", "{}", .{i32_type.fmt(&ip)});
     try expectFmt("i16", "{}", .{i16_type.fmt(&ip)});
     try expectFmt("u7", "{}", .{u7_type.fmt(&ip)});
+
+    try expect(ip.isSignedInt(.isize_type, builtin.target));
+    try expect(ip.isSignedInt(.c_short_type, builtin.target));
+    try expect(ip.isSignedInt(.c_int_type, builtin.target));
+    try expect(ip.isSignedInt(.c_long_type, builtin.target));
+    try expect(ip.isSignedInt(.c_longlong_type, builtin.target));
+    try expect(ip.isSignedInt(i32_type, builtin.target));
+    try expect(ip.isSignedInt(i16_type, builtin.target));
+    try expect(!ip.isUnsignedInt(i32_type, builtin.target));
+    try expect(!ip.isUnsignedInt(i16_type, builtin.target));
+
+    try expect(ip.isUnsignedInt(.usize_type, builtin.target));
+    try expect(ip.isUnsignedInt(.c_ushort_type, builtin.target));
+    try expect(ip.isUnsignedInt(.c_uint_type, builtin.target));
+    try expect(ip.isUnsignedInt(.c_ulong_type, builtin.target));
+    try expect(ip.isUnsignedInt(.c_ulonglong_type, builtin.target));
+    try expect(ip.isUnsignedInt(.u16_type, builtin.target));
+    try expect(ip.isUnsignedInt(u7_type, builtin.target));
+    try expect(!ip.isSignedInt(u7_type, builtin.target));
+
+    try expect(.u32_type == try ip.toUnsigned(gpa, i32_type, builtin.target));
+    try expect(.u16_type == try ip.toUnsigned(gpa, i16_type, builtin.target));
+    try expect(.u16_type == try ip.toUnsigned(gpa, .u16_type, builtin.target));
+    try expect(u7_type == try ip.toUnsigned(gpa, u7_type, builtin.target));
+
+    try expect(i32_type == ip.scalarType(i32_type));
+    try expect(i16_type == ip.scalarType(i16_type));
+    try expect(u7_type == ip.scalarType(u7_type));
 }
 
 test "int value" {
@@ -4644,6 +4736,10 @@ test "vector type" {
     var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
+    const @"@Vector(2,i32)" = try ip.get(gpa, .{ .vector_type = .{
+        .len = 2,
+        .child = .i32_type,
+    } });
     const @"@Vector(2,u32)" = try ip.get(gpa, .{ .vector_type = .{
         .len = 2,
         .child = .u32_type,
@@ -4655,8 +4751,20 @@ test "vector type" {
 
     try expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
 
+    try expectFmt("@Vector(2,i32)", "{}", .{@"@Vector(2,i32)".fmt(&ip)});
     try expectFmt("@Vector(2,u32)", "{}", .{@"@Vector(2,u32)".fmt(&ip)});
     try expectFmt("@Vector(2,bool)", "{}", .{@"@Vector(2,bool)".fmt(&ip)});
+
+    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,i32)", builtin.target));
+    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,u32)", builtin.target));
+
+    try expect(.i32_type == ip.scalarType(@"@Vector(2,i32)"));
+    try expect(.u32_type == ip.scalarType(@"@Vector(2,u32)"));
+    try expect(.bool_type == ip.scalarType(@"@Vector(2,bool)"));
+
+    try expect(2 == ip.vectorLen(@"@Vector(2,i32)"));
+    try expect(2 == ip.vectorLen(@"@Vector(2,u32)"));
+    try expect(2 == ip.vectorLen(@"@Vector(2,bool)"));
 }
 
 test "Index.Slice" {
