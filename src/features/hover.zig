@@ -362,7 +362,6 @@ fn hoverNumberLiteral(
     token_index: Ast.TokenIndex,
     arena: std.mem.Allocator,
     markup_kind: types.MarkupKind,
-    client_name: ?[]const u8,
 ) error{OutOfMemory}!?[]const u8 {
     const tree = handle.tree;
     // number literals get tokenized separately from their minus sign
@@ -381,19 +380,15 @@ fn hoverNumberLiteral(
         }
     };
 
-    // Zed currently doesn't render markdown unless wrapped in code blocks
-    // Remove this when this issue is closed https://github.com/zed-industries/zed/issues/5386
-    const is_zed = if (client_name) |name| std.mem.startsWith(u8, name, "Zed") else false;
     switch (markup_kind) {
         .markdown => return try std.fmt.allocPrint(arena,
-            \\{[md_ticks]s}| Base | {[value]s:<[count]} |
+            \\| Base | {[value]s:<[count]} |
             \\| ---- | {[dash]s:-<[count]} |
             \\| BIN  | {[sign]s}0b{[number]b:<[len]} |
             \\| OCT  | {[sign]s}0o{[number]o:<[len]} |
             \\| DEC  | {[sign]s}{[number]d:<[len]}   |
-            \\| HEX  | {[sign]s}0x{[number]X:<[len]} |{[md_ticks]s}
+            \\| HEX  | {[sign]s}0x{[number]X:<[len]} |
         , .{
-            .md_ticks = if (is_zed) "\n```" else "",
             .sign = if (is_negative) "-" else "",
             .dash = "-",
             .value = "Value",
@@ -419,7 +414,6 @@ fn hoverDefinitionNumberLiteral(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-    client_name: ?[]const u8,
 ) !?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -427,7 +421,7 @@ fn hoverDefinitionNumberLiteral(
     const tree = handle.tree;
     const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number_literal, .char_literal }, &tree) orelse return null;
     const num_loc = offsets.tokenToLoc(tree, token_index);
-    const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind, client_name)) orelse return null;
+    const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
 
     return .{
         .contents = .{ .MarkupContent = .{
@@ -445,7 +439,6 @@ pub fn hover(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-    client_name: ?[]const u8,
 ) !?types.Hover {
     const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, true);
 
@@ -455,7 +448,7 @@ pub fn hover(
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .label_access, .label_decl => |loc| try hoverDefinitionLabel(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind, offset_encoding),
-        .number_literal, .char_literal => try hoverDefinitionNumberLiteral(arena, handle, source_index, markup_kind, offset_encoding, client_name),
+        .number_literal, .char_literal => try hoverDefinitionNumberLiteral(arena, handle, source_index, markup_kind, offset_encoding),
         else => null,
     };
 

@@ -1726,7 +1726,6 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
         source_index,
         markup_kind,
         server.offset_encoding,
-        server.client_capabilities.client_name,
     );
 }
 
