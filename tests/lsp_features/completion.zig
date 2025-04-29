@@ -1649,6 +1649,25 @@ test "decl literal function" {
     });
 }
 
+test "decl literal function call" {
+    try testCompletion(
+        \\const S = struct {
+        \\    field: u32,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo(s: S) void {}
+        \\fn bar() void {
+        \\    foo(.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+        .{ .label = "default", .kind = .Struct },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+    });
+}
+
 test "enum literal" {
     try testCompletion(
         \\const literal = .foo;
@@ -2391,6 +2410,92 @@ test "structinit" {
         .{ .label = "s2f2", .kind = .Field, .detail = "u32 = 1" },
         .{ .label = "ref1", .kind = .Field, .detail = "S1" },
         .{ .label = "mye", .kind = .Field, .detail = "MyEnum = .ef1" },
+    });
+}
+
+test "return - enum" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+        \\fn foo() E {
+        \\    return .<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+    });
+}
+
+test "return - decl literal" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo() S {
+        \\    return .<cursor>;
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+        .{ .label = "default", .kind = .Struct },
+    });
+}
+
+test "return - structinit" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\fn foo() S {
+        \\    return .{ .<cursor> }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\fn foo() S {
+        \\    return .{ .gamma = .{ .<cursor> }
+        \\}
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+}
+
+test "return - structinit decl literal" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\
+        \\    const default: S = .{};
+        \\    fn init() S {}
+        \\};
+        \\fn foo() S {
+        \\    return .{ .gamma = .<cursor> }
+        \\}
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S" },
+        .{ .label = "default", .kind = .Struct },
     });
 }
 

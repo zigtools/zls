@@ -691,7 +691,8 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     if (dot_token_index < 2) return;
 
     blk: {
-        const dot_context = getEnumLiteralContext(tree, dot_token_index) orelse break :blk;
+        const nodes = try ast.nodesOverlappingIndex(builder.arena, tree, loc.start);
+        const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
         const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
         const containers = try collectContainerNodes(
             builder,
@@ -1065,6 +1066,8 @@ const EnumLiteralContext = struct {
         enum_literal,
         /// Same as above, but`f() = .` or `identifier.f() = .` are ignored, ie lhs of `=` is a fn call
         enum_assignment,
+        /// `return .`
+        enum_return,
         // `==`, `!=`
         enum_comparison,
         /// the enum is a fn arg, eg `f(.`
@@ -1078,6 +1081,16 @@ const EnumLiteralContext = struct {
         //  ? Would this lead to confusion/perceived as the server not responding? Push an error diag ?
         // / Abort, don't list any enums
         // invalid,
+
+        fn allowsDeclLiterals(likely: Likely) bool {
+            return switch (likely) {
+                .enum_assignment,
+                .enum_return,
+                .enum_arg,
+                => true,
+                else => false,
+            };
+        }
     };
     likely: Likely,
     identifier_token_index: Ast.TokenIndex = 0,
@@ -1088,6 +1101,7 @@ const EnumLiteralContext = struct {
 fn getEnumLiteralContext(
     tree: Ast,
     dot_token_index: Ast.TokenIndex,
+    nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // Allow using `1.` (parser workaround)
     var token_index = if (tree.tokenTag(dot_token_index - 1) == .number_literal)
@@ -1105,13 +1119,17 @@ fn getEnumLiteralContext(
             dot_context.likely = .enum_assignment;
             dot_context.identifier_token_index = token_index;
         },
+        .keyword_return => {
+            dot_context.identifier_token_index = getReturnTypeLastToken(tree, nodes) orelse return null;
+            dot_context.likely = .enum_return;
+        },
         .equal_equal, .bang_equal => {
             token_index -= 1;
             dot_context.likely = .enum_comparison;
             dot_context.identifier_token_index = token_index;
         },
         .l_brace, .comma, .l_paren => {
-            dot_context = getSwitchOrStructInitContext(tree, dot_token_index) orelse return null;
+            dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return null;
         },
         else => return null,
     }
@@ -1124,6 +1142,7 @@ fn getEnumLiteralContext(
 fn getSwitchOrStructInitContext(
     tree: Ast,
     dot_index: Ast.TokenIndex,
+    nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // at least 3 tokens should be present, `x{.`
     if (dot_index < 2) return null;
@@ -1172,6 +1191,10 @@ fn getSwitchOrStructInitContext(
                                 => break :find_identifier,
                                 else => return null,
                             }
+                        }
+                        if (tree.tokenTag(upper_index) == .keyword_return) { // `return .{.`
+                            upper_index = getReturnTypeLastToken(tree, nodes) orelse return null;
+                            break :find_identifier;
                         }
                         // We never return from this branch/condition to the `find_identifier: while ..` loop, so reset and reuse these
                         fn_arg_index = 0;
@@ -1290,6 +1313,18 @@ fn getSwitchOrStructInitContext(
     };
 }
 
+fn getReturnTypeLastToken(tree: Ast, nodes: []const Ast.Node.Index) ?Ast.TokenIndex {
+    const return_type = blk: {
+        var func_buf: [1]Ast.Node.Index = undefined;
+        for (nodes) |node| {
+            const func = tree.fullFnProto(&func_buf, node) orelse continue;
+            break :blk func.ast.return_type.unwrap() orelse return null;
+        }
+        return null;
+    };
+    return ast.lastToken(tree, return_type);
+}
+
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 fn collectContainerFields(
     builder: *Builder,
@@ -1367,11 +1402,11 @@ fn collectContainerFields(
             .simple_var_decl,
             .aligned_var_decl,
             => {
-                if (likely != .enum_assignment) continue;
+                if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
-                if (!expected_ty.eql(container)) continue;
+                if (!expected_ty.eql(container) and !expected_ty.eql(container.typeOf(builder.analyser))) continue;
                 try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
                 continue;
             },
@@ -1381,7 +1416,7 @@ fn collectContainerFields(
             .fn_proto_simple,
             .fn_decl,
             => blk: {
-                if (likely != .enum_assignment) continue;
+                if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
@@ -1659,7 +1694,8 @@ fn collectEnumLiteralContainerNodes(
     const arena = builder.arena;
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
-    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index) orelse return;
+    const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, loc.start);
+    const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(
         builder,
         handle,
