@@ -1215,8 +1215,32 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
             }
 
             if (!std.fs.path.isAbsolute(path)) {
-                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ check.field_name, path });
-                break :ok false;
+                const cwd = std.process.getCwdAlloc(server.allocator) catch |err| {
+                    server.showMessage(
+                        .Warning,
+                        "config option '{s}': unable to get cwd to resolve relative path '{s}': {!}",
+                        .{ check.field_name, path, err },
+                    );
+                    break :ok false;
+                };
+                defer server.allocator.free(cwd);
+
+                const absolute = std.fs.path.resolve(server.allocator, &.{ cwd, path }) catch |err| {
+                    server.showMessage(
+                        .Warning,
+                        "config option '{s}': unable to resolve relative path '{s}': {!}",
+                        .{ check.field_name, path, err },
+                    );
+                    break :ok false;
+                };
+
+                server.showMessage(
+                    .Debug,
+                    "config option '{s}': resolved relative path '{s}': '{s}'",
+                    .{ check.field_name, path, absolute },
+                );
+                check.value.* = absolute;
+                break :ok true;
             }
 
             switch (check.kind) {
