@@ -980,7 +980,7 @@ pub fn updateConfiguration(
         const resolved_config = try resolveConfiguration(server.allocator, config_arena, &new_config);
         server.validateConfiguration(&new_config);
 
-        server.resolved_config.deinit();
+        server.resolved_config.deinit(server.allocator);
         server.resolved_config = resolved_config;
     }
 
@@ -1317,11 +1317,11 @@ const ResolvedConfiguration = struct {
         .build_runner_version = .unresolved_dont_error,
     };
 
-    fn deinit(result: *ResolvedConfiguration) void {
+    fn deinit(result: *ResolvedConfiguration, allocator: std.mem.Allocator) void {
         if (result.zig_env) |parsed| parsed.deinit();
         if (zig_builtin.target.os.tag != .wasi) {
-            if (result.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close();
-            if (result.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close();
+            if (result.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.closeAndFree(allocator);
+            if (result.global_cache_dir) |*global_cache_dir| global_cache_dir.closeAndFree(allocator);
         }
     }
 };
@@ -1336,7 +1336,7 @@ fn resolveConfiguration(
     defer tracy_zone.end();
 
     var result: ResolvedConfiguration = .unresolved;
-    errdefer result.deinit();
+    errdefer result.deinit(allocator);
 
     if (config.zig_exe_path == null) blk: {
         if (!std.process.can_spawn) break :blk;
@@ -1348,7 +1348,7 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        result.zig_env = configuration.getZigEnv(config_arena, exe_path);
+        result.zig_env = configuration.getZigEnv(allocator, exe_path);
         const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
@@ -1369,8 +1369,7 @@ fn resolveConfiguration(
             }
         }
 
-        const version_string_duped = try config_arena.dupe(u8, env.value.version);
-        result.zig_runtime_version = std.SemanticVersion.parse(version_string_duped) catch |err| {
+        result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
             log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
             break :blk;
         };
@@ -1384,7 +1383,7 @@ fn resolveConfiguration(
         if (std.fs.openDirAbsolute(zig_lib_path, .{})) |zig_lib_dir| {
             result.zig_lib_dir = .{
                 .handle = zig_lib_dir,
-                .path = zig_lib_path,
+                .path = try allocator.dupe(u8, zig_lib_path),
             };
         } else |err| {
             log.err("failed to open zig library directory '{s}': {}", .{ zig_lib_path, err });
@@ -1413,7 +1412,7 @@ fn resolveConfiguration(
         if (std.fs.cwd().makeOpenPath(global_cache_path, .{})) |global_cache_dir| {
             result.global_cache_dir = .{
                 .handle = global_cache_dir,
-                .path = global_cache_path,
+                .path = try allocator.dupe(u8, global_cache_path),
             };
         } else |err| {
             log.warn("failed to create cache directory '{s}': {}", .{ global_cache_path, err });
@@ -2064,6 +2063,7 @@ pub fn destroy(server: *Server) void {
     server.workspaces.deinit(server.allocator);
     server.diagnostics_collection.deinit();
     server.client_capabilities.deinit(server.allocator);
+    server.resolved_config.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
 }
