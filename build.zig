@@ -421,7 +421,7 @@ fn getTracyModule(
         },
         .link_libc = options.enable,
         .link_libcpp = options.enable,
-        .sanitize_c = false,
+        .sanitize_c = null,
     });
     if (!options.enable) return tracy_module;
     const tracy_dependency = b.lazyDependency("tracy", .{
