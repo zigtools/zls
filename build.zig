@@ -188,7 +188,7 @@ pub fn build(b: *Build) !void {
                     },
                 }),
                 .version = resolved_zls_version,
-                .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_600_000_000,
+                .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_800_000_000,
                 .use_llvm = use_llvm,
                 .use_lld = use_llvm,
             });
