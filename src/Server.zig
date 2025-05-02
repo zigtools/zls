@@ -961,7 +961,9 @@ pub fn updateConfiguration(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var config_arena_allocator = server.config_arena.promote(if (options.leaky_config_arena) std.heap.page_allocator else server.allocator);
+    const possibly_leaky_allocator = if (zig_builtin.is_test and options.leaky_config_arena) std.heap.page_allocator else server.allocator;
+
+    var config_arena_allocator = server.config_arena.promote(possibly_leaky_allocator);
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
 
@@ -977,10 +979,10 @@ pub fn updateConfiguration(
 
     resolve: {
         if (!options.resolve) break :resolve;
-        const resolved_config = try resolveConfiguration(server.allocator, config_arena, &new_config);
+        const resolved_config = try resolveConfiguration(possibly_leaky_allocator, config_arena, &new_config);
         server.validateConfiguration(&new_config);
 
-        server.resolved_config.deinit(server.allocator);
+        server.resolved_config.deinit(possibly_leaky_allocator);
         server.resolved_config = resolved_config;
     }
 
