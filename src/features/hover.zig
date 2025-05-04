@@ -122,7 +122,7 @@ fn hoverSymbolResolved(
     markup_kind: types.MarkupKind,
     doc_strings: []const []const u8,
     def_str: []const u8,
-    resolved_type_str: ?[]const u8,
+    resolved_type_str: []const u8,
     referenced_types: []const Analyser.ReferencedType,
 ) error{OutOfMemory}![]const u8 {
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
@@ -130,9 +130,7 @@ fn hoverSymbolResolved(
     if (markup_kind == .markdown) {
         for (doc_strings) |doc|
             try writer.print("{s}\n\n", .{doc});
-        try writer.print("```zig\n{s}\n```", .{def_str});
-        if (resolved_type_str) |s|
-            try writer.print("\n```zig\n({s})\n```", .{s});
+        try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -145,9 +143,7 @@ fn hoverSymbolResolved(
     } else {
         for (doc_strings) |doc|
             try writer.print("{s}\n\n", .{doc});
-        try writer.print("{s}", .{def_str});
-        if (resolved_type_str) |s|
-            try writer.print("\n({s})", .{s});
+        try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
     }
 
     return hover_text.items;

@@ -904,7 +904,7 @@ test "type reference cycle" {
         \\) void
         \\```
         \\```zig
-        \\(unknown)
+        \\(fn (anytype, (unknown value)) void)
         \\```
     );
 }
