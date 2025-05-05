@@ -277,7 +277,7 @@ fn colorIdentifierBasedOnType(
             new_tok_mod.generic = true;
         }
 
-        const has_self_param = try builder.analyser.hasSelfParam(type_node);
+        const has_self_param = Analyser.hasSelfParam(type_node);
 
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
@@ -413,21 +413,20 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, fn_proto.lib_name, .string);
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
-            const func_ty = Analyser.Type{
-                .data = .{ .function = .of(node, handle) },
-                .is_type_val = true,
-            };
-
-            const func_name_tok_type: TokenType = if (func_ty.isTypeFunc())
-                .type
-            else if (try builder.analyser.hasSelfParam(func_ty))
-                .method
-            else
-                .function;
+            var is_generic = false;
+            var func_name_tok_type: TokenType = .function;
+            if (try builder.analyser.resolveTypeOfNode(.of(node, handle))) |func_ty| {
+                is_generic = func_ty.isGenericFunc();
+                if (func_ty.isTypeFunc()) {
+                    func_name_tok_type = .type;
+                } else if (Analyser.hasSelfParam(func_ty)) {
+                    func_name_tok_type = .method;
+                }
+            }
 
             const tok_mod: TokenModifiers = .{
                 .declaration = true,
-                .generic = func_ty.isGenericFunc(),
+                .generic = is_generic,
             };
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);

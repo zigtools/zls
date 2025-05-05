@@ -354,7 +354,7 @@ test "generic function" {
         \\const foo = s2.<cursor>;
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, comptime T: type) T" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, comptime T: type) (unknown type)" },
     });
     try testCompletion(
         \\const S = struct {
@@ -366,7 +366,7 @@ test "generic function" {
         \\const foo = s2.<cursor>;
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, any: anytype, comptime T: type) T" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, any: anytype, comptime T: type) (unknown type)" },
     });
 }
 
@@ -1189,7 +1189,7 @@ test "namespace" {
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: namespace) void" },
     });
     try testCompletion(
         \\const namespace = struct {
@@ -1202,7 +1202,7 @@ test "namespace" {
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: namespace) void" },
     });
     try testCompletion(
         \\fn alpha() void {}
@@ -1214,7 +1214,7 @@ test "namespace" {
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: test-0) void" },
     });
 }
 
@@ -1314,7 +1314,7 @@ test "struct" {
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: test-0) void" },
         .{ .label = "Self", .kind = .Struct },
         .{ .label = "bar", .kind = .Struct },
     });
@@ -1642,7 +1642,7 @@ test "decl literal function" {
         \\}
         \\const foo: Empty() = .in<cursor>it();
     , &.{
-        .{ .label = "init", .kind = .Function, .detail = "fn () @This()" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () Empty" },
     });
 }
 
@@ -2325,7 +2325,7 @@ test "structinit" {
         \\  s3f1: u8,
         \\  s3f2: u32 = 1,
         \\  ref2: S2,
-        \\  pub fn s3(p0: es, p1: S2) void {}
+        \\  pub fn s3(p0: S1, p1: S2) void {}
         \\};
         \\const refs = S3{ .ref2 = .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } } };
     , &.{
@@ -2346,7 +2346,7 @@ test "structinit" {
         \\  s3f2: u32 = 1,
         \\  ref2: S2,
         \\  const Self = @This();
-        \\  pub fn s3(self: *Self, p0: es, p1: S2) void {}
+        \\  pub fn s3(self: *Self, p0: S1, p1: S2) void {}
         \\};
         \\S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
     , &.{
@@ -2544,7 +2544,9 @@ test "declarations" {
         .{ .label = "public", .kind = .Function, .detail = "fn () S" },
         .{ .label = "private", .kind = .Function, .detail = "fn () !void" },
     });
+}
 
+test "declarations - meta type" {
     try testCompletion(
         \\const S: type = struct {
         \\    pub fn public() S {}
@@ -2597,7 +2599,7 @@ test "usingnamespace" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Self) void" },
+        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Foo) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
     try testCompletion(
@@ -3020,7 +3022,7 @@ test "either" {
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
+        .{ .label = "beta", .kind = .Method, .detail = "fn (_: Beta) void" },
     });
     try testCompletion(
         \\const Alpha = struct {
@@ -3037,7 +3039,7 @@ test "either" {
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Method, .detail = "fn (_: @This()) void" },
+        .{ .label = "beta", .kind = .Method, .detail = "fn (_: Beta) void" },
     });
 
     try testCompletion(
@@ -3051,7 +3053,7 @@ test "either" {
         \\const bar = T.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Function, .detail = "fn (_: @This()) void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn (_: Beta) void" },
     });
 }
 
@@ -3569,6 +3571,9 @@ test "insert replace behaviour - function with snippets" {
         .enable_snippets = true,
         .enable_argument_placeholders = true,
     });
+}
+
+test "insert replace behaviour - function with snippets - 'self parameter' with placeholder" {
     try testCompletionTextEdit(.{
         .source =
         \\const S = struct {
@@ -3627,7 +3632,9 @@ test "insert replace behaviour - function with snippets" {
         .enable_snippets = true,
         .enable_argument_placeholders = false,
     });
+}
 
+test "insert replace behaviour - function with snippets - partial argument placeholders" {
     // remove the following tests when partial argument placeholders are supported (see test below)
     try testCompletionTextEdit(.{
         .source =
