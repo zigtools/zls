@@ -2232,6 +2232,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buf, node).?;
 
+            const container_type = try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+            const doc_comments = try getDocComments(analyser.arena.allocator(), tree, node);
+            const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
+
             var parameters: std.ArrayListUnmanaged(Type.Data.Parameter) = .empty;
             var has_varargs = false;
 
@@ -2293,8 +2297,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 });
             }
 
-            const container_type = try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
-
             const return_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse {
                 return null;
             };
@@ -2303,8 +2305,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
                 .node = node,
                 .container_type = try analyser.allocType(container_type),
-                .doc_comments = try getDocComments(analyser.arena.allocator(), tree, node),
-                .name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null,
+                .doc_comments = doc_comments,
+                .name = name,
                 .parameters = parameters.items,
                 .has_varargs = has_varargs,
                 .return_type = try analyser.allocType(return_type),
