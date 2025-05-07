@@ -110,11 +110,7 @@ test "multiline" {
         \\    foo(<cursor>)
         \\}
     ,
-        \\fn foo(
-        \\    /// a is important
-        \\    a: u32,
-        \\    b: u32,
-        \\) void
+        \\fn foo(a: u32, b: u32) void
     , 0);
     try testSignatureHelp(
         \\fn foo(
@@ -125,11 +121,7 @@ test "multiline" {
         \\    foo(<cursor>,0)
         \\}
     ,
-        \\fn foo(
-        \\    /// a is important
-        \\    a: u32,
-        \\    b: u32,
-        \\) void
+        \\fn foo(a: u32, b: u32) void
     , 0);
     try testSignatureHelp(
         \\fn foo(
@@ -140,11 +132,7 @@ test "multiline" {
         \\    foo(0,<cursor>)
         \\}
     ,
-        \\fn foo(
-        \\    /// a is important
-        \\    a: u32,
-        \\    b: u32,
-        \\) void
+        \\fn foo(a: u32, b: u32) void
     , 1);
 }
 
@@ -229,21 +217,21 @@ test "function pointer container field" {
         \\};
         \\const s: S = undefined;
         \\const foo = s.foo(<cursor>);
-    , "fn(a: u32, b: void) bool", 0);
+    , "fn (a: u32, b: void) bool", 0);
     try testSignatureHelp(
         \\const S = struct {
         \\    foo: *const fn(a: u32, b: void) bool {}
         \\};
         \\const s: S = undefined;
         \\const foo = s.foo(<cursor>);
-    , "fn(a: u32, b: void) bool", 0);
+    , "fn (a: u32, b: void) bool", 0);
     try testSignatureHelp(
         \\const S = struct {
         \\    foo: *const fn(a: u32, b: void) bool {}
         \\};
         \\const s: S = undefined;
         \\const foo = s.foo.*(<cursor>);
-    , "fn(a: u32, b: void) bool", 0);
+    , "fn (a: u32, b: void) bool", 0);
 }
 
 test "self parameter" {
@@ -256,14 +244,14 @@ test "self parameter" {
         \\};
         \\const s: S = undefined;
         \\const foo = s.foo(3,<cursor>);
-    , "fn foo(self: @This(), a: u32, b: void) bool", 2);
+    , "fn foo(self: S, a: u32, b: void) bool", 2);
     try testSignatureHelp(
         \\const S = struct {
         \\    alpha: u32,
         \\    fn foo(self: @This(), a: u32, b: void) bool {}
         \\};
         \\const foo = S.foo(undefined,<cursor>);
-    , "fn foo(self: @This(), a: u32, b: void) bool", 1);
+    , "fn foo(self: S, a: u32, b: void) bool", 1);
 
     // parameter: *S
     // argument: S
@@ -274,14 +262,14 @@ test "self parameter" {
         \\};
         \\const s: S = undefined;
         \\const foo = s.foo(3,<cursor>);
-    , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
+    , "fn foo(self: *S, a: u32, b: void) bool", 2);
     try testSignatureHelp(
         \\const S = struct {
         \\    alpha: u32,
         \\    fn foo(self: *@This(), a: u32, b: void) bool {}
         \\};
         \\const foo = S.foo(undefined,<cursor>);
-    , "fn foo(self: *@This(), a: u32, b: void) bool", 1);
+    , "fn foo(self: *S, a: u32, b: void) bool", 1);
 
     // parameter: S
     // argument: *S
@@ -292,7 +280,7 @@ test "self parameter" {
         \\};
         \\const s: *S = undefined;
         \\const foo = s.foo(3,<cursor>);
-    , "fn foo(self: @This(), a: u32, b: void) bool", 2);
+    , "fn foo(self: S, a: u32, b: void) bool", 2);
 
     // parameter: *S
     // argument: *S
@@ -303,7 +291,7 @@ test "self parameter" {
         \\};
         \\const s: *S = undefined;
         \\const foo = s.foo(3,<cursor>);
-    , "fn foo(self: *@This(), a: u32, b: void) bool", 2);
+    , "fn foo(self: *S, a: u32, b: void) bool", 2);
 }
 
 test "self parameter is anytype" {

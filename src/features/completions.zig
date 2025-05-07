@@ -153,9 +153,10 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 try typeToCompletion(builder, entry_ty);
             }
         },
+        .function,
+        .for_range,
         .error_union,
         .union_tag,
-        .other,
         .compile_error,
         => {},
     }
@@ -338,18 +339,14 @@ fn functionTypeCompletion(
 ) error{OutOfMemory}!?types.CompletionItem {
     std.debug.assert(func_ty.isFunc());
 
-    const node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
-    const tree = node_handle.handle.tree;
-
-    var buf: [1]Ast.Node.Index = undefined;
-    const func = tree.fullFnProto(&buf, node_handle.node).?;
+    const info = func_ty.data.function;
 
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk try builder.analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
@@ -358,10 +355,8 @@ fn functionTypeCompletion(
         .only_name => func_name,
         .snippet => blk: {
             if (use_snippets and builder.server.config.enable_argument_placeholders) {
-                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
-                    .fn_proto = func,
-                    .tree = &tree,
-
+                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+                    .info = info,
                     .include_fn_keyword = false,
                     .include_name = true,
                     .override_name = func_name,
@@ -378,7 +373,7 @@ fn functionTypeCompletion(
 
             if (!use_snippets) break :blk func_name;
 
-            switch (func.ast.params.len) {
+            switch (info.parameters.len) {
                 // No arguments, leave cursor at the end
                 0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
                 1 => {
@@ -408,10 +403,8 @@ fn functionTypeCompletion(
     const label_details: ?types.CompletionItemLabelDetails = blk: {
         if (!builder.server.client_capabilities.label_details_support) break :blk null;
 
-        const detail = try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
-            .fn_proto = func,
-            .tree = &tree,
-
+        const detail = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+            .info = info,
             .include_fn_keyword = false,
             .include_name = false,
             .skip_first_param = has_self_param,
@@ -427,15 +420,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = description: {
-            const return_type = func.ast.return_type.unwrap() orelse break :description null;
-            const return_type_str = offsets.nodeToSlice(tree, return_type);
-
-            break :description if (ast.hasInferredError(tree, func))
-                try std.fmt.allocPrint(builder.arena, "!{s}", .{return_type_str})
-            else
-                return_type_str;
-        };
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_type.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
@@ -443,10 +428,8 @@ fn functionTypeCompletion(
         };
     };
 
-    const details = try std.fmt.allocPrint(builder.arena, "{}", .{Analyser.fmtFunction(.{
-        .fn_proto = func,
-        .tree = &tree,
-
+    const details = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+        .info = info,
         .include_fn_keyword = true,
         .include_name = false,
         .parameters = .{ .show = .{
@@ -1598,19 +1581,17 @@ fn collectVarAccessContainerNodes(
         return;
     }
 
+    const info = type_expr.data.function;
+
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
         var node_type = try analyser.resolveReturnType(type_expr) orelse return;
         if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
         try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
     }
-    const func_node_handle = type_expr.data.other; // this assumes that function types can only be Ast nodes
-    const fn_param_decl: Analyser.Declaration = .{ .function_parameter = .{
-        .func = func_node_handle.node,
-        .param_index = @intCast(dot_context.fn_arg_index),
-    } };
-    const fn_param_decl_with_handle: Analyser.DeclWithHandle = .{ .decl = fn_param_decl, .handle = func_node_handle.handle };
-    const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
+    const param_index = dot_context.fn_arg_index;
+    if (param_index >= info.parameters.len) return;
+    const param_type = info.parameters[param_index].type orelse return;
     try types_with_handles.append(arena, param_type);
 }
 
@@ -1671,22 +1652,22 @@ fn collectFieldAccessContainerNodes(
             const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
             const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
             if (!symbol_type.is_type_val) { // then => instance_of_T
-                if (try analyser.hasSelfParam(node_type)) break :blk 1;
+                if (Analyser.hasSelfParam(node_type)) break :blk 1;
             }
             break :blk 0; // is `T`, no SelfParam
         };
-        const fn_node_handle = node_type.data.other; // this assumes that function types can only be Ast nodes
+        const fn_node = decl.decl.ast_node;
         const param_decl: Analyser.Declaration.Param = .{
             .param_index = @truncate(dot_context.fn_arg_index + additional_index),
-            .func = fn_node_handle.node,
+            .func = fn_node,
         };
-        const param = param_decl.get(fn_node_handle.handle.tree) orelse continue;
+        const param = param_decl.get(handle.tree) orelse continue;
 
         const type_expr = param.type_expr orelse continue;
         const param_rcts = try collectContainerNodes(
             builder,
-            fn_node_handle.handle,
-            offsets.nodeToLoc(fn_node_handle.handle.tree, type_expr).end,
+            handle,
+            offsets.nodeToLoc(handle.tree, type_expr).end,
             dot_context,
         );
         for (param_rcts) |prct| try types_with_handles.append(arena, prct);

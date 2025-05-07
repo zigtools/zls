@@ -172,9 +172,85 @@ fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlace
     return .{ .data = bytes };
 }
 
+pub const FormatParameterOptions = struct {
+    info: Type.Data.Parameter,
+    index: usize,
+
+    include_modifier: bool,
+    include_name: bool,
+    include_type: bool,
+    snippet_placeholders: bool,
+};
+
+const FormatParameterContext = struct {
+    analyser: *Analyser,
+    options: FormatParameterOptions,
+};
+
+pub fn formatParameter(
+    ctx: FormatParameterContext,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx);
+    _ = options;
+
+    const analyser = ctx.analyser;
+    const data = ctx.options;
+    const info = data.info;
+
+    if (data.index != 0) {
+        try writer.writeAll(", ");
+    }
+
+    if (data.snippet_placeholders) {
+        try writer.print("${{{d}:", .{data.index + 1});
+    }
+
+    // Note that parameter doc comments are being skipped
+
+    if (data.include_modifier) {
+        if (info.modifier) |modifier| {
+            switch (modifier) {
+                .comptime_param => try writer.writeAll("comptime "),
+                .noalias_param => try writer.writeAll("noalias "),
+            }
+        }
+    }
+
+    if (data.include_name) {
+        if (info.name) |name| {
+            if (data.snippet_placeholders) {
+                try writer.print("{}", .{fmtSnippetPlaceholder(name)});
+            } else {
+                try writer.writeAll(name);
+            }
+        }
+    }
+
+    if (data.include_type) {
+        const has_parameter_name = data.include_name and info.name != null;
+        if (has_parameter_name) try writer.writeAll(": ");
+
+        if (info.type) |ty| {
+            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{ .truncate_container_decls = true })});
+        } else {
+            try writer.writeAll("anytype");
+        }
+    }
+
+    if (data.snippet_placeholders) {
+        try writer.writeByte('}');
+    }
+}
+
+pub fn fmtParameter(analyser: *Analyser, options: FormatParameterOptions) std.fmt.Formatter(formatParameter) {
+    return .{ .data = .{ .analyser = analyser, .options = options } };
+}
+
 pub const FormatFunctionOptions = struct {
-    fn_proto: Ast.full.FnProto,
-    tree: *const Ast,
+    info: Type.Data.Function,
 
     include_fn_keyword: bool,
     /// only included if available
@@ -193,17 +269,24 @@ pub const FormatFunctionOptions = struct {
     snippet_placeholders: bool,
 };
 
+const FormatFunctionContext = struct {
+    analyser: *Analyser,
+    options: FormatFunctionOptions,
+};
+
 pub fn formatFunction(
-    data: FormatFunctionOptions,
+    ctx: FormatFunctionContext,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, data);
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx);
     _ = options;
 
-    const tree = data.tree;
-    var it = data.fn_proto.iterate(data.tree);
+    const analyser = ctx.analyser;
+    const data = ctx.options;
+    const info = data.info;
+    var parameters = info.parameters;
 
     if (data.include_fn_keyword) {
         try writer.writeAll("fn ");
@@ -212,20 +295,22 @@ pub fn formatFunction(
     if (data.include_name) {
         if (data.override_name) |name| {
             try writer.writeAll(name);
-        } else if (data.fn_proto.name_token) |name_token| {
-            try writer.writeAll(tree.tokenSlice(name_token));
+        } else if (info.name) |name| {
+            try writer.writeAll(name);
         }
     }
 
     try writer.writeByte('(');
 
     if (data.skip_first_param) {
-        _ = ast.nextFnParam(&it);
+        if (parameters.len >= 1) {
+            parameters = parameters[1..];
+        }
     }
 
     switch (data.parameters) {
         .collapse => {
-            const has_arguments = ast.nextFnParam(&it) != null;
+            const has_arguments = parameters.len != 0;
             if (has_arguments) {
                 if (data.snippet_placeholders) {
                     try writer.writeAll("${1:...}");
@@ -235,73 +320,26 @@ pub fn formatFunction(
             }
         },
         .show => |parameter_options| {
-            var i: usize = 0;
-            while (ast.nextFnParam(&it)) |param| : (i += 1) {
-                if (i != 0) {
-                    try writer.writeAll(", ");
-                }
-
-                if (data.snippet_placeholders) {
-                    try writer.print("${{{d}:", .{i + 1});
-                }
-
-                // Note that parameter doc comments are being skipped
-
-                if (parameter_options.include_modifiers) {
-                    if (param.comptime_noalias) |token_index| {
-                        switch (tree.tokenTag(token_index)) {
-                            .keyword_comptime => try writer.writeAll("comptime "),
-                            .keyword_noalias => try writer.writeAll("noalias "),
-                            else => unreachable,
-                        }
-                    }
-                }
-
-                if (parameter_options.include_names) {
-                    if (param.name_token) |name_token| {
-                        const name = tree.tokenSlice(name_token);
-                        if (data.snippet_placeholders) {
-                            try writer.print("{}", .{fmtSnippetPlaceholder(name)});
-                        } else {
-                            try writer.writeAll(name);
-                        }
-                    }
-                }
-
-                if (parameter_options.include_types) {
-                    const has_parameter_name = parameter_options.include_names and param.name_token != null;
-                    if (has_parameter_name) try writer.writeAll(": ");
-
-                    if (param.type_expr) |type_expr| {
-                        if (data.snippet_placeholders) {
-                            var curr_token = tree.firstToken(type_expr);
-                            const end_token = ast.lastToken(tree.*, type_expr);
-                            while (curr_token <= end_token) : (curr_token += 1) {
-                                const tag = tree.tokenTag(curr_token);
-                                const is_comma = tag == .comma;
-
-                                if (curr_token == end_token and is_comma) continue;
-                                try writer.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
-                                if (is_comma or tag == .keyword_const) try writer.writeByte(' ');
-                            }
-                        } else {
-                            try writer.writeAll(offsets.nodeToSlice(tree.*, type_expr));
-                        }
-                    } else if (param.anytype_ellipsis3) |token_index| {
-                        switch (tree.tokenTag(token_index)) {
-                            .keyword_anytype => try writer.writeAll("anytype"),
-                            .ellipsis3 => try writer.writeAll("..."),
-                            else => unreachable,
-                        }
-                    }
-                }
-
-                if (data.snippet_placeholders) {
-                    try writer.writeByte('}');
-                }
+            for (parameters, 0..) |param_info, index| {
+                try writer.print("{}", .{fmtParameter(analyser, .{
+                    .info = param_info,
+                    .index = index,
+                    .include_modifier = parameter_options.include_modifiers,
+                    .include_name = parameter_options.include_names,
+                    .include_type = parameter_options.include_types,
+                    .snippet_placeholders = data.snippet_placeholders,
+                })});
             }
         },
     }
+
+    if (info.has_varargs) {
+        if (parameters.len != 0) {
+            try writer.writeAll(", ");
+        }
+        try writer.writeAll("...");
+    }
+
     try writer.writeByte(')');
 
     // ignoring align_expr
@@ -310,18 +348,13 @@ pub fn formatFunction(
     // ignoring callconv_expr
 
     if (data.include_return_type) {
-        if (data.fn_proto.ast.return_type.unwrap()) |return_type| {
-            try writer.writeByte(' ');
-            if (ast.hasInferredError(tree.*, data.fn_proto)) {
-                try writer.writeByte('!');
-            }
-            try writer.writeAll(offsets.nodeToSlice(tree.*, return_type));
-        }
+        try writer.writeByte(' ');
+        try writer.print("{}", .{info.return_type.fmtTypeVal(analyser, .{ .truncate_container_decls = true })});
     }
 }
 
-pub fn fmtFunction(options: FormatFunctionOptions) std.fmt.Formatter(formatFunction) {
-    return .{ .data = options };
+pub fn fmtFunction(analyser: *Analyser, options: FormatFunctionOptions) std.fmt.Formatter(formatFunction) {
+    return .{ .data = .{ .analyser = analyser, .options = options } };
 }
 
 pub fn isInstanceCall(
@@ -337,45 +370,30 @@ pub fn isInstanceCall(
 
     const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
         container_instance.typeOf(analyser)
-    else blk: {
-        const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
-        const fn_token = func_node.handle.tree.nodeMainToken(func_node.node);
-        break :blk try analyser.innermostContainer(func_node.handle, func_node.handle.tree.tokenStart(fn_token));
-    };
+    else
+        func_ty.data.function.container_type.*;
 
     std.debug.assert(container_ty.is_type_val);
 
-    return analyser.firstParamIs(func_ty, container_ty);
+    return firstParamIs(func_ty, container_ty);
 }
 
-pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) error{OutOfMemory}!bool {
-    const func_node = func_ty.data.other; // this assumes that function types can only be Ast nodes
-    const fn_token = func_node.handle.tree.nodeMainToken(func_node.node);
-    const in_container = try analyser.innermostContainer(func_node.handle, func_node.handle.tree.tokenStart(fn_token));
+pub fn hasSelfParam(func_ty: Type) bool {
+    std.debug.assert(func_ty.isFunc());
+    const in_container = func_ty.data.function.container_type.*;
     std.debug.assert(in_container.is_type_val);
     if (in_container.isNamespace()) return false;
-    return analyser.firstParamIs(func_ty, in_container);
+    return Analyser.firstParamIs(func_ty, in_container);
 }
 
 pub fn firstParamIs(
-    analyser: *Analyser,
     func_type: Type,
     expected_type: Type,
-) error{OutOfMemory}!bool {
+) bool {
     std.debug.assert(func_type.isFunc());
-    const func_handle = func_type.data.other;
-
-    var buffer: [1]Ast.Node.Index = undefined;
-    const func = func_handle.handle.tree.fullFnProto(&buffer, func_handle.node).?;
-
-    var it = func.iterate(&func_handle.handle.tree);
-    const param = ast.nextFnParam(&it) orelse return false;
-    if (param.anytype_ellipsis3) |token| {
-        if (func_handle.handle.tree.tokenTag(token) == .keyword_anytype) return true;
-    }
-    const type_expr = param.type_expr orelse return false;
-
-    const resolved_type = try analyser.resolveTypeOfNodeInternal(.of(type_expr, func_handle.handle)) orelse return false;
+    const func_info = func_type.data.function;
+    if (func_info.parameters.len == 0) return false;
+    const resolved_type = func_info.parameters[0].type orelse return true;
     if (!resolved_type.is_type_val) return false;
 
     const deref_type = switch (resolved_type.data) {
@@ -828,9 +846,10 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
 
 pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOfMemory}!?Type {
     const func_type = try analyser.resolveFuncProtoOfCallable(func_type_param) orelse return null;
-    const func_node_handle = func_type.data.other; // this assumes that function types can only be Ast nodes
-    const tree = func_node_handle.handle.tree;
-    const func_node = func_node_handle.node;
+    const info = func_type.data.function;
+    const handle = info.handle;
+    const tree = handle.tree;
+    const func_node = info.node;
 
     var buf: [1]Ast.Node.Index = undefined;
     const fn_proto = tree.fullFnProto(&buf, func_node).?;
@@ -842,14 +861,24 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
         // a container declaration, we will return that declaration.
         const return_node = findReturnStatement(tree, body) orelse return null;
         if (tree.nodeData(return_node).opt_node.unwrap()) |return_expr| {
-            return try analyser.resolveTypeOfNodeInternal(.of(return_expr, func_node_handle.handle));
+            return try analyser.resolveTypeOfNodeInternal(.of(return_expr, handle));
         }
 
         return null;
     }
 
+    const child_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse return null;
+    return child_type.instanceTypeVal(analyser);
+}
+
+fn resolveReturnTypeInternal(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    fn_proto: Ast.full.FnProto,
+) error{OutOfMemory}!?Type {
+    const tree = handle.tree;
     const return_type = fn_proto.ast.return_type.unwrap() orelse return null;
-    const ret: NodeWithHandle = .of(return_type, func_node_handle.handle);
+    const ret: NodeWithHandle = .of(return_type, handle);
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
     if (!child_type.is_type_val) return null;
@@ -860,11 +889,11 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
                 .error_set = null,
                 .payload = try analyser.allocType(child_type),
             } },
-            .is_type_val = false,
+            .is_type_val = true,
         };
     }
 
-    return child_type.instanceTypeVal(analyser);
+    return child_type;
 }
 
 /// `optional.?`
@@ -1006,10 +1035,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .for_range => return Type.fromIP(analyser, .usize_type, null),
-            else => return null,
-        },
+        .for_range => return Type.fromIP(analyser, .usize_type, null),
         .tuple => |fields| switch (rhs) {
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
@@ -1309,16 +1335,6 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
         .container => {},
 
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .multiline_string_literal,
-            .string_literal,
-            => if (std.mem.eql(u8, "len", name)) {
-                return Type.fromIP(analyser, .usize_type, null);
-            },
-
-            else => {},
-        },
-
         else => {},
     }
 
@@ -1602,32 +1618,20 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
 
-            const func_node_handle = func_ty.data.other; // this assumes that function types can only be Ast nodes
-            const func_node = func_node_handle.node;
-            const func_handle = func_node_handle.handle;
-            const func_tree = func_handle.tree;
-            var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = func_tree.fullFnProto(&buf, func_node).?;
+            const func_info = func_ty.data.function;
 
-            var params: std.ArrayListUnmanaged(Ast.full.FnProto.Param) = try .initCapacity(analyser.gpa, fn_proto.ast.params.len);
-            defer params.deinit(analyser.gpa);
-            var meta_params: std.ArrayListUnmanaged(ScopeWithHandle.Param) = try .initCapacity(analyser.arena.allocator(), fn_proto.ast.params.len);
+            var meta_params: std.ArrayListUnmanaged(ScopeWithHandle.Param) = try .initCapacity(analyser.arena.allocator(), func_info.parameters.len);
             errdefer meta_params.deinit(analyser.arena.allocator());
 
-            var it = fn_proto.iterate(&func_handle.tree);
-            while (ast.nextFnParam(&it)) |param| {
-                try params.append(analyser.gpa, param);
-            }
-
-            const has_self_param = call.ast.params.len + 1 == params.items.len and
+            const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
                 try analyser.isInstanceCall(handle, call, func_ty);
 
-            const parameters = params.items[@intFromBool(has_self_param)..];
+            const parameters = func_info.parameters[@intFromBool(has_self_param)..];
             const arguments = call.ast.params;
             const min_len = @min(parameters.len, arguments.len);
             for (parameters[0..min_len], arguments[0..min_len], @intFromBool(has_self_param)..) |param, arg, param_index| {
-                const type_expr = param.type_expr orelse continue;
-                if (!isMetaType(func_tree, type_expr)) continue;
+                const param_type = param.type orelse continue;
+                if (!param_type.is_type_val) continue;
 
                 const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
@@ -1635,7 +1639,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const ptyp = try analyser.arena.allocator().create(Type);
                 ptyp.* = argument_type;
 
-                const symbol = if (param.name_token) |name_token| offsets.identifierTokenToNameSlice(func_tree, name_token) else "";
+                const symbol = param.name orelse "";
                 meta_params.appendAssumeCapacity(.{ .index = param_index, .symbol = symbol, .typ = ptyp });
             }
 
@@ -2226,12 +2230,94 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            // This is a function type
-            if (tree.fullFnProto(&buf, node).?.name_token == null) {
-                return Type.typeVal(node_handle);
+            const fn_proto = tree.fullFnProto(&buf, node).?;
+
+            const container_type = try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+            const doc_comments = try getDocComments(analyser.arena.allocator(), tree, node);
+            const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
+
+            var parameters: std.ArrayListUnmanaged(Type.Data.Parameter) = .empty;
+            var has_varargs = false;
+
+            var it = fn_proto.iterate(&tree);
+            while (ast.nextFnParam(&it)) |param| {
+                if (has_varargs) {
+                    return null;
+                }
+
+                var param_comments: ?[]const u8 = null;
+                if (param.first_doc_comment) |dc| {
+                    param_comments = try collectDocComments(analyser.arena.allocator(), tree, dc, false);
+                }
+
+                var param_modifier: ?Type.Data.Parameter.Modifier = null;
+                if (param.comptime_noalias) |token_index| {
+                    switch (tree.tokenTag(token_index)) {
+                        .keyword_comptime => param_modifier = .comptime_param,
+                        .keyword_noalias => param_modifier = .noalias_param,
+                        else => unreachable,
+                    }
+                }
+
+                var param_name: ?[]const u8 = null;
+                if (param.name_token) |name_token| {
+                    param_name = tree.tokenSlice(name_token);
+                }
+
+                const param_type = blk: {
+                    if (param.type_expr) |type_expr| {
+                        const ty = try analyser.resolveTypeOfNode(.of(type_expr, handle)) orelse {
+                            return null;
+                        };
+                        if (!ty.is_type_val) {
+                            return null;
+                        }
+                        break :blk ty;
+                    }
+                    if (param.anytype_ellipsis3) |token_index| {
+                        switch (tree.tokenTag(token_index)) {
+                            .keyword_anytype => {
+                                break :blk null;
+                            },
+                            .ellipsis3 => {
+                                has_varargs = true;
+                                continue;
+                            },
+                            else => unreachable,
+                        }
+                    }
+                    return null;
+                };
+
+                try parameters.append(analyser.arena.allocator(), .{
+                    .doc_comments = param_comments,
+                    .modifier = param_modifier,
+                    .name = param_name,
+                    .type = param_type,
+                });
             }
 
-            return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false };
+            const return_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse {
+                return null;
+            };
+
+            const info: Type.Data.Function = .{
+                .handle = handle,
+                .node = node,
+                .container_type = try analyser.allocType(container_type),
+                .doc_comments = doc_comments,
+                .name = name,
+                .parameters = parameters.items,
+                .has_varargs = has_varargs,
+                .return_type = try analyser.allocType(return_type),
+            };
+
+            // This is a function type
+            if (fn_proto.name_token == null) {
+                return .{ .data = .{ .function = info }, .is_type_val = true };
+            }
+
+            return .{ .data = .{ .function = info }, .is_type_val = false };
         },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
@@ -2356,7 +2442,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
         },
 
-        .for_range => return .{ .data = .{ .other = .of(node, handle) }, .is_type_val = false },
+        .for_range => return .{ .data = .{ .for_range = node_handle }, .is_type_val = false },
 
         .equal_equal,
         .bang_equal,
@@ -2685,8 +2771,10 @@ pub const Type = struct {
         container: ScopeWithHandle,
 
         /// - Function: `fn () Foo`, `fn foo() Foo`
+        function: Function,
+
         /// - `start..end`
-        other: NodeWithHandle,
+        for_range: NodeWithHandle,
 
         /// - `@compileError("")`
         compile_error: NodeWithHandle,
@@ -2700,6 +2788,31 @@ pub const Type = struct {
             type: InternPool.Index,
             index: ?InternPool.Index,
         },
+
+        pub const Function = struct {
+            node: Ast.Node.Index,
+            handle: *DocumentStore.Handle,
+
+            container_type: *Type,
+            doc_comments: ?[]const u8,
+            name: ?[]const u8,
+            parameters: []Parameter,
+            has_varargs: bool,
+            return_type: *Type,
+        };
+
+        pub const Parameter = struct {
+            doc_comments: ?[]const u8,
+            modifier: ?Modifier,
+            name: ?[]const u8,
+            /// null if anytype
+            type: ?Type,
+
+            pub const Modifier = enum {
+                comptime_param,
+                noalias_param,
+            };
+        };
 
         pub const EitherEntry = struct {
             /// the `is_type_val` property is inherited from the containing `Type`
@@ -2748,7 +2861,11 @@ pub const Type = struct {
             .container => |scope_handle| {
                 scope_handle.hashWithHasher(hasher);
             },
-            .other, .compile_error => |node_handle| {
+            .function => |info| {
+                std.hash.autoHash(hasher, info.node);
+                hasher.update(info.handle.uri);
+            },
+            .for_range, .compile_error => |node_handle| {
                 std.hash.autoHash(hasher, node_handle.node);
                 hasher.update(node_handle.handle.uri);
             },
@@ -2808,7 +2925,12 @@ pub const Type = struct {
                 const b_scope_handle = b.data.container;
                 return a_scope_handle.eql(b_scope_handle);
             },
-            .other => |a_node_handle| return a_node_handle.eql(b.data.other),
+            .function => |a_info| {
+                const b_info = b.data.function;
+                if (a_info.node != b_info.node) return false;
+                return std.mem.eql(u8, a_info.handle.uri, b_info.handle.uri);
+            },
+            .for_range => |a_node_handle| return a_node_handle.eql(b.data.for_range),
             .compile_error => |a_node_handle| return a_node_handle.eql(b.data.compile_error),
             .either => |a_entries| {
                 const b_entries = b.data.either;
@@ -2830,13 +2952,6 @@ pub const Type = struct {
         }
 
         return true;
-    }
-
-    pub fn typeVal(node_handle: NodeWithHandle) Type {
-        return .{
-            .data = .{ .other = node_handle },
-            .is_type_val = true,
-        };
     }
 
     pub fn fromIP(analyser: *Analyser, ty: InternPool.Index, index: ?InternPool.Index) Type {
@@ -3082,7 +3197,6 @@ pub const Type = struct {
     pub fn isMetaType(self: Type) bool {
         if (!self.is_type_val) return false;
         switch (self.data) {
-            .other => |node_handle| return Analyser.isMetaType(node_handle.handle.tree, node_handle.node),
             .ip_index => |payload| return payload.index == .type_type,
             else => return false,
         }
@@ -3119,11 +3233,8 @@ pub const Type = struct {
     }
 
     pub fn isTypeFunc(self: Type) bool {
-        var buf: [1]Ast.Node.Index = undefined;
         return switch (self.data) {
-            .other => |node_handle| if (node_handle.handle.tree.fullFnProto(&buf, node_handle.node)) |fn_proto| blk: {
-                break :blk isTypeFunction(node_handle.handle.tree, fn_proto);
-            } else false,
+            .function => |info| info.return_type.isMetaType(),
             else => false,
         };
     }
@@ -3131,12 +3242,9 @@ pub const Type = struct {
     /// Returns whether the given function has a `anytype` parameter.
     pub fn isGenericFunc(self: Type) bool {
         return switch (self.data) {
-            .other => |node_handle| {
-                var buf: [1]Ast.Node.Index = undefined;
-                const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node) orelse return false;
-                var it = fn_proto.iterate(&node_handle.handle.tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
+            .function => |info| {
+                for (info.parameters) |param| {
+                    if (param.type == null or param.modifier == .comptime_param) {
                         return true;
                     }
                 }
@@ -3148,15 +3256,7 @@ pub const Type = struct {
 
     pub fn isFunc(self: Type) bool {
         return switch (self.data) {
-            .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => true,
-                else => false,
-            },
+            .function => true,
             else => false,
         };
     }
@@ -3167,9 +3267,9 @@ pub const Type = struct {
                 .token = scope_handle.handle.tree.firstToken(scope_handle.toNode()),
                 .handle = scope_handle.handle,
             },
-            .other => |node_handle| .{
-                .token = node_handle.handle.tree.firstToken(node_handle.node),
-                .handle = node_handle.handle,
+            .function => |info| .{
+                .token = info.handle.tree.firstToken(info.node),
+                .handle = info.handle,
             },
             else => null,
         };
@@ -3179,7 +3279,7 @@ pub const Type = struct {
         if (self.is_type_val) {
             switch (self.data) {
                 .container => |scope_handle| return try getDocComments(allocator, scope_handle.handle.tree, scope_handle.toNode()),
-                .other => |node_handle| return try getDocComments(allocator, node_handle.handle.tree, node_handle.node),
+                .function => |info| return info.doc_comments,
                 else => {},
             }
         }
@@ -3334,7 +3434,13 @@ pub const Type = struct {
                     => {
                         // This is a hacky nightmare but it works :P
                         const token = tree.firstToken(node);
+                        // `Foo = struct`
                         if (token >= 2 and tree.tokenTag(token - 2) == .identifier and tree.tokenTag(token - 1) == .equal) {
+                            // `Foo: type = struct`
+                            if (token >= 4 and tree.tokenTag(token - 4) == .identifier and tree.tokenTag(token - 3) == .colon) {
+                                try writer.writeAll(tree.tokenSlice(token - 4));
+                                return;
+                            }
                             try writer.writeAll(tree.tokenSlice(token - 2));
                             return;
                         }
@@ -3387,33 +3493,22 @@ pub const Type = struct {
                     else => unreachable,
                 }
             },
-            .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => {
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const fn_proto = node_handle.handle.tree.fullFnProto(&buf, node_handle.node).?;
-
-                    try writer.print("{}", .{fmtFunction(.{
-                        .fn_proto = fn_proto,
-                        .tree = &node_handle.handle.tree,
-                        .include_fn_keyword = true,
-                        .include_name = false,
-                        .skip_first_param = false,
-                        .parameters = .{ .show = .{
-                            .include_modifiers = true,
-                            .include_names = true,
-                            .include_types = true,
-                        } },
-                        .include_return_type = true,
-                        .snippet_placeholders = false,
-                    })});
-                },
-                else => try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+            .function => |info| {
+                try writer.print("{}", .{analyser.fmtFunction(.{
+                    .info = info,
+                    .include_fn_keyword = true,
+                    .include_name = false,
+                    .skip_first_param = false,
+                    .parameters = .{ .show = .{
+                        .include_modifiers = true,
+                        .include_names = true,
+                        .include_types = true,
+                    } },
+                    .include_return_type = true,
+                    .snippet_placeholders = false,
+                })});
             },
+            .for_range => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             .ip_index => |payload| {
                 const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
                 try analyser.ip.print(ip_index, writer, .{
@@ -4640,7 +4735,7 @@ pub fn collectDeclarationsOfContainer(
                         const alias_type = try analyser.resolveTypeOfNode(.of(node, handle)) orelse continue;
                         const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
-                        if (!try analyser.firstParamIs(func_ty, .{
+                        if (!firstParamIs(func_ty, .{
                             .data = .{
                                 .container = .{
                                     .handle = handle,
@@ -5250,15 +5345,11 @@ pub fn resolveExpressionTypeFromAncestors(
             };
             if (fn_type.is_type_val) return null;
 
-            const fn_node_handle = fn_type.data.other; // this assumes that function types can only be Ast nodes
-            const param_decl: Declaration.Param = .{
-                .param_index = @truncate(arg_index + @intFromBool(try analyser.hasSelfParam(fn_type))),
-                .func = fn_node_handle.node,
-            };
-            const param = param_decl.get(fn_node_handle.handle.tree) orelse return null;
-            const type_expr = param.type_expr orelse return null;
-
-            const param_ty = try analyser.resolveTypeOfNode(.of(type_expr, fn_node_handle.handle)) orelse return null;
+            const fn_info = fn_type.data.function;
+            const param_index = arg_index + @intFromBool(hasSelfParam(fn_type));
+            if (param_index >= fn_info.parameters.len) return null;
+            const param = fn_info.parameters[param_index];
+            const param_ty = param.type orelse return null;
             return param_ty.instanceTypeVal(analyser);
         },
         .assign => {
@@ -5607,34 +5698,16 @@ fn addReferencedTypes(
             }
         },
 
-        .other => |node_handle| switch (node_handle.handle.tree.nodeTag(node_handle.node)) {
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => {
-                const node = node_handle.node;
-                const handle = node_handle.handle;
-                const tree = handle.tree;
+        .function => |info| {
+            for (info.parameters) |param| {
+                const param_ty = param.type orelse continue;
+                try analyser.addReferencedTypes(param_ty, .{ .referenced_types = referenced_types });
+            }
 
-                var buffer: [1]Ast.Node.Index = undefined;
-                const fn_proto = tree.fullFnProto(&buffer, node).?;
-
-                var it = fn_proto.iterate(&tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    const type_expr = param.type_expr orelse continue;
-                    try analyser.addReferencedTypesFromNode(.of(type_expr, handle), referenced_types);
-                }
-
-                if (fn_proto.ast.return_type.unwrap()) |return_type| {
-                    try analyser.addReferencedTypesFromNode(.of(return_type, handle), referenced_types);
-                }
-            },
-            else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
+            try analyser.addReferencedTypes(info.return_type.*, .{ .referenced_types = referenced_types });
         },
 
-        .ip_index, .compile_error => {},
+        .for_range, .ip_index, .compile_error => {},
         .either => {}, // TODO
     }
 }

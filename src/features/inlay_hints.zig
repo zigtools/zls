@@ -237,28 +237,16 @@ fn writeCallHint(
 
     const ty = try builder.analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
-    const fn_node = fn_ty.data.other; // this assumes that function types can only be Ast nodes
+    const fn_info = fn_ty.data.function;
 
-    var buffer: [1]Ast.Node.Index = undefined;
-    const fn_proto = fn_node.handle.tree.fullFnProto(&buffer, fn_node.node).?;
-
-    var params: std.ArrayListUnmanaged(Ast.full.FnProto.Param) = try .initCapacity(builder.arena, fn_proto.ast.params.len);
-    defer params.deinit(builder.arena);
-
-    var it = fn_proto.iterate(&fn_node.handle.tree);
-    while (ast.nextFnParam(&it)) |param| {
-        try params.append(builder.arena, param);
-    }
-
-    const has_self_param = call.ast.params.len + 1 == params.items.len and
+    const has_self_param = call.ast.params.len + 1 == fn_info.parameters.len and
         try builder.analyser.isInstanceCall(handle, call, fn_ty);
 
-    const parameters = params.items[@intFromBool(has_self_param)..];
+    const parameters = fn_info.parameters[@intFromBool(has_self_param)..];
     const arguments = call.ast.params;
     const min_len = @min(parameters.len, arguments.len);
     for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
-        const parameter_name_token = param.name_token orelse continue;
-        const parameter_name = offsets.identifierTokenToNameSlice(fn_node.handle.tree, parameter_name_token);
+        const parameter_name = param.name orelse continue;
 
         if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) dont_skip: {
             const arg_token = if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
@@ -275,15 +263,13 @@ fn writeCallHint(
             continue;
         }
 
-        const token_tags = fn_node.handle.tree.tokens.items(.tag);
+        const no_alias = if (param.modifier) |m| m == .noalias_param else false;
+        const comp_time = if (param.modifier) |m| m == .comptime_param else false;
 
-        const no_alias = if (param.comptime_noalias) |t| token_tags[t] == .keyword_noalias or token_tags[t - 1] == .keyword_noalias else false;
-        const comp_time = if (param.comptime_noalias) |t| token_tags[t] == .keyword_comptime or token_tags[t - 1] == .keyword_comptime else false;
-
-        const tooltip = if (param.anytype_ellipsis3) |token|
-            if (token_tags[token] == .keyword_anytype) "anytype" else ""
+        const tooltip = if (param.type) |param_ty|
+            try std.fmt.allocPrint(builder.arena, "{}", .{param_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })})
         else
-            offsets.nodeToSlice(fn_node.handle.tree, param.type_expr.?);
+            "anytype";
 
         try builder.appendParameterHint(
             handle.tree.nodeTag(arg),
