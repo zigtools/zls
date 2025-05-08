@@ -20,9 +20,9 @@
             .url = "https://github.com/ziglibs/diffz/archive/a20dd1f11b10819a6f570f98b42e1c91e3704357.tar.gz",
             .hash = "diffz-0.0.1-G2tlIQrOAQCfH15jdyaLyrMgV8eGPouFhkCeYFTmJaLk",
         },
-        .@"lsp-codegen" = .{
-            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/063a98c13a2293d8654086140813bdd1de6501bc.tar.gz",
-            .hash = "lsp_codegen-0.1.0-CMjjo0ZXCQB-rAhPYrlfzzpU0u0u2MeGvUucZ-_g32eg",
+        .lsp_codegen = .{
+            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/3b26e5781bb7d0c7b547bb48e154d1ab13180b69.tar.gz",
+            .hash = "lsp_codegen-0.1.0-CMjjozO0CQBBS-ateW3KKgV0iP2iLlNryW-rnub3wLPL",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",
