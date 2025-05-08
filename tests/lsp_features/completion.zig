@@ -553,6 +553,19 @@ test "function call" {
     });
 }
 
+test "resolve return type of function with invalid parameter" {
+    try testCompletion(
+        \\fn Foo(foo: unknown) type {
+        \\    _ = foo;
+        \\    return struct { alpha: u32 };
+        \\}
+        \\var foo: Foo() = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "optional" {
     try testCompletion(
         \\const foo: ?u32 = undefined;

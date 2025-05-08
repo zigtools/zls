@@ -2264,20 +2264,20 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     param_name = tree.tokenSlice(name_token);
                 }
 
-                const param_type = blk: {
-                    if (param.type_expr) |type_expr| {
+                const param_type = param_type: {
+                    if (param.type_expr) |type_expr| blk: {
                         const ty = try analyser.resolveTypeOfNode(.of(type_expr, handle)) orelse {
-                            return null;
+                            break :blk;
                         };
                         if (!ty.is_type_val) {
-                            return null;
+                            break :blk;
                         }
-                        break :blk ty;
+                        break :param_type ty;
                     }
                     if (param.anytype_ellipsis3) |token_index| {
                         switch (tree.tokenTag(token_index)) {
                             .keyword_anytype => {
-                                break :blk null;
+                                break :param_type null;
                             },
                             .ellipsis3 => {
                                 has_varargs = true;
@@ -2286,7 +2286,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                             else => unreachable,
                         }
                     }
-                    return null;
+                    break :param_type Type.fromIP(analyser, InternPool.Index.unknown_type, null);
                 };
 
                 try parameters.append(analyser.arena.allocator(), .{
