@@ -8,9 +8,9 @@
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
-    // nix run github:Cloudef/zig2nix#zon2nix -- build.zig.zon > deps.nix
-    // rm build.zig.zon2json-lock # this file is unnecessary
+    // nix run github:nix-community/zon2nix#default_0_14 > deps.nix
     // ```
+    // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/aa24df42183ad415d10bc0a33e6238c437fc0f59.tar.gz",

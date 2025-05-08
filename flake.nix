@@ -39,7 +39,7 @@
               doCheck = true;
               buildPhase = ''
                 NO_COLOR=1 # prevent escape codes from messing up the `nix log`
-                PACKAGE_DIR=${pkgs.callPackage ./deps.nix {zig = zig;}}
+                PACKAGE_DIR=${pkgs.callPackage ./deps.nix {}}
                 zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe --prefix $out
               '';
               checkPhase = ''
