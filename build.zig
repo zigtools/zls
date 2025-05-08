@@ -99,7 +99,7 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     }).module("diffz");
-    const lsp_module = b.dependency("lsp-codegen", .{
+    const lsp_module = b.dependency("lsp_codegen", .{
         .target = target,
         .optimize = optimize,
     }).module("lsp");

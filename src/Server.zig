@@ -197,7 +197,7 @@ fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anyt
 
     const response: lsp.TypedJsonRPCResponse(@TypeOf(result)) = .{
         .id = id,
-        .result = result,
+        .result_or_error = .{ .result = result },
     };
     return try sendToClientInternal(server.allocator, server.transport, response);
 }
@@ -1966,10 +1966,7 @@ const HandledNotificationParams = union(enum) {
     other: lsp.MethodWithParams,
 };
 
-const Message = lsp.Message(.{
-    .RequestParams = HandledRequestParams,
-    .NotificationParams = HandledNotificationParams,
-});
+const Message = lsp.Message(HandledRequestParams, HandledNotificationParams, .{});
 
 fn isBlockingMessage(msg: Message) bool {
     switch (msg) {
