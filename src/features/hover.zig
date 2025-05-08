@@ -156,8 +156,17 @@ fn hoverSymbolResolved(
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
     const writer = hover_text.writer(arena);
     if (markup_kind == .markdown) {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
+        for (doc_strings) |doc| {
+            // Better format the document string
+            var lines = std.mem.splitAny(u8, doc, "\n");
+            while (lines.next()) |line| {
+                const trimmed_line = std.mem.trimLeft(u8, line, " ");
+
+                try writer.print("{s}\n", .{trimmed_line});
+            }
+            try writer.print("\n", .{});
+        }
+        if (doc_strings.len > 0) try writer.print("---\n", .{});
         try writer.print("```zig\n{s}\n```", .{def_str});
         if (resolved_type_str) |s|
             try writer.print("\n```zig\n({s})\n```", .{s});
