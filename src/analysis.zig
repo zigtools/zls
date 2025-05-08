@@ -357,10 +357,14 @@ pub fn formatFunction(
 
     if (data.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{info.return_type.fmtTypeVal(analyser, .{
-            .referenced = referenced,
-            .truncate_container_decls = true,
-        })});
+        if (info.return_type) |ty| {
+            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{
+                .referenced = referenced,
+                .truncate_container_decls = true,
+            })});
+        } else {
+            try writer.writeAll("anytype");
+        }
     }
 }
 
@@ -1488,6 +1492,52 @@ fn resolveStringLiteral(analyser: *Analyser, node_param: NodeWithHandle) !?[]con
     return field_name[1 .. field_name.len - 1];
 }
 
+fn getTypeFromParameters(
+    parameters: []const Type.Data.Parameter,
+    handle: *DocumentStore.Handle,
+    type_expr_maybe: ?Ast.Node.Index,
+) ??Type {
+    const type_expr = type_expr_maybe orelse {
+        return null;
+    };
+    const tree = handle.tree;
+    switch (tree.nodeTag(type_expr)) {
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const call_args = tree.builtinCallParams(&buffer, type_expr).?;
+            const call_name = tree.tokenSlice(tree.nodeMainToken(type_expr));
+
+            // TODO Do peer type resolution, we just keep the first for now.
+            if (std.mem.eql(u8, call_name, "@TypeOf")) {
+                if (call_args.len < 1) {
+                    return null;
+                }
+                if (tree.nodeTag(call_args[0]) != .identifier) {
+                    return null;
+                }
+                const arg_token = tree.nodeMainToken(call_args[0]);
+                const arg_name = tree.tokenSlice(arg_token);
+                for (parameters) |param| {
+                    if (param.name) |param_name| {
+                        if (std.mem.eql(u8, param_name, arg_name)) {
+                            return param.type;
+                        }
+                    }
+                }
+            }
+
+            return null;
+        },
+        else => {
+            return null;
+        },
+    }
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -2276,6 +2326,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 }
 
                 const param_type = param_type: {
+                    if (getTypeFromParameters(parameters.items, handle, param.type_expr)) |ty| {
+                        break :param_type ty;
+                    }
                     if (param.type_expr) |type_expr| blk: {
                         const ty = try analyser.resolveTypeOfNode(.of(type_expr, handle)) orelse {
                             break :blk;
@@ -2308,7 +2361,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 });
             }
 
-            const return_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse {
+            const return_type = blk: {
+                if (getTypeFromParameters(parameters.items, handle, fn_proto.ast.return_type.unwrap())) |ty| {
+                    break :blk ty;
+                }
+                if (try analyser.resolveReturnTypeInternal(handle, fn_proto)) |ty| {
+                    break :blk ty;
+                }
                 return null;
             };
 
@@ -2320,7 +2379,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .name = name,
                 .parameters = parameters.items,
                 .has_varargs = has_varargs,
-                .return_type = try analyser.allocType(return_type),
+                .return_type = if (return_type) |ty| try analyser.allocType(ty) else null,
             };
 
             // This is a function type
@@ -2809,7 +2868,8 @@ pub const Type = struct {
             name: ?[]const u8,
             parameters: []Parameter,
             has_varargs: bool,
-            return_type: *Type,
+            /// null if anytype
+            return_type: ?*Type,
         };
 
         pub const Parameter = struct {
@@ -3245,7 +3305,7 @@ pub const Type = struct {
 
     pub fn isTypeFunc(self: Type) bool {
         return switch (self.data) {
-            .function => |info| info.return_type.isMetaType(),
+            .function => |info| if (info.return_type) |ty| ty.isMetaType() else false,
             else => false,
         };
     }
