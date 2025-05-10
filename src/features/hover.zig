@@ -36,12 +36,8 @@ fn hoverSymbolRecursive(
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
-    var type_references: Analyser.ReferencedType.Set = .empty;
-    var reference_collector: Analyser.ReferencedType.Collector = .{ .referenced_types = &type_references };
     if (try decl_handle.docComments(arena)) |doc|
         try doc_strings.append(arena, doc);
-
-    var is_fn = false;
 
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| def: {
@@ -56,18 +52,6 @@ fn hoverSymbolRecursive(
                 .simple_var_decl,
                 => {
                     const var_decl = tree.fullVarDecl(node).?;
-                    const opt_type_node: ?Ast.Node.Index = blk: {
-                        if (var_decl.ast.type_node.unwrap()) |type_node| break :blk type_node;
-                        const init_node = var_decl.ast.init_node.unwrap() orelse break :blk null;
-                        var struct_init_buf: [2]Ast.Node.Index = undefined;
-                        const struct_init = tree.fullStructInit(&struct_init_buf, init_node) orelse break :blk null;
-                        break :blk struct_init.ast.type_expr.unwrap();
-                    };
-
-                    if (opt_type_node) |type_node| {
-                        try analyser.referencedTypesFromNode(.of(type_node, handle), &reference_collector);
-                    }
-
                     break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
                 },
                 .container_field,
@@ -75,12 +59,6 @@ fn hoverSymbolRecursive(
                 .container_field_align,
                 => {
                     const field = tree.fullContainerField(node).?;
-                    var converted = field;
-                    converted.convertToNonTupleLike(&tree);
-                    if (converted.ast.type_expr.unwrap()) |type_expr| {
-                        try analyser.referencedTypesFromNode(.of(type_expr, handle), &reference_collector);
-                    }
-
                     break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
                 },
                 .fn_proto,
@@ -89,7 +67,6 @@ fn hoverSymbolRecursive(
                 .fn_proto_simple,
                 .fn_decl,
                 => {
-                    is_fn = true;
                     var buf: [1]Ast.Node.Index = undefined;
                     const fn_proto = tree.fullFnProto(&buf, node).?;
                     break :def Analyser.getFunctionSignature(tree, fn_proto);
@@ -106,11 +83,6 @@ fn hoverSymbolRecursive(
         },
         .function_parameter => |pay| def: {
             const param = pay.get(tree).?;
-
-            if (param.type_expr) |type_expr| { // null for `anytype` and extern C varargs `...`
-                try analyser.referencedTypesFromNode(.of(type_expr, handle), &reference_collector);
-            }
-
             break :def ast.paramSlice(tree, param, false);
         },
         .optional_payload,
@@ -124,23 +96,23 @@ fn hoverSymbolRecursive(
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
+    var referenced: Analyser.ReferencedType.Set = .empty;
     var resolved_type_str: []const u8 = "unknown";
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
-        try analyser.referencedTypes(
-            resolved_type,
-            &reference_collector,
-        );
-        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser, .{ .truncate_container_decls = false })});
+        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser, .{
+            .referenced = &referenced,
+            .truncate_container_decls = false,
+        })});
     }
-    const referenced_types: []const Analyser.ReferencedType = type_references.keys();
+    const referenced_types: []const Analyser.ReferencedType = referenced.keys();
     return try hoverSymbolResolved(
         arena,
         markup_kind,
         doc_strings.items,
         def_str,
-        if (is_fn) null else resolved_type_str,
+        resolved_type_str,
         referenced_types,
     );
 }
@@ -150,7 +122,7 @@ fn hoverSymbolResolved(
     markup_kind: types.MarkupKind,
     doc_strings: []const []const u8,
     def_str: []const u8,
-    resolved_type_str: ?[]const u8,
+    resolved_type_str: []const u8,
     referenced_types: []const Analyser.ReferencedType,
 ) error{OutOfMemory}![]const u8 {
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
@@ -158,9 +130,7 @@ fn hoverSymbolResolved(
     if (markup_kind == .markdown) {
         for (doc_strings) |doc|
             try writer.print("{s}\n\n", .{doc});
-        try writer.print("```zig\n{s}\n```", .{def_str});
-        if (resolved_type_str) |s|
-            try writer.print("\n```zig\n({s})\n```", .{s});
+        try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -173,9 +143,7 @@ fn hoverSymbolResolved(
     } else {
         for (doc_strings) |doc|
             try writer.print("{s}\n\n", .{doc});
-        try writer.print("{s}", .{def_str});
-        if (resolved_type_str) |s|
-            try writer.print("\n({s})", .{s});
+        try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
     }
 
     return hover_text.items;

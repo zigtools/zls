@@ -346,7 +346,7 @@ test "function alias" {
         \\fn foo(alpha: u32) void {
         \\    return alpha;
         \\}
-        \\const bar<fn (alpha: u32) void> = foo;
+        \\const bar<fn (u32) void> = foo;
     , .{ .kind = .Type });
     try testInlayHints(
         \\pub fn foo(
@@ -355,7 +355,7 @@ test "function alias" {
         \\) u32 {
         \\    return alpha;
         \\}
-        \\const bar<*fn (comptime alpha: u32) u32> = &foo;
+        \\const bar<*fn (comptime u32) u32> = &foo;
     , .{ .kind = .Type });
 }
 
