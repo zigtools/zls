@@ -139,3 +139,35 @@ comptime {
     // Use @compileLog to verify the expected type with the compiler
     // @compileLog(vector_builtin_13);
 }
+
+fn builtin_calls() void {
+    @branchHint(.none);
+    //          ^^^^^ (BranchHint)()
+    @atomicLoad(undefined, undefined, .unordered);
+    //                                ^^^^^^^^^^ (AtomicOrder)()
+    @atomicRmw(undefined, undefined, .Xchg, undefined, .unordered);
+    //                               ^^^^^ (AtomicRmwOp)()
+    //                                                 ^^^^^^^^^^ (AtomicOrder)()
+    @atomicStore(undefined, undefined, undefined, .unordered);
+    //                                            ^^^^^^^^^^ (AtomicOrder)()
+    @cmpxchgStrong(undefined, undefined, undefined, undefined, .unordered, .unordered);
+    //                                                         ^^^^^^^^^^ (AtomicOrder)()
+    //                                                                     ^^^^^^^^^^ (AtomicOrder)()
+    @cmpxchgWeak(undefined, undefined, undefined, undefined, .unordered, .unordered);
+    //                                                       ^^^^^^^^^^ (AtomicOrder)()
+    //                                                                   ^^^^^^^^^^ (AtomicOrder)()
+    @call(.always_inline, undefined, undefined);
+    //    ^^^^^^^^^^^^^^ (CallModifier)()
+    @export(undefined, .{ .name = undefined });
+    //                    ^^^^^ ([]const u8)()
+    @extern(undefined, .{ .name = undefined });
+    //                    ^^^^^ ([]const u8)()
+    @prefetch(undefined, .{ .locality = 3 });
+    //                      ^^^^^^^^^ (u2)()
+    @reduce(.And, undefined);
+    //      ^^^^ (ReduceOp)()
+    @setFloatMode(.strict);
+    //            ^^^^^^^ (FloatMode)()
+    @Type(.type);
+    //    ^^^^^ (void)()
+}
