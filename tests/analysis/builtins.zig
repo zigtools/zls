@@ -116,6 +116,25 @@ const panic = @panic("foo");
 const trap = @trap();
 //    ^^^^ (noreturn)()
 
+const type_type: @Type(.type) = i32;
+//    ^^^^^^^^^ (type)()
+const type_void: @Type(.void) = {};
+//    ^^^^^^^^^ (void)()
+const type_bool: @Type(.bool) = false;
+//    ^^^^^^^^^ (bool)()
+const type_noreturn: @Type(.noreturn) = @panic("foo");
+//    ^^^^^^^^^^^^^ (noreturn)()
+const type_comptime_float: @Type(.comptime_float) = 3.14;
+//    ^^^^^^^^^^^^^^^^^^^ (comptime_float)()
+const type_comptime_int: @Type(.comptime_int) = 42;
+//    ^^^^^^^^^^^^^^^^^ (comptime_int)()
+const type_undefined: @Type(.undefined) = undefined;
+//    ^^^^^^^^^^^^^^ (@TypeOf(undefined))()
+const type_null: @Type(.null) = null;
+//    ^^^^^^^^^ (@TypeOf(null))()
+const type_enum_literal: @Type(.enum_literal) = .foo;
+//    ^^^^^^^^^^^^^^^^^ (@Type(.enum_literal))()
+
 comptime {
     // Use @compileLog to verify the expected type with the compiler
     // @compileLog(vector_builtin_13);

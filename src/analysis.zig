@@ -2123,6 +2123,26 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return analyser.instanceStdBuiltinType("Type");
             }
 
+            const type_map: std.StaticStringMap(InternPool.Index) = .initComptime(.{
+                .{ "type", .type_type },
+                .{ "void", .void_type },
+                .{ "bool", .bool_type },
+                .{ "noreturn", .noreturn_type },
+                .{ "comptime_float", .comptime_float_type },
+                .{ "comptime_int", .comptime_int_type },
+                .{ "undefined", .undefined_type },
+                .{ "null", .null_type },
+                .{ "enum_literal", .enum_literal_type },
+            });
+            if (std.mem.eql(u8, call_name, "@Type")) {
+                if (params.len != 1) return null;
+                if (tree.nodeTag(params[0]) != .enum_literal) return null;
+                const name_token = tree.nodeMainToken(params[0]);
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                const ip_index = type_map.get(name) orelse return null;
+                return Type.fromIP(analyser, .type_type, ip_index);
+            }
+
             if (std.mem.eql(u8, call_name, "@import")) {
                 if (params.len == 0) return null;
                 const import_param = params[0];
