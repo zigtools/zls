@@ -1029,9 +1029,10 @@ fn extractBuildInformation(
         var stack: std.ArrayListUnmanaged(*Step) = .{};
         defer stack.deinit(gpa);
 
-        try stack.ensureUnusedCapacity(gpa, b.top_level_steps.count());
         for (b.top_level_steps.values()) |tls| {
-            stack.appendAssumeCapacity(&tls.step);
+            if (std.meta.eql(tls.step, b.default_step.*)) {
+                try stack.append(gpa, &tls.step);
+            }
         }
 
         while (stack.pop()) |step| {
