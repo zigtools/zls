@@ -1657,17 +1657,18 @@ fn collectFieldAccessContainerNodes(
             break :blk 0; // is `T`, no SelfParam
         };
         const fn_node = decl.decl.ast_node;
+        const fn_handle = decl.handle;
         const param_decl: Analyser.Declaration.Param = .{
             .param_index = @truncate(dot_context.fn_arg_index + additional_index),
             .func = fn_node,
         };
-        const param = param_decl.get(handle.tree) orelse continue;
+        const param = param_decl.get(fn_handle.tree) orelse continue;
 
         const type_expr = param.type_expr orelse continue;
         const param_rcts = try collectContainerNodes(
             builder,
-            handle,
-            offsets.nodeToLoc(handle.tree, type_expr).end,
+            fn_handle,
+            offsets.nodeToLoc(fn_handle.tree, type_expr).end,
             dot_context,
         );
         for (param_rcts) |prct| try types_with_handles.append(arena, prct);
