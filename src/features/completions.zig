@@ -420,7 +420,10 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_type.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = if (info.return_type) |ty|
+            try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })})
+        else
+            "anytype";
 
         break :blk .{
             .detail = detail,
