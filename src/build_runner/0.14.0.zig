@@ -219,8 +219,12 @@ pub fn main() !void {
                 // but it is handled by the parent process. The build runner
                 // only sees this flag.
                 graph.system_package_mode = true;
-            } else if (mem.eql(u8, arg, "--glibc-runtimes")) {
-                builder.glibc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
+            } else if (mem.eql(u8, arg, "--libc-runtimes") or mem.eql(u8, arg, "--glibc-runtimes")) {
+                if (@hasField(std.Build, "glibc_runtimes_dir")) {
+                    builder.glibc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
+                } else {
+                    builder.libc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
+                }
             } else if (mem.eql(u8, arg, "--verbose-link")) {
                 builder.verbose_link = true;
             } else if (mem.eql(u8, arg, "--verbose-air")) {
