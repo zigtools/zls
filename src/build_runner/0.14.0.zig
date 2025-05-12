@@ -1093,6 +1093,147 @@ fn extractBuildInformation(
             }
         }
 
+        /// Ported from src/offsets.zig
+        /// Support formats:
+        /// - `foo`
+        /// - `@"foo"`
+        /// - `@foo`
+        fn identifierIndexToLoc(text: [:0]const u8, source_index: usize) struct {
+            start: usize,
+            end: usize,
+        } {
+            if (text[source_index] == '@' and text[source_index + 1] == '"') {
+                const start_index = source_index + 2;
+                var index: usize = start_index;
+                while (true) : (index += 1) {
+                    switch (text[index]) {
+                        '\n' => break,
+                        '"' => {
+                            // continue on e.g. `@"\""` but not `@"\\"`
+                            if (text[index - 1] == '\\' and text[index - 2] != '\\') continue;
+                            // include the closing quote
+                            break;
+                        },
+                        else => {},
+                    }
+                }
+                return .{ .start = start_index, .end = index };
+            } else {
+                const start: usize = source_index + @intFromBool(text[source_index] == '@');
+                var index = start;
+                while (true) : (index += 1) {
+                    switch (text[index]) {
+                        'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
+                        else => break,
+                    }
+                }
+                return .{ .start = start, .end = index };
+            }
+        }
+
+        /// Ported from src/offsets.zig
+        /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
+        fn collectImports(allocator: std.mem.Allocator, tree: std.zig.Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
+            var imports: std.ArrayListUnmanaged([]const u8) = .empty;
+            errdefer imports.deinit(allocator);
+
+            for (0..tree.tokens.len) |i| {
+                if (tree.tokenTag(@intCast(i)) != .builtin)
+                    continue;
+
+                const loc = identifierIndexToLoc(tree.source, tree.tokenStart(@intCast(i)));
+                const name = tree.source[loc.start..loc.end];
+                if (!std.mem.eql(u8, name, "import")) continue;
+                if (!std.mem.startsWith(std.zig.Token.Tag, tree.tokens.items(.tag)[i + 1 ..], &.{ .l_paren, .string_literal, .r_paren })) continue;
+
+                const str = tree.tokenSlice(@intCast(i + 2));
+                try imports.append(allocator, str[1 .. str.len - 1]);
+            }
+
+            return imports;
+        }
+
+        fn getRelatedFiles(allocator: Allocator, root_source_file: ?std.Build.LazyPath) error{OutOfMemory}![]const []const u8 {
+            var files = std.StringArrayHashMap(void).init(allocator);
+            defer files.deinit();
+            errdefer for (files.keys()) |key| {
+                allocator.free(key);
+            };
+
+            var stack = std.ArrayList([]const u8).init(allocator);
+            defer stack.deinit();
+            errdefer for (stack.items) |file_path| {
+                allocator.free(file_path);
+            };
+
+            if (root_source_file == null or switch(root_source_file.?) {
+                .src_path => false,
+                else => true,
+            }) {
+                return try allocator.dupe([]const u8, files.keys());
+            }
+
+            const build_root = root_source_file.?.src_path.owner.build_root.path.?;
+
+            {
+                const resolved_root_source_file = try std.fs.path.resolve(allocator, &.{
+                    build_root,
+                    root_source_file.?.src_path.sub_path,
+                });
+                errdefer allocator.free(resolved_root_source_file);
+
+                try stack.append(resolved_root_source_file);
+            }
+
+            while (stack.pop()) |file_path| {
+                defer allocator.free(file_path);
+
+                const gop = blk: {
+                    const resolved_file_path = try std.fs.path.resolve(allocator, &.{
+                        build_root,
+                        file_path,
+                    });
+                    errdefer allocator.free(resolved_file_path);
+
+                    break :blk try files.getOrPut(resolved_file_path);
+                };
+
+                if (!gop.found_existing) {
+                    const file = std.fs.cwd().openFile(file_path, .{}) catch continue;
+                    defer file.close();
+
+                    const content = file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, .@"1", 0) catch continue;
+                    defer allocator.free(content);
+
+                    var tree = try std.zig.Ast.parse(allocator, content, .zig);
+                    defer tree.deinit(allocator);
+
+                    var imports = try collectImports(allocator, tree);
+                    defer {
+                        for (imports.items) |item| {
+                            allocator.free(item);
+                        }
+                        imports.deinit(allocator);
+                    }
+
+                    for (imports.items) |item| {
+                        if (std.mem.endsWith(u8, item, ".zig")) {
+                            const resolved_path = try std.fs.path.resolve(allocator, &.{
+                                file_path,
+                                "..",
+                                item,
+                            });
+                            errdefer allocator.free(resolved_path);
+
+                            try stack.append(resolved_path);
+                        }
+                    }
+                }
+            }
+
+            return try allocator.dupe([]const u8, files.keys());
+        }
+
         fn processItem(
             allocator: Allocator,
             module: *std.Build.Module,
@@ -1202,18 +1343,33 @@ fn extractBuildInformation(
         run,
     );
 
-    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(gpa);
 
-    var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer c_macros.deinit(gpa);
-
-    var packages: Packages = .{ .allocator = gpa };
-    defer packages.deinit();
+    var compilation_unit_info = std.AutoArrayHashMap(*std.Build.Module, BuildConfig.CompilationUnit).init(gpa);
+    defer {
+        for (compilation_unit_info.values()) |value| {
+            gpa.free(value.include_dirs);
+            gpa.free(value.c_macros);
+            gpa.free(value.packages);
+            for (value.files) |file| {
+                gpa.free(file);
+            }
+            gpa.free(value.files);
+        }
+        compilation_unit_info.deinit();
+    }
 
     // extract packages and include paths
     {
         for (steps.keys()) |step| {
+            var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
+            defer include_dirs.deinit(gpa);
+
+            var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
+            defer c_macros.deinit(gpa);
+
+            var packages: Packages = .{ .allocator = gpa };
+            defer packages.deinit();
+
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
             try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs, &c_macros);
@@ -1222,15 +1378,60 @@ fn extractBuildInformation(
                     try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
             }
+
+            const files = try helper.getRelatedFiles(gpa, compile.root_module.root_source_file);
+            errdefer {
+                for (files) |file_path| {
+                    gpa.free(file_path);
+                }
+                gpa.free(files);
+            }
+
+            const gop = try compilation_unit_info.getOrPut(compile.root_module);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{
+                    .include_dirs = try gpa.dupe([]const u8, include_dirs.keys()),
+                    .c_macros = try gpa.dupe([]const u8, c_macros.keys()),
+                    .packages = try packages.toPackageList(),
+                    .files = files,
+                };
+            }
         }
 
         for (b.modules.values()) |root_module| {
+            var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
+            defer include_dirs.deinit(gpa);
+
+            var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
+            defer c_macros.deinit(gpa);
+
+            var packages: Packages = .{ .allocator = gpa };
+            defer packages.deinit();
+
             const graph = root_module.getGraph();
             try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
                 for (module.import_table.keys(), module.import_table.values()) |name, import| {
                     try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
                 }
+            }
+
+            const files = try helper.getRelatedFiles(gpa, root_module.root_source_file);
+            errdefer {
+                for (files) |file_path| {
+                    gpa.free(file_path);
+                }
+                gpa.free(files);
+            }
+
+            const gop = try compilation_unit_info.getOrPut(root_module);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{
+                    .include_dirs = try gpa.dupe([]const u8, include_dirs.keys()),
+                    .c_macros = try gpa.dupe([]const u8, c_macros.keys()),
+                    .packages = try packages.toPackageList(),
+                    .files = files,
+                };
             }
         }
     }
@@ -1275,11 +1476,12 @@ fn extractBuildInformation(
     try std.json.stringify(
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,
-            .packages = try packages.toPackageList(),
-            .include_dirs = include_dirs.keys(),
+            .compilation_unit_info = compilation_unit_info.values(),
+            // .packages = try packages.toPackageList(),
+            // .include_dirs = include_dirs.keys(),
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = available_options,
-            .c_macros = c_macros.keys(),
+            // .c_macros = c_macros.keys(),
         },
         .{
             .whitespace = .indent_2,

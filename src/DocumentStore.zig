@@ -113,10 +113,12 @@ pub const BuildFile = struct {
         const build_config = self.tryLockConfig() orelse return false;
         defer self.unlockConfig();
 
-        try package_uris.ensureUnusedCapacity(allocator, build_config.packages.len);
-        for (build_config.packages) |package| {
-            package_uris.appendAssumeCapacity(try URI.fromPath(allocator, package.path));
+        for (build_config.compilation_unit_info) |compilation_unit| {
+            for (compilation_unit.packages) |package| {
+                try package_uris.append(allocator, try URI.fromPath(allocator,package.path));
+            }
         }
+
         return true;
     }
 
@@ -140,18 +142,19 @@ pub const BuildFile = struct {
         const build_config = self.tryLockConfig() orelse return false;
         defer self.unlockConfig();
 
-        try include_paths.ensureUnusedCapacity(allocator, build_config.include_dirs.len);
-        for (build_config.include_dirs) |include_path| {
-            const absolute_path = if (std.fs.path.isAbsolute(include_path))
-                try allocator.dupe(u8, include_path)
-            else blk: {
-                const build_file_dir = std.fs.path.dirname(self.uri).?;
-                const build_file_path = try URI.parse(allocator, build_file_dir);
-                defer allocator.free(build_file_path);
-                break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
-            };
+        for (build_config.compilation_unit_info) |compilation_unit| {
+            for (compilation_unit.include_dirs) |include_path| {
+                const absolute_path = if (std.fs.path.isAbsolute(include_path))
+                    try allocator.dupe(u8, include_path)
+                else blk: {
+                    const build_file_dir = std.fs.path.dirname(self.uri).?;
+                    const build_file_path = try URI.parse(allocator, build_file_dir);
+                    defer allocator.free(build_file_path);
+                    break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
+                };
 
-            include_paths.appendAssumeCapacity(absolute_path);
+                try include_paths.append(allocator, absolute_path);
+            }
         }
         return true;
     }
@@ -1303,8 +1306,10 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
     ) catch return error.InvalidBuildConfig;
     errdefer build_config.deinit();
 
-    for (build_config.value.packages) |*pkg| {
-        pkg.path = try std.fs.path.resolve(build_config.arena.allocator(), &.{ build_file_path, "..", pkg.path });
+    for (build_config.value.compilation_unit_info) |compilation_unit_info| {
+        for (compilation_unit_info.packages) |*pkg| {
+            pkg.path = try std.fs.path.resolve(build_config.arena.allocator(), &.{ build_file_path, "..", pkg.path });
+        }
     }
 
     return build_config;
@@ -1702,9 +1707,10 @@ pub fn collectCMacros(
             const build_config = build_file.tryLockConfig() orelse break :blk false;
             defer build_file.unlockConfig();
 
-            try c_macros.ensureUnusedCapacity(allocator, build_config.c_macros.len);
-            for (build_config.c_macros) |c_macro| {
-                c_macros.appendAssumeCapacity(try allocator.dupe(u8, c_macro));
+            for (build_config.compilation_unit_info) |compilation_unit| {
+                for (compilation_unit.c_macros) |c_macro| {
+                    try c_macros.append(allocator, try allocator.dupe(u8, c_macro));
+                }
             }
             break :blk true;
         },
@@ -1907,9 +1913,30 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
 
-            for (build_config.packages) |pkg| {
-                if (std.mem.eql(u8, import_str, pkg.name)) {
-                    return try URI.fromPath(allocator, pkg.path);
+            const current_file_uri = handle.uri;
+
+            var current_cu: ?BuildConfig.CompilationUnit = null;
+
+            find_cu: for (build_config.compilation_unit_info) |compilation_unit| {
+                for (compilation_unit.files) |file_path| {
+                    const file_uri = try URI.fromPath(allocator, file_path);
+                    defer allocator.free(file_uri);
+
+                    const relative = std.fs.path.relative(allocator, file_uri, current_file_uri) catch continue;
+                    defer allocator.free(relative);
+
+                    if (relative.len == 0) {
+                        current_cu = compilation_unit;
+                        break :find_cu;
+                    }
+                }
+            }
+
+            if (current_cu) |compilation_unit| {
+                for (compilation_unit.packages) |pkg| {
+                    if (std.mem.eql(u8, import_str, pkg.name)) {
+                        return try URI.fromPath(allocator, pkg.path);
+                    }
                 }
             }
         } else if (isBuildFile(handle.uri)) blk: {

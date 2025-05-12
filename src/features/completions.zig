@@ -809,13 +809,15 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
 
-            try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
-            for (build_config.packages) |pkg| {
-                completions.putAssumeCapacity(.{
-                    .label = pkg.name,
-                    .kind = .Module,
-                    .detail = pkg.path,
-                }, {});
+            // TODO: restrict to its own compilation unit.
+            for (build_config.compilation_unit_info) |compilation_unit| {
+                for (compilation_unit.packages) |pkg| {
+                    try completions.put(builder.arena, .{
+                        .label = pkg.name,
+                        .kind = .Module,
+                        .detail = pkg.path,
+                    }, {});
+                }
             }
         } else if (DocumentStore.isBuildFile(builder.orig_handle.uri)) blk: {
             const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :blk;
