@@ -1,20 +1,27 @@
 {
   "deps_build_roots": [],
-  "packages": [
+  "compilation_unit_info": [
     {
-      "name": "bar",
-      "path": "root.zig"
-    },
-    {
-      "name": "root",
-      "path": "root.zig"
+      "include_dirs": [],
+      "c_macros": [],
+      "packages": [
+        {
+          "name": "bar",
+          "path": "root.zig"
+        },
+        {
+          "name": "root",
+          "path": "root.zig"
+        }
+      ],
+      "files": [
+        "root.zig"
+      ]
     }
   ],
-  "include_dirs": [],
   "top_level_steps": [
     "install",
     "uninstall"
   ],
-  "available_options": {},
-  "c_macros": []
+  "available_options": {}
 }
