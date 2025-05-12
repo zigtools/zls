@@ -1031,18 +1031,29 @@ pub fn resolveFuncProtoOfCallable(analyser: *Analyser, ty: Type) error{OutOfMemo
 /// resolve a pointer dereference
 /// `pointer.*`
 pub fn resolveDerefType(analyser: *Analyser, pointer: Type) error{OutOfMemory}!?Type {
+    const binding = try analyser.resolveDerefBinding(pointer) orelse return null;
+    return binding.type;
+}
+
+pub fn resolveDerefBinding(analyser: *Analyser, pointer: Type) error{OutOfMemory}!?Binding {
     if (pointer.is_type_val) return null;
 
     switch (pointer.data) {
         .pointer => |info| switch (info.size) {
-            .one, .c => return info.elem_ty.instanceTypeVal(analyser),
+            .one, .c => return .{
+                .type = info.elem_ty.instanceTypeVal(analyser) orelse return null,
+                .is_const = info.is_const,
+            },
             .many, .slice => return null,
         },
         .ip_index => |payload| {
             const ty = payload.type;
             switch (analyser.ip.indexToKey(ty)) {
                 .pointer_type => |pointer_info| switch (pointer_info.flags.size) {
-                    .one, .c => return Type.fromIP(analyser, pointer_info.elem_type, null),
+                    .one, .c => return .{
+                        .type = Type.fromIP(analyser, pointer_info.elem_type, null),
+                        .is_const = pointer_info.flags.is_const,
+                    },
                     .many, .slice => return null,
                 },
                 else => return null,
@@ -1770,13 +1781,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return ty.instanceTypeVal(analyser);
             }
             return lhs.instanceTypeVal(analyser);
-        },
-        .deref => {
-            const expr_node = tree.nodeData(node).node;
-
-            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
-
-            return try analyser.resolveDerefType(base_type);
         },
         .unwrap_optional => {
             const lhs_node, _ = tree.nodeData(node).node_and_token;
@@ -2717,6 +2721,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .slice_sentinel,
         .slice_open,
         .array_access,
+        .deref,
         => {
             const binding = try analyser.resolveBindingOfNodeUncached(node_handle) orelse return null;
             return binding.type;
@@ -2821,6 +2826,14 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle
                 .type = try analyser.resolveBracketAccessTypeFromBinding(lhs, .{ .single = index }) orelse return null,
                 .is_const = true,
             };
+        },
+
+        .deref => {
+            const expr_node = tree.nodeData(node).node;
+
+            const base_type = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
+
+            return try analyser.resolveDerefBinding(base_type);
         },
 
         else => return .{
