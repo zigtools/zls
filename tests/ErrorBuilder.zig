@@ -208,16 +208,33 @@ fn appendMessage(
 
 fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
     const builder = context.builder;
+    var multiple_files = false;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
 
         std.debug.assert(std.sort.isSorted(MsgItem, file.messages.items, file.source, MsgItem.lessThan));
 
-        if (builder.file_name_visibility == .always or
-            builder.file_name_visibility == .multi_file and builder.files.count() > 1)
-        {
-            try writer.print("{s}:\n", .{file_name});
+        switch (builder.file_name_visibility) {
+            .never => {
+                if (multiple_files) {
+                    try writer.writeByte('\n');
+                }
+            },
+            .multi_file => {
+                if (multiple_files) {
+                    try writer.writeAll("\n\n");
+                }
+                if (builder.files.count() > 1) {
+                    try writer.print("{s}:\n", .{file_name});
+                }
+            },
+            .always => {
+                if (multiple_files) {
+                    try writer.writeAll("\n\n");
+                }
+            },
         }
+        multiple_files = true;
 
         var it: MsgItemIterator = .{
             .source = file.source,
@@ -243,13 +260,52 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 };
             defer last_line_end_with_unified = unified_loc.end;
 
-            if (last_line_end_with_unified == 0) { // start
-                try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
-            } else if (last_line_end_with_unified < unified_loc.start) { // no intersection
-                try writer.writeAll(file.source[last_line_end..@min(last_line_end_with_unified + 1, file.source.len)]);
-                try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
-            } else { // intersection (we can merge)
-                try writer.writeAll(file.source[last_line_end..line_loc.end]);
+            const intersection_state: enum {
+                start,
+                no_intersection,
+                intersection,
+            } = blk: {
+                if (last_line_end_with_unified == 0) break :blk .start;
+                if (last_line_end_with_unified + 1 < unified_loc.start) break :blk .no_intersection;
+                break :blk .intersection;
+            };
+
+            switch (intersection_state) {
+                .start => {},
+                .no_intersection => {
+                    try writer.writeAll(file.source[last_line_end..last_line_end_with_unified]);
+                },
+                .intersection => { // (we can merge)
+                    try writer.writeAll(file.source[last_line_end..line_loc.end]);
+                },
+            }
+
+            switch (intersection_state) {
+                .start,
+                .no_intersection,
+                => {
+                    switch (builder.file_name_visibility) {
+                        .never => {
+                            if (intersection_state == .no_intersection) {
+                                try writer.writeByte('\n');
+                            }
+                        },
+                        .multi_file => {
+                            if (intersection_state == .no_intersection) {
+                                try writer.writeAll("\n...\n");
+                            }
+                        },
+                        .always => {
+                            if (intersection_state == .no_intersection) {
+                                try writer.writeAll("\n\n");
+                            }
+                            const pos = offsets.indexToPosition(file.source, some_line_source_index, .@"utf-16");
+                            try writer.print("{s}:{}:{}:\n", .{ file_name, pos.line + 1, pos.character + 1 });
+                        },
+                    }
+                    try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
+                },
+                .intersection => {},
             }
 
             for (line_messages) |item| {
@@ -500,5 +556,150 @@ test "ErrorBuilder - write on empty file" {
     try std.testing.expectFmt(
         \\
         \\^ warning: why is this empty?
+    , "{}", .{eb});
+}
+
+test "ErrorBuilder - file name visibility" {
+    var eb: ErrorBuilder = .init(std.testing.allocator);
+    defer eb.deinit();
+
+    try eb.addFile("basic.zig",
+        \\const alpha: bool = true;
+        \\//    ^^^^^ (bool)()
+        \\const beta: bool = false;
+        \\//    ^^^^ (bool)()
+        \\const gamma: type = bool;
+        \\//    ^^^^^ (type)(bool)
+    );
+
+    try eb.addFile("array.zig",
+        \\const array_slice_open_runtime = some_array[runtime_index..];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_0_2 = some_array[0..2];
+        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_2_sentinel = some_array[0..2 :0];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_5 = some_array[0..5];
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\const array_slice_3_2 = some_array[3..2];
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\const array_slice_0_runtime = some_array[0..runtime_index];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_init = [length]u8{};
+        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\const array_init_inferred_len_0 = [_]u8{};
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+        \\const array_init_inferred_len_3 = [_]u8{ 1, 2, 3 };
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([3]u8)()
+    );
+
+    try eb.addFile("sentinel_value.zig",
+        \\const hw = "Hello, World!";
+        \\//    ^^ (*const [13:0]u8)(
+        \\const h = hw[0..5];
+        \\//    ^ (unknown)()
+        \\const w = hw[7..];
+        \\//    ^ (unknown)()
+    );
+
+    try eb.msgAtLoc("this should be `*const [2:0]u8`", "array.zig", .{ .start = 195, .end = 219 }, .err, .{});
+    try eb.msgAtLoc("this should be `[:0]const u8`", "array.zig", .{ .start = 562, .end = 587 }, .err, .{});
+
+    try eb.msgAtLoc("this should be `*const [5]u8`", "sentinel_value.zig", .{ .start = 62, .end = 63 }, .err, .{});
+    try eb.msgAtLoc("this should be `*const [6:0]u8`", "sentinel_value.zig", .{ .start = 102, .end = 103 }, .err, .{});
+
+    eb.file_name_visibility = .multi_file;
+    try std.testing.expectFmt(
+        \\array.zig:
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_0_2 = some_array[0..2];
+        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_2_sentinel = some_array[0..2 :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_5 = some_array[0..5];
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\...
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\const array_slice_0_runtime = some_array[0..runtime_index];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_init = [length]u8{};
+        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\
+        \\sentinel_value.zig:
+        \\const hw = "Hello, World!";
+        \\//    ^^ (*const [13:0]u8)(
+        \\const h = hw[0..5];
+        \\      ^ error: this should be `*const [5]u8`
+        \\//    ^ (unknown)()
+        \\const w = hw[7..];
+        \\      ^ error: this should be `*const [6:0]u8`
+        \\//    ^ (unknown)()
+    , "{}", .{eb});
+
+    eb.file_name_visibility = .always;
+    try std.testing.expectFmt(
+        \\array.zig:5:7:
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_0_2 = some_array[0..2];
+        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_2_sentinel = some_array[0..2 :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_5 = some_array[0..5];
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\
+        \\array.zig:13:7:
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\const array_slice_0_runtime = some_array[0..runtime_index];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_init = [length]u8{};
+        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\
+        \\sentinel_value.zig:3:7:
+        \\const hw = "Hello, World!";
+        \\//    ^^ (*const [13:0]u8)(
+        \\const h = hw[0..5];
+        \\      ^ error: this should be `*const [5]u8`
+        \\//    ^ (unknown)()
+        \\const w = hw[7..];
+        \\      ^ error: this should be `*const [6:0]u8`
+        \\//    ^ (unknown)()
+    , "{}", .{eb});
+
+    eb.file_name_visibility = .never;
+    try std.testing.expectFmt(
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_0_2 = some_array[0..2];
+        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_2_sentinel = some_array[0..2 :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\const array_slice_0_5 = some_array[0..5];
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\const array_slice_0_runtime = some_array[0..runtime_index];
+        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
+        \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
+        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\const array_init = [length]u8{};
+        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\const hw = "Hello, World!";
+        \\//    ^^ (*const [13:0]u8)(
+        \\const h = hw[0..5];
+        \\      ^ error: this should be `*const [5]u8`
+        \\//    ^ (unknown)()
+        \\const w = hw[7..];
+        \\      ^ error: this should be `*const [6:0]u8`
+        \\//    ^ (unknown)()
     , "{}", .{eb});
 }
