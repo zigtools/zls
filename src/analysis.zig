@@ -2284,7 +2284,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                             else => unreachable,
                         }
                     }
-                    break :param_type Type.fromIP(analyser, InternPool.Index.unknown_type, null);
+                    break :param_type Type.fromIP(analyser, .type_type, .unknown_type);
                 };
 
                 try parameters.append(analyser.arena.allocator(), .{
@@ -2295,9 +2295,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 });
             }
 
-            const return_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse {
-                return null;
-            };
+            const return_type = try analyser.resolveReturnTypeInternal(handle, fn_proto) orelse
+                Type.fromIP(analyser, .type_type, .unknown_type);
 
             const info: Type.Data.Function = .{
                 .handle = handle,

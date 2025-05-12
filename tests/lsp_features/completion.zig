@@ -566,6 +566,15 @@ test "resolve return type of function with invalid parameter" {
     });
 }
 
+test "resolve parameters of function with invalid return type" {
+    try testCompletion(
+        \\fn foo(_: struct { alpha: u32 }) unknown {}
+        \\const bar = foo(.<cursor>)
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "optional" {
     try testCompletion(
         \\const foo: ?u32 = undefined;
