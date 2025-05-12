@@ -147,12 +147,19 @@ fn hoverSymbolResolved(
 
                 try writer.print("{s}\n", .{trimmed_line});
             }
-            try writer.print("\n", .{});
         }
     } else {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+        if (doc_strings.len > 0) try writer.print("\n", .{});
+        for (doc_strings) |doc| {
+            // Better format the document string
+            var lines = std.mem.splitAny(u8, doc, "\n");
+            while (lines.next()) |line| {
+                const trimmed_line = std.mem.trimLeft(u8, line, " ");
+
+                try writer.print("{s}\n", .{trimmed_line});
+            }
+        }
     }
 
     return hover_text.items;
