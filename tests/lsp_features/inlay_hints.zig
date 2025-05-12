@@ -243,11 +243,11 @@ test "var decl" {
         \\const foo<@TypeOf(undefined)> = undefined;
     , .{ .kind = .Type });
     try testInlayHints(
-        \\const foo<**const [3:0]u8> = &"Bar";
+        \\const foo<*const *const [3:0]u8> = &"Bar";
     , .{ .kind = .Type });
     try testInlayHints(
         \\const foo: *[]const u8 = &"Bar";
-        \\const baz<**[]const u8> = &foo;
+        \\const baz<*const *[]const u8> = &foo;
     , .{ .kind = .Type });
     try testInlayHints(
         \\const Foo<type> = struct { bar: u32 };
@@ -256,7 +256,7 @@ test "var decl" {
         \\    const baz: ?Foo = Foo{ .bar<u32> = 42 };
         \\    if (baz) |b<Foo>| {
         \\        const d: Error!?Foo = b;
-        \\        const e<*error{e}!?Foo> = &d;
+        \\        const e<*const error{e}!?Foo> = &d;
         \\        const f<Foo> = (try e.*).?;
         \\        _ = f;
         \\    }
@@ -346,7 +346,7 @@ test "function alias" {
         \\fn foo(alpha: u32) void {
         \\    return alpha;
         \\}
-        \\const bar<fn (alpha: u32) void> = foo;
+        \\const bar<fn (u32) void> = foo;
     , .{ .kind = .Type });
     try testInlayHints(
         \\pub fn foo(
@@ -355,7 +355,7 @@ test "function alias" {
         \\) u32 {
         \\    return alpha;
         \\}
-        \\const bar<*fn (comptime alpha: u32) u32> = &foo;
+        \\const bar<*const fn (comptime u32) u32> = &foo;
     , .{ .kind = .Type });
 }
 

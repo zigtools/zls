@@ -326,6 +326,21 @@ test "struct" {
     );
 }
 
+test "root struct" {
+    try testHover(
+        \\const f<cursor>oo: @This() = .{};
+    ,
+        \\```zig
+        \\const foo: @This() = .{}
+        \\```
+        \\```zig
+        \\(test)
+        \\```
+        \\
+        \\Go to [test](file:///test.zig#L1)
+    );
+}
+
 test "decl literal" {
     try testHover(
         \\const S = struct {
@@ -361,6 +376,9 @@ test "decl literal function" {
         \\```zig
         \\fn foo() S
         \\```
+        \\```zig
+        \\(fn () S)
+        \\```
         \\
         \\Go to [S](file:///test.zig#L1)
     );
@@ -375,6 +393,9 @@ test "decl literal function" {
     ,
         \\```zig
         \\fn foo() !S
+        \\```
+        \\```zig
+        \\(fn () !S)
         \\```
         \\
         \\Go to [S](file:///test.zig#L1)
@@ -392,6 +413,9 @@ test "decl literal function" {
     ,
         \\```zig
         \\fn init() Inner
+        \\```
+        \\```zig
+        \\(fn () Inner)
         \\```
         \\
         \\Go to [Inner](file:///test.zig#L1)
@@ -417,7 +441,7 @@ test "decl literal on generic type" {
         \\(Box)
         \\```
         \\
-        \\Go to [@This()](file:///test.zig#L1)
+        \\Go to [Box](file:///test.zig#L1)
     );
 }
 
@@ -511,6 +535,28 @@ test "enum member" {
     );
 }
 
+test "generic type" {
+    try testHover(
+        \\const StructType = struct {};
+        \\const EnumType = enum {};
+        \\fn GenericType(A: type, B: type) type {
+        \\    _ = .{ A, B };
+        \\    return struct {};
+        \\}
+        \\const T = GenericType(StructType, EnumType);
+        \\const t<cursor>: T = .{};
+    ,
+        \\```zig
+        \\const t: T = .{}
+        \\```
+        \\```zig
+        \\(GenericType(StructType,EnumType))
+        \\```
+        \\
+        \\Go to [GenericType](file:///test.zig#L3) | [StructType](file:///test.zig#L1) | [EnumType](file:///test.zig#L2)
+    );
+}
+
 test "block label" {
     try testHover(
         \\const foo: i32 = undefined;
@@ -567,6 +613,9 @@ test "function" {
         \\```zig
         \\fn foo(a: A, b: B) E!C
         \\```
+        \\```zig
+        \\(fn (A, B) error{A,B}!C)
+        \\```
         \\
         \\Go to [A](file:///test.zig#L1) | [B](file:///test.zig#L2) | [C](file:///test.zig#L3)
     );
@@ -578,8 +627,22 @@ test "function" {
         \\```zig
         \\fn foo(a: S, b: S) E!S
         \\```
+        \\```zig
+        \\(fn (S, S) error{A,B}!S)
+        \\```
         \\
         \\Go to [S](file:///test.zig#L1)
+    );
+    try testHover(
+        \\const E = error { A, B, C };
+        \\fn f<cursor>oo() E!void {}
+    ,
+        \\```zig
+        \\fn foo() E!void
+        \\```
+        \\```zig
+        \\(fn () error{...}!void)
+        \\```
     );
     try testHover(
         \\fn foo(b<cursor>ar: enum { fizz, buzz }) void {}
@@ -597,6 +660,9 @@ test "function" {
         \\```zig
         \\fn foo() !i32
         \\```
+        \\```zig
+        \\(fn () !i32)
+        \\```
     );
     try testHover(
         \\extern fn f<cursor>oo(u32) void;
@@ -604,11 +670,15 @@ test "function" {
         \\```zig
         \\fn foo(u32) void
         \\```
+        \\```zig
+        \\(fn (u32) void)
+        \\```
     );
     try testHoverWithOptions(
         \\fn f<cursor>oo() i32 {}
     ,
         \\fn foo() i32
+        \\(fn () i32)
     , .{ .markup_kind = .plaintext });
 }
 
@@ -744,6 +814,9 @@ test "var decl alias" {
         \\```zig
         \\fn foo() void
         \\```
+        \\```zig
+        \\(fn () void)
+        \\```
     );
     try testHover(
         \\const foo = 5;
@@ -829,6 +902,9 @@ test "type reference cycle" {
         \\    alpha: anytype,
         \\    beta: @TypeOf(alpha),
         \\) void
+        \\```
+        \\```zig
+        \\(fn (anytype, (unknown value)) void)
         \\```
     );
 }
