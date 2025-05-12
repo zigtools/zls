@@ -2193,8 +2193,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (std.mem.eql(u8, call_name, "@src")) {
                 return analyser.instanceStdBuiltinType("SourceLocation");
             }
+
             if (std.mem.eql(u8, call_name, "@compileError")) {
                 return .{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
+            }
+
+            if (std.mem.eql(u8, call_name, "@panic") or
+                std.mem.eql(u8, call_name, "@trap"))
+            {
+                return Type.fromIP(analyser, .noreturn_type, null);
             }
 
             if (std.mem.eql(u8, call_name, "@Vector")) {
