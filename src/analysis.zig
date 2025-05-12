@@ -2510,6 +2510,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .bool_not,
         => return Type.fromIP(analyser, .bool_type, null),
 
+        .bit_not,
         .negation,
         .negation_wrap,
         => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)),
@@ -2639,19 +2640,62 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .mod,
         .mul_wrap,
         .mul_sat,
-        .add,
-        .sub,
         .add_wrap,
         .sub_wrap,
         .add_sat,
         .sub_sat,
-        .shl,
-        .shl_sat,
-        .shr,
         .bit_and,
         .bit_xor,
         .bit_or,
-        .bit_not,
+        => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            if (rhs_ty.is_type_val) return null;
+            return Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty);
+        },
+
+        .add => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            if (rhs_ty.is_type_val) return null;
+            return switch (lhs_ty.data) {
+                .pointer => |lhs_info| switch (lhs_info.size) {
+                    .many, .c => lhs_ty,
+                    else => null,
+                },
+                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+            };
+        },
+
+        .sub => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            if (rhs_ty.is_type_val) return null;
+            return switch (lhs_ty.data) {
+                .pointer => |lhs_info| switch (rhs_ty.data) {
+                    .pointer => |rhs_info| {
+                        if (lhs_info.size == .slice) return null;
+                        if (rhs_info.size == .slice) return null;
+                        return Type.fromIP(analyser, .usize_type, null);
+                    },
+                    else => switch (lhs_info.size) {
+                        .many, .c => lhs_ty,
+                        else => null,
+                    },
+                },
+                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+            };
+        },
+
+        .shl,
+        .shl_sat,
+        .shr,
         => {},
 
         .array_mult => {

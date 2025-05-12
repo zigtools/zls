@@ -129,3 +129,103 @@ comptime {
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(many_u32_slice_len_comptime);
 }
+
+fn pointer_arithmetic() void {
+    var some_u8: u8 = 1;
+    var some_i8: i8 = -1;
+
+    const many_plus_u8 = many_u32 + some_u8;
+    //    ^^^^^^^^^^^^ ([*]const u32)()
+    const many_minus_u8 = many_u32 - some_u8;
+    //    ^^^^^^^^^^^^^ ([*]const u32)()
+
+    const c_plus_u8 = c_u32 + some_u8;
+    //    ^^^^^^^^^ ([*c]const u32)()
+    const c_minus_u8 = c_u32 - some_u8;
+    //    ^^^^^^^^^^ ([*c]const u32)()
+
+    const one_minus_one = one_u32 - one_u32;
+    //    ^^^^^^^^^^^^^ (usize)()
+    const one_minus_many = one_u32 - many_u32;
+    //    ^^^^^^^^^^^^^^ (usize)()
+    const one_minus_c = one_u32 - c_u32;
+    //    ^^^^^^^^^^^ (usize)()
+
+    const many_minus_one = many_u32 - one_u32;
+    //    ^^^^^^^^^^^^^^ (usize)()
+    const many_minus_many = many_u32 - many_u32;
+    //    ^^^^^^^^^^^^^^^ (usize)()
+    const many_minus_c = many_u32 - c_u32;
+    //    ^^^^^^^^^^^^ (usize)()
+
+    const c_minus_one = c_u32 - one_u32;
+    //    ^^^^^^^^^^^ (usize)()
+    const c_minus_many = c_u32 - many_u32;
+    //    ^^^^^^^^^^^^ (usize)()
+    const c_minus_c = c_u32 - c_u32;
+    //    ^^^^^^^^^ (usize)()
+
+    _ = .{
+        .{ &some_u8, &some_i8 },
+        .{ many_plus_u8, many_minus_u8 },
+        .{ c_plus_u8, c_minus_u8 },
+        .{ one_minus_one, one_minus_many, one_minus_c },
+        .{ many_minus_one, many_minus_many, many_minus_c },
+        .{ c_minus_one, c_minus_many, c_minus_c },
+    };
+}
+
+fn invalid_pointer_arithmetic() void {
+    var some_u8: u8 = 1;
+    var some_i8: i8 = -1;
+
+    const one_plus_u8 = one_u32 + some_u8;
+    //    ^^^^^^^^^^^ (unknown)()
+    const one_minus_u8 = one_u32 - some_u8;
+    //    ^^^^^^^^^^^^ (unknown)()
+
+    const slice_plus_u8 = slice_u32 + some_u8;
+    //    ^^^^^^^^^^^^^ (unknown)()
+    const slice_minus_u8 = slice_u32 - some_u8;
+    //    ^^^^^^^^^^^^^^ (unknown)()
+
+    // TODO this should be `unknown`
+    const many_plus_i8 = many_u32 + some_i8;
+    //    ^^^^^^^^^^^^ ([*]const u32)()
+    // TODO this should be `unknown`
+    const many_minus_i8 = many_u32 - some_i8;
+    //    ^^^^^^^^^^^^^ ([*]const u32)()
+
+    // TODO this should be `unknown`
+    const c_plus_i8 = c_u32 + some_i8;
+    //    ^^^^^^^^^ ([*c]const u32)()
+    // TODO this should be `unknown`
+    const c_minus_i8 = c_u32 - some_i8;
+    //    ^^^^^^^^^^ ([*c]const u32)()
+
+    const one_minus_slice = one_u32 - slice_u32;
+    //    ^^^^^^^^^^^^^^^ (unknown)()
+    const many_minus_slice = many_u32 - slice_u32;
+    //    ^^^^^^^^^^^^^^^^ (unknown)()
+    const c_minus_slice = c_u32 - slice_u32;
+    //    ^^^^^^^^^^^^^ (unknown)()
+
+    const slice_minus_one = slice_u32 - one_u32;
+    //    ^^^^^^^^^^^^^^^ (unknown)()
+    const slice_minus_many = slice_u32 - many_u32;
+    //    ^^^^^^^^^^^^^^^^ (unknown)()
+    const slice_minus_slice = slice_u32 - slice_u32;
+    //    ^^^^^^^^^^^^^^^^^ (unknown)()
+    const slice_minus_c = slice_u32 - c_u32;
+    //    ^^^^^^^^^^^^^ (unknown)()
+
+    _ = .{
+        .{ &some_u8, &some_i8 },
+        .{ one_plus_u8, one_minus_u8 },
+        .{ slice_plus_u8, slice_minus_u8 },
+        .{ many_plus_i8, many_minus_i8 },
+        .{ c_plus_i8, c_minus_i8 },
+        .{ one_minus_slice, many_minus_slice, c_minus_slice },
+        .{ slice_minus_one, slice_minus_many, slice_minus_slice, slice_minus_c },
+    };
+}
