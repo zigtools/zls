@@ -1166,7 +1166,7 @@ fn extractBuildInformation(
                 allocator.free(file_path);
             };
 
-            if (root_source_file == null or switch(root_source_file.?) {
+            if (root_source_file == null or switch (root_source_file.?) {
                 .src_path => false,
                 else => true,
             }) {
@@ -1343,7 +1343,6 @@ fn extractBuildInformation(
         run,
     );
 
-
     var compilation_unit_info = std.AutoArrayHashMap(*std.Build.Module, BuildConfig.CompilationUnit).init(gpa);
     defer {
         for (compilation_unit_info.values()) |value| {
@@ -1477,11 +1476,8 @@ fn extractBuildInformation(
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,
             .compilation_unit_info = compilation_unit_info.values(),
-            // .packages = try packages.toPackageList(),
-            // .include_dirs = include_dirs.keys(),
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = available_options,
-            // .c_macros = c_macros.keys(),
         },
         .{
             .whitespace = .indent_2,

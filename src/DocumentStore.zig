@@ -115,7 +115,7 @@ pub const BuildFile = struct {
 
         for (build_config.compilation_unit_info) |compilation_unit| {
             for (compilation_unit.packages) |package| {
-                try package_uris.append(allocator, try URI.fromPath(allocator,package.path));
+                try package_uris.append(allocator, try URI.fromPath(allocator, package.path));
             }
         }
 

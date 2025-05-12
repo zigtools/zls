@@ -809,7 +809,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
 
-            // TODO: restrict to its own compilation unit.
             for (build_config.compilation_unit_info) |compilation_unit| {
                 for (compilation_unit.packages) |pkg| {
                     try completions.put(builder.arena, .{
