@@ -2193,8 +2193,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (std.mem.eql(u8, call_name, "@src")) {
                 return analyser.instanceStdBuiltinType("SourceLocation");
             }
+
             if (std.mem.eql(u8, call_name, "@compileError")) {
                 return .{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
+            }
+
+            if (std.mem.eql(u8, call_name, "@panic") or
+                std.mem.eql(u8, call_name, "@trap"))
+            {
+                return Type.fromIP(analyser, .noreturn_type, null);
             }
 
             if (std.mem.eql(u8, call_name, "@Vector")) {
@@ -2414,16 +2421,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .block_two,
         .block_two_semicolon,
         => {
-            const has_zero_statements = switch (tree.nodeTag(node)) {
-                .block_two, .block_two_semicolon => tree.nodeData(node).opt_node_and_opt_node[0] == .none,
-                .block, .block_semicolon => false,
-                else => unreachable,
-            };
-            if (has_zero_statements) {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const statements = tree.blockStatements(&buffer, node).?;
+            if (statements.len == 0) {
                 return Type.fromIP(analyser, .void_type, .void_value);
             }
 
-            const label_token = ast.blockLabel(tree, node) orelse return null;
+            const label_token = ast.blockLabel(tree, node) orelse {
+                const last_statement = statements[statements.len - 1];
+                if (try analyser.resolveTypeOfNodeInternal(.of(last_statement, handle))) |ty| {
+                    if (ty.typeOf(analyser).isNoreturnType()) {
+                        return Type.fromIP(analyser, .noreturn_type, null);
+                    }
+                }
+                return Type.fromIP(analyser, .void_type, .void_value);
+            };
             const block_label = offsets.identifierTokenToNameSlice(tree, label_token);
 
             // TODO: peer type resolution based on all `break` statements
@@ -3377,6 +3389,15 @@ pub const Type = struct {
     pub fn isFunc(self: Type) bool {
         return switch (self.data) {
             .function => true,
+            else => false,
+        };
+    }
+
+    pub fn isNoreturnType(self: Type) bool {
+        if (!self.is_type_val) return false;
+        return switch (self.data) {
+            .compile_error => true,
+            .ip_index => |payload| payload.index == .noreturn_type,
             else => false,
         };
     }
