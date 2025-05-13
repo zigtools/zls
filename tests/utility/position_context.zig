@@ -528,7 +528,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
     const new_source = try allocator.dupeZ(u8, phr.new_source);
     defer allocator.free(new_source);
 
-    var tree = try std.zig.Ast.parse(allocator, new_source, .zig);
+    var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);
     defer tree.deinit(allocator);
 
     const ctx = try Analyser.getPositionContext(allocator, tree, cursor_index, lookahead);

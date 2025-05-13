@@ -161,7 +161,7 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) SourceIndexToToke
 }
 
 test sourceIndexToTokenIndex {
-    var tree = try std.zig.Ast.parse(std.testing.allocator, " a  bb; ", .zig);
+    var tree: Ast = try .parse(std.testing.allocator, " a  bb; ", .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
@@ -187,7 +187,7 @@ test sourceIndexToTokenIndex {
 }
 
 test "sourceIndexToTokenIndex - token at end" {
-    var tree = try std.zig.Ast.parse(std.testing.allocator, " a", .zig);
+    var tree: Ast = try .parse(std.testing.allocator, " a", .zig);
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
