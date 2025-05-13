@@ -10,6 +10,9 @@ const enum_literal_pointer = &.foo;
 const string_literal_pointer = &"foo";
 //    ^^^^^^^^^^^^^^^^^^^^^^ (*const *const [3:0]u8)()
 
+const string_literal_deref_pointer = &"foo".*;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [3:0]u8)()
+
 // zig fmt: off
 const multiline_string_literal_pointer = &
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const *const [3:0]u8)()
@@ -65,6 +68,12 @@ const some_struct_pointer_pointer = &&some_struct;
 
 const mutable_struct_pointer_pointer = &&mutable_struct;
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const *StructType)()
+
+const some_struct_pointer_deref_pointer = &some_struct_pointer.*;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const StructType)()
+
+const mutable_struct_pointer_deref_pointer = &mutable_struct_pointer.*;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*StructType)()
 
 const some_field_pointer = &some_struct.foo;
 //    ^^^^^^^^^^^^^^^^^^ (*const i32)()
