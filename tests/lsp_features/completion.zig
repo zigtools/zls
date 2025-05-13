@@ -311,6 +311,20 @@ test "function alias" {
             .detail = "fn () void",
         },
     });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    fn foo(_: S) void {}
+        \\    const bar = foo;
+        \\};
+        \\const baz = S.bar(.<cursor>);
+    , &.{
+        .{
+            .label = "alpha",
+            .kind = .Field,
+            .detail = "u32",
+        },
+    });
 }
 
 test "generic function" {

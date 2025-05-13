@@ -1656,22 +1656,11 @@ fn collectFieldAccessContainerNodes(
             }
             break :blk 0; // is `T`, no SelfParam
         };
-        const fn_node = decl.decl.ast_node;
-        const fn_handle = decl.handle;
-        const param_decl: Analyser.Declaration.Param = .{
-            .param_index = @truncate(dot_context.fn_arg_index + additional_index),
-            .func = fn_node,
-        };
-        const param = param_decl.get(fn_handle.tree) orelse continue;
-
-        const type_expr = param.type_expr orelse continue;
-        const param_rcts = try collectContainerNodes(
-            builder,
-            fn_handle,
-            offsets.nodeToLoc(fn_handle.tree, type_expr).end,
-            dot_context,
-        );
-        for (param_rcts) |prct| try types_with_handles.append(arena, prct);
+        const params = node_type.data.function.parameters;
+        const param_index = dot_context.fn_arg_index + additional_index;
+        if (param_index >= params.len) continue;
+        const param_type = params[param_index].type orelse continue;
+        try param_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
     }
 }
 
