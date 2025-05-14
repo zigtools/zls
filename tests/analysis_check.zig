@@ -63,6 +63,7 @@ pub fn main() Error!void {
             };
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         } else if (std.mem.eql(u8, arg, "--zig-lib-path")) {
+            std.debug.assert(builtin.target.os.tag != .wasi);
             const zig_lib_path = arg_it.next() orelse {
                 std.log.err("expected argument after '--zig-lib-path'.", .{});
                 std.process.exit(1);
@@ -81,6 +82,20 @@ pub fn main() Error!void {
             std.log.err("Unrecognized argument '{s}'.", .{arg});
             std.process.exit(1);
         }
+    }
+
+    if (builtin.target.os.tag == .wasi) {
+        const wasi_preopens = try std.fs.wasi.preopensAlloc(gpa);
+        defer {
+            for (wasi_preopens.names[3..]) |name| gpa.free(name);
+            gpa.free(wasi_preopens.names);
+        }
+
+        const zig_lib_dir_fd = wasi_preopens.find("/lib") orelse {
+            std.log.err("failed to resolve '/lib' WASI preopen", .{});
+            std.process.exit(1);
+        };
+        config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
     }
 
     var thread_pool: if (builtin.single_threaded) void else std.Thread.Pool = undefined;
