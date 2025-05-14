@@ -227,7 +227,7 @@ test "function header" {
 }
 
 test "cross-file reference" {
-    if (true) return error.SkipZigTest; // TODO
+    if (true) return error.SkipZigTest; // https://github.com/zigtools/zls/issues/1071
     try testMFReferences(&.{
         \\pub const <0> = struct {};
         ,

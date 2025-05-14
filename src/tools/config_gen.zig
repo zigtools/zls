@@ -914,9 +914,9 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
             for (arguments) |arg| {
                 try writer.print("                \"{}\",\n", .{std.zig.fmtEscapes(arg)});
             }
-            try writer.writeAll("            },");
+            try writer.writeAll("            },\n");
         } else {
-            try writer.writeAll("},");
+            try writer.writeAll("},\n");
         }
 
         try writer.writeAll(

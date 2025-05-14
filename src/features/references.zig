@@ -450,7 +450,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree, source_index, true);
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     // TODO: Make this work with branching types

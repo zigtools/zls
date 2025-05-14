@@ -408,7 +408,7 @@ pub const Handle = struct {
         switch (self.impl.associated_build_file) {
             .none => return &.{},
             .unresolved => |unresolved| return unresolved.potential_build_files, // some of these could be removed because of `has_been_checked`
-            .resolved => |build_file| return &.{build_file},
+            .resolved => |*build_file| return build_file[0..1],
         }
     }
 

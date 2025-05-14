@@ -111,6 +111,11 @@ const abs_vector_i8 = @abs(@as(@Vector(4, i8), undefined));
 const abs_vector_u8 = @abs(@as(@Vector(4, u8), undefined));
 //    ^^^^^^^^^^^^^ (@Vector(4,u8))()
 
+const panic = @panic("foo");
+//    ^^^^^ (noreturn)()
+const trap = @trap();
+//    ^^^^ (noreturn)()
+
 comptime {
     // Use @compileLog to verify the expected type with the compiler
     // @compileLog(vector_builtin_13);
