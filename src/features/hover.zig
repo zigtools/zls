@@ -128,8 +128,6 @@ fn hoverSymbolResolved(
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
     const writer = hover_text.writer(arena);
     if (markup_kind == .markdown) {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
         try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
@@ -140,10 +138,28 @@ fn hoverSymbolResolved(
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
+        if (doc_strings.len > 0) try writer.print("\n---\n", .{});
+        for (doc_strings) |doc| {
+            // Better format the document string
+            var lines = std.mem.splitAny(u8, doc, "\n");
+            while (lines.next()) |line| {
+                const trimmed_line = std.mem.trimLeft(u8, line, " ");
+
+                try writer.print("{s}\n", .{trimmed_line});
+            }
+        }
     } else {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+        if (doc_strings.len > 0) try writer.print("\n", .{});
+        for (doc_strings) |doc| {
+            // Better format the document string
+            var lines = std.mem.splitAny(u8, doc, "\n");
+            while (lines.next()) |line| {
+                const trimmed_line = std.mem.trimLeft(u8, line, " ");
+
+                try writer.print("{s}\n", .{trimmed_line});
+            }
+        }
     }
 
     return hover_text.items;
