@@ -236,7 +236,7 @@ pub fn gotoHandler(
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
