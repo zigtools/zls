@@ -136,7 +136,7 @@ pub fn main() Error!void {
     };
     defer gpa.free(annotations);
 
-    var analyser = zls.Analyser.init(gpa, &document_store, &ip, handle);
+    var analyser = zls.Analyser.init(gpa, arena, &document_store, &ip, handle);
     defer analyser.deinit();
 
     for (annotations) |annotation| {
