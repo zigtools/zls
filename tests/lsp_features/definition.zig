@@ -260,6 +260,25 @@ test "non labeled break" {
     );
 }
 
+test "type definition unwraps error unions, optionals, pointers" {
+    try testDefinition(
+        \\const S = <tdef>struct</tdef> {};
+        \\const <>foo: error{}!S = .{};
+    );
+    try testDefinition(
+        \\const S = <tdef>struct</tdef> {};
+        \\const <>foo: ?S = .{};
+    );
+    try testDefinition(
+        \\const S = <tdef>struct</tdef> {};
+        \\const <>foo: *const S = &.{};
+    );
+    try testDefinition(
+        \\const S = <tdef>struct</tdef> {};
+        \\const <>foo: error{}!?*const S = &.{};
+    );
+}
+
 /// - use `<>` to indicate the cursor position
 /// - use `<decl>content</decl>` to set the expected range of the declaration
 /// - use `<def>content</def>` to set the expected range of the definition

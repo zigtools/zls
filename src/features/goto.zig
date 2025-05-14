@@ -38,7 +38,14 @@ fn gotoDefinitionSymbol(
         .definition => try decl_handle.definitionToken(analyser, true),
         .type_definition => blk: {
             if (try decl_handle.resolveType(analyser)) |ty| {
-                if (try ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
+                var resolved_ty = ty;
+                while (true) {
+                    resolved_ty =
+                        try analyser.resolveUnwrapErrorUnionType(resolved_ty, .payload) orelse
+                        try analyser.resolveDerefType(resolved_ty) orelse
+                        try analyser.resolveOptionalUnwrap(resolved_ty) orelse break;
+                }
+                if (try resolved_ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
             }
             const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
