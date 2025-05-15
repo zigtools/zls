@@ -1380,7 +1380,7 @@ fn resolveConfiguration(
 
     if (config.zig_lib_path) |zig_lib_path| blk: {
         if (zig_builtin.target.os.tag == .wasi) {
-            std.log.warn("The 'zig_lib_path' config option is ignored on WASI in favor of preopens.", .{});
+            log.warn("The 'zig_lib_path' config option is ignored on WASI in favor of preopens.", .{});
             break :blk;
         }
         if (std.fs.openDirAbsolute(zig_lib_path, .{})) |zig_lib_dir| {
@@ -1409,7 +1409,7 @@ fn resolveConfiguration(
 
     if (config.global_cache_path) |global_cache_path| blk: {
         if (zig_builtin.target.os.tag == .wasi) {
-            std.log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
+            log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
             break :blk;
         }
         if (std.fs.cwd().makeOpenPath(global_cache_path, .{})) |global_cache_dir| {
