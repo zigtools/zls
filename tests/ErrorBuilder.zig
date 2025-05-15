@@ -211,6 +211,7 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
     var multiple_files = false;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
+        defer multiple_files = true;
 
         std.debug.assert(std.sort.isSorted(MsgItem, file.messages.items, file.source, MsgItem.lessThan));
 
@@ -234,7 +235,6 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 }
             },
         }
-        multiple_files = true;
 
         var it: MsgItemIterator = .{
             .source = file.source,
