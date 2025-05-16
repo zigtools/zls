@@ -353,6 +353,7 @@ pub const Scope = struct {
     };
 
     pub const OptionalIndex = enum(u32) {
+        root,
         none = std.math.maxInt(u32),
         _,
 

@@ -438,10 +438,10 @@ test "decl literal on generic type" {
         \\const init: @This() = undefined
         \\```
         \\```zig
-        \\(Box)
+        \\(Box(T))
         \\```
         \\
-        \\Go to [Box](file:///test.zig#L1)
+        \\Go to [Box](file:///test.zig#L1) | [T](file:///test.zig#L1)
     );
 }
 

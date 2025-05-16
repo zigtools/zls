@@ -129,9 +129,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .container => |scope_handle| {
-            const starting_depth = builder.analyser.bound_type_params.depth();
-            try builder.analyser.bound_type_params.push(builder.analyser.gpa, scope_handle.bound_params);
-            defer builder.analyser.bound_type_params.pop(starting_depth);
             var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
             try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
 
@@ -158,6 +155,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
         .error_union,
         .union_tag,
         .compile_error,
+        .generic,
         => {},
     }
 }
@@ -189,16 +187,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         doc_comments.appendAssumeCapacity(docs);
     }
 
-    const starting_depth = builder.analyser.bound_type_params.depth();
-    var pushed = false;
-    if (decl_handle.from) |from| {
-        if (from.bound_params.len > 0) {
-            try builder.analyser.bound_type_params.push(builder.analyser.gpa, from.bound_params);
-            pushed = true;
-        }
-    }
-    defer if (pushed) builder.analyser.bound_type_params.pop(starting_depth);
-    const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
+    const maybe_resolved_ty = try decl_handle.resolveTypeWithContainer(builder.analyser, options.parent_container_ty);
 
     if (maybe_resolved_ty) |resolve_ty| {
         if (try resolve_ty.docComments(builder.arena)) |docs| {
@@ -420,7 +409,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_type.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_type.fmt(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
@@ -1325,12 +1314,9 @@ fn collectContainerFields(
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
     const scope_handle = switch (container.data) {
-        .container => |s| s,
+        .container => |info| info.scope_handle,
         else => return,
     };
-    const starting_depth = builder.analyser.bound_type_params.depth();
-    try builder.analyser.bound_type_params.push(builder.analyser.gpa, scope_handle.bound_params);
-    defer builder.analyser.bound_type_params.pop(starting_depth);
 
     const document_scope = try scope_handle.handle.getDocumentScope();
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
@@ -1394,11 +1380,13 @@ fn collectContainerFields(
             .simple_var_decl,
             .aligned_var_decl,
             => {
+                if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
-                if (!expected_ty.eql(container) and !expected_ty.eql(container.typeOf(builder.analyser))) continue;
+                if (expected_ty.data != .container) continue;
+                if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
                 continue;
             },
@@ -1408,12 +1396,14 @@ fn collectContainerFields(
             .fn_proto_simple,
             .fn_decl,
             => blk: {
+                if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
-                if (!expected_ty.eql(container) and !expected_ty.typeOf(builder.analyser).eql(container)) continue;
+                if (expected_ty.data != .container) continue;
+                if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
             },
             else => continue,
@@ -1635,6 +1625,8 @@ fn collectFieldAccessContainerNodes(
             continue;
         }
 
+        const info = node_type.data.function;
+
         if (dot_context.need_ret_type) { // => we need f()'s return type
             node_type = try analyser.resolveReturnType(node_type) orelse continue;
             if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
@@ -1652,11 +1644,12 @@ fn collectFieldAccessContainerNodes(
             const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
             const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
             if (!symbol_type.is_type_val) { // then => instance_of_T
-                if (Analyser.hasSelfParam(node_type)) break :blk 1;
+                const container_type = try Analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
+                if (Analyser.firstParamIs(node_type, container_type)) break :blk 1;
             }
             break :blk 0; // is `T`, no SelfParam
         };
-        const params = node_type.data.function.parameters;
+        const params = info.parameters;
         const param_index = dot_context.fn_arg_index + additional_index;
         if (param_index >= params.len) continue;
         const param_type = params[param_index].type orelse continue;
