@@ -429,7 +429,20 @@ pub fn firstParamIs(
         else => expected_type,
     };
 
-    return deref_type.eql(deref_expected_type);
+    // HACK: return true for generic method
+    //
+    //     fn Foo(T: type) type {
+    //         return struct {
+    //             fn bar(self: @This) void {}
+    //             fn baz(self: Foo(T)) void {}
+    //         };
+    //     }
+    //
+    var a = deref_type;
+    var b = deref_expected_type;
+    if (a.data == .container) a.data.container.bound_params = .empty;
+    if (b.data == .container) b.data.container.bound_params = .empty;
+    return a.eql(b);
 }
 
 pub fn getVariableSignature(

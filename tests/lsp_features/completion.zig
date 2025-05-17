@@ -2595,6 +2595,61 @@ test "declarations - meta type" {
     });
 }
 
+test "generic method - @This() parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        fn bar(self: @This()) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "T" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+    });
+}
+
+test "generic method - Self parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        const Self = @This();
+        \\        fn bar(self: Self) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "T" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+    });
+}
+
+test "generic method - recursive self parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        fn bar(self: Foo(T)) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "T" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+    });
+}
+
 test "usingnamespace" {
     try testCompletion(
         \\const S1 = struct {
