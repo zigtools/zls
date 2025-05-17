@@ -5042,16 +5042,7 @@ pub fn collectDeclarationsOfContainer(
                         const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
                         if (!firstParamIs(func_ty, .{
-                            .data = .{
-                                .container = .{
-                                    .scope_handle = .{
-                                        .handle = handle,
-                                        .scope = scope,
-                                    },
-                                    .is_generic = info.is_generic,
-                                    .bound_params = info.bound_params,
-                                },
-                            },
+                            .data = .{ .container = info },
                             .is_type_val = true,
                         })) continue;
                     }
