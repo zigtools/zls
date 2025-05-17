@@ -22,11 +22,7 @@ pub const std_options: std.Options = .{
 const Error = error{
     OutOfMemory,
     InvalidTestItem,
-
-    IdentifierNotFound,
-    ResolveTypeFailed,
-    WrongType,
-    WrongValue,
+    CheckFailed,
 };
 
 pub fn main() Error!void {
@@ -180,7 +176,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("failed to find identifier '{s}' here", file_path, annotation.loc, .err, .{
                 annotation.content,
             });
-            return error.IdentifierNotFound;
+            continue;
         };
 
         const expect_unknown = (if (test_item.expected_type) |expected_type| std.mem.eql(u8, expected_type, "unknown") else false) and
@@ -192,7 +188,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("failed to resolve type of '{s}'", file_path, annotation.loc, .err, .{
                 identifier,
             });
-            return error.ResolveTypeFailed;
+            continue;
         };
 
         if (expect_unknown) {
@@ -204,7 +200,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("expected unknown but got `{s}`", file_path, identifier_loc, .err, .{
                 actual_type,
             });
-            return error.WrongType;
+            continue;
         }
 
         if (test_item.expected_error) |_| {
@@ -222,7 +218,7 @@ pub fn main() Error!void {
                     expected_type,
                     actual_type,
                 });
-                return error.WrongType;
+                continue;
             }
         }
 
@@ -231,7 +227,7 @@ pub fn main() Error!void {
                 try error_builder.msgAtLoc("unsupported value check `{s}`", file_path, identifier_loc, .err, .{
                     expected_value,
                 });
-                return error.WrongValue;
+                continue;
             }
 
             const actual_value = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeVal(&analyser, .{
@@ -244,9 +240,13 @@ pub fn main() Error!void {
                     expected_value,
                     actual_value,
                 });
-                return error.WrongValue;
+                continue;
             }
         }
+    }
+
+    if (error_builder.hasMessages()) {
+        return error.CheckFailed;
     }
 }
 
