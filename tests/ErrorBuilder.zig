@@ -564,142 +564,142 @@ test "ErrorBuilder - file name visibility" {
     defer eb.deinit();
 
     try eb.addFile("basic.zig",
+        \\// comment
         \\const alpha: bool = true;
-        \\//    ^^^^^ (bool)()
+        \\// comment
         \\const beta: bool = false;
-        \\//    ^^^^ (bool)()
+        \\// comment
         \\const gamma: type = bool;
-        \\//    ^^^^^ (type)(bool)
     );
 
     try eb.addFile("array.zig",
+        \\// comment
         \\const array_slice_open_runtime = some_array[runtime_index..];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_0_2 = some_array[0..2];
-        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_2_sentinel = some_array[0..2 :0];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_5 = some_array[0..5];
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
         \\const array_slice_3_2 = some_array[3..2];
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
         \\const array_slice_0_runtime = some_array[0..runtime_index];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_init = [length]u8{};
-        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\// comment
         \\const array_init_inferred_len_0 = [_]u8{};
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([0]u8)()
+        \\// comment
         \\const array_init_inferred_len_3 = [_]u8{ 1, 2, 3 };
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([3]u8)()
     );
 
     try eb.addFile("sentinel_value.zig",
+        \\// comment
         \\const hw = "Hello, World!";
-        \\//    ^^ (*const [13:0]u8)(
+        \\// comment
         \\const h = hw[0..5];
-        \\//    ^ (unknown)()
+        \\// comment
         \\const w = hw[7..];
-        \\//    ^ (unknown)()
     );
 
-    try eb.msgAtLoc("this should be `*const [2:0]u8`", "array.zig", .{ .start = 195, .end = 219 }, .err, .{});
-    try eb.msgAtLoc("this should be `[:0]const u8`", "array.zig", .{ .start = 562, .end = 587 }, .err, .{});
+    try eb.msgAtLoc("this should be `*const [2:0]u8`", "array.zig", .{ .start = 143, .end = 143 + 24 }, .err, .{});
+    try eb.msgAtLoc("this should be `[:0]const u8`", "array.zig", .{ .start = 385, .end = 385 + 25 }, .err, .{});
 
-    try eb.msgAtLoc("this should be `*const [5]u8`", "sentinel_value.zig", .{ .start = 62, .end = 63 }, .err, .{});
-    try eb.msgAtLoc("this should be `*const [6:0]u8`", "sentinel_value.zig", .{ .start = 102, .end = 103 }, .err, .{});
+    try eb.msgAtLoc("this should be `*const [5]u8`", "sentinel_value.zig", .{ .start = 56, .end = 57 }, .err, .{});
+    try eb.msgAtLoc("this should be `*const [6:0]u8`", "sentinel_value.zig", .{ .start = 87, .end = 88 }, .err, .{});
 
     eb.file_name_visibility = .multi_file;
     try std.testing.expectFmt(
         \\array.zig:
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_0_2 = some_array[0..2];
-        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_2_sentinel = some_array[0..2 :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_5 = some_array[0..5];
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
         \\...
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
         \\const array_slice_0_runtime = some_array[0..runtime_index];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_init = [length]u8{};
-        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\// comment
         \\
         \\sentinel_value.zig:
+        \\// comment
         \\const hw = "Hello, World!";
-        \\//    ^^ (*const [13:0]u8)(
+        \\// comment
         \\const h = hw[0..5];
         \\      ^ error: this should be `*const [5]u8`
-        \\//    ^ (unknown)()
+        \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-        \\//    ^ (unknown)()
     , "{}", .{eb});
 
     eb.file_name_visibility = .always;
     try std.testing.expectFmt(
-        \\array.zig:5:7:
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\array.zig:6:7:
+        \\// comment
         \\const array_slice_0_2 = some_array[0..2];
-        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_2_sentinel = some_array[0..2 :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_5 = some_array[0..5];
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
         \\
-        \\array.zig:13:7:
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\array.zig:14:7:
+        \\// comment
         \\const array_slice_0_runtime = some_array[0..runtime_index];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_init = [length]u8{};
-        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\// comment
         \\
-        \\sentinel_value.zig:3:7:
+        \\sentinel_value.zig:4:7:
+        \\// comment
         \\const hw = "Hello, World!";
-        \\//    ^^ (*const [13:0]u8)(
+        \\// comment
         \\const h = hw[0..5];
         \\      ^ error: this should be `*const [5]u8`
-        \\//    ^ (unknown)()
+        \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-        \\//    ^ (unknown)()
     , "{}", .{eb});
 
     eb.file_name_visibility = .never;
     try std.testing.expectFmt(
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_0_2 = some_array[0..2];
-        \\//    ^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_2_sentinel = some_array[0..2 :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `*const [2:0]u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+        \\// comment
         \\const array_slice_0_5 = some_array[0..5];
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
-        \\//    ^^^^^^^^^^^^^^^ (*const [?]u8)()
+        \\// comment
+        \\// comment
         \\const array_slice_0_runtime = some_array[0..runtime_index];
-        \\//    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_slice_with_sentinel = some_array[0..runtime_index :0];
         \\      ^^^^^^^^^^^^^^^^^^^^^^^^^ error: this should be `[:0]const u8`
-        \\//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+        \\// comment
         \\const array_init = [length]u8{};
-        \\//    ^^^^^^^^^^ ([3]u8)()
+        \\// comment
+        \\// comment
         \\const hw = "Hello, World!";
-        \\//    ^^ (*const [13:0]u8)(
+        \\// comment
         \\const h = hw[0..5];
         \\      ^ error: this should be `*const [5]u8`
-        \\//    ^ (unknown)()
+        \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-        \\//    ^ (unknown)()
     , "{}", .{eb});
 }
