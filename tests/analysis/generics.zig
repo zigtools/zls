@@ -83,3 +83,27 @@ fn taggedUnion(comptime T: type, in: union(enum) { a: T, b: T }) void {
         },
     }
 }
+
+fn Option(comptime T: type) type {
+    return struct {
+        item: ?T,
+        const none: @This() = undefined;
+        const alias = none;
+        const default = init();
+        fn init() @This() {}
+    };
+}
+
+const option_none: Option(u8) = .none;
+//                              ^^^^^ (Option(u8))()
+
+const option_alias: Option(u8) = .alias;
+//                               ^^^^^^ (Option(u8))()
+
+// TODO this should be `Option(u8)`
+const option_default: Option(u8) = .default;
+//                                 ^^^^^^^^ (Option(T))()
+
+// TODO this should be `fn () Option(u8)`
+const option_init: Option(u8) = .init();
+//                              ^^^^^ (fn () Option(T))()
