@@ -274,6 +274,11 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 .start => {},
                 .no_intersection => {
                     try writer.writeAll(file.source[last_line_end..last_line_end_with_unified]);
+                    switch (builder.file_name_visibility) {
+                        .never => try writer.writeByte('\n'),
+                        .multi_file => try writer.writeAll("\n...\n"),
+                        .always => try writer.writeAll("\n\n"),
+                    }
                 },
                 .intersection => { // (we can merge)
                     try writer.writeAll(file.source[last_line_end..line_loc.end]);
@@ -284,24 +289,9 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 .start,
                 .no_intersection,
                 => {
-                    switch (builder.file_name_visibility) {
-                        .never => {
-                            if (intersection_state == .no_intersection) {
-                                try writer.writeByte('\n');
-                            }
-                        },
-                        .multi_file => {
-                            if (intersection_state == .no_intersection) {
-                                try writer.writeAll("\n...\n");
-                            }
-                        },
-                        .always => {
-                            if (intersection_state == .no_intersection) {
-                                try writer.writeAll("\n\n");
-                            }
-                            const pos = offsets.indexToPosition(file.source, some_line_source_index, .@"utf-16");
-                            try writer.print("{s}:{}:{}:\n", .{ file_name, pos.line + 1, pos.character + 1 });
-                        },
+                    if (builder.file_name_visibility == .always) {
+                        const pos = offsets.indexToPosition(file.source, some_line_source_index, .@"utf-16");
+                        try writer.print("{s}:{}:{}:\n", .{ file_name, pos.line + 1, pos.character + 1 });
                     }
                     try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
                 },
