@@ -1413,8 +1413,8 @@ test "enum" {
         \\};
         \\const foo: E = .<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .EnumMember },
-        .{ .label = "beta", .kind = .EnumMember, .detail = "beta = 42" },
+        .{ .label = "alpha", .kind = .EnumMember, .detail = "E" },
+        .{ .label = "beta", .kind = .EnumMember, .detail = "E = 42" },
     });
     try testCompletion(
         \\const E = enum {
@@ -2650,6 +2650,20 @@ test "generic method - recursive self parameter" {
     });
 }
 
+test "function taking a generic struct arg" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\    };
+        \\}
+        \\fn foo(_: Foo(u8)) void {}
+        \\const bar = foo(.{.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+    });
+}
+
 test "usingnamespace" {
     try testCompletion(
         \\const S1 = struct {
@@ -2940,7 +2954,7 @@ test "builtin fns taking an enum arg" {
         .{ .label = "null", .kind = .Field, .detail = "void" },
         .{ .label = "optional", .kind = .Field, .detail = "Optional" },
         .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
-        .{ .label = "error_set", .kind = .Field, .detail = "ErrorSet" },
+        .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
         .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
         .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
         .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },

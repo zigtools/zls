@@ -1313,11 +1313,12 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
-    const scope_handle = switch (container.data) {
-        .container => |info| info.scope_handle,
+    const info = switch (container.data) {
+        .container => |info| info,
         else => return,
     };
 
+    const scope_handle = info.scope_handle;
     const document_scope = try scope_handle.handle.getDocumentScope();
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
 
@@ -1363,7 +1364,15 @@ fn collectContainerFields(
                     break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
                 };
 
-                const detail = if (Analyser.getContainerFieldSignature(tree, field)) |signature| detail: {
+                const detail = if (try decl_handle.resolveTypeWithContainer(builder.analyser, container)) |ty| detail: {
+                    const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
+                    if (field.ast.value_expr.unwrap()) |value_expr| {
+                        const value_str = offsets.nodeToSlice(tree, value_expr);
+                        break :detail try std.fmt.allocPrint(builder.arena, "{} = {s}", .{ type_fmt, value_str });
+                    } else {
+                        break :detail try std.fmt.allocPrint(builder.arena, "{}", .{type_fmt});
+                    }
+                } else if (Analyser.getContainerFieldSignature(tree, field)) |signature| detail: {
                     if (std.mem.eql(u8, name, signature) and field.ast.tuple_like) break :detail null;
                     break :detail signature;
                 } else null;
