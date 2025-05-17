@@ -56,12 +56,6 @@ const one_minus_u8 = one_u32 - runtime_u8;
 const one_minus_slice = one_u32 - slice_u32;
 //    ^^^^^^^^^^^^^^^ (unknown)()
 
-const many_minus_slice = many_u32 - slice_u32;
-//    ^^^^^^^^^^^^^^^^ (unknown)()
-
-const c_minus_slice = c_u32 - slice_u32;
-//    ^^^^^^^^^^^^^ (unknown)()
-
 //
 // many item pointer [*]T
 //
@@ -112,6 +106,9 @@ const many_plus_i8 = many_u32 + runtime_i8;
 // TODO this should be `unknown`
 const many_minus_i8 = many_u32 - runtime_i8;
 //    ^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_minus_slice = many_u32 - slice_u32;
+//    ^^^^^^^^^^^^^^^^ (unknown)()
 
 //
 // slice []T
@@ -210,6 +207,9 @@ const c_plus_i8 = c_u32 + runtime_i8;
 // TODO this should be `unknown`
 const c_minus_i8 = c_u32 - runtime_i8;
 //    ^^^^^^^^^^ ([*c]const u32)()
+
+const c_minus_slice = c_u32 - slice_u32;
+//    ^^^^^^^^^^^^^ (unknown)()
 
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
