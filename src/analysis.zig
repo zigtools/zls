@@ -1550,6 +1550,17 @@ fn resolveStringLiteral(analyser: *Analyser, node_param: NodeWithHandle) !?[]con
     return field_name[1 .. field_name.len - 1];
 }
 
+fn resolveErrorSetIPIndex(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?InternPool.Index {
+    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
+    if (!ty.is_type_val) return null;
+    const ip_index = switch (ty.data) {
+        .ip_index => |payload| payload.index orelse return null,
+        else => return null,
+    };
+    if (analyser.ip.zigTypeTag(ip_index) != .error_set) return null;
+    return ip_index;
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -1921,20 +1932,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
         .merge_error_sets => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
-            if (!lhs_ty.is_type_val) return null;
-            if (!rhs_ty.is_type_val) return null;
-            const lhs_index = switch (lhs_ty.data) {
-                .ip_index => |payload| payload.index orelse return null,
-                else => return null,
-            };
-            const rhs_index = switch (rhs_ty.data) {
-                .ip_index => |payload| payload.index orelse return null,
-                else => return null,
-            };
-            if (analyser.ip.zigTypeTag(lhs_index) != .error_set) return null;
-            if (analyser.ip.zigTypeTag(rhs_index) != .error_set) return null;
+            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse return null;
+            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse return null;
             const ip_index = try analyser.ip.errorSetMerge(analyser.gpa, lhs_index, rhs_index);
             return Type.fromIP(analyser, .type_type, ip_index);
         },
@@ -2650,8 +2649,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
             const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
             return Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty);
         },
@@ -2659,8 +2658,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .add => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
             const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
             return switch (lhs_ty.data) {
                 .pointer => |lhs_info| switch (lhs_info.size) {
@@ -2674,8 +2673,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .sub => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
             const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
             return switch (lhs_ty.data) {
                 .pointer => |lhs_info| switch (rhs_ty.data) {
