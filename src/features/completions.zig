@@ -1440,6 +1440,8 @@ fn collectContainerNodes(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const gpa = builder.analyser.gpa;
+
     var types_with_handles: std.ArrayListUnmanaged(Analyser.Type) = .empty;
     const token_index = switch (dot_context.type_info) {
         .identifier_token_index => |token| token,
@@ -1452,10 +1454,32 @@ fn collectContainerNodes(
     };
     const source_index = offsets.tokenToLoc(handle.tree, token_index).end;
     const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
+    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, handle.tree, source_index);
+    defer gpa.free(nodes);
+
+    if (nodes.len > 1) {
+        switch (handle.tree.nodeTag(nodes[1])) {
+            .global_var_decl,
+            .local_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            => {
+                const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
+                if (nodes[0].toOptional() == var_decl.ast.type_node) {
+                    if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+                        try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
+                        return types_with_handles.toOwnedSlice(builder.arena);
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
-        .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, &types_with_handles),
+        .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, nodes, &types_with_handles),
         .builtin => |loc| try collectBuiltinContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .keyword => |tag| try collectKeywordFnContainerNodes(builder, tag, dot_context, &types_with_handles),
         else => {},
@@ -1686,13 +1710,13 @@ fn collectEnumLiteralContainerNodes(
     builder: *Builder,
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
+    nodes: []const Ast.Node.Index,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
     const alleged_field_name = handle.tree.source[loc.start + 1 .. loc.end];
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
-    const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, loc.start);
     const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(builder, handle, el_dot_context);
     for (containers) |container| {

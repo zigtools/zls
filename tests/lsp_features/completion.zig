@@ -402,8 +402,8 @@ test "nested generic function" {
         \\
         \\var list: ArrayList(u8) = .<cursor>;
     , &.{
-        .{ .label = "items", .kind = .Field, .detail = "[]T" },
-        .{ .label = "empty", .kind = .Constant, .detail = "ArrayListAligned(T)" }, // detail should be `ArrayListAligned(u8)`
+        .{ .label = "items", .kind = .Field, .detail = "[]u8" },
+        .{ .label = "empty", .kind = .Constant, .detail = "ArrayListAligned(u8)" },
     });
 }
 

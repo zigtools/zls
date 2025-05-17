@@ -1572,9 +1572,42 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usi
     };
 
     var context: Context = .{ .index = index, .allocator = allocator };
+    defer context.nodes.deinit(allocator);
     try iterateChildren(tree, .root, &context, error{OutOfMemory}, Context.append);
     try context.nodes.append(allocator, .root);
     return try context.nodes.toOwnedSlice(allocator);
+}
+
+/// returns a list of nodes (including parse errors) that overlap with the given source code index.
+/// sorted from smallest to largest.
+/// caller owns the returned memory.
+pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, tree: Ast, source_index: usize) error{OutOfMemory}![]Ast.Node.Index {
+    const NodeLoc = struct {
+        node: Ast.Node.Index,
+        loc: offsets.Loc,
+
+        fn lessThan(_: void, lhs: @This(), rhs: @This()) bool {
+            return rhs.loc.start < lhs.loc.start and lhs.loc.end < rhs.loc.end;
+        }
+    };
+
+    var node_locs: std.ArrayListUnmanaged(NodeLoc) = .empty;
+    defer node_locs.deinit(allocator);
+    for (0..tree.nodes.len) |i| {
+        const node: Ast.Node.Index = @enumFromInt(i);
+        const loc = offsets.nodeToLoc(tree, node);
+        if (loc.start <= source_index and source_index <= loc.end) {
+            try node_locs.append(allocator, .{ .node = node, .loc = loc });
+        }
+    }
+
+    std.mem.sort(NodeLoc, node_locs.items, {}, NodeLoc.lessThan);
+
+    const nodes = try allocator.alloc(Ast.Node.Index, node_locs.items.len);
+    for (node_locs.items, nodes) |node_loc, *node| {
+        node.* = node_loc.node;
+    }
+    return nodes;
 }
 
 /// returns a list of nodes that together encloses the given source code range
