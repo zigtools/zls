@@ -45,7 +45,6 @@ const mod_u8_u16 = runtime_u8 % runtime_u16;
 const mod_u8_i16 = runtime_u8 % runtime_i16;
 //    ^^^^^^^^^^ (i16)()
 
-// TODO this should be `i16`
 const shl_i16_u4 = runtime_i16 << runtime_u4;
 //    ^^^^^^^^^^ (i16)()
 
