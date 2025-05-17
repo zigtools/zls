@@ -1694,7 +1694,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             const func_info = func_ty.data.function;
             const return_type = func_info.return_type.*;
-            if (!try return_type.isGenericType()) {
+            if (!return_type.isGenericType()) {
                 return return_type;
             }
 
@@ -1989,26 +1989,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             // TODO: use map? idk
-            const document_scope = try handle.getDocumentScope();
-
-            return .{
-                .data = .{
-                    .container = .{
-                        .scope_handle = .{
-                            .handle = handle,
-                            .scope = for (0..document_scope.scopes.len) |scope_index| {
-                                switch (document_scope.getScopeTag(@enumFromInt(scope_index))) {
-                                    .container, .container_usingnamespace => if (document_scope.getScopeAstNode(@enumFromInt(scope_index)).? == node) {
-                                        break @enumFromInt(scope_index);
-                                    },
-                                    else => {},
-                                }
-                            } else unreachable, // is this safe? idk
-                        },
-                    },
-                },
-                .is_type_val = true,
-            };
+            return try innermostContainer(handle, offsets.nodeToLoc(tree, node).start);
         },
         .builtin_call,
         .builtin_call_comma,
@@ -2141,14 +2122,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
 
                 return .{
-                    .data = .{
-                        .container = .{
-                            .scope_handle = .{
-                                .handle = new_handle,
-                                .scope = .root,
-                            },
-                        },
-                    },
+                    .data = .{ .container = .root(new_handle) },
                     .is_type_val = true,
                 };
             }
@@ -2159,14 +2133,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
 
                 return .{
-                    .data = .{
-                        .container = .{
-                            .scope_handle = .{
-                                .handle = new_handle,
-                                .scope = .root,
-                            },
-                        },
-                    },
+                    .data = .{ .container = .root(new_handle) },
                     .is_type_val = true,
                 };
             }
@@ -2932,7 +2899,16 @@ pub const Type = struct {
 
         pub const Container = struct {
             scope_handle: ScopeWithHandle,
-            bound_params: TokenToTypeMap = .empty,
+            is_generic: bool,
+            bound_params: TokenToTypeMap,
+
+            pub fn root(handle: *DocumentStore.Handle) Container {
+                return .{
+                    .scope_handle = .{ .handle = handle, .scope = .root },
+                    .is_generic = false,
+                    .bound_params = .empty,
+                };
+            }
         };
 
         pub const Function = struct {
@@ -2967,14 +2943,14 @@ pub const Type = struct {
             descriptor: []const u8,
         };
 
-        fn isGeneric(data: Data) error{OutOfMemory}!bool {
+        fn isGeneric(data: Data) bool {
             return switch (data) {
                 .generic => true,
                 .pointer => |info| info.elem_ty.data.isGeneric(),
                 .array => |info| info.elem_ty.data.isGeneric(),
                 .tuple => |types| {
                     for (types) |t| {
-                        if (try t.data.isGeneric()) {
+                        if (t.data.isGeneric()) {
                             return true;
                         }
                     }
@@ -2982,34 +2958,28 @@ pub const Type = struct {
                 },
                 .optional => |t| t.data.isGeneric(),
                 .error_union => |info| {
-                    if (try info.payload.data.isGeneric()) {
+                    if (info.payload.data.isGeneric()) {
                         return true;
                     }
                     if (info.error_set) |t| {
-                        if (try t.data.isGeneric()) { // is this possible?
+                        if (t.data.isGeneric()) { // is this possible?
                             return true;
                         }
                     }
                     return false;
                 },
                 .union_tag => |t| t.data.isGeneric(),
-                .container => |info| {
-                    const handle = info.scope_handle.handle;
-                    const doc_scope = try handle.getDocumentScope();
-                    const scope_index = info.scope_handle.scope;
-                    const scope_loc = doc_scope.scopes.items(.loc)[@intFromEnum(scope_index)];
-                    return innermostFunctionScopeAtIndex(doc_scope, scope_loc.start) != .none;
-                },
+                .container => |info| info.is_generic,
                 .function => |info| {
-                    if (try info.container_type.data.isGeneric()) {
+                    if (info.container_type.data.isGeneric()) {
                         return true;
                     }
-                    if (try info.return_type.data.isGeneric()) {
+                    if (info.return_type.data.isGeneric()) {
                         return true;
                     }
                     for (info.parameters) |param| {
                         if (param.type) |t| {
-                            if (try t.data.isGeneric()) {
+                            if (t.data.isGeneric()) {
                                 return true;
                             }
                         }
@@ -3018,7 +2988,7 @@ pub const Type = struct {
                 },
                 .either => |entries| {
                     for (entries) |entry| {
-                        if (try entry.type_data.isGeneric()) {
+                        if (entry.type_data.isGeneric()) {
                             return true;
                         }
                     }
@@ -3032,7 +3002,7 @@ pub const Type = struct {
         }
 
         fn resolveGeneric(data: Data, analyser: *Analyser, bound_params: TokenToTypeMap) error{OutOfMemory}!?Data {
-            if (!try data.isGeneric()) {
+            if (!data.isGeneric()) {
                 return data;
             }
             switch (data) {
@@ -3083,6 +3053,8 @@ pub const Type = struct {
                 },
                 .container => |info| return .{
                     .container = .{
+                        .scope_handle = info.scope_handle,
+                        .is_generic = info.is_generic,
                         .bound_params = blk: {
                             var merged_params = try bound_params.clone(analyser.arena);
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
@@ -3090,7 +3062,6 @@ pub const Type = struct {
                             }
                             break :blk merged_params;
                         },
-                        .scope_handle = info.scope_handle,
                     },
                 },
                 .function => |info| return .{
@@ -3481,7 +3452,7 @@ pub const Type = struct {
         }
     }
 
-    pub fn isGenericType(self: Type) !bool {
+    pub fn isGenericType(self: Type) bool {
         return self.data.isGeneric();
     }
 
@@ -3963,10 +3934,7 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
 
     const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
     const builtin_root_struct_type: Type = .{
-        .data = .{ .container = .{ .scope_handle = .{
-            .handle = builtin_handle,
-            .scope = .root,
-        } } },
+        .data = .{ .container = .root(builtin_handle) },
         .is_type_val = true,
     };
 
@@ -4219,14 +4187,7 @@ pub fn getFieldAccessType(
                     const uri = try analyser.store.uriFromImportStr(analyser.arena, handle, import_str) orelse return null;
                     const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
                     current_type = .{
-                        .data = .{
-                            .container = .{
-                                .scope_handle = .{
-                                    .handle = node_handle,
-                                    .scope = .root,
-                                },
-                            },
-                        },
+                        .data = .{ .container = .root(node_handle) },
                         .is_type_val = true,
                     };
                     _ = tokenizer.next(); // eat the .r_paren
@@ -5087,6 +5048,8 @@ pub fn collectDeclarationsOfContainer(
                                         .handle = handle,
                                         .scope = scope,
                                     },
+                                    .is_generic = info.is_generic,
+                                    .bound_params = info.bound_params,
                                 },
                             },
                             .is_type_val = true,
@@ -5286,23 +5249,18 @@ pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) A
 
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
     const document_scope = try handle.getDocumentScope();
-    var current: DocumentScope.Scope.Index = .root;
     if (document_scope.scopes.len == 1) return .{
-        .data = .{
-            .container = .{
-                .scope_handle = .{
-                    .handle = handle,
-                    .scope = .root,
-                },
-            },
-        },
+        .data = .{ .container = .root(handle) },
         .is_type_val = true,
     };
 
+    var current: DocumentScope.Scope.Index = .root;
+    var is_generic = false;
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
             .container, .container_usingnamespace => current = scope_index,
+            .function => is_generic = true,
             else => {},
         }
     }
@@ -5313,6 +5271,8 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) er
                     .handle = handle,
                     .scope = current,
                 },
+                .is_generic = is_generic,
+                .bound_params = .empty,
             },
         },
         .is_type_val = true,
