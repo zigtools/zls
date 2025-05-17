@@ -8,6 +8,7 @@ const offsets = zls.offsets;
 const ErrorBuilder = @This();
 
 allocator: std.mem.Allocator,
+encoding: offsets.Encoding = .@"utf-16",
 files: std.StringArrayHashMapUnmanaged(File) = .empty,
 message_count: usize = 0,
 /// similar to `git diff --unified`
@@ -291,7 +292,7 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 .no_intersection,
                 => {
                     if (builder.file_name_visibility == .always) {
-                        const pos = offsets.indexToPosition(file.source, some_line_source_index, .@"utf-16");
+                        const pos = offsets.indexToPosition(file.source, some_line_source_index, builder.encoding);
                         try writer.print("{s}:{}:{}:\n", .{ file_name, pos.line + 1, pos.character + 1 });
                     }
                     try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
