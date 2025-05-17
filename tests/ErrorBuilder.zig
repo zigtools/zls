@@ -208,21 +208,21 @@ fn appendMessage(
 
 fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
     const builder = context.builder;
-    var multiple_files = false;
+    var first = true;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
-        defer multiple_files = true;
+        defer first = false;
 
         std.debug.assert(std.sort.isSorted(MsgItem, file.messages.items, file.source, MsgItem.lessThan));
 
         switch (builder.file_name_visibility) {
             .never => {
-                if (multiple_files) {
+                if (!first) {
                     try writer.writeByte('\n');
                 }
             },
             .multi_file => {
-                if (multiple_files) {
+                if (!first) {
                     try writer.writeAll("\n\n");
                 }
                 if (builder.files.count() > 1) {
@@ -230,7 +230,7 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 }
             },
             .always => {
-                if (multiple_files) {
+                if (!first) {
                     try writer.writeAll("\n\n");
                 }
             },
