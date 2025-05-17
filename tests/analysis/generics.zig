@@ -107,3 +107,79 @@ const option_default: Option(u8) = .default;
 // TODO this should be `fn () Option(u8)`
 const option_init: Option(u8) = .init();
 //                              ^^^^^ (fn () Option(T))()
+
+fn GenericUnion(T: type) type {
+    return union {
+        field: T,
+        const decl: T = undefined;
+    };
+}
+
+const generic_union_decl = GenericUnion(u8).decl;
+//    ^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_union: GenericUnion(u8) = .{ .field = 1 };
+//    ^^^^^^^^^^^^^ (GenericUnion(u8))()
+
+const generic_union_field = generic_union.field;
+//    ^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_union_tag = GenericUnion(u8).field;
+//    ^^^^^^^^^^^^^^^^^ (unknown)()
+
+fn GenericTaggedUnion(T: type) type {
+    return union(enum) {
+        field: T,
+        const decl: T = undefined;
+    };
+}
+
+const generic_tagged_union_decl = GenericTaggedUnion(u8).decl;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_tagged_union: GenericTaggedUnion(u8) = .{ .field = 1 };
+//    ^^^^^^^^^^^^^^^^^^^^ (GenericTaggedUnion(u8))()
+
+const generic_tagged_union_field = generic_tagged_union.field;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_tagged_union_tag = GenericTaggedUnion(u8).field;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (@typeInfo(GenericTaggedUnion(u8)).@"union".tag_type.?)()
+
+fn GenericEnum(T: type) type {
+    return enum {
+        field,
+        const decl: T = undefined;
+    };
+}
+
+const generic_enum_decl = GenericEnum(u8).decl;
+//    ^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_enum: GenericEnum(u8) = .field;
+//    ^^^^^^^^^^^^ (GenericEnum(u8))()
+
+const generic_enum_field = generic_enum.field;
+//    ^^^^^^^^^^^^^^^^^^ (unknown)()
+
+const generic_enum_tag = GenericEnum(u8).field;
+//    ^^^^^^^^^^^^^^^^ (GenericEnum(u8))()
+
+fn GenericStruct(T: type) type {
+    return struct {
+        field: T,
+        const decl: T = undefined;
+    };
+}
+
+const generic_struct_decl = GenericStruct(u8).decl;
+//    ^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_struct: GenericStruct(u8) = .{ .field = 1 };
+//    ^^^^^^^^^^^^^^ (GenericStruct(u8))()
+
+const generic_struct_field = generic_struct.field;
+//    ^^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const generic_struct_tag = GenericStruct(u8).field;
+//    ^^^^^^^^^^^^^^^^^^ (unknown)()

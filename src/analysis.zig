@@ -834,7 +834,8 @@ pub fn resolveFieldAccess(analyser: *Analyser, lhs: Type, field_name: []const u8
 pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, field_name: []const u8) !?Binding {
     const lhs = lhs_binding.type;
 
-    if (try analyser.resolveUnionFieldBinding(lhs, field_name)) |b| return b;
+    if (try analyser.resolveUnionTagAccess(lhs, field_name)) |t|
+        return .{ .type = t, .is_const = true };
 
     // If we are accessing a pointer type, remove one pointerness level :)
     const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
@@ -995,7 +996,7 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
     };
 }
 
-fn resolveUnionFieldBinding(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Binding {
+fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1020,24 +1021,14 @@ fn resolveUnionFieldBinding(analyser: *Analyser, ty: Type, symbol: []const u8) e
         return null;
 
     if (child.decl != .ast_node or !child.handle.tree.nodeTag(child.decl.ast_node).isContainerField())
-        return .{
-            .type = try child.resolveType(analyser) orelse return null,
-            .is_const = child.isConst(),
-        };
+        return null;
 
-    if (container_decl.ast.enum_token != null) {
-        return .{
-            .type = .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = false },
-            .is_const = true,
-        };
-    }
+    if (container_decl.ast.enum_token != null)
+        return .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = false };
 
     if (container_decl.ast.arg.unwrap()) |arg| {
         const tag_type = (try analyser.resolveTypeOfNode(.of(arg, handle))) orelse return null;
-        return .{
-            .type = tag_type.instanceTypeVal(analyser) orelse return null,
-            .is_const = true,
-        };
+        return tag_type.instanceTypeVal(analyser) orelse return null;
     }
 
     return null;
@@ -3773,7 +3764,7 @@ pub const Type = struct {
                 }
                 try writer.print("!{}", .{info.payload.fmtTypeVal(analyser, ctx.options)});
             },
-            .union_tag => |t| try writer.print("@typeInfo({}).Union.tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
+            .union_tag => |t| try writer.print("@typeInfo({}).@\"union\".tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
             .container => |info| {
                 const scope_handle = info.scope_handle;
                 const handle = scope_handle.handle;
