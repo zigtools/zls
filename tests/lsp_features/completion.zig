@@ -2668,7 +2668,7 @@ test "generic method - recursive self parameter" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u8" },
-        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" }, // detail should be `fn (self: Foo(u8)) void`
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
     });
 }
 

@@ -3152,7 +3152,8 @@ pub const Type = struct {
                         .bound_params = blk: {
                             var merged_params = try bound_params.clone(analyser.arena);
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                try merged_params.put(analyser.arena, k, v);
+                                const t = try analyser.resolveGenericType(v, bound_params) orelse v;
+                                try merged_params.put(analyser.arena, k, t);
                             }
                             break :blk merged_params;
                         },
