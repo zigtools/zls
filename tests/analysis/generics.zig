@@ -65,3 +65,21 @@ fn Point1(comptime T: type) type {
         }
     };
 }
+
+fn parameter(comptime T: type, in: T) void {
+    _ = in;
+    //  ^^ (T)()
+}
+
+fn taggedUnion(comptime T: type, in: union(enum) { a: T, b: T }) void {
+    switch (in) {
+        .a => |a| {
+            _ = a;
+            //  ^ (T)()
+        },
+        .b => |b| {
+            _ = b;
+            //  ^ (T)()
+        },
+    }
+}
