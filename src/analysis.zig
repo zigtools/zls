@@ -2695,7 +2695,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .shl,
         .shl_sat,
         .shr,
-        => {},
+        => {
+            const lhs, _ = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            return lhs_ty;
+        },
 
         .array_mult => {
             const elem_idx, const mult_idx = tree.nodeData(node).node_and_node;

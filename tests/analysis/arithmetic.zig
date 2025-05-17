@@ -47,21 +47,21 @@ const mod_u8_i16 = runtime_u8 % runtime_i16;
 
 // TODO this should be `i16`
 const shl_i16_u4 = runtime_i16 << runtime_u4;
-//    ^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^ (i16)()
 
+// TODO this should be `unknown`
 const shl_i16_u8 = runtime_i16 << runtime_u8;
-//    ^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^ (i16)()
 
-// TODO this should be `i16`
 const shl_sat_i16_u16 = runtime_i16 <<| runtime_u16;
-//    ^^^^^^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^^^^^^ (i16)()
 
-// TODO this should be `i16`
 const shr_i16_u4 = runtime_i16 >> runtime_u4;
-//    ^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^ (i16)()
 
+// TODO this should be `unknown`
 const shr_i16_u8 = runtime_i16 >> runtime_u8;
-//    ^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^ (i16)()
 
 const bit_and_u8_i16 = runtime_u8 & runtime_i16;
 //    ^^^^^^^^^^^^^^ (i16)()
