@@ -264,11 +264,12 @@ fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
                 start,
                 no_intersection,
                 intersection,
-            } = blk: {
-                if (last_line_end_with_unified == 0) break :blk .start;
-                if (last_line_end_with_unified + 1 < unified_loc.start) break :blk .no_intersection;
-                break :blk .intersection;
-            };
+            } = if (last_line_end_with_unified == 0)
+                .start
+            else if (last_line_end_with_unified + 1 < unified_loc.start)
+                .no_intersection
+            else
+                .intersection;
 
             switch (intersection_state) {
                 .start => {},
