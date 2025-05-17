@@ -330,6 +330,12 @@ fn functionTypeCompletion(
 
     const info = func_ty.data.function;
 
+    const bound_type_params: Analyser.TokenToTypeMap =
+        if (parent_container_ty) |ty| switch (ty.data) {
+            .container => |c| c.bound_params,
+            else => .empty,
+        } else .empty;
+
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
@@ -346,6 +352,7 @@ fn functionTypeCompletion(
             if (use_snippets and builder.server.config.enable_argument_placeholders) {
                 break :blk try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
                     .info = info,
+                    .bound_type_params = &bound_type_params,
                     .include_fn_keyword = false,
                     .include_name = true,
                     .override_name = func_name,
@@ -419,6 +426,7 @@ fn functionTypeCompletion(
 
     const details = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
         .info = info,
+        .bound_type_params = &bound_type_params,
         .include_fn_keyword = true,
         .include_name = false,
         .parameters = .{ .show = .{
@@ -675,12 +683,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
         const nodes = try ast.nodesOverlappingIndex(builder.arena, tree, loc.start);
         const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
         const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
-        const containers = try collectContainerNodes(
-            builder,
-            builder.orig_handle,
-            offsets.tokenToLoc(tree, dot_context.identifier_token_index).end,
-            dot_context,
-        );
+        const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
         for (containers) |container| {
             try collectContainerFields(builder, dot_context.likely, container, used_members_set);
         }
@@ -1074,7 +1077,10 @@ const EnumLiteralContext = struct {
         }
     };
     likely: Likely,
-    identifier_token_index: Ast.TokenIndex = 0,
+    type_info: union(enum) {
+        identifier_token_index: Ast.TokenIndex,
+        expr_node_index: Ast.Node.Index,
+    } = .{ .identifier_token_index = 0 },
     fn_arg_index: usize = 0,
     need_ret_type: bool = false,
 };
@@ -1098,16 +1104,16 @@ fn getEnumLiteralContext(
             token_index -= 1;
             dot_context.need_ret_type = tree.tokenTag(token_index) == .r_paren;
             dot_context.likely = .enum_assignment;
-            dot_context.identifier_token_index = token_index;
+            dot_context.type_info = .{ .identifier_token_index = token_index };
         },
         .keyword_return => {
-            dot_context.identifier_token_index = getReturnTypeLastToken(tree, nodes) orelse return null;
+            dot_context.type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null };
             dot_context.likely = .enum_return;
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;
             dot_context.likely = .enum_comparison;
-            dot_context.identifier_token_index = token_index;
+            dot_context.type_info = .{ .identifier_token_index = token_index };
         },
         .l_brace, .comma, .l_paren => {
             dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return null;
@@ -1174,8 +1180,12 @@ fn getSwitchOrStructInitContext(
                             }
                         }
                         if (tree.tokenTag(upper_index) == .keyword_return) { // `return .{.`
-                            upper_index = getReturnTypeLastToken(tree, nodes) orelse return null;
-                            break :find_identifier;
+                            return .{
+                                .likely = likely,
+                                .type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null },
+                                .fn_arg_index = fn_arg_index,
+                                .need_ret_type = need_ret_type,
+                            };
                         }
                         // We never return from this branch/condition to the `find_identifier: while ..` loop, so reset and reuse these
                         fn_arg_index = 0;
@@ -1288,22 +1298,19 @@ fn getSwitchOrStructInitContext(
 
     return .{
         .likely = likely,
-        .identifier_token_index = upper_index,
+        .type_info = .{ .identifier_token_index = upper_index },
         .fn_arg_index = fn_arg_index,
         .need_ret_type = need_ret_type,
     };
 }
 
-fn getReturnTypeLastToken(tree: Ast, nodes: []const Ast.Node.Index) ?Ast.TokenIndex {
-    const return_type = blk: {
-        var func_buf: [1]Ast.Node.Index = undefined;
-        for (nodes) |node| {
-            const func = tree.fullFnProto(&func_buf, node) orelse continue;
-            break :blk func.ast.return_type.unwrap() orelse return null;
-        }
-        return null;
-    };
-    return ast.lastToken(tree, return_type);
+fn getReturnTypeNode(tree: Ast, nodes: []const Ast.Node.Index) ?Ast.Node.Index {
+    var func_buf: [1]Ast.Node.Index = undefined;
+    for (nodes) |node| {
+        const func = tree.fullFnProto(&func_buf, node) orelse continue;
+        return func.ast.return_type.unwrap();
+    }
+    return null;
 }
 
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
@@ -1428,13 +1435,22 @@ fn collectContainerFields(
 fn collectContainerNodes(
     builder: *Builder,
     handle: *DocumentStore.Handle,
-    source_index: usize,
     dot_context: EnumLiteralContext,
 ) error{OutOfMemory}![]Analyser.Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var types_with_handles: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    const token_index = switch (dot_context.type_info) {
+        .identifier_token_index => |token| token,
+        .expr_node_index => |node| {
+            if (try builder.analyser.resolveTypeOfNode(.of(node, handle))) |ty| {
+                try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
+            }
+            return types_with_handles.toOwnedSlice(builder.arena);
+        },
+    };
+    const source_index = offsets.tokenToLoc(handle.tree, token_index).end;
     const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
@@ -1678,12 +1694,7 @@ fn collectEnumLiteralContainerNodes(
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
     const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, loc.start);
     const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
-    const containers = try collectContainerNodes(
-        builder,
-        handle,
-        offsets.tokenToLoc(handle.tree, el_dot_context.identifier_token_index).end,
-        el_dot_context,
-    );
+    const containers = try collectContainerNodes(builder, handle, el_dot_context);
     for (containers) |container| {
         const container_instance = container.instanceTypeVal(analyser) orelse container;
         const member_decl = try container_instance.lookupSymbol(analyser, alleged_field_name) orelse continue;

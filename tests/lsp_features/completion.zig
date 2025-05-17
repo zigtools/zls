@@ -2481,6 +2481,28 @@ test "return - decl literal" {
     });
 }
 
+test "return - generic decl literal" {
+    try testCompletion(
+        \\fn S(T: type) type {
+        \\    return struct {
+        \\        alpha: T,
+        \\        beta: []const u8,
+        \\
+        \\        const default: @This() = .{};
+        \\        fn init() @This() {}
+        \\    };
+        \\}
+        \\fn foo() S(u8) {
+        \\    return .<cursor>;
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u8" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S(u8)" },
+        .{ .label = "default", .kind = .Constant, .detail = "S(u8)" },
+    });
+}
+
 test "return - structinit" {
     try testCompletion(
         \\const S = struct {

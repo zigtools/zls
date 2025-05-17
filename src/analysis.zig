@@ -4569,7 +4569,7 @@ pub fn getPositionContext(
     return .empty;
 }
 
-const TokenToTypeMap = std.ArrayHashMapUnmanaged(TokenWithHandle, Type, TokenWithHandle.Context, true);
+pub const TokenToTypeMap = std.ArrayHashMapUnmanaged(TokenWithHandle, Type, TokenWithHandle.Context, true);
 
 pub const TokenWithHandle = struct {
     token: Ast.TokenIndex,
