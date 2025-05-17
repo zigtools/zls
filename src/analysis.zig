@@ -846,12 +846,9 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
             .is_const = lhs_binding.is_const,
         };
 
-    if (try left_type.lookupContainerDecl(analyser, field_name)) |container_decl| {
-        const info, const child = container_decl;
-        var resolved = try child.resolveTypeWithContainer(analyser, left_type) orelse return null;
-        resolved = try analyser.resolveGenericType(resolved, info.bound_params) orelse resolved;
+    if (try left_type.lookupSymbol(analyser, field_name)) |child| {
         return .{
-            .type = resolved,
+            .type = try child.resolveTypeWithContainer(analyser, left_type) orelse return null,
             .is_const = if (left_type.is_type_val) child.isConst() else lhs_binding.is_const,
         };
     }
@@ -3631,45 +3628,32 @@ pub const Type = struct {
         analyser: *Analyser,
         symbol: []const u8,
     ) error{OutOfMemory}!?DeclWithHandle {
-        _, const decl = try self.lookupContainerDecl(analyser, symbol) orelse return null;
-        return decl;
-    }
-
-    pub fn lookupContainerDecl(
-        self: Type,
-        analyser: *Analyser,
-        symbol: []const u8,
-    ) error{OutOfMemory}!?struct { Type.Data.Container, DeclWithHandle } {
-        const info = switch (self.data) {
-            .container => |info| info,
+        const scope_handle = switch (self.data) {
+            .container => |s| s,
             .either => |entries| {
                 // TODO: Return all options instead of first valid one
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = self.is_type_val };
-                    return try entry_ty.lookupContainerDecl(analyser, symbol) orelse continue;
+                    if (try entry_ty.lookupSymbol(analyser, symbol)) |decl| {
+                        return decl;
+                    }
                 }
                 return null;
             },
             else => return null,
         };
         if (self.is_type_val) {
-            if (try analyser.lookupSymbolContainer(info, symbol, .other)) |decl|
-                return .{ info, decl };
+            if (try analyser.lookupSymbolContainer(scope_handle, symbol, .other)) |decl|
+                return decl;
             if (self.isEnumType() or self.isTaggedUnion())
-                if (try analyser.lookupSymbolContainer(info, symbol, .field)) |decl|
-                    return .{ info, decl };
+                return analyser.lookupSymbolContainer(scope_handle, symbol, .field);
             return null;
         }
         if (self.isEnumType())
-            return if (try analyser.lookupSymbolContainer(info, symbol, .other)) |decl|
-                .{ info, decl }
-            else
-                null;
-        if (try analyser.lookupSymbolContainer(info, symbol, .field)) |decl|
-            return .{ info, decl };
-        if (try analyser.lookupSymbolContainer(info, symbol, .other)) |decl|
-            return .{ info, decl };
-        return null;
+            return analyser.lookupSymbolContainer(scope_handle, symbol, .other);
+        if (try analyser.lookupSymbolContainer(scope_handle, symbol, .field)) |decl|
+            return decl;
+        return analyser.lookupSymbolContainer(scope_handle, symbol, .other);
     }
 
     const Formatter = std.fmt.Formatter(format);
@@ -4823,7 +4807,7 @@ pub const DeclWithHandle = struct {
         defer tracy_zone.end();
 
         const tree = self.handle.tree;
-        const resolved_ty = switch (self.decl) {
+        var resolved_ty = switch (self.decl) {
             .ast_node => |node| try analyser.resolveTypeOfNodeInternal(.{
                 .node_handle = .of(node, self.handle),
                 .container_type = container_type,
@@ -4981,6 +4965,17 @@ pub const DeclWithHandle = struct {
             },
             .error_token => return null,
         } orelse return null;
+
+        if (container_type) |container_ty| {
+            switch (container_ty.data) {
+                .container => |info| {
+                    if (try analyser.resolveGenericType(resolved_ty, info.bound_params)) |ty| {
+                        resolved_ty = ty;
+                    }
+                },
+                else => {},
+            }
+        }
 
         if (!self.isCaptureByRef()) return resolved_ty;
 
@@ -5456,7 +5451,6 @@ pub fn lookupSymbolFieldInit(
     // Assume we are doing decl literals
     const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
     var resolved_type = try decl.resolveTypeWithContainer(analyser, container_type.typeOf(analyser)) orelse return null;
-    resolved_type = try analyser.resolveGenericType(resolved_type, container_scope.bound_params) orelse resolved_type;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
     resolved_type = resolved_type.resolveDeclLiteralResultType();
     if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;

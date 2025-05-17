@@ -2608,8 +2608,8 @@ test "generic method - @This() parameter" {
         \\const foo: Foo(u8) = .{};
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "field", .kind = .Field, .detail = "T" },
-        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
     });
 }
 
@@ -2627,8 +2627,8 @@ test "generic method - Self parameter" {
         \\const foo: Foo(u8) = .{};
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "field", .kind = .Field, .detail = "T" },
-        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
     });
 }
 
@@ -2645,8 +2645,8 @@ test "generic method - recursive self parameter" {
         \\const foo: Foo(u8) = .{};
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "field", .kind = .Field, .detail = "T" },
-        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" },
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(T)) void" }, // detail should be `fn (self: Foo(u8)) void`
     });
 }
 
