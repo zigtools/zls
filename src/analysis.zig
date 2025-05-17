@@ -1675,7 +1675,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var fallback_type: ?Type = null;
 
             if (var_decl.ast.type_node.unwrap()) |type_node| blk: {
-                const decl_type = try analyser.resolveTypeOfNodeInternal(.of(type_node, handle)) orelse break :blk;
+                const decl_type = try analyser.resolveTypeOfNodeInternal(.{
+                    .node_handle = .of(type_node, handle),
+                    .container_type = options.container_type,
+                }) orelse break :blk;
                 if (decl_type.isMetaType()) {
                     fallback_type = decl_type;
                     break :blk;
@@ -5461,7 +5464,7 @@ pub fn lookupSymbolFieldInit(
 
     // Assume we are doing decl literals
     const decl = try analyser.lookupSymbolContainer(container_scope, field_name, .other) orelse return null;
-    var resolved_type = try decl.resolveType(analyser) orelse return null;
+    var resolved_type = try decl.resolveTypeWithContainer(analyser, container_type.typeOf(analyser)) orelse return null;
     resolved_type = try analyser.resolveGenericType(resolved_type, container_scope.bound_params) orelse resolved_type;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
     resolved_type = resolved_type.resolveDeclLiteralResultType();
