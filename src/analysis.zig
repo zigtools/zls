@@ -2943,6 +2943,95 @@ pub const Type = struct {
             descriptor: []const u8,
         };
 
+        pub fn eql(a: Data, b: Data) bool {
+            if (@intFromEnum(a) != @intFromEnum(b)) return false;
+
+            switch (a) {
+                .pointer => |a_type| {
+                    const b_type = b.pointer;
+                    if (a_type.size != b_type.size) return false;
+                    if (a_type.sentinel != b_type.sentinel) return false;
+                    if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
+                },
+                .array => |a_type| {
+                    const b_type = b.array;
+                    if (std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
+                    if (a_type.sentinel != b_type.sentinel) return false;
+                    if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
+                },
+                .tuple => |a_slice| {
+                    const b_slice = b.tuple;
+                    if (a_slice.len != b_slice.len) return false;
+                    for (a_slice, b_slice) |a_type, b_type| {
+                        if (!a_type.eql(b_type)) return false;
+                    }
+                },
+                inline .optional,
+                .union_tag,
+                => |a_type, name| {
+                    const b_type = @field(b, @tagName(name));
+                    if (!a_type.eql(b_type.*)) return false;
+                },
+                .error_union => |info| {
+                    const b_info = b.error_union;
+                    if (!info.payload.eql(b_info.payload.*)) return false;
+                    if ((info.error_set == null) != (b_info.error_set == null)) return false;
+                    if (info.error_set) |a_error_set| {
+                        if (!a_error_set.eql(b_info.error_set.?.*)) return false;
+                    }
+                },
+                .container => |a_info| {
+                    const b_info = b.container;
+                    if (!a_info.scope_handle.eql(b_info.scope_handle)) return false;
+                    if (a_info.bound_params.count() != b_info.bound_params.count()) return false;
+                    for (a_info.bound_params.keys(), a_info.bound_params.values()) |a_token_handle, a_type| {
+                        const b_type = b_info.bound_params.get(a_token_handle) orelse return false;
+                        if (!a_type.eql(b_type)) return false;
+                    }
+                },
+                .function => |a_info| {
+                    const b_info = b.function;
+                    if (a_info.fn_token != b_info.fn_token) return false;
+                    if (!std.mem.eql(u8, a_info.handle.uri, b_info.handle.uri)) return false;
+                    if (!a_info.container_type.eql(b_info.container_type.*)) return false;
+                    if (a_info.parameters.len != b_info.parameters.len) return false;
+                    for (a_info.parameters, b_info.parameters) |a_param, b_param| {
+                        const a_param_type = a_param.type orelse {
+                            if (b_param.type) |_| return false;
+                            continue;
+                        };
+                        const b_param_type = b_param.type orelse return false;
+                        if (!a_param_type.eql(b_param_type)) return false;
+                    }
+                    if (!a_info.return_type.eql(b_info.return_type.*)) return false;
+                },
+                .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
+                .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
+                .generic => |a_token_handle| {
+                    const b_token_handle = b.generic;
+                    if (a_token_handle.token != b_token_handle.token) return false;
+                    return std.mem.eql(u8, a_token_handle.handle.uri, b_token_handle.handle.uri);
+                },
+                .either => |a_entries| {
+                    const b_entries = b.either;
+
+                    if (a_entries.len != b_entries.len) return false;
+                    for (a_entries, b_entries) |a_entry, b_entry| {
+                        if (!std.mem.eql(u8, a_entry.descriptor, b_entry.descriptor)) return false;
+                        if (!a_entry.type_data.eql(b_entry.type_data)) return false;
+                    }
+                },
+                .ip_index => |a_payload| {
+                    const b_payload = b.ip_index;
+
+                    if (a_payload.type != b_payload.type) return false;
+                    if (a_payload.index != b_payload.index) return false;
+                },
+            }
+
+            return true;
+        }
+
         fn isGeneric(data: Data) bool {
             return switch (data) {
                 .generic => true,
@@ -3013,6 +3102,7 @@ pub const Type = struct {
                 .generic => |token_handle| {
                     const other = bound_params.get(token_handle) orelse return data;
                     std.debug.assert(other.is_type_val);
+                    if (data.eql(other.data)) return data;
                     return other.data.resolveGeneric(analyser, bound_params);
                 },
                 .pointer => |info| return .{
@@ -3184,93 +3274,7 @@ pub const Type = struct {
 
     pub fn eql(a: Type, b: Type) bool {
         if (a.is_type_val != b.is_type_val) return false;
-        if (@intFromEnum(a.data) != @intFromEnum(b.data)) return false;
-
-        switch (a.data) {
-            .pointer => |a_type| {
-                const b_type = b.data.pointer;
-                if (a_type.size != b_type.size) return false;
-                if (a_type.sentinel != b_type.sentinel) return false;
-                if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
-            },
-            .array => |a_type| {
-                const b_type = b.data.array;
-                if (std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
-                if (a_type.sentinel != b_type.sentinel) return false;
-                if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
-            },
-            .tuple => |a_slice| {
-                const b_slice = b.data.tuple;
-                if (a_slice.len != b_slice.len) return false;
-                for (a_slice, b_slice) |a_type, b_type| {
-                    if (!a_type.eql(b_type)) return false;
-                }
-            },
-            inline .optional,
-            .union_tag,
-            => |a_type, name| {
-                const b_type = @field(b.data, @tagName(name));
-                if (!a_type.eql(b_type.*)) return false;
-            },
-            .error_union => |info| {
-                const b_info = b.data.error_union;
-                if (!info.payload.eql(b_info.payload.*)) return false;
-                if ((info.error_set == null) != (b_info.error_set == null)) return false;
-                if (info.error_set) |a_error_set| {
-                    if (!a_error_set.eql(b_info.error_set.?.*)) return false;
-                }
-            },
-            .container => |a_info| {
-                const b_info = b.data.container;
-                if (!a_info.scope_handle.eql(b_info.scope_handle)) return false;
-                if (a_info.bound_params.count() != b_info.bound_params.count()) return false;
-                for (a_info.bound_params.keys(), a_info.bound_params.values()) |a_token_handle, a_type| {
-                    const b_type = b_info.bound_params.get(a_token_handle) orelse return false;
-                    if (!a_type.eql(b_type)) return false;
-                }
-            },
-            .function => |a_info| {
-                const b_info = b.data.function;
-                if (a_info.fn_token != b_info.fn_token) return false;
-                if (!std.mem.eql(u8, a_info.handle.uri, b_info.handle.uri)) return false;
-                if (!a_info.container_type.eql(b_info.container_type.*)) return false;
-                if (a_info.parameters.len != b_info.parameters.len) return false;
-                for (a_info.parameters, b_info.parameters) |a_param, b_param| {
-                    const a_param_type = a_param.type orelse {
-                        if (b_param.type) |_| return false;
-                        continue;
-                    };
-                    const b_param_type = b_param.type orelse return false;
-                    if (!a_param_type.eql(b_param_type)) return false;
-                }
-                if (!a_info.return_type.eql(b_info.return_type.*)) return false;
-            },
-            .for_range => |a_node_handle| return a_node_handle.eql(b.data.for_range),
-            .compile_error => |a_node_handle| return a_node_handle.eql(b.data.compile_error),
-            .generic => |a_token_handle| {
-                const b_token_handle = b.data.generic;
-                if (a_token_handle.token != b_token_handle.token) return false;
-                return std.mem.eql(u8, a_token_handle.handle.uri, b_token_handle.handle.uri);
-            },
-            .either => |a_entries| {
-                const b_entries = b.data.either;
-
-                if (a_entries.len != b_entries.len) return false;
-                for (a_entries, b_entries) |a_entry, b_entry| {
-                    if (!std.mem.eql(u8, a_entry.descriptor, b_entry.descriptor)) return false;
-                    const a_entry_ty: Type = .{ .data = a_entry.type_data, .is_type_val = a.is_type_val };
-                    const b_entry_ty: Type = .{ .data = b_entry.type_data, .is_type_val = b.is_type_val };
-                    if (!a_entry_ty.eql(b_entry_ty)) return false;
-                }
-            },
-            .ip_index => |a_payload| {
-                const b_payload = b.data.ip_index;
-
-                if (a_payload.type != b_payload.type) return false;
-                if (a_payload.index != b_payload.index) return false;
-            },
-        }
-
+        if (!a.data.eql(b.data)) return false;
         return true;
     }
 
@@ -3890,14 +3894,16 @@ pub const Type = struct {
             .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             .generic => |token_handle| {
                 if (bound_type_params.get(token_handle)) |t| {
-                    try writer.print("{}", .{t.fmtTypeVal(ctx.analyser, ctx.options)});
-                } else {
-                    const token = token_handle.token;
-                    const handle = token_handle.handle;
-                    const str = handle.tree.tokenSlice(token);
-                    try writer.writeAll(str);
-                    if (referenced) |r| try r.put(arena, .of(str, handle, token), {});
+                    if (!ty.eql(t)) {
+                        try writer.print("{}", .{t.fmtTypeVal(ctx.analyser, ctx.options)});
+                        return;
+                    }
                 }
+                const token = token_handle.token;
+                const handle = token_handle.handle;
+                const str = handle.tree.tokenSlice(token);
+                try writer.writeAll(str);
+                if (referenced) |r| try r.put(arena, .of(str, handle, token), {});
             },
         }
     }

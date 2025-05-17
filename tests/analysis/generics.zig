@@ -54,3 +54,14 @@ comptime {
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(foo);
 }
+
+fn Point1(comptime T: type) type {
+    return struct {
+        x: T,
+        y: T,
+        fn normSquared(self: Point1(T)) T {
+            _ = self;
+            //  ^^^^ (Point1(T))()
+        }
+    };
+}
