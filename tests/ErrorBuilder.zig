@@ -604,8 +604,8 @@ test "ErrorBuilder - file name visibility" {
         \\const w = hw[7..];
     );
 
-    try eb.msgAtLoc("this should be `*const [2:0]u8`", "array.zig", .{ .start = 143, .end = 143 + 24 }, .err, .{});
-    try eb.msgAtLoc("this should be `[:0]const u8`", "array.zig", .{ .start = 385, .end = 385 + 25 }, .err, .{});
+    try eb.msgAtLoc("this should be `*const [2:0]u8`", "array.zig", .{ .start = 143, .end = 167 }, .err, .{});
+    try eb.msgAtLoc("this should be `[:0]const u8`", "array.zig", .{ .start = 385, .end = 410 }, .err, .{});
 
     try eb.msgAtLoc("this should be `*const [5]u8`", "sentinel_value.zig", .{ .start = 56, .end = 57 }, .err, .{});
     try eb.msgAtLoc("this should be `*const [6:0]u8`", "sentinel_value.zig", .{ .start = 87, .end = 88 }, .err, .{});
