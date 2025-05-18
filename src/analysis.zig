@@ -1559,6 +1559,17 @@ fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const 
     return field_name[1 .. field_name.len - 1];
 }
 
+fn resolveErrorSetIPIndex(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?InternPool.Index {
+    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
+    if (!ty.is_type_val) return null;
+    const ip_index = switch (ty.data) {
+        .ip_index => |payload| payload.index orelse return null,
+        else => return null,
+    };
+    if (analyser.ip.zigTypeTag(ip_index) != .error_set) return null;
+    return ip_index;
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -1910,20 +1921,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
         .merge_error_sets => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
-            if (!lhs_ty.is_type_val) return null;
-            if (!rhs_ty.is_type_val) return null;
-            const lhs_index = switch (lhs_ty.data) {
-                .ip_index => |payload| payload.index orelse return null,
-                else => return null,
-            };
-            const rhs_index = switch (rhs_ty.data) {
-                .ip_index => |payload| payload.index orelse return null,
-                else => return null,
-            };
-            if (analyser.ip.zigTypeTag(lhs_index) != .error_set) return null;
-            if (analyser.ip.zigTypeTag(rhs_index) != .error_set) return null;
+            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse return null;
+            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse return null;
             const ip_index = try analyser.ip.errorSetMerge(analyser.gpa, lhs_index, rhs_index);
             return Type.fromIP(analyser, .type_type, ip_index);
         },
@@ -2463,6 +2462,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .bool_not,
         => return Type.fromIP(analyser, .bool_type, null),
 
+        .bit_not,
         .negation,
         .negation_wrap,
         => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)),
@@ -2592,20 +2592,68 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .mod,
         .mul_wrap,
         .mul_sat,
-        .add,
-        .sub,
         .add_wrap,
         .sub_wrap,
         .add_sat,
         .sub_sat,
-        .shl,
-        .shl_sat,
-        .shr,
         .bit_and,
         .bit_xor,
         .bit_or,
-        .bit_not,
-        => {},
+        => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_ty.is_type_val) return null;
+            return Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty);
+        },
+
+        .add => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_ty.is_type_val) return null;
+            return switch (lhs_ty.data) {
+                .pointer => |lhs_info| switch (lhs_info.size) {
+                    .many, .c => lhs_ty,
+                    else => null,
+                },
+                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+            };
+        },
+
+        .sub => {
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_ty.is_type_val) return null;
+            return switch (lhs_ty.data) {
+                .pointer => |lhs_info| switch (rhs_ty.data) {
+                    .pointer => |rhs_info| {
+                        if (lhs_info.size == .slice) return null;
+                        if (rhs_info.size == .slice) return null;
+                        return Type.fromIP(analyser, .usize_type, null);
+                    },
+                    else => switch (lhs_info.size) {
+                        .many, .c => lhs_ty,
+                        else => null,
+                    },
+                },
+                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+            };
+        },
+
+        .shl,
+        .shl_sat,
+        .shr,
+        => {
+            const lhs, _ = tree.nodeData(node).node_and_node;
+            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_ty.is_type_val) return null;
+            return lhs_ty;
+        },
 
         .array_mult => {
             const elem_idx, const mult_idx = tree.nodeData(node).node_and_node;

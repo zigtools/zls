@@ -825,7 +825,7 @@ test "var decl comments" {
         \\const foo = 0 + 0
         \\```
         \\```zig
-        \\(unknown)
+        \\(comptime_int)
         \\```
     );
 }
