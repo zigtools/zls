@@ -878,9 +878,12 @@ fn removeWorkspace(server: *Server, uri: types.URI) void {
 fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
     var updated_files: usize = 0;
     for (notification.changes) |change| {
-        const file_path = Uri.parse(arena, change.uri) catch |err| {
-            log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
-            continue;
+        const file_path = Uri.parse(arena, change.uri) catch |err| switch (err) {
+            error.UnsupportedScheme => continue,
+            else => {
+                log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
+                continue;
+            },
         };
         const file_extension = std.fs.path.extension(file_path);
         if (!std.mem.eql(u8, file_extension, ".zig") and !std.mem.eql(u8, file_extension, ".zon")) continue;
