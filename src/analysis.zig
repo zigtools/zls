@@ -767,6 +767,13 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
         .identifier => blk: {
             const name_token = ast.identifierTokenFromIdentifierNode(tree, node_handle.node) orelse break :blk null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
+            if (options.container_type) |ty| {
+                break :blk try analyser.lookupSymbolContainer(
+                    ty,
+                    name,
+                    .other,
+                );
+            }
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
                 name,
@@ -775,7 +782,10 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
         },
         .field_access => blk: {
             const lhs, const field_name = tree.nodeData(node_handle.node).node_and_token;
-            const resolved = (try analyser.resolveTypeOfNode(.of(lhs, handle))) orelse return null;
+            const resolved = (try analyser.resolveTypeOfNode(.{
+                .node_handle = .of(lhs, handle),
+                .container_type = options.container_type,
+            })) orelse return null;
             if (!resolved.is_type_val)
                 return null;
 
@@ -797,7 +807,10 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
             const base_exp = var_decl.ast.init_node.unwrap() orelse return null;
             if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return null;
 
-            return try analyser.resolveVarDeclAliasInternal(.of(base_exp, handle), node_trail);
+            return try analyser.resolveVarDeclAliasInternal(.{
+                .node_handle = .of(base_exp, handle),
+                .container_type = options.container_type,
+            }, node_trail);
         },
         else => return null,
     } orelse return null;
@@ -814,7 +827,10 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
         return null;
     }
 
-    if (try analyser.resolveVarDeclAliasInternal(.of(resolved_node, resolved.handle), node_trail)) |result| {
+    if (try analyser.resolveVarDeclAliasInternal(.{
+        .node_handle = .of(resolved_node, resolved.handle),
+        .container_type = options.container_type,
+    }, node_trail)) |result| {
         return result;
     } else {
         return resolved;
@@ -4611,7 +4627,10 @@ pub const DeclWithHandle = struct {
         if (resolve_alias) {
             switch (self.decl) {
                 .ast_node => |node| {
-                    if (try analyser.resolveVarDeclAlias(.of(node, self.handle))) |result| {
+                    if (try analyser.resolveVarDeclAlias(.{
+                        .node_handle = .of(node, self.handle),
+                        .container_type = self.container_type,
+                    })) |result| {
                         return result.definitionToken(analyser, resolve_alias);
                     }
                 },

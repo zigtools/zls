@@ -446,7 +446,6 @@ test "decl literal on generic type" {
 }
 
 test "decl literal on generic type - alias" {
-    // TODO this should be `Box(u8)`
     try testHover(
         \\fn Box(comptime T: type) type {
         \\    return struct {
@@ -463,10 +462,10 @@ test "decl literal on generic type - alias" {
         \\const init: @This() = undefined
         \\```
         \\```zig
-        \\(Box(T))
+        \\(Box(u8))
         \\```
         \\
-        \\Go to [Box](file:///test.zig#L1) | [T](file:///test.zig#L1)
+        \\Go to [Box](file:///test.zig#L1)
     );
 }
 
