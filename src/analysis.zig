@@ -3244,7 +3244,6 @@ pub const Type = struct {
                 .generic => |token_handle| {
                     const other = bound_params.get(token_handle) orelse return data;
                     std.debug.assert(other.is_type_val);
-                    if (data.eql(other.data)) return data;
                     return other.data.resolveGeneric(analyser, bound_params, visited);
                 },
                 .pointer => |info| return .{
