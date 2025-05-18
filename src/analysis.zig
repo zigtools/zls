@@ -859,7 +859,9 @@ pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTy
     if (!ty.is_type_val) {
         resolved = resolved.typeOf(analyser);
     }
-    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params) orelse return null;
+    var visited: Type.Data.Set = .empty;
+    defer visited.deinit(analyser.gpa);
+    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, &visited) orelse return null;
     if (ty.is_type_val) {
         return resolved;
     }
@@ -2944,6 +2946,87 @@ pub const Type = struct {
             descriptor: []const u8,
         };
 
+        const Set = std.HashMapUnmanaged(Type.Data, void, Type.Data.Context, std.hash_map.default_max_load_percentage);
+
+        const Context = struct {
+            pub fn hash(ctx: Context, data: Data) u64 {
+                _ = ctx;
+                var hasher: std.hash.Wyhash = .init(0);
+                data.hashWithHasher(&hasher);
+                return hasher.final();
+            }
+
+            pub fn eql(ctx: Context, a: Data, b: Data) bool {
+                _ = ctx;
+                return a.eql(b);
+            }
+        };
+
+        pub fn hashWithHasher(data: Data, hasher: anytype) void {
+            switch (data) {
+                .pointer => |info| {
+                    std.hash.autoHash(hasher, info.size);
+                    std.hash.autoHash(hasher, info.sentinel);
+                    std.hash.autoHash(hasher, info.is_const);
+                    info.elem_ty.hashWithHasher(hasher);
+                },
+                .array => |info| {
+                    std.hash.autoHash(hasher, info.elem_count);
+                    std.hash.autoHash(hasher, info.sentinel);
+                    info.elem_ty.hashWithHasher(hasher);
+                },
+                .tuple => |elem_ty_slice| {
+                    for (elem_ty_slice) |elem_ty| {
+                        elem_ty.hashWithHasher(hasher);
+                    }
+                },
+                .optional, .union_tag => |t| t.hashWithHasher(hasher),
+                .error_union => |info| {
+                    if (info.error_set) |error_set| {
+                        error_set.hashWithHasher(hasher);
+                    }
+                    info.payload.hashWithHasher(hasher);
+                },
+                .container => |info| {
+                    info.scope_handle.hashWithHasher(hasher);
+                    for (info.bound_params.keys(), info.bound_params.values()) |token_handle, ty| {
+                        std.hash.autoHash(hasher, token_handle.token);
+                        hasher.update(token_handle.handle.uri);
+                        ty.hashWithHasher(hasher);
+                    }
+                },
+                .function => |info| {
+                    std.hash.autoHash(hasher, info.fn_token);
+                    hasher.update(info.handle.uri);
+                    info.container_type.hashWithHasher(hasher);
+                    for (info.parameters) |param| {
+                        if (param.type) |param_ty| {
+                            param_ty.hashWithHasher(hasher);
+                        }
+                    }
+                    info.return_type.hashWithHasher(hasher);
+                },
+                .for_range, .compile_error => |node_handle| {
+                    std.hash.autoHash(hasher, node_handle.node);
+                    hasher.update(node_handle.handle.uri);
+                },
+                .generic => |token_handle| {
+                    std.hash.autoHash(hasher, token_handle.token);
+                    hasher.update(token_handle.handle.uri);
+                },
+                .either => |entries| {
+                    for (entries) |entry| {
+                        hasher.update(entry.descriptor);
+                        entry.type_data.hashWithHasher(hasher);
+                    }
+                },
+                .ip_index => |payload| {
+                    std.hash.autoHash(hasher, payload.type);
+                    std.hash.autoHash(hasher, payload.index);
+                },
+            }
+        }
+
         pub fn eql(a: Data, b: Data) bool {
             if (@intFromEnum(a) != @intFromEnum(b)) return false;
 
@@ -3091,10 +3174,19 @@ pub const Type = struct {
             };
         }
 
-        fn resolveGeneric(data: Data, analyser: *Analyser, bound_params: TokenToTypeMap) error{OutOfMemory}!?Data {
+        fn resolveGeneric(
+            data: Data,
+            analyser: *Analyser,
+            bound_params: TokenToTypeMap,
+            visited: *Set,
+        ) error{OutOfMemory}!?Data {
             if (!data.isGeneric()) {
                 return data;
             }
+            if (visited.contains(data)) {
+                return data;
+            }
+            try visited.put(analyser.gpa, data, {});
             switch (data) {
                 .for_range,
                 .compile_error,
@@ -3104,7 +3196,7 @@ pub const Type = struct {
                     const other = bound_params.get(token_handle) orelse return data;
                     std.debug.assert(other.is_type_val);
                     if (data.eql(other.data)) return data;
-                    return other.data.resolveGeneric(analyser, bound_params);
+                    return other.data.resolveGeneric(analyser, bound_params, visited);
                 },
                 .pointer => |info| return .{
                     .pointer = .{
@@ -3185,7 +3277,7 @@ pub const Type = struct {
                         const entries = try analyser.arena.alloc(EitherEntry, info.len);
                         for (info, entries) |old, *new| {
                             new.* = .{
-                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params) orelse return null,
+                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params, visited) orelse return null,
                                 .descriptor = old.descriptor,
                             };
                         }
@@ -3208,70 +3300,7 @@ pub const Type = struct {
 
     pub fn hashWithHasher(self: Type, hasher: anytype) void {
         hasher.update(&.{ @intFromBool(self.is_type_val), @intFromEnum(self.data) });
-
-        switch (self.data) {
-            .pointer => |info| {
-                std.hash.autoHash(hasher, info.size);
-                std.hash.autoHash(hasher, info.sentinel);
-                std.hash.autoHash(hasher, info.is_const);
-                info.elem_ty.hashWithHasher(hasher);
-            },
-            .array => |info| {
-                std.hash.autoHash(hasher, info.elem_count);
-                std.hash.autoHash(hasher, info.sentinel);
-                info.elem_ty.hashWithHasher(hasher);
-            },
-            .tuple => |elem_ty_slice| {
-                for (elem_ty_slice) |elem_ty| {
-                    elem_ty.hashWithHasher(hasher);
-                }
-            },
-            .optional, .union_tag => |t| t.hashWithHasher(hasher),
-            .error_union => |info| {
-                if (info.error_set) |error_set| {
-                    error_set.hashWithHasher(hasher);
-                }
-                info.payload.hashWithHasher(hasher);
-            },
-            .container => |info| {
-                info.scope_handle.hashWithHasher(hasher);
-                for (info.bound_params.keys(), info.bound_params.values()) |token_handle, ty| {
-                    std.hash.autoHash(hasher, token_handle.token);
-                    hasher.update(token_handle.handle.uri);
-                    ty.hashWithHasher(hasher);
-                }
-            },
-            .function => |info| {
-                std.hash.autoHash(hasher, info.fn_token);
-                hasher.update(info.handle.uri);
-                info.container_type.hashWithHasher(hasher);
-                for (info.parameters) |param| {
-                    if (param.type) |param_ty| {
-                        param_ty.hashWithHasher(hasher);
-                    }
-                }
-                info.return_type.hashWithHasher(hasher);
-            },
-            .for_range, .compile_error => |node_handle| {
-                std.hash.autoHash(hasher, node_handle.node);
-                hasher.update(node_handle.handle.uri);
-            },
-            .generic => |token_handle| {
-                std.hash.autoHash(hasher, token_handle.token);
-                hasher.update(token_handle.handle.uri);
-            },
-            .either => |entries| {
-                for (entries) |entry| {
-                    hasher.update(entry.descriptor);
-                    const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = self.is_type_val };
-                    entry_ty.hashWithHasher(hasher);
-                }
-            },
-            .ip_index => |payload| {
-                std.hash.autoHash(hasher, payload.type);
-                std.hash.autoHash(hasher, payload.index);
-            },
-        }
+        self.data.hashWithHasher(hasher);
     }
 
     pub fn eql(a: Type, b: Type) bool {

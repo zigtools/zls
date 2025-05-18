@@ -181,3 +181,31 @@ const generic_struct_field = generic_struct.field;
 
 const generic_struct_tag = GenericStruct(u8).field;
 //    ^^^^^^^^^^^^^^^^^^ (unknown)()
+
+fn Map(Context: type) type {
+    return struct {
+        unmanaged: MapUnmanaged(Context),
+        ctx: Context,
+        const Self = @This();
+        fn clone(self: Self) Self {
+            const unmanaged = self.unmanaged.cloneContext(self.ctx);
+            return .{ .unmanaged = unmanaged, .ctx = self.ctx };
+        }
+    };
+}
+
+fn MapUnmanaged(Context: type) type {
+    return struct {
+        size: u32,
+        const Self = @This();
+        fn clone(self: Self) Self {
+            return self.cloneContext(@as(Context, undefined));
+        }
+        // zig fmt: off
+        fn cloneContext(self: Self, new_ctx: anytype) MapUnmanaged(@TypeOf(new_ctx)) {
+        // ^^^^^^^^^^^^ (fn (MapUnmanaged(Context), anytype) MapUnmanaged(either type))()
+            _ = self;
+        }
+        // zig fmt: on
+    };
+}
