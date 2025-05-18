@@ -860,7 +860,7 @@ pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTy
     return analyser.resolveGenericTypeInternal(ty, bound_params, &visited);
 }
 
-pub fn resolveGenericTypeInternal(
+fn resolveGenericTypeInternal(
     analyser: *Analyser,
     ty: Type,
     bound_params: TokenToTypeMap,
