@@ -1687,7 +1687,7 @@ fn collectFieldAccessContainerNodes(
             const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
             const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
             if (!symbol_type.is_type_val) { // then => instance_of_T
-                const container_type = try Analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
+                const container_type = try analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
                 if (Analyser.firstParamIs(node_type, container_type)) break :blk 1;
             }
             break :blk 0; // is `T`, no SelfParam

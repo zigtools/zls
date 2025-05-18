@@ -1742,7 +1742,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .container_field_init,
         .container_field_align,
         => {
-            const container_type = options.container_type orelse try Analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+            const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
             if (container_type.isEnumType())
                 return if (container_type.is_type_val) container_type.instanceTypeVal(analyser) else container_type;
 
@@ -2005,7 +2005,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             // TODO: use map? idk
-            return try innermostContainer(handle, offsets.nodeToLoc(tree, node).start);
+            return try analyser.innermostContainer(handle, offsets.nodeToLoc(tree, node).start);
         },
         .builtin_call,
         .builtin_call_comma,
@@ -2018,7 +2018,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const call_name = tree.tokenSlice(tree.nodeMainToken(node));
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (params.len != 0) return null;
-                return options.container_type orelse try Analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+                return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
             }
 
             const cast_map: std.StaticStringMap(void) = .initComptime(.{
@@ -2223,7 +2223,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buf, node).?;
 
-            const container_type = options.container_type orelse try Analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+            const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
             const doc_comments = try getDocComments(analyser.arena, tree, node);
             const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
 
@@ -2915,13 +2915,11 @@ pub const Type = struct {
 
         pub const Container = struct {
             scope_handle: ScopeWithHandle,
-            is_generic: bool,
             bound_params: TokenToTypeMap,
 
             pub fn root(handle: *DocumentStore.Handle) Container {
                 return .{
                     .scope_handle = .{ .handle = handle, .scope = .root },
-                    .is_generic = false,
                     .bound_params = .empty,
                 };
             }
@@ -3074,7 +3072,7 @@ pub const Type = struct {
                     return false;
                 },
                 .union_tag => |t| t.data.isGeneric(),
-                .container => |info| info.is_generic,
+                .container => |info| info.bound_params.count() != 0,
                 .function => |info| {
                     if (info.container_type.data.isGeneric()) {
                         return true;
@@ -3160,14 +3158,13 @@ pub const Type = struct {
                 .container => |info| return .{
                     .container = .{
                         .scope_handle = info.scope_handle,
-                        .is_generic = info.is_generic,
                         .bound_params = blk: {
-                            var merged_params = try bound_params.clone(analyser.arena);
+                            var new_params = try info.bound_params.clone(analyser.arena);
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
                                 const t = try analyser.resolveGenericType(v, bound_params) orelse v;
-                                try merged_params.put(analyser.arena, k, t);
+                                try new_params.put(analyser.arena, k, t);
                             }
-                            break :blk merged_params;
+                            break :blk new_params;
                         },
                     },
                 },
@@ -5249,7 +5246,7 @@ pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) A
     return ast_node.?; // the DocumentScope's root scope is guaranteed to have an Ast Node
 }
 
-pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
+pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
     const document_scope = try handle.getDocumentScope();
     if (document_scope.scopes.len == 1) return .{
         .data = .{ .container = .root(handle) },
@@ -5257,12 +5254,26 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) er
     };
 
     var current: DocumentScope.Scope.Index = .root;
-    var is_generic = false;
+    var meta_params: TokenToTypeMap = .empty;
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
             .container, .container_usingnamespace => current = scope_index,
-            .function => is_generic = true,
+            .function => {
+                const tree = handle.tree;
+                const function_node = document_scope.getScopeAstNode(scope_index).?;
+                var buf: [1]Ast.Node.Index = undefined;
+                const func = tree.fullFnProto(&buf, function_node).?;
+                var it = func.iterate(&tree);
+                while (ast.nextFnParam(&it)) |param| {
+                    const param_type_expr = param.type_expr orelse continue;
+                    if (!Analyser.isMetaType(tree, param_type_expr)) continue;
+                    const param_name_token = param.name_token orelse continue;
+                    const token_handle: TokenWithHandle = .{ .token = param_name_token, .handle = handle };
+                    const ty: Type = .{ .data = .{ .generic = token_handle }, .is_type_val = true };
+                    try meta_params.put(analyser.arena, token_handle, ty);
+                }
+            },
             else => {},
         }
     }
@@ -5273,8 +5284,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) er
                     .handle = handle,
                     .scope = current,
                 },
-                .is_generic = is_generic,
-                .bound_params = .empty,
+                .bound_params = meta_params,
             },
         },
         .is_type_val = true,
