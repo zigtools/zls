@@ -1731,7 +1731,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {
             const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
             if (container_type.isEnumType())
-                return if (container_type.is_type_val) container_type.instanceTypeVal(analyser) else container_type;
+                return container_type.instanceTypeVal(analyser);
 
             var field = tree.fullContainerField(node).?;
 
@@ -1992,7 +1992,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             // TODO: use map? idk
-            return try analyser.innermostContainer(handle, offsets.nodeToLoc(tree, node).start);
+            return try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
         },
         .builtin_call,
         .builtin_call_comma,
@@ -5237,6 +5237,7 @@ pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) A
 }
 
 pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
+    const tree = handle.tree;
     const document_scope = try handle.getDocumentScope();
     if (document_scope.scopes.len == 1) return .{
         .data = .{ .container = .root(handle) },
@@ -5250,7 +5251,6 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
         switch (document_scope.getScopeTag(scope_index)) {
             .container, .container_usingnamespace => current = scope_index,
             .function => {
-                const tree = handle.tree;
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
                 const func = tree.fullFnProto(&buf, function_node).?;
@@ -5446,7 +5446,8 @@ pub fn lookupSymbolFieldInit(
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct => {},
-        .keyword_enum, .keyword_union => if (try analyser.lookupSymbolContainer(container_type, field_name, .field)) |ty| return ty,
+        .keyword_enum => if (try analyser.lookupSymbolContainer(container_type.typeOf(analyser), field_name, .field)) |ty| return ty,
+        .keyword_union => if (try analyser.lookupSymbolContainer(container_type, field_name, .field)) |ty| return ty,
         else => return null,
     }
 
