@@ -854,18 +854,19 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
     return null;
 }
 
-pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) !?Type {
+pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) !Type {
     var resolved = ty;
     if (!ty.is_type_val) {
         resolved = resolved.typeOf(analyser);
     }
+    std.debug.assert(resolved.is_type_val);
     var visited: Type.Data.Set = .empty;
     defer visited.deinit(analyser.gpa);
-    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, &visited) orelse return null;
-    if (ty.is_type_val) {
-        return resolved;
+    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, &visited);
+    if (!ty.is_type_val) {
+        resolved = resolved.instanceTypeVal(analyser).?;
     }
-    return resolved.instanceTypeVal(analyser);
+    return resolved;
 }
 
 fn findReturnStatementInternal(tree: Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
@@ -1736,7 +1737,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
             }
 
-            return try analyser.resolveGenericType(return_type, meta_params) orelse return_type;
+            return try analyser.resolveGenericType(return_type, meta_params);
         },
         .container_field,
         .container_field_init,
@@ -3227,7 +3228,7 @@ pub const Type = struct {
             analyser: *Analyser,
             bound_params: TokenToTypeMap,
             visited: *Set,
-        ) error{OutOfMemory}!?Data {
+        ) error{OutOfMemory}!Data {
             if (!data.isGeneric()) {
                 return data;
             }
@@ -3251,36 +3252,36 @@ pub const Type = struct {
                         .size = info.size,
                         .sentinel = info.sentinel,
                         .is_const = info.is_const,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericType(info.elem_ty.*, bound_params) orelse return null),
+                        .elem_ty = try analyser.allocType(try analyser.resolveGenericType(info.elem_ty.*, bound_params)),
                     },
                 },
                 .array => |info| return .{
                     .array = .{
                         .elem_count = info.elem_count,
                         .sentinel = info.sentinel,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericType(info.elem_ty.*, bound_params) orelse return null),
+                        .elem_ty = try analyser.allocType(try analyser.resolveGenericType(info.elem_ty.*, bound_params)),
                     },
                 },
                 .tuple => |info| return .{
                     .tuple = blk: {
                         const types = try analyser.arena.alloc(Type, info.len);
                         for (info, types) |old, *new| {
-                            new.* = try analyser.resolveGenericType(old, bound_params) orelse return null;
+                            new.* = try analyser.resolveGenericType(old, bound_params);
                         }
                         break :blk types;
                     },
                 },
                 .optional => |info| return .{
-                    .optional = try analyser.allocType(try analyser.resolveGenericType(info.*, bound_params) orelse return null),
+                    .optional = try analyser.allocType(try analyser.resolveGenericType(info.*, bound_params)),
                 },
                 .error_union => |info| return .{
                     .error_union = .{
-                        .error_set = if (info.error_set) |t| try analyser.allocType(try analyser.resolveGenericType(t.*, bound_params) orelse return null) else null,
-                        .payload = try analyser.allocType(try analyser.resolveGenericType(info.payload.*, bound_params) orelse return null),
+                        .error_set = if (info.error_set) |t| try analyser.allocType(try analyser.resolveGenericType(t.*, bound_params)) else null,
+                        .payload = try analyser.allocType(try analyser.resolveGenericType(info.payload.*, bound_params)),
                     },
                 },
                 .union_tag => |info| return .{
-                    .union_tag = try analyser.allocType(try analyser.resolveGenericType(info.*, bound_params) orelse return null),
+                    .union_tag = try analyser.allocType(try analyser.resolveGenericType(info.*, bound_params)),
                 },
                 .container => |info| return .{
                     .container = .{
@@ -3289,7 +3290,7 @@ pub const Type = struct {
                             var new_params: TokenToTypeMap = .empty;
                             try new_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                const t = try analyser.resolveGenericType(v, bound_params) orelse v;
+                                const t = try analyser.resolveGenericType(v, bound_params);
                                 new_params.putAssumeCapacity(k, t);
                             }
                             break :blk new_params;
@@ -3300,7 +3301,7 @@ pub const Type = struct {
                     .function = .{
                         .fn_token = info.fn_token,
                         .handle = info.handle,
-                        .container_type = try analyser.allocType(try analyser.resolveGenericType(info.container_type.*, bound_params) orelse return null),
+                        .container_type = try analyser.allocType(try analyser.resolveGenericType(info.container_type.*, bound_params)),
                         .doc_comments = info.doc_comments,
                         .name = info.name,
                         .parameters = blk: {
@@ -3311,13 +3312,13 @@ pub const Type = struct {
                                     .modifier = old.modifier,
                                     .name = old.name,
                                     .name_token = old.name_token,
-                                    .type = if (old.type) |t| try analyser.resolveGenericType(t, bound_params) orelse return null else null,
+                                    .type = if (old.type) |t| try analyser.resolveGenericType(t, bound_params) else null,
                                 };
                             }
                             break :blk parameters;
                         },
                         .has_varargs = info.has_varargs,
-                        .return_type = try analyser.allocType(try analyser.resolveGenericType(info.return_type.*, bound_params) orelse return null),
+                        .return_type = try analyser.allocType(try analyser.resolveGenericType(info.return_type.*, bound_params)),
                     },
                 },
                 .either => |info| return .{
@@ -3325,7 +3326,7 @@ pub const Type = struct {
                         const entries = try analyser.arena.alloc(EitherEntry, info.len);
                         for (info, entries) |old, *new| {
                             new.* = .{
-                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params, visited) orelse return null,
+                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params, visited),
                                 .descriptor = old.descriptor,
                             };
                         }
@@ -3892,7 +3893,7 @@ pub const Type = struct {
                                 var new_type_params: TokenToTypeMap = .empty;
                                 try new_type_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                                 for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                    const t = try analyser.resolveGenericType(v, bound_type_params.*) orelse v;
+                                    const t = try analyser.resolveGenericType(v, bound_type_params.*);
                                     new_type_params.putAssumeCapacity(k, t);
                                 }
                                 try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
@@ -5040,9 +5041,7 @@ pub const DeclWithHandle = struct {
         if (self.container_type) |container_ty| {
             switch (container_ty.data) {
                 .container => |info| {
-                    if (try analyser.resolveGenericType(resolved_ty, info.bound_params)) |ty| {
-                        resolved_ty = ty;
-                    }
+                    resolved_ty = try analyser.resolveGenericType(resolved_ty, info.bound_params);
                 },
                 else => {},
             }
