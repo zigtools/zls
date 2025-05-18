@@ -3159,10 +3159,11 @@ pub const Type = struct {
                     .container = .{
                         .scope_handle = info.scope_handle,
                         .bound_params = blk: {
-                            var new_params = try info.bound_params.clone(analyser.arena);
+                            var new_params: TokenToTypeMap = .empty;
+                            try new_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
                                 const t = try analyser.resolveGenericType(v, bound_params) orelse v;
-                                try new_params.put(analyser.arena, k, t);
+                                new_params.putAssumeCapacity(k, t);
                             }
                             break :blk new_params;
                         },
@@ -3829,13 +3830,15 @@ pub const Type = struct {
                                     .data = .{ .generic = .{ .token = param_name_token, .handle = handle } },
                                     .is_type_val = true,
                                 };
-                                var merged_type_params = try bound_type_params.clone(analyser.arena);
+                                var new_type_params: TokenToTypeMap = .empty;
+                                try new_type_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                                 for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                    try merged_type_params.put(analyser.arena, k, v);
+                                    const t = try analyser.resolveGenericType(v, bound_type_params.*) orelse v;
+                                    new_type_params.putAssumeCapacity(k, t);
                                 }
                                 try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
                                     .referenced = referenced,
-                                    .bound_type_params = &merged_type_params,
+                                    .bound_type_params = &new_type_params,
                                     .truncate_container_decls = options.truncate_container_decls,
                                 })});
                                 first = false;
