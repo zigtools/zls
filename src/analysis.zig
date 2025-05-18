@@ -3665,11 +3665,6 @@ pub const Type = struct {
         return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
     }
 
-    pub fn fmtUnderlying(ty: Type, analyser: *Analyser) Formatter {
-        const options = FormatOptions{ .truncate_container_decls = true };
-        return if (ty.is_type_val) ty.fmtTypeVal(analyser, options) else ty.fmt(analyser, options);
-    }
-
     pub const FormatOptions = struct {
         referenced: ?*ReferencedType.Set = null,
         bound_type_params: *const TokenToTypeMap = &.empty,
