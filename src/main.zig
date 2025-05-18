@@ -100,6 +100,7 @@ fn logFn(
 }
 
 fn defaultLogFilePath(allocator: std.mem.Allocator) std.mem.Allocator.Error!?[]const u8 {
+    if (zig_builtin.target.os.tag == .wasi) return null;
     const cache_path = known_folders.getPath(allocator, .cache) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.ParseError => return null,
