@@ -128,14 +128,12 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 ),
             });
         },
-        .container => |scope_handle| {
+        .container => {
             var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
-            try builder.analyser.collectDeclarationsOfContainer(scope_handle, builder.orig_handle, !ty.is_type_val, &decls);
+            try builder.analyser.collectDeclarationsOfContainer(ty, builder.orig_handle, !ty.is_type_val, &decls);
 
             for (decls.items) |decl_with_handle| {
-                try declToCompletion(builder, decl_with_handle, .{
-                    .parent_container_ty = ty,
-                });
+                try declToCompletion(builder, decl_with_handle);
             }
         },
         .ip_index => |payload| try analyser_completions.dotCompletions(
@@ -160,11 +158,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
     }
 }
 
-const DeclToCompletionOptions = struct {
-    parent_container_ty: ?Analyser.Type = null,
-};
-
-fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, options: DeclToCompletionOptions) error{OutOfMemory}!void {
+fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
@@ -187,7 +181,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         doc_comments.appendAssumeCapacity(docs);
     }
 
-    const maybe_resolved_ty = try decl_handle.resolveTypeWithContainer(builder.analyser, options.parent_container_ty);
+    const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
 
     if (maybe_resolved_ty) |resolve_ty| {
         if (try resolve_ty.docComments(builder.arena)) |docs| {
@@ -236,7 +230,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
         .switch_payload,
         => {
             var kind: types.CompletionItemKind = blk: {
-                const parent_is_type_val = if (options.parent_container_ty) |container_ty| container_ty.is_type_val else null;
+                const parent_is_type_val = if (decl_handle.container_type) |container_ty| container_ty.is_type_val else null;
                 if (decl_handle.decl == .ast_node)
                     switch (decl_handle.handle.tree.nodeTag(decl_handle.decl.ast_node)) {
                         .container_field_init,
@@ -253,7 +247,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle, opt
             var is_deprecated: bool = false;
             if (maybe_resolved_ty) |ty| {
                 if (try builder.analyser.resolveFuncProtoOfCallable(ty)) |func_ty| blk: {
-                    var item = try functionTypeCompletion(builder, name, options.parent_container_ty, func_ty) orelse break :blk;
+                    var item = try functionTypeCompletion(builder, name, decl_handle.container_type, func_ty) orelse break :blk;
                     item.documentation = documentation;
                     builder.completions.appendAssumeCapacity(item);
                     return;
@@ -576,7 +570,7 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
     try builder.analyser.collectAllSymbolsAtSourceIndex(builder.orig_handle, builder.source_index, &decls);
     for (decls.items) |decl_with_handle| {
-        try declToCompletion(builder, decl_with_handle, .{});
+        try declToCompletion(builder, decl_with_handle);
     }
     try populateSnippedCompletions(builder, &snipped_data.generic);
 }
@@ -1333,7 +1327,7 @@ fn collectContainerFields(
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
-        const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle };
+        const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
         const tree = scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
@@ -1371,7 +1365,7 @@ fn collectContainerFields(
                     break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
                 };
 
-                const detail = if (try decl_handle.resolveTypeWithContainer(builder.analyser, container)) |ty| detail: {
+                const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
                     const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
@@ -1403,7 +1397,7 @@ fn collectContainerFields(
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
-                try declToCompletion(builder, decl_handle, .{ .parent_container_ty = container });
+                try declToCompletion(builder, decl_handle);
                 continue;
             },
             .fn_proto,

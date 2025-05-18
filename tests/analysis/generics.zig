@@ -100,13 +100,11 @@ const option_none: Option(u8) = .none;
 const option_alias: Option(u8) = .alias;
 //                               ^^^^^^ (Option(u8))()
 
-// TODO this should be `Option(u8)`
 const option_default: Option(u8) = .default;
-//                                 ^^^^^^^^ (Option(T))()
+//                                 ^^^^^^^^ (Option(u8))()
 
-// TODO this should be `fn () Option(u8)`
 const option_init: Option(u8) = .init();
-//                              ^^^^^ (fn () Option(T))()
+//                              ^^^^^ (fn () Option(u8))()
 
 fn GenericUnion(T: type) type {
     return union {
