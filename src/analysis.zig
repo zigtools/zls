@@ -858,12 +858,11 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
             .is_const = lhs_binding.is_const,
         };
 
-    if (try left_type.lookupSymbol(analyser, field_name)) |child| {
+    if (try left_type.lookupSymbol(analyser, field_name)) |child|
         return .{
             .type = try child.resolveType(analyser) orelse return null,
             .is_const = if (left_type.is_type_val) child.isConst() else lhs_binding.is_const,
         };
-    }
 
     return null;
 }
@@ -1718,6 +1717,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 .container => |info| try info.bound_params.clone(analyser.arena),
                 else => .empty,
             };
+            errdefer meta_params.deinit(analyser.arena);
 
             const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
                 try analyser.isInstanceCall(handle, call, func_ty);
@@ -1730,7 +1730,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const param_type = param.type orelse continue;
                 if (!param_type.is_type_val) continue;
 
-                const argument_type = try analyser.resolveTypeOfNodeInternal(.of(arg, handle)) orelse continue;
+                const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
 
                 try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
@@ -1754,8 +1754,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     return Type.fromIP(analyser, .void_type, null);
             }
 
-            const type_expr = field.ast.type_expr.unwrap().?;
-            const base_type = (try analyser.resolveTypeOfNodeInternal(.of(type_expr, handle))) orelse return null;
+            const base = field.ast.type_expr.unwrap().?;
+            const base_type = (try analyser.resolveTypeOfNodeInternal(.of(base, handle))) orelse return null;
             return base_type.instanceTypeVal(analyser);
         },
         .@"comptime",
@@ -2900,6 +2900,7 @@ pub const Type = struct {
         /// - `@compileError("")`
         compile_error: NodeWithHandle,
 
+        // `T` in `fn Foo(comptime T: type) type`
         generic: TokenWithHandle,
 
         /// Branching types
