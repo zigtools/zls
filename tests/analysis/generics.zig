@@ -191,6 +191,11 @@ fn Map(Context: type) type {
             const unmanaged = self.unmanaged.cloneContext(self.ctx);
             return .{ .unmanaged = unmanaged, .ctx = self.ctx };
         }
+        fn clone2(self: Self) Self {
+            const unmanaged = self.unmanaged.cloneContext2(self.ctx);
+            //    ^^^^^^^^^ (unknown)()
+            return .{ .unmanaged = unmanaged, .ctx = self.ctx };
+        }
     };
 }
 
@@ -207,5 +212,11 @@ fn MapUnmanaged(Context: type) type {
             _ = self;
         }
         // zig fmt: on
+        fn clone2(self: Self) Self {
+            return self.cloneContext2(@as(Context, undefined));
+        }
+        fn cloneContext2(self: Self, new_ctx: anytype) MapUnmanaged(*@TypeOf(new_ctx)) {
+            _ = self;
+        }
     };
 }
