@@ -1559,8 +1559,8 @@ fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const 
     return field_name[1 .. field_name.len - 1];
 }
 
-fn resolveErrorSetIPIndex(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?InternPool.Index {
-    const ty = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
+fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
+    const ty = try analyser.resolveTypeOfNodeInternal(options) orelse return null;
     if (!ty.is_type_val) return null;
     const ip_index = switch (ty.data) {
         .ip_index => |payload| payload.index orelse return null,
