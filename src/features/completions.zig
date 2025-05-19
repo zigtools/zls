@@ -324,12 +324,6 @@ fn functionTypeCompletion(
 
     const info = func_ty.data.function;
 
-    const bound_type_params: Analyser.TokenToTypeMap =
-        if (parent_container_ty) |ty| switch (ty.data) {
-            .container => |c| c.bound_params,
-            else => .empty,
-        } else .empty;
-
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
@@ -346,7 +340,6 @@ fn functionTypeCompletion(
             if (use_snippets and builder.server.config.enable_argument_placeholders) {
                 break :blk try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
                     .info = info,
-                    .bound_type_params = &bound_type_params,
                     .include_fn_keyword = false,
                     .include_name = true,
                     .override_name = func_name,
@@ -420,7 +413,6 @@ fn functionTypeCompletion(
 
     const details = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
         .info = info,
-        .bound_type_params = &bound_type_params,
         .include_fn_keyword = true,
         .include_name = false,
         .parameters = .{ .show = .{

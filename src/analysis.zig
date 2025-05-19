@@ -171,7 +171,6 @@ fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlace
 
 pub const FormatParameterOptions = struct {
     referenced: ?*ReferencedType.Set = null,
-    bound_type_params: *const TokenToTypeMap = &.empty,
     info: Type.Data.Parameter,
     index: usize,
 
@@ -198,7 +197,6 @@ pub fn formatParameter(
     const analyser = ctx.analyser;
     const data = ctx.options;
     const referenced = data.referenced;
-    const bound_type_params = data.bound_type_params;
     const info = data.info;
 
     if (data.index != 0) {
@@ -237,7 +235,6 @@ pub fn formatParameter(
         if (info.type) |ty| {
             try writer.print("{}", .{ty.fmtTypeVal(analyser, .{
                 .referenced = referenced,
-                .bound_type_params = bound_type_params,
                 .truncate_container_decls = true,
             })});
         } else {
@@ -256,7 +253,6 @@ pub fn fmtParameter(analyser: *Analyser, options: FormatParameterOptions) std.fm
 
 pub const FormatFunctionOptions = struct {
     referenced: ?*ReferencedType.Set = null,
-    bound_type_params: *const TokenToTypeMap = &.empty,
     info: Type.Data.Function,
 
     include_fn_keyword: bool,
@@ -293,7 +289,6 @@ pub fn formatFunction(
     const analyser = ctx.analyser;
     const data = ctx.options;
     const referenced = data.referenced;
-    const bound_type_params = data.bound_type_params;
     const info = data.info;
     var parameters = info.parameters;
 
@@ -332,7 +327,6 @@ pub fn formatFunction(
             for (parameters, 0..) |param_info, index| {
                 try writer.print("{}", .{fmtParameter(analyser, .{
                     .referenced = referenced,
-                    .bound_type_params = bound_type_params,
                     .info = param_info,
                     .index = index,
                     .include_modifier = parameter_options.include_modifiers,
@@ -362,7 +356,6 @@ pub fn formatFunction(
         try writer.writeByte(' ');
         try writer.print("{}", .{info.return_type.fmt(analyser, .{
             .referenced = referenced,
-            .bound_type_params = bound_type_params,
             .truncate_container_decls = true,
         })});
     }
@@ -3762,7 +3755,6 @@ pub const Type = struct {
 
     pub const FormatOptions = struct {
         referenced: ?*ReferencedType.Set = null,
-        bound_type_params: *const TokenToTypeMap = &.empty,
         truncate_container_decls: bool,
     };
 
@@ -3784,7 +3776,6 @@ pub const Type = struct {
         const analyser = ctx.analyser;
         const options = ctx.options;
         const referenced = options.referenced;
-        const bound_type_params = options.bound_type_params;
         const arena = analyser.arena;
 
         switch (ty.data) {
@@ -3903,19 +3894,12 @@ pub const Type = struct {
                                 if (!first) {
                                     try writer.writeByte(',');
                                 }
-                                const param_ty: Type = .{
+                                const param_ty = try analyser.resolveGenericType(.{
                                     .data = .{ .generic = .{ .token = param_name_token, .handle = handle } },
                                     .is_type_val = true,
-                                };
-                                var new_type_params: TokenToTypeMap = .empty;
-                                try new_type_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
-                                for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                    const t = try analyser.resolveGenericType(v, bound_type_params.*);
-                                    new_type_params.putAssumeCapacity(k, t);
-                                }
+                                }, info.bound_params);
                                 try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
                                     .referenced = referenced,
-                                    .bound_type_params = &new_type_params,
                                     .truncate_container_decls = options.truncate_container_decls,
                                 })});
                                 first = false;
@@ -3954,7 +3938,6 @@ pub const Type = struct {
             .function => |info| {
                 try writer.print("{}", .{analyser.fmtFunction(.{
                     .referenced = referenced,
-                    .bound_type_params = bound_type_params,
                     .info = info,
                     .include_fn_keyword = true,
                     .include_name = false,
@@ -3978,12 +3961,6 @@ pub const Type = struct {
             .either => try writer.writeAll("either type"), // TODO
             .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             .generic => |token_handle| {
-                if (bound_type_params.get(token_handle)) |t| {
-                    if (!ty.eql(t)) {
-                        try writer.print("{}", .{t.fmtTypeVal(ctx.analyser, ctx.options)});
-                        return;
-                    }
-                }
                 const token = token_handle.token;
                 const handle = token_handle.handle;
                 const str = handle.tree.tokenSlice(token);
