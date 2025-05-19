@@ -855,23 +855,23 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
 }
 
 pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) !Type {
-    var visited: std.ArrayListUnmanaged(Type.Data) = .empty;
-    defer visited.deinit(analyser.gpa);
-    return analyser.resolveGenericTypeInternal(ty, bound_params, &visited);
+    var visiting: Type.Data.GenericSet = .empty;
+    defer visiting.deinit(analyser.gpa);
+    return analyser.resolveGenericTypeInternal(ty, bound_params, &visiting);
 }
 
 fn resolveGenericTypeInternal(
     analyser: *Analyser,
     ty: Type,
     bound_params: TokenToTypeMap,
-    visited: *std.ArrayListUnmanaged(Type.Data),
+    visiting: *Type.Data.GenericSet,
 ) !Type {
     var resolved = ty;
     if (!ty.is_type_val) {
         resolved = resolved.typeOf(analyser);
     }
     std.debug.assert(resolved.is_type_val);
-    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visited);
+    resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visiting);
     if (!ty.is_type_val) {
         resolved = resolved.instanceTypeVal(analyser).?;
     }
@@ -3217,90 +3217,88 @@ pub const Type = struct {
             };
         }
 
+        const GenericSet = std.HashMapUnmanaged(Data, void, GenericContext, std.hash_map.default_max_load_percentage);
+
+        const GenericContext = struct {
+            bound_params: TokenToTypeMap,
+
+            pub fn hash(ctx: GenericContext, data: Data) u64 {
+                var hasher: std.hash.Wyhash = .init(0);
+                data.hashWithHasher(&hasher);
+                for (ctx.bound_params.keys(), ctx.bound_params.values()) |token_handle, ty| {
+                    std.hash.autoHash(&hasher, token_handle.token);
+                    hasher.update(token_handle.handle.uri);
+                    ty.hashWithHasher(&hasher);
+                }
+                return hasher.final();
+            }
+
+            pub fn eql(ctx: GenericContext, a: Data, b: Data) bool {
+                _ = ctx;
+                return a.eql(b);
+            }
+        };
+
         fn resolveGeneric(
             data: Data,
             analyser: *Analyser,
             bound_params: TokenToTypeMap,
-            visited: *std.ArrayListUnmanaged(Data),
+            visiting: *GenericSet,
         ) error{OutOfMemory}!Data {
             if (!data.isGeneric()) {
                 return data;
             }
-
-            var previous_offset: ?usize = null;
-            for (0..visited.items.len) |offset| {
-                const elem = visited.items[visited.items.len - offset - 1];
-                if (!elem.eql(data)) continue;
-
-                const a_offset = previous_offset orelse {
-                    previous_offset = offset;
-                    continue;
-                };
-                const b_offset = offset;
-
-                const a_start = visited.items.len - a_offset;
-                const a_end = visited.items.len;
-                const a_slice = visited.items[a_start..a_end];
-
-                const b_start = visited.items.len - b_offset;
-                const b_end = a_start - 1;
-                const b_slice = visited.items[b_start..b_end];
-
-                if (a_slice.len != b_slice.len) break;
-
-                for (a_slice, b_slice) |a, b| {
-                    if (!a.eql(b)) break;
-                } else {
-                    return data;
-                }
+            const ctx = GenericContext{ .bound_params = bound_params };
+            if (visiting.containsContext(data, ctx)) {
+                return data;
             }
-            try visited.append(analyser.gpa, data);
-
+            try visiting.putContext(analyser.gpa, data, {}, ctx);
+            defer _ = visiting.removeContext(data, ctx);
             switch (data) {
                 .for_range,
                 .compile_error,
                 .ip_index,
                 => unreachable,
                 .generic => |token_handle| {
-                    const other = bound_params.get(token_handle) orelse return data;
-                    std.debug.assert(other.is_type_val);
-                    return other.data.resolveGeneric(analyser, bound_params, visited);
+                    const t = bound_params.get(token_handle) orelse return data;
+                    std.debug.assert(t.is_type_val);
+                    return t.data.resolveGeneric(analyser, bound_params, visiting);
                 },
                 .pointer => |info| return .{
                     .pointer = .{
                         .size = info.size,
                         .sentinel = info.sentinel,
                         .is_const = info.is_const,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visited)),
+                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
                     },
                 },
                 .array => |info| return .{
                     .array = .{
                         .elem_count = info.elem_count,
                         .sentinel = info.sentinel,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visited)),
+                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
                     },
                 },
                 .tuple => |info| return .{
                     .tuple = blk: {
                         const types = try analyser.arena.alloc(Type, info.len);
                         for (info, types) |old, *new| {
-                            new.* = try analyser.resolveGenericTypeInternal(old, bound_params, visited);
+                            new.* = try analyser.resolveGenericTypeInternal(old, bound_params, visiting);
                         }
                         break :blk types;
                     },
                 },
                 .optional => |info| return .{
-                    .optional = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visited)),
+                    .optional = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
                 },
                 .error_union => |info| return .{
                     .error_union = .{
-                        .error_set = if (info.error_set) |t| try analyser.allocType(try analyser.resolveGenericTypeInternal(t.*, bound_params, visited)) else null,
-                        .payload = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.payload.*, bound_params, visited)),
+                        .error_set = if (info.error_set) |t| try analyser.allocType(try analyser.resolveGenericTypeInternal(t.*, bound_params, visiting)) else null,
+                        .payload = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.payload.*, bound_params, visiting)),
                     },
                 },
                 .union_tag => |info| return .{
-                    .union_tag = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visited)),
+                    .union_tag = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
                 },
                 .container => |info| return .{
                     .container = .{
@@ -3309,7 +3307,7 @@ pub const Type = struct {
                             var new_params: TokenToTypeMap = .empty;
                             try new_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                const t = try analyser.resolveGenericTypeInternal(v, bound_params, visited);
+                                const t = try analyser.resolveGenericTypeInternal(v, bound_params, visiting);
                                 new_params.putAssumeCapacity(k, t);
                             }
                             break :blk new_params;
@@ -3320,7 +3318,7 @@ pub const Type = struct {
                     .function = .{
                         .fn_token = info.fn_token,
                         .handle = info.handle,
-                        .container_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.container_type.*, bound_params, visited)),
+                        .container_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.container_type.*, bound_params, visiting)),
                         .doc_comments = info.doc_comments,
                         .name = info.name,
                         .parameters = blk: {
@@ -3331,13 +3329,13 @@ pub const Type = struct {
                                     .modifier = old.modifier,
                                     .name = old.name,
                                     .name_token = old.name_token,
-                                    .type = if (old.type) |t| try analyser.resolveGenericTypeInternal(t, bound_params, visited) else null,
+                                    .type = if (old.type) |t| try analyser.resolveGenericTypeInternal(t, bound_params, visiting) else null,
                                 };
                             }
                             break :blk parameters;
                         },
                         .has_varargs = info.has_varargs,
-                        .return_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.return_type.*, bound_params, visited)),
+                        .return_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.return_type.*, bound_params, visiting)),
                     },
                 },
                 .either => |info| return .{
@@ -3345,7 +3343,7 @@ pub const Type = struct {
                         const entries = try analyser.arena.alloc(EitherEntry, info.len);
                         for (info, entries) |old, *new| {
                             new.* = .{
-                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params, visited),
+                                .type_data = try old.type_data.resolveGeneric(analyser, bound_params, visiting),
                                 .descriptor = old.descriptor,
                             };
                         }
