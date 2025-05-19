@@ -3241,7 +3241,7 @@ pub const Type = struct {
             if (!data.isGeneric()) {
                 return data;
             }
-            const ctx = GenericContext{ .bound_params = bound_params };
+            const ctx: GenericContext = .{ .bound_params = bound_params };
             if (visiting.containsContext(data, ctx)) {
                 return data;
             }
