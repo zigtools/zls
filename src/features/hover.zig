@@ -138,28 +138,15 @@ fn hoverSymbolResolved(
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
-        if (doc_strings.len > 0) try writer.print("\n---\n", .{});
-        for (doc_strings) |doc| {
-            // Better format the document string
-            var lines = std.mem.splitAny(u8, doc, "\n");
-            while (lines.next()) |line| {
-                const trimmed_line = std.mem.trimLeft(u8, line, " ");
 
-                try writer.print("{s}\n", .{trimmed_line});
-            }
-        }
+        try writer.print("\n", .{});
+        for (doc_strings) |doc|
+            try writer.print("{s}", .{doc});
     } else {
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
-        if (doc_strings.len > 0) try writer.print("\n", .{});
-        for (doc_strings) |doc| {
-            // Better format the document string
-            var lines = std.mem.splitAny(u8, doc, "\n");
-            while (lines.next()) |line| {
-                const trimmed_line = std.mem.trimLeft(u8, line, " ");
-
-                try writer.print("{s}\n", .{trimmed_line});
-            }
-        }
+        try writer.print("\n", .{});
+        for (doc_strings) |doc|
+            try writer.print("{s}", .{doc});
     }
 
     return hover_text.items;
