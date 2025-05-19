@@ -297,9 +297,10 @@ fn showMessage(
     }
 }
 
-pub fn initAnalyser(server: *Server, handle: ?*DocumentStore.Handle) Analyser {
+pub fn initAnalyser(server: *Server, arena: std.mem.Allocator, handle: ?*DocumentStore.Handle) Analyser {
     return .init(
         server.allocator,
+        arena,
         &server.document_store,
         &server.ip,
         handle,
@@ -333,7 +334,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
     defer error_bundle.deinit(server.allocator);
     if (error_bundle.errorMessageCount() == 0) return .empty;
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     var builder: code_actions.Builder = .{
@@ -1379,7 +1380,7 @@ fn resolveConfiguration(
 
     if (config.zig_lib_path) |zig_lib_path| blk: {
         if (zig_builtin.target.os.tag == .wasi) {
-            std.log.warn("The 'zig_lib_path' config option is ignored on WASI in favor of preopens.", .{});
+            log.warn("The 'zig_lib_path' config option is ignored on WASI in favor of preopens.", .{});
             break :blk;
         }
         if (std.fs.openDirAbsolute(zig_lib_path, .{})) |zig_lib_dir| {
@@ -1408,7 +1409,7 @@ fn resolveConfiguration(
 
     if (config.global_cache_path) |global_cache_path| blk: {
         if (zig_builtin.target.os.tag == .wasi) {
-            std.log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
+            log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
             break :blk;
         }
         if (std.fs.cwd().makeOpenPath(global_cache_path, .{})) |global_cache_dir| {
@@ -1651,7 +1652,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
     // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
     if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
     // semantic tokens can be quite expensive to compute on large files
     // and disabling callsite references can help with bringing the cost down.
@@ -1678,7 +1679,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
 
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     return try semantic_tokens.writeSemanticTokens(
@@ -1698,7 +1699,7 @@ fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     return .{
@@ -1714,7 +1715,7 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     const signature_info = (try signature_help.getSignatureInfo(
@@ -1789,7 +1790,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     return hover_handler.hover(
@@ -1799,7 +1800,6 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
         source_index,
         markup_kind,
         server.offset_encoding,
-        server.client_capabilities.client_name,
     );
 }
 
@@ -1860,7 +1860,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     return try inlay_hints.writeRangeInlayHint(
@@ -1884,7 +1884,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
     defer error_bundle.deinit(server.allocator);
 
-    var analyser = server.initAnalyser(handle);
+    var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
     const only_kinds = if (request.context.only) |kinds| blk: {

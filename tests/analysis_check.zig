@@ -22,11 +22,7 @@ pub const std_options: std.Options = .{
 const Error = error{
     OutOfMemory,
     InvalidTestItem,
-
-    IdentifierNotFound,
-    ResolveTypeFailed,
-    WrongType,
-    WrongValue,
+    CheckFailed,
 };
 
 pub fn main() Error!void {
@@ -63,6 +59,7 @@ pub fn main() Error!void {
             };
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         } else if (std.mem.eql(u8, arg, "--zig-lib-path")) {
+            std.debug.assert(builtin.target.os.tag != .wasi);
             const zig_lib_path = arg_it.next() orelse {
                 std.log.err("expected argument after '--zig-lib-path'.", .{});
                 std.process.exit(1);
@@ -81,6 +78,20 @@ pub fn main() Error!void {
             std.log.err("Unrecognized argument '{s}'.", .{arg});
             std.process.exit(1);
         }
+    }
+
+    if (builtin.target.os.tag == .wasi) {
+        const wasi_preopens = try std.fs.wasi.preopensAlloc(gpa);
+        defer {
+            for (wasi_preopens.names[3..]) |name| gpa.free(name);
+            gpa.free(wasi_preopens.names);
+        }
+
+        const zig_lib_dir_fd = wasi_preopens.find("/lib") orelse {
+            std.log.err("failed to resolve '/lib' WASI preopen", .{});
+            std.process.exit(1);
+        };
+        config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
     }
 
     var thread_pool: if (builtin.single_threaded) void else std.Thread.Pool = undefined;
@@ -136,7 +147,7 @@ pub fn main() Error!void {
     };
     defer gpa.free(annotations);
 
-    var analyser = zls.Analyser.init(gpa, &document_store, &ip, handle);
+    var analyser = zls.Analyser.init(gpa, arena, &document_store, &ip, handle);
     defer analyser.deinit();
 
     for (annotations) |annotation| {
@@ -165,7 +176,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("failed to find identifier '{s}' here", file_path, annotation.loc, .err, .{
                 annotation.content,
             });
-            return error.IdentifierNotFound;
+            continue;
         };
 
         const expect_unknown = (if (test_item.expected_type) |expected_type| std.mem.eql(u8, expected_type, "unknown") else false) and
@@ -177,7 +188,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("failed to resolve type of '{s}'", file_path, annotation.loc, .err, .{
                 identifier,
             });
-            return error.ResolveTypeFailed;
+            continue;
         };
 
         if (expect_unknown) {
@@ -189,7 +200,7 @@ pub fn main() Error!void {
             try error_builder.msgAtLoc("expected unknown but got `{s}`", file_path, identifier_loc, .err, .{
                 actual_type,
             });
-            return error.WrongType;
+            continue;
         }
 
         if (test_item.expected_error) |_| {
@@ -207,7 +218,7 @@ pub fn main() Error!void {
                     expected_type,
                     actual_type,
                 });
-                return error.WrongType;
+                continue;
             }
         }
 
@@ -216,7 +227,7 @@ pub fn main() Error!void {
                 try error_builder.msgAtLoc("unsupported value check `{s}`", file_path, identifier_loc, .err, .{
                     expected_value,
                 });
-                return error.WrongValue;
+                continue;
             }
 
             const actual_value = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeVal(&analyser, .{
@@ -229,9 +240,13 @@ pub fn main() Error!void {
                     expected_value,
                     actual_value,
                 });
-                return error.WrongValue;
+                continue;
             }
         }
+    }
+
+    if (error_builder.hasMessages()) {
+        return error.CheckFailed;
     }
 }
 

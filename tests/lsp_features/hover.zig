@@ -803,7 +803,7 @@ test "var decl comments" {
         \\const foo = 0 + 0
         \\```
         \\```zig
-        \\(unknown)
+        \\(comptime_int)
         \\```
         \\---
         \\this is a comment
@@ -909,7 +909,7 @@ test "type reference cycle" {
         \\) void
         \\```
         \\```zig
-        \\(fn (anytype, (unknown value)) void)
+        \\(fn (anytype, (unknown type)) void)
         \\```
     );
 }
