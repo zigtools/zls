@@ -527,6 +527,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
+    // TODO Instead of checking `is_test`, possible config paths should be provided by the main function.
     if (!zig_builtin.is_test) {
         var maybe_config_result = if (server.config_path) |config_path|
             configuration.loadFromFile(server.allocator, config_path)
