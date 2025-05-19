@@ -3005,6 +3005,7 @@ pub const Type = struct {
         };
 
         pub fn hashWithHasher(data: Data, hasher: anytype) void {
+            hasher.update(&.{@intFromEnum(data)});
             switch (data) {
                 .pointer => |info| {
                     std.hash.autoHash(hasher, info.size);
@@ -3366,7 +3367,7 @@ pub const Type = struct {
     }
 
     pub fn hashWithHasher(self: Type, hasher: anytype) void {
-        hasher.update(&.{ @intFromBool(self.is_type_val), @intFromEnum(self.data) });
+        hasher.update(&.{@intFromBool(self.is_type_val)});
         self.data.hashWithHasher(hasher);
     }
 
