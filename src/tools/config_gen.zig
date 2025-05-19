@@ -774,28 +774,57 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
     try writeLine(html[index..], single_line, writer);
 }
 
-/// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
-/// and outputs its arguments: `comptime DestType: type`, `integer: anytype`
-fn extractArgumentsFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}![][]const u8 {
-    var arguments: std.ArrayListUnmanaged([]const u8) = .empty;
-    defer arguments.deinit(allocator);
+const Parameter = struct {
+    signature: []const u8,
+    type: ?[]const u8,
+};
+
+/// takes in a signature (without name or leading parenthesis) like this:
+/// `comptime DestType: type, integer: anytype) DestType`
+/// and outputs its parameters and return type:
+/// `comptime DestType: type`, `integer: anytype`, `DestType`
+fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}!struct { []Parameter, []const u8 } {
+    var parameters: std.ArrayListUnmanaged(Parameter) = .empty;
+    defer parameters.deinit(allocator);
 
     var argument_start: usize = 0;
+    var type_start: ?usize = null;
     var index: usize = 0;
-    while (std.mem.indexOfAnyPos(u8, signature, index, ",()")) |token_index| {
+    while (std.mem.indexOfAnyPos(u8, signature, index, ",():")) |token_index| {
         if (signature[token_index] == '(') {
-            argument_start = index;
-            index = 1 + std.mem.indexOfScalarPos(u8, signature, token_index + 1, ')').?;
+            index = token_index + 1;
+            var paren_depth: usize = 1;
+            while (paren_depth > 0) : (index += 1) {
+                switch (signature[index]) {
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    else => {},
+                }
+            }
+            continue;
+        }
+        if (signature[token_index] == ':') {
+            std.debug.assert(signature[token_index + 1] == ' ');
+            type_start = token_index + 2;
+            index = token_index + 2;
             continue;
         }
         const argument = std.mem.trim(u8, signature[argument_start..token_index], &std.ascii.whitespace);
-        if (argument.len != 0) try arguments.append(allocator, argument);
-        if (signature[token_index] == ')') break;
+        if (argument.len != 0) {
+            try parameters.append(allocator, .{
+                .signature = argument,
+                .type = if (type_start) |i| std.mem.trim(u8, signature[i..token_index], &std.ascii.whitespace) else null,
+            });
+        }
         argument_start = token_index + 1;
         index = token_index + 1;
+        type_start = null;
+        if (signature[token_index] == ')') break;
     }
 
-    return arguments.toOwnedSlice(allocator);
+    std.debug.assert(signature[index] == ' ');
+    const return_type = signature[index + 1 ..];
+    return .{ try parameters.toOwnedSlice(allocator), return_type };
 }
 
 /// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
@@ -832,6 +861,13 @@ fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const 
     return snippet.toOwnedSlice(allocator);
 }
 
+fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, type_str, "std.builtin.")) {
+        return type_str["std.builtin.".len..];
+    }
+    return type_str;
+}
+
 /// Generates data files from the Zig language Reference (https://ziglang.org/documentation/master/)
 /// Output example: https://github.com/zigtools/zls/blob/0.11.0/src/data/master.zig
 fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, output_path: []const u8, langref_path: []const u8) !void {
@@ -861,9 +897,15 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         \\
         \\pub const Builtin = struct {
         \\    signature: []const u8,
+        \\    return_type: []const u8,
         \\    snippet: []const u8,
         \\    documentation: []const u8,
-        \\    arguments: []const []const u8,
+        \\    parameters: []const Parameter,
+        \\
+        \\    pub const Parameter = struct {
+        \\        signature: []const u8,
+        \\        type: ?[]const u8,
+        \\    };
         \\};
         \\
         \\pub const builtins: std.StaticStringMap(Builtin) = .initComptime(&.{
@@ -877,19 +919,21 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         const snippet = try extractSnippetFromSignature(allocator, signature);
         defer allocator.free(snippet);
 
-        const arguments = try extractArgumentsFromSignature(allocator, signature[builtin.name.len + 1 ..]);
-        defer allocator.free(arguments);
+        const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, signature[builtin.name.len + 1 ..]);
+        defer allocator.free(parameters);
 
         try writer.print(
             \\    .{{
             \\        "{}",
             \\        Builtin{{
             \\            .signature = "{}",
+            \\            .return_type = "{}",
             \\            .snippet = "{}",
             \\
         , .{
             std.zig.fmtEscapes(builtin.name),
             std.zig.fmtEscapes(signature),
+            std.zig.fmtEscapes(withoutStdBuiltinPrefix(return_type)),
             std.zig.fmtEscapes(snippet),
         });
 
@@ -906,13 +950,27 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
 
         try writer.writeAll(
             \\            ,
-            \\            .arguments = &[_][]const u8{
+            \\            .parameters = &[_]Builtin.Parameter{
         );
 
-        if (arguments.len != 0) {
+        if (parameters.len != 0) {
             try writer.writeByte('\n');
-            for (arguments) |arg| {
-                try writer.print("                \"{}\",\n", .{std.zig.fmtEscapes(arg)});
+            for (parameters) |param| {
+                try writer.print(
+                    \\                .{{
+                    \\                    .signature = "{}",
+                    \\
+                , .{
+                    std.zig.fmtEscapes(param.signature),
+                });
+                if (param.type) |t| {
+                    try writer.print("                    .type = \"{}\",\n", .{
+                        std.zig.fmtEscapes(withoutStdBuiltinPrefix(t)),
+                    });
+                } else {
+                    try writer.writeAll("                    .type = null,\n");
+                }
+                try writer.writeAll("                },\n");
             }
             try writer.writeAll("            },\n");
         } else {
