@@ -1083,7 +1083,7 @@ pub fn updateConfiguration(
         }
     }
 
-    if (new_zig_exe_path or new_zig_lib_path) {
+    if (DocumentStore.supports_build_system and (new_zig_exe_path or new_zig_lib_path)) {
         for (server.document_store.cimports.values()) |*result| {
             result.deinit(server.document_store.allocator);
         }
