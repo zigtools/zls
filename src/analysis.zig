@@ -3026,8 +3026,7 @@ pub const Type = struct {
                 .container => |info| {
                     info.scope_handle.hashWithHasher(hasher);
                     for (info.bound_params.keys(), info.bound_params.values()) |token_handle, ty| {
-                        std.hash.autoHash(hasher, token_handle.token);
-                        hasher.update(token_handle.handle.uri);
+                        token_handle.hashWithHasher(hasher);
                         ty.hashWithHasher(hasher);
                     }
                 },
@@ -3046,10 +3045,7 @@ pub const Type = struct {
                     std.hash.autoHash(hasher, node_handle.node);
                     hasher.update(node_handle.handle.uri);
                 },
-                .generic => |token_handle| {
-                    std.hash.autoHash(hasher, token_handle.token);
-                    hasher.update(token_handle.handle.uri);
-                },
+                .generic => |token_handle| token_handle.hashWithHasher(hasher),
                 .either => |entries| {
                     for (entries) |entry| {
                         hasher.update(entry.descriptor);
@@ -3127,11 +3123,7 @@ pub const Type = struct {
                 },
                 .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
-                .generic => |a_token_handle| {
-                    const b_token_handle = b.generic;
-                    if (a_token_handle.token != b_token_handle.token) return false;
-                    return std.mem.eql(u8, a_token_handle.handle.uri, b_token_handle.handle.uri);
-                },
+                .generic => |a_token_handle| return a_token_handle.eql(b.generic),
                 .either => |a_entries| {
                     const b_entries = b.either;
 
@@ -3219,8 +3211,7 @@ pub const Type = struct {
                 var hasher: std.hash.Wyhash = .init(0);
                 data.hashWithHasher(&hasher);
                 for (ctx.bound_params.keys(), ctx.bound_params.values()) |token_handle, ty| {
-                    std.hash.autoHash(&hasher, token_handle.token);
-                    hasher.update(token_handle.handle.uri);
+                    token_handle.hashWithHasher(&hasher);
                     ty.hashWithHasher(&hasher);
                 }
                 return hasher.final();
@@ -4646,20 +4637,29 @@ pub const TokenWithHandle = struct {
     token: Ast.TokenIndex,
     handle: *DocumentStore.Handle,
 
+    pub fn hashWithHasher(token_handle: TokenWithHandle, hasher: anytype) void {
+        std.hash.autoHash(hasher, token_handle.token);
+        hasher.update(token_handle.handle.uri);
+    }
+
+    pub fn eql(a: TokenWithHandle, b: TokenWithHandle) bool {
+        if (a.token != b.token) return false;
+        if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
+        return true;
+    }
+
     const Context = struct {
-        pub fn hash(self: Context, item: TokenWithHandle) u32 {
+        pub fn hash(self: Context, token_handle: TokenWithHandle) u32 {
             _ = self;
             var hasher: std.hash.Wyhash = .init(0);
-            std.hash.autoHash(&hasher, item.token);
-            hasher.update(item.handle.uri);
+            token_handle.hashWithHasher(&hasher);
             return @truncate(hasher.final());
         }
 
         pub fn eql(self: Context, a: TokenWithHandle, b: TokenWithHandle, b_index: usize) bool {
             _ = self;
             _ = b_index;
-            if (a.token != b.token) return false;
-            return std.mem.eql(u8, a.handle.uri, b.handle.uri);
+            return a.eql(b);
         }
     };
 };
