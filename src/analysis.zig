@@ -5770,31 +5770,7 @@ pub fn resolveExpressionTypeFromAncestors(
             else
                 null;
 
-            const index = blk: for (1..ancestors.len) |index| {
-                if (ast.fullFor(tree, ancestors[index])) |for_node| {
-                    const break_label = break_label_maybe orelse break :blk index;
-                    const for_label = tree.tokenSlice(for_node.label_token orelse continue);
-                    if (std.mem.eql(u8, break_label, for_label)) break :blk index;
-                } else if (ast.fullWhile(tree, ancestors[index])) |while_node| {
-                    const break_label = break_label_maybe orelse break :blk index;
-                    const while_label = tree.tokenSlice(while_node.label_token orelse continue);
-                    if (std.mem.eql(u8, break_label, while_label)) break :blk index;
-                } else switch (tree.nodeTag(ancestors[index])) {
-                    .block,
-                    .block_semicolon,
-                    .block_two,
-                    .block_two_semicolon,
-                    => {
-                        const break_label = break_label_maybe orelse continue;
-                        const block_label_token = ast.blockLabel(tree, ancestors[index]) orelse continue;
-                        const block_label = tree.tokenSlice(block_label_token);
-
-                        if (std.mem.eql(u8, break_label, block_label)) break :blk index;
-                    },
-
-                    else => {},
-                }
-            } else return null;
+            const index = ast.indexOfBreakTarget(tree, ancestors, break_label_maybe) orelse return null;
 
             return try analyser.resolveExpressionType(
                 handle,

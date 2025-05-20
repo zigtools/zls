@@ -1043,6 +1043,8 @@ const EnumLiteralContext = struct {
         enum_assignment,
         /// `return .`
         enum_return,
+        /// `break .`
+        enum_break,
         // `==`, `!=`
         enum_comparison,
         /// the enum is a fn arg, eg `f(.`
@@ -1061,6 +1063,7 @@ const EnumLiteralContext = struct {
             return switch (likely) {
                 .enum_assignment,
                 .enum_return,
+                .enum_break,
                 .enum_arg,
                 => true,
                 else => false,
@@ -1100,6 +1103,11 @@ fn getEnumLiteralContext(
         .keyword_return => {
             dot_context.type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null };
             dot_context.likely = .enum_return;
+        },
+        .keyword_break => {
+            const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
+            dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+            dot_context.likely = .enum_break;
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;

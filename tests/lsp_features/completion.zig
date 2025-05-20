@@ -2550,6 +2550,26 @@ test "return - structinit decl literal" {
     });
 }
 
+test "break - enum/decl literal" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = while (true) {
+        \\    break .<cursor>
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        .{ .label = "default", .kind = .EnumMember },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

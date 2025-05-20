@@ -1772,3 +1772,35 @@ test smallestEnclosingSubrange {
         children[result4.start .. result4.start + result4.len],
     );
 }
+
+pub fn indexOfBreakTarget(
+    tree: Ast,
+    nodes: []const Ast.Node.Index,
+    break_label_maybe: ?[]const u8,
+) ?usize {
+    for (nodes, 0..) |node, index| {
+        if (fullFor(tree, node)) |for_node| {
+            const break_label = break_label_maybe orelse return index;
+            const for_label = tree.tokenSlice(for_node.label_token orelse continue);
+            if (std.mem.eql(u8, break_label, for_label)) return index;
+        } else if (fullWhile(tree, node)) |while_node| {
+            const break_label = break_label_maybe orelse return index;
+            const while_label = tree.tokenSlice(while_node.label_token orelse continue);
+            if (std.mem.eql(u8, break_label, while_label)) return index;
+        } else switch (tree.nodeTag(node)) {
+            .block,
+            .block_semicolon,
+            .block_two,
+            .block_two_semicolon,
+            => {
+                const break_label = break_label_maybe orelse continue;
+                const block_label_token = blockLabel(tree, node) orelse continue;
+                const block_label = tree.tokenSlice(block_label_token);
+
+                if (std.mem.eql(u8, break_label, block_label)) return index;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
