@@ -328,8 +328,6 @@ test "function alias" {
 }
 
 test "generic function" {
-    // TODO doesn't work for std.ArrayList
-
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn ArrayList(comptime T: type) type {
