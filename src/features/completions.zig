@@ -1043,7 +1043,7 @@ const EnumLiteralContext = struct {
         enum_assignment,
         /// `return .`
         enum_return,
-        /// `break .`
+        /// `break .` or `break :blk .`
         enum_break,
         // `==`, `!=`
         enum_comparison,
@@ -1108,6 +1108,14 @@ fn getEnumLiteralContext(
             const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
             dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
             dot_context.likely = .enum_break;
+        },
+        .identifier => {
+            if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_break, .colon })) {
+                const break_label = tree.tokenSlice(token_index);
+                const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
+                dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+                dot_context.likely = .enum_break;
+            }
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;
