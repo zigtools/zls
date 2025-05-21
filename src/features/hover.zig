@@ -139,14 +139,23 @@ fn hoverSymbolResolved(
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
 
-        try writer.print("\n", .{});
-        for (doc_strings) |doc|
-            try writer.print("{s}", .{doc});
+        if (doc_strings.len > 0) {
+            try writer.writeAll("\n\n");
+            for (doc_strings, 0..) |doc, i| {
+                try writer.writeAll(doc);
+                if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
+            }
+        }
     } else {
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
-        try writer.print("\n", .{});
-        for (doc_strings) |doc|
-            try writer.print("{s}", .{doc});
+
+        if (doc_strings.len > 0) {
+            try writer.writeAll("\n\n");
+            for (doc_strings, 0..) |doc, i| {
+                try writer.writeAll(doc);
+                if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
+            }
+        }
     }
 
     return hover_text.items;
