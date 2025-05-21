@@ -138,23 +138,15 @@ fn hoverSymbolResolved(
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
-
-        if (doc_strings.len > 0) {
-            try writer.writeAll("\n\n");
-            for (doc_strings, 0..) |doc, i| {
-                try writer.writeAll(doc);
-                if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
-            }
-        }
     } else {
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+    }
 
-        if (doc_strings.len > 0) {
-            try writer.writeAll("\n\n");
-            for (doc_strings, 0..) |doc, i| {
-                try writer.writeAll(doc);
-                if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
-            }
+    if (doc_strings.len > 0) {
+        try writer.writeAll("\n\n");
+        for (doc_strings, 0..) |doc, i| {
+            try writer.writeAll(doc);
+            if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
         }
     }
 
