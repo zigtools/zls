@@ -284,9 +284,8 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
-        \\---
-        \\Foo doc comment
         \\
+        \\Foo doc comment
     );
     try testHover(
         \\const Edge<cursor>Cases = struct {
@@ -698,9 +697,8 @@ test "function parameter" {
         \\```zig
         \\(u32)
         \\```
-        \\---
-        \\hello world
         \\
+        \\hello world
     );
 }
 
@@ -756,9 +754,8 @@ test "either types" {
         \\```zig
         \\(type)
         \\```
-        \\---
-        \\small type
         \\
+        \\small type
         \\
         \\```zig
         \\const T = u64
@@ -766,9 +763,8 @@ test "either types" {
         \\```zig
         \\(type)
         \\```
-        \\---
-        \\large type
         \\
+        \\large type
     );
     try testHoverWithOptions(
         \\const A = struct {
@@ -784,13 +780,13 @@ test "either types" {
     ,
         \\const T = u32
         \\(type)
-        \\small type
         \\
+        \\small type
         \\
         \\const T = u64
         \\(type)
-        \\large type
         \\
+        \\large type
     , .{ .markup_kind = .plaintext });
 }
 
@@ -805,9 +801,8 @@ test "var decl comments" {
         \\```zig
         \\(comptime_int)
         \\```
-        \\---
-        \\this is a comment
         \\
+        \\this is a comment
     );
 }
 
@@ -942,10 +937,10 @@ test "combine doc comments of declaration and definition" {
         \\```zig
         \\(type)
         \\```
-        \\---
-        \\Foo
-        \\Bar
         \\
+        \\Foo
+        \\
+        \\Bar
     );
     try testHoverWithOptions(
         \\/// Foo
@@ -957,9 +952,10 @@ test "combine doc comments of declaration and definition" {
     ,
         \\const baz = struct
         \\(type)
-        \\Foo
-        \\Bar
         \\
+        \\Foo
+        \\
+        \\Bar
     , .{ .markup_kind = .plaintext });
 }
 
@@ -976,10 +972,10 @@ test "top-level doc comment" {
         \\```zig
         \\(type)
         \\```
-        \\---
-        \\A
-        \\B
         \\
+        \\A
+        \\
+        \\B
     );
 }
 
