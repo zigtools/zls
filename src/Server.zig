@@ -747,7 +747,9 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    server.updateConfiguration(new_config, .{}) catch |err| {
+    server.updateConfiguration(new_config, .{
+        .allowRelative = true,
+    }) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
@@ -938,12 +940,15 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    try server.updateConfiguration(new_config, .{});
+    try server.updateConfiguration(new_config, .{
+        .allowRelative = true,
+    });
 }
 
 pub const UpdateConfigurationOptions = struct {
     resolve: bool = true,
     leaky_config_arena: bool = false,
+    allowRelative: bool = false,
 };
 
 pub fn updateConfiguration2(
@@ -973,8 +978,45 @@ pub fn updateConfiguration(
     const config_arena = config_arena_allocator.allocator();
 
     var new_config: configuration.Configuration = param_new_config;
-    server.validateConfiguration(&new_config);
 
+    if (options.allowRelative) {
+        const maybe_root_dir: ?[]const u8 = if (server.workspaces.items.len == 1) dir: {
+            const uri = std.Uri.parse(server.workspaces.items[0].uri) catch |err| {
+                log.err("failed to parse root uri for workspace {s}: {!}", .{
+                    server.workspaces.items[0].uri, err,
+                });
+                break :dir null;
+            };
+            break :dir try uri.path.toRawMaybeAlloc(config_arena);
+        } else null;
+
+        inline for (&.{
+            "zig_exe_path",
+            "builtin_path",
+            "build_runner_path",
+            "zig_lib_path",
+            "global_cache_path",
+        }) |fieldName| {
+            const field: *?[]const u8 = &@field(new_config, fieldName);
+            if (field.*) |maybe_relative| resolve: {
+                if (std.fs.path.isAbsolute(maybe_relative)) break :resolve;
+
+                const root_dir = maybe_root_dir orelse {
+                    log.err("relative path only supported for {s} with exactly one workspace", .{fieldName});
+                    break :resolve;
+                };
+
+                const absolute = try std.fs.path.join(config_arena, &.{
+                    root_dir, maybe_relative,
+                });
+
+                log.debug("resolved '{s}' to {s}", .{ fieldName, absolute });
+                field.* = absolute;
+            }
+        }
+    }
+
+    server.validateConfiguration(&new_config);
     inline for (std.meta.fields(Config)) |field| {
         @field(new_config, field.name) = if (@field(new_config, field.name)) |new_value|
             new_value
