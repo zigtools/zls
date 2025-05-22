@@ -4383,6 +4383,11 @@ pub fn getPositionContext(
             switch (tok.tag) {
                 .identifier,
                 .builtin,
+                .keyword_for,
+                .keyword_while,
+                .keyword_switch,
+                .keyword_break,
+                .keyword_continue,
                 .number_literal,
                 .string_literal,
                 .multiline_string_literal_line,
@@ -4509,10 +4514,13 @@ pub fn getPositionContext(
                     return .{ .char_literal = tok.loc };
                 }
             },
-            .keyword_break,
-            .keyword_continue,
-            .keyword_callconv,
             .keyword_addrspace,
+            .keyword_break,
+            .keyword_callconv,
+            .keyword_continue,
+            .keyword_for,
+            .keyword_switch,
+            .keyword_while,
             => curr_ctx.ctx = .{ .keyword = tok.tag },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
             else => curr_ctx.ctx = .empty,
@@ -4630,6 +4638,7 @@ pub const DeclWithHandle = struct {
 
             .label,
             .error_token,
+            .keyword,
             => return null,
         }
     }
@@ -4674,6 +4683,7 @@ pub const DeclWithHandle = struct {
             .switch_payload,
             .label,
             .error_token,
+            .keyword,
             => true,
         };
     }
@@ -4687,6 +4697,7 @@ pub const DeclWithHandle = struct {
             .assign_destructure,
             .label,
             .error_token,
+            .keyword,
             => false,
             inline .optional_payload,
             .for_loop_payload,
@@ -4904,7 +4915,7 @@ pub const DeclWithHandle = struct {
 
                 return null;
             },
-            .error_token => return null,
+            .error_token, .keyword => return null,
         } orelse return null;
 
         if (!self.isCaptureByRef()) return resolved_ty;
