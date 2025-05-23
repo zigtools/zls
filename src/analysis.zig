@@ -128,12 +128,25 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
     var lines: std.ArrayListUnmanaged([]const u8) = .empty;
     defer lines.deinit(allocator);
 
+    var lines_start_with_space = true;
+
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
         const comm = tree.tokenTag(curr_line_tok);
         if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
-            try lines.append(allocator, tree.tokenSlice(curr_line_tok)[3..]);
+            const line = tree.tokenSlice(curr_line_tok)[3..];
+            if (line.len > 1 and line[0] != ' ') lines_start_with_space = false;
+            try lines.append(allocator, line);
         } else break;
+    }
+
+    // If all of the lines that aren't empty start with a space, remove the first space
+    if (lines_start_with_space) {
+        for (lines.items, 0..) |line, i| {
+            if (line.len > 1 and line[0] == ' ') {
+                lines.items[i] = line[1..];
+            }
+        }
     }
 
     return try std.mem.join(allocator, "\n", lines.items);

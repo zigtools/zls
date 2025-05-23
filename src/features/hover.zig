@@ -131,8 +131,6 @@ fn hoverSymbolResolved(
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
     const writer = hover_text.writer(arena);
     if (markup_kind == .markdown) {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
         try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
@@ -144,9 +142,15 @@ fn hoverSymbolResolved(
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
-        for (doc_strings) |doc|
-            try writer.print("{s}\n\n", .{doc});
         try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+    }
+
+    if (doc_strings.len > 0) {
+        try writer.writeAll("\n\n");
+        for (doc_strings, 0..) |doc, i| {
+            try writer.writeAll(doc);
+            if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
+        }
     }
 
     return hover_text.items;

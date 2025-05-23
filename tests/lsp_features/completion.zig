@@ -3263,9 +3263,9 @@ test "top-level doc comment" {
             .kind = .Struct,
             .detail = "type",
             .documentation =
-            \\ A
+            \\A
             \\
-            \\ B
+            \\B
             ,
         },
     });

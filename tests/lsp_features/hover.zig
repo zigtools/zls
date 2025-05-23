@@ -274,8 +274,6 @@ test "struct" {
         \\    };
         \\};
     ,
-        \\ Foo doc comment
-        \\
         \\```zig
         \\const FooStruct = struct {
         \\    bar: u32,
@@ -286,6 +284,8 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Foo doc comment
     );
     try testHover(
         \\const Edge<cursor>Cases = struct {
@@ -715,14 +715,14 @@ test "function parameter" {
         \\    return a;
         \\}
     ,
-        \\ hello world
-        \\
         \\```zig
         \\a: u32
         \\```
         \\```zig
         \\(u32)
         \\```
+        \\
+        \\hello world
     );
 }
 
@@ -772,8 +772,6 @@ test "either types" {
         \\const either = if (undefined) A else B;
         \\const bar = either.<cursor>T;
     ,
-        \\small type
-        \\
         \\```zig
         \\const T = u32
         \\```
@@ -781,7 +779,7 @@ test "either types" {
         \\(type)
         \\```
         \\
-        \\large type
+        \\small type
         \\
         \\```zig
         \\const T = u64
@@ -789,6 +787,8 @@ test "either types" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\large type
     );
     try testHoverWithOptions(
         \\const A = struct {
@@ -802,15 +802,15 @@ test "either types" {
         \\const either = if (undefined) A else B;
         \\const bar = either.<cursor>T;
     ,
-        \\small type
-        \\
         \\const T = u32
         \\(type)
         \\
-        \\large type
+        \\small type
         \\
         \\const T = u64
         \\(type)
+        \\
+        \\large type
     , .{ .markup_kind = .plaintext });
 }
 
@@ -819,14 +819,14 @@ test "var decl comments" {
         \\///this is a comment
         \\const f<cursor>oo = 0 + 0;
     ,
-        \\this is a comment
-        \\
         \\```zig
         \\const foo = 0 + 0
         \\```
         \\```zig
         \\(comptime_int)
         \\```
+        \\
+        \\this is a comment
     );
 }
 
@@ -955,16 +955,16 @@ test "combine doc comments of declaration and definition" {
         \\    const baz = struct {};
         \\};
     ,
-        \\ Foo
-        \\
-        \\ Bar
-        \\
         \\```zig
         \\const baz = struct
         \\```
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Foo
+        \\
+        \\Bar
     );
     try testHoverWithOptions(
         \\/// Foo
@@ -974,12 +974,12 @@ test "combine doc comments of declaration and definition" {
         \\    const baz = struct {};
         \\};
     ,
-        \\ Foo
-        \\
-        \\ Bar
-        \\
         \\const baz = struct
         \\(type)
+        \\
+        \\Foo
+        \\
+        \\Bar
     , .{ .markup_kind = .plaintext });
 }
 
@@ -990,16 +990,16 @@ test "top-level doc comment" {
         \\/// A
         \\const S<cursor>elf = @This();
     ,
-        \\ A
-        \\
-        \\ B
-        \\
         \\```zig
         \\const Self = @This()
         \\```
         \\```zig
         \\(type)
         \\```
+        \\
+        \\A
+        \\
+        \\B
     );
 }
 
