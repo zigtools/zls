@@ -3076,7 +3076,7 @@ pub const Type = struct {
                 },
                 .array => |a_type| {
                     const b_type = b.array;
-                    if (std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
+                    if (!std.meta.eql(a_type.elem_count, b_type.elem_count)) return false;
                     if (a_type.sentinel != b_type.sentinel) return false;
                     if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
                 },
