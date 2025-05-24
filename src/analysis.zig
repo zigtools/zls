@@ -367,7 +367,7 @@ pub fn formatFunction(
 
     if (data.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{info.return_type.fmt(analyser, .{
+        try writer.print("{}", .{info.return_value.fmt(analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
         })});
@@ -909,10 +909,12 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     return findReturnStatementInternal(tree, body, &already_found);
 }
 
+/// if `func_type_param` is callable, returns an instance of the return type.
+/// otherwise, returns null.
 pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOfMemory}!?Type {
     const func_type = try analyser.resolveFuncProtoOfCallable(func_type_param) orelse return null;
     const info = func_type.data.function;
-    return info.return_type.*;
+    return info.return_value.*;
 }
 
 fn resolveReturnTypeOfFuncNode(
@@ -1724,9 +1726,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (func_ty.is_type_val) return null;
 
             const func_info = func_ty.data.function;
-            const return_type = func_info.return_type.*;
-            if (!return_type.isGenericType()) {
-                return return_type;
+            const return_value = func_info.return_value.*;
+            if (!return_value.isGenericType()) {
+                return return_value;
             }
 
             var meta_params: TokenToTypeMap = switch (func_info.container_type.data) {
@@ -1752,7 +1754,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
             }
 
-            return try analyser.resolveGenericType(return_type, meta_params);
+            return try analyser.resolveGenericType(return_value, meta_params);
         },
         .container_field,
         .container_field_init,
@@ -2293,7 +2295,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 });
             }
 
-            const return_type = try analyser.resolveReturnTypeOfFuncNode(handle, node) orelse
+            const return_value = try analyser.resolveReturnTypeOfFuncNode(handle, node) orelse
                 Type.fromIP(analyser, .unknown_type, null);
 
             const info: Type.Data.Function = .{
@@ -2304,7 +2306,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 .name = name,
                 .parameters = parameters.items,
                 .has_varargs = has_varargs,
-                .return_type = try analyser.allocType(return_type),
+                .return_value = try analyser.allocType(return_value),
             };
 
             // This is a function type
@@ -2977,7 +2979,7 @@ pub const Type = struct {
             name: ?[]const u8,
             parameters: []Parameter,
             has_varargs: bool,
-            return_type: *Type,
+            return_value: *Type,
         };
 
         pub const Parameter = struct {
@@ -3042,7 +3044,7 @@ pub const Type = struct {
                             param_ty.hashWithHasher(hasher);
                         }
                     }
-                    info.return_type.hashWithHasher(hasher);
+                    info.return_value.hashWithHasher(hasher);
                 },
                 .for_range, .compile_error => |node_handle| {
                     std.hash.autoHash(hasher, node_handle.node);
@@ -3122,7 +3124,7 @@ pub const Type = struct {
                         const b_param_type = b_param.type orelse return false;
                         if (!a_param_type.eql(b_param_type)) return false;
                     }
-                    if (!a_info.return_type.eql(b_info.return_type.*)) return false;
+                    if (!a_info.return_value.eql(b_info.return_value.*)) return false;
                 },
                 .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
@@ -3178,7 +3180,7 @@ pub const Type = struct {
                     if (info.container_type.data.isGeneric()) {
                         return true;
                     }
-                    if (info.return_type.data.isGeneric()) {
+                    if (info.return_value.data.isGeneric()) {
                         return true;
                     }
                     for (info.parameters) |param| {
@@ -3320,7 +3322,7 @@ pub const Type = struct {
                             break :blk parameters;
                         },
                         .has_varargs = info.has_varargs,
-                        .return_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.return_type.*, bound_params, visiting)),
+                        .return_value = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.return_value.*, bound_params, visiting)),
                     },
                 },
                 .either => |info| return .{
@@ -3640,7 +3642,7 @@ pub const Type = struct {
 
     pub fn isTypeFunc(self: Type) bool {
         return switch (self.data) {
-            .function => |info| info.return_type.is_type_val,
+            .function => |info| info.return_value.is_type_val,
             else => false,
         };
     }

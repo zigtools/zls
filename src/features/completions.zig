@@ -403,7 +403,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_type.fmt(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_value.fmt(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
