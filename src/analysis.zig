@@ -2944,7 +2944,7 @@ pub const Type = struct {
         compile_error: NodeWithHandle,
 
         // `T` in `fn Foo(comptime T: type) type`
-        generic: TokenWithHandle,
+        type_parameter: TokenWithHandle,
 
         /// Branching types
         either: []const EitherEntry,
@@ -3048,7 +3048,7 @@ pub const Type = struct {
                     std.hash.autoHash(hasher, node_handle.node);
                     hasher.update(node_handle.handle.uri);
                 },
-                .generic => |token_handle| token_handle.hashWithHasher(hasher),
+                .type_parameter => |token_handle| token_handle.hashWithHasher(hasher),
                 .either => |entries| {
                     for (entries) |entry| {
                         hasher.update(entry.descriptor);
@@ -3126,7 +3126,7 @@ pub const Type = struct {
                 },
                 .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
-                .generic => |a_token_handle| return a_token_handle.eql(b.generic),
+                .type_parameter => |a_token_handle| return a_token_handle.eql(b.type_parameter),
                 .either => |a_entries| {
                     const b_entries = b.either;
 
@@ -3149,7 +3149,7 @@ pub const Type = struct {
 
         fn isGeneric(data: Data) bool {
             return switch (data) {
-                .generic => true,
+                .type_parameter => true,
                 .pointer => |info| info.elem_ty.data.isGeneric(),
                 .array => |info| info.elem_ty.data.isGeneric(),
                 .tuple => |types| {
@@ -3244,7 +3244,7 @@ pub const Type = struct {
                 .compile_error,
                 .ip_index,
                 => unreachable,
-                .generic => |token_handle| {
+                .type_parameter => |token_handle| {
                     const t = bound_params.get(token_handle) orelse return data;
                     std.debug.assert(t.is_type_val);
                     return t.data.resolveGeneric(analyser, bound_params, visiting);
@@ -3887,7 +3887,7 @@ pub const Type = struct {
                                     try writer.writeByte(',');
                                 }
                                 const param_ty = try analyser.resolveGenericType(.{
-                                    .data = .{ .generic = .{ .token = param_name_token, .handle = handle } },
+                                    .data = .{ .type_parameter = .{ .token = param_name_token, .handle = handle } },
                                     .is_type_val = true,
                                 }, info.bound_params);
                                 try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
@@ -3952,7 +3952,7 @@ pub const Type = struct {
             },
             .either => try writer.writeAll("either type"), // TODO
             .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
-            .generic => |token_handle| {
+            .type_parameter => |token_handle| {
                 const token = token_handle.token;
                 const handle = token_handle.handle;
                 const str = handle.tree.tokenSlice(token);
@@ -4969,7 +4969,7 @@ pub const DeclWithHandle = struct {
                 if (param_type.isMetaType()) {
                     const name_token = self.decl.nameToken(tree);
                     break :blk Type{
-                        .data = .{ .generic = .{ .token = name_token, .handle = self.handle } },
+                        .data = .{ .type_parameter = .{ .token = name_token, .handle = self.handle } },
                         .is_type_val = true,
                     };
                 }
@@ -5326,7 +5326,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                     if (!Analyser.isMetaType(tree, param_type_expr)) continue;
                     const param_name_token = param.name_token orelse continue;
                     const token_handle: TokenWithHandle = .{ .token = param_name_token, .handle = handle };
-                    const ty: Type = .{ .data = .{ .generic = token_handle }, .is_type_val = true };
+                    const ty: Type = .{ .data = .{ .type_parameter = token_handle }, .is_type_val = true };
                     try meta_params.put(analyser.arena, token_handle, ty);
                 }
             },
