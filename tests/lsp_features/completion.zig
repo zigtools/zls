@@ -2712,7 +2712,6 @@ test "usingnamespace" {
 }
 
 test "usingnamespace - generics" {
-    if (true) return error.SkipZigTest; // TODO
     try testCompletion(
         \\fn Bar(comptime Self: type) type {
         \\    return struct {
@@ -2728,7 +2727,8 @@ test "usingnamespace - generics" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Foo) void" },
+        // should be Method, but usingnamespace will be removed anyways https://github.com/ziglang/zig/issues/20663
+        .{ .label = "inner", .kind = .Function, .detail = "fn (self: Foo) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
 }

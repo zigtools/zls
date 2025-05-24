@@ -2317,16 +2317,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
 
-            // HACK: resolve std.ArrayList(T).Slice
-            if (std.mem.endsWith(u8, node_handle.handle.uri, "array_list.zig") and
-                if_node.payload_token != null and
-                std.mem.eql(u8, offsets.identifierTokenToNameSlice(tree, if_node.payload_token.?), "a") and
-                tree.nodeTag(if_node.ast.cond_expr) == .identifier and
-                std.mem.eql(u8, offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(if_node.ast.cond_expr)), "alignment"))
-            blk: {
-                return (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) orelse break :blk;
-            }
-
             var either: std.BoundedArray(Type.TypeWithDescriptor, 2) = .{};
 
             if (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) |t| {
@@ -3246,11 +3236,9 @@ pub const Type = struct {
                 return data;
             }
             const ctx: GenericContext = .{ .bound_params = bound_params };
-            if (visiting.containsContext(data, ctx)) {
-                return data;
-            }
-            try visiting.putContext(analyser.gpa, data, {}, ctx);
-            defer _ = visiting.removeContext(data, ctx);
+            const gop = try visiting.getOrPutContext(analyser.gpa, data, ctx);
+            if (gop.found_existing) return data;
+            defer std.debug.assert(visiting.removeContext(data, ctx));
             switch (data) {
                 .for_range,
                 .compile_error,

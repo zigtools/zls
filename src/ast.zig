@@ -1578,9 +1578,11 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usi
     return try context.nodes.toOwnedSlice(allocator);
 }
 
-/// returns a list of nodes (including parse errors) that overlap with the given source code index.
+/// returns a list of nodes that overlap with the given source code index.
+/// the list may include nodes that were discarded during error recovery in the Zig parser.
 /// sorted from smallest to largest.
 /// caller owns the returned memory.
+/// this function can be removed when the parser has been improved.
 pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, tree: Ast, source_index: usize) error{OutOfMemory}![]Ast.Node.Index {
     const NodeLoc = struct {
         node: Ast.Node.Index,
