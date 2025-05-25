@@ -193,11 +193,11 @@ pub fn getSignatureInfo(
                     const builtin = data.builtins.get(tree.tokenSlice(expr_last_token)) orelse return null;
                     const param_infos = try arena.alloc(
                         types.ParameterInformation,
-                        builtin.arguments.len,
+                        builtin.parameters.len,
                     );
-                    for (param_infos, builtin.arguments) |*info, argument| {
+                    for (param_infos, builtin.parameters) |*info, parameter| {
                         info.* = .{
-                            .label = .{ .string = argument },
+                            .label = .{ .string = parameter.signature },
                             .documentation = null,
                         };
                     }

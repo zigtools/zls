@@ -546,7 +546,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .only_name => .{ name, .PlainText },
             .snippet => blk: {
                 std.debug.assert(use_snippets);
-                if (builtin.arguments.len == 0) break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}()", .{name}), .PlainText };
+                if (builtin.parameters.len == 0) break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}()", .{name}), .PlainText };
                 if (use_placeholders) break :blk .{ builtin.snippet, .Snippet };
                 break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name}), .Snippet };
             },
@@ -1454,95 +1454,10 @@ fn resolveBuiltinFnArg(
     /// Includes leading `@`
     name: []const u8,
 ) std.mem.Allocator.Error!?Analyser.Type {
-    const builtin_name: []const u8 = name: {
-        if (std.mem.eql(u8, name, "@Type")) {
-            switch (arg_index) {
-                0 => break :name "Type",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@setFloatMode")) {
-            switch (arg_index) {
-                0 => break :name "FloatMode",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@prefetch")) {
-            switch (arg_index) {
-                1 => break :name "PrefetchOptions",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@reduce")) {
-            switch (arg_index) {
-                0 => break :name "ReduceOp",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@export")) {
-            switch (arg_index) {
-                1 => break :name "ExportOptions",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@extern")) {
-            switch (arg_index) {
-                1 => break :name "ExternOptions",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@cmpxchgWeak") or std.mem.eql(u8, name, "@cmpxchgStrong")) {
-            switch (arg_index) {
-                4, 5 => break :name "AtomicOrder",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@atomicLoad")) {
-            switch (arg_index) {
-                2 => break :name "AtomicOrder",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@atomicStore")) {
-            switch (arg_index) {
-                3 => break :name "AtomicOrder",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@atomicRmw")) {
-            switch (arg_index) {
-                2 => break :name "AtomicRmwOp",
-                4 => break :name "AtomicOrder",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@call")) {
-            switch (arg_index) {
-                0 => break :name "CallModifier",
-                else => return null,
-            }
-        }
-
-        if (std.mem.eql(u8, name, "@branchHint")) {
-            switch (arg_index) {
-                0 => break :name "BranchHint",
-                else => return null,
-            }
-        }
-
-        return null;
-    };
-
+    const builtin = version_data.builtins.get(name) orelse return null;
+    if (arg_index >= builtin.parameters.len) return null;
+    const param = builtin.parameters[arg_index];
+    const builtin_name = param.type orelse return null;
     return analyser.instanceStdBuiltinType(builtin_name);
 }
 

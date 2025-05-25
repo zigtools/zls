@@ -23,6 +23,8 @@ pub const DocumentScope = @import("DocumentScope.zig");
 pub const Declaration = DocumentScope.Declaration;
 pub const Scope = DocumentScope.Scope;
 
+const version_data = @import("version_data");
+
 const Analyser = @This();
 
 gpa: std.mem.Allocator,
@@ -2131,10 +2133,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return resolved_type.typeOf(analyser);
             }
 
-            if (std.mem.eql(u8, call_name, "@typeInfo")) {
-                return analyser.instanceStdBuiltinType("Type");
-            }
-
             const type_map: std.StaticStringMap(InternPool.Index) = .initComptime(.{
                 .{ "type", .type_type },
                 .{ "void", .void_type },
@@ -2225,18 +2223,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return try analyser.resolveFieldAccess(lhs, field_name);
             }
 
-            if (std.mem.eql(u8, call_name, "@src")) {
-                return analyser.instanceStdBuiltinType("SourceLocation");
-            }
-
             if (std.mem.eql(u8, call_name, "@compileError")) {
                 return .{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
-            }
-
-            if (std.mem.eql(u8, call_name, "@panic") or
-                std.mem.eql(u8, call_name, "@trap"))
-            {
-                return Type.fromIP(analyser, .noreturn_type, null);
             }
 
             if (std.mem.eql(u8, call_name, "@Vector")) {
@@ -2261,6 +2249,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 });
 
                 return Type.fromIP(analyser, .type_type, vector_ty_ip_index);
+            }
+
+            if (version_data.builtins.get(call_name)) |data| {
+                const type_str = data.return_type;
+                if (try analyser.resolvePrimitive(type_str)) |primitive|
+                    return Type.fromIP(analyser, primitive, null);
+                return analyser.instanceStdBuiltinType(type_str);
             }
         },
         .fn_proto,
@@ -5694,88 +5689,12 @@ pub fn resolveExpressionTypeFromAncestors(
                 return ty.instanceTypeVal(analyser);
             }
 
-            if (std.mem.eql(u8, call_name, "@branchHint")) {
-                if (params.len == 0) return null;
-                if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("BranchHint");
-            }
-
-            if (std.mem.eql(u8, call_name, "@atomicLoad")) {
-                if (params.len <= 2) return null;
-                if (params[2] != node) return null;
-                return analyser.instanceStdBuiltinType("AtomicOrder");
-            }
-
-            if (std.mem.eql(u8, call_name, "@atomicRmw")) {
-                if (params.len > 2 and params[2] == node)
-                    return analyser.instanceStdBuiltinType("AtomicRmwOp");
-                if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
-                return null;
-            }
-
-            if (std.mem.eql(u8, call_name, "@atomicStore")) {
-                if (params.len <= 3) return null;
-                if (params[3] != node) return null;
-                return analyser.instanceStdBuiltinType("AtomicOrder");
-            }
-
-            if (std.mem.eql(u8, call_name, "@cmpxchgStrong")) {
-                if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
-                if (params.len > 5 and params[5] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
-                return null;
-            }
-
-            if (std.mem.eql(u8, call_name, "@cmpxchgWeak")) {
-                if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
-                if (params.len > 5 and params[5] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
-                return null;
-            }
-
-            if (std.mem.eql(u8, call_name, "@call")) {
-                if (params.len == 0) return null;
-                if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("CallModifier");
-            }
-
-            if (std.mem.eql(u8, call_name, "@export")) {
-                if (params.len <= 1) return null;
-                if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("ExportOptions");
-            }
-
-            if (std.mem.eql(u8, call_name, "@extern")) {
-                if (params.len <= 1) return null;
-                if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("ExternOptions");
-            }
-
-            if (std.mem.eql(u8, call_name, "@prefetch")) {
-                if (params.len <= 1) return null;
-                if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("PrefetchOptions");
-            }
-
-            if (std.mem.eql(u8, call_name, "@reduce")) {
-                if (params.len == 0) return null;
-                if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("ReduceOp");
-            }
-
-            if (std.mem.eql(u8, call_name, "@setFloatMode")) {
-                if (params.len == 0) return null;
-                if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("FloatMode");
-            }
-
-            if (std.mem.eql(u8, call_name, "@Type")) {
-                if (params.len == 0) return null;
-                if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("Type");
+            if (version_data.builtins.get(call_name)) |data| {
+                const index = std.mem.indexOfScalar(Ast.Node.Index, params, node) orelse return null;
+                if (index >= data.parameters.len) return null;
+                const parameter = data.parameters[index];
+                const type_str = parameter.type orelse return null;
+                return analyser.instanceStdBuiltinType(type_str);
             }
         },
 
