@@ -438,7 +438,31 @@ test "decl literal on generic type" {
         \\const init: @This() = undefined
         \\```
         \\```zig
-        \\(Box)
+        \\(Box(u8))
+        \\```
+        \\
+        \\Go to [Box](file:///test.zig#L1)
+    );
+}
+
+test "decl literal on generic type - alias" {
+    try testHover(
+        \\fn Box(comptime T: type) type {
+        \\    return struct {
+        \\        item: T,
+        \\        const init: @This() = undefined;
+        \\        const alias = init;
+        \\    };
+        \\}
+        \\test {
+        \\    const box: Box(u8) = .al<cursor>ias;
+        \\}
+    ,
+        \\```zig
+        \\const init: @This() = undefined
+        \\```
+        \\```zig
+        \\(Box(u8))
         \\```
         \\
         \\Go to [Box](file:///test.zig#L1)

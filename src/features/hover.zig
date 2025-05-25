@@ -41,7 +41,10 @@ fn hoverSymbolRecursive(
 
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| def: {
-            if (try analyser.resolveVarDeclAlias(.of(node, handle))) |result| {
+            if (try analyser.resolveVarDeclAlias(.{
+                .node_handle = .of(node, handle),
+                .container_type = decl_handle.container_type,
+            })) |result| {
                 return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
             }
 

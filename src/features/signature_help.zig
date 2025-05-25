@@ -36,7 +36,7 @@ fn fnProtoToSignatureInfo(
     })});
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = Analyser.hasSelfParam(func_type);
+        const has_self_param = analyser.hasSelfParam(func_type);
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 

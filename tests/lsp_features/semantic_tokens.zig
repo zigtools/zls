@@ -600,6 +600,57 @@ test "function call on return value of generic function" {
     });
 }
 
+test "generic method - @This() parameter" {
+    try testSemanticTokens(
+        \\fn Foo(comptime T: type) type {
+        \\    return struct {
+        \\        fn bar(self: @This()) void {}
+        \\    };
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "T", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "type", .type, .{} },
+
+        .{ "return", .keyword, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "bar", .method, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "@This", .builtin, .{} },
+        .{ "void", .type, .{} },
+    });
+}
+
+test "generic method - recursive self parameter" {
+    try testSemanticTokens(
+        \\fn Foo(comptime T: type) type {
+        \\    return struct {
+        \\        fn bar(self: Foo(T)) void {}
+        \\    };
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true, .generic = true } },
+        .{ "comptime", .keyword, .{} },
+        .{ "T", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "type", .type, .{} },
+
+        .{ "return", .keyword, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "bar", .method, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "Foo", .type, .{} },
+        .{ "T", .typeParameter, .{} },
+        .{ "void", .type, .{} },
+    });
+}
+
 test "catch" {
     try testSemanticTokens(
         \\var alpha = a catch b;

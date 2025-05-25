@@ -277,7 +277,7 @@ fn colorIdentifierBasedOnType(
             new_tok_mod.generic = true;
         }
 
-        const has_self_param = Analyser.hasSelfParam(type_node);
+        const has_self_param = builder.analyser.hasSelfParam(type_node);
 
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
@@ -419,8 +419,13 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 is_generic = func_ty.isGenericFunc();
                 if (func_ty.isTypeFunc()) {
                     func_name_tok_type = .type;
-                } else if (Analyser.hasSelfParam(func_ty)) {
-                    func_name_tok_type = .method;
+                } else {
+                    const container_ty = try builder.analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+                    if (container_ty.data.container.scope_handle.scope != .root and
+                        Analyser.firstParamIs(func_ty, container_ty))
+                    {
+                        func_name_tok_type = .method;
+                    }
                 }
             }
 
@@ -620,7 +625,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
                 if (try builder.analyser.resolveTypeOfNode(.of(type_expr, handle))) |struct_type| {
                     switch (struct_type.data) {
-                        .container => |scope_handle| {
+                        .container => |info| {
+                            const scope_handle = info.scope_handle;
                             field_token_type = fieldTokenType(scope_handle.toNode(), scope_handle.handle, false);
                         },
                         else => {},
@@ -1131,7 +1137,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
 
     try writeNodeTokens(builder, lhs_node);
 
-    const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = lhs_node, .handle = handle }) orelse {
+    const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse {
         try writeToken(builder, field_name_token, .variable);
         return;
     };
@@ -1148,7 +1154,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
             const decl_node = decl_type.decl.ast_node;
             if (!decl_type.handle.tree.nodeTag(decl_node).isContainerField()) break :field_blk;
             if (lhs_type.data != .container) break :field_blk;
-            const scope_handle = lhs_type.data.container;
+            const scope_handle = lhs_type.data.container.scope_handle;
             const tt = fieldTokenType(
                 scope_handle.toNode(),
                 scope_handle.handle,
