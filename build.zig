@@ -35,6 +35,7 @@ const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .loongarch64, .os_tag = .linux },
     .{ .cpu_arch = .powerpc64le, .os_tag = .linux },
     .{ .cpu_arch = .riscv64, .os_tag = .linux },
+    .{ .cpu_arch = .s390x, .os_tag = .linux },
     .{ .cpu_arch = .x86, .os_tag = .linux },
     .{ .cpu_arch = .x86, .os_tag = .windows },
     .{ .cpu_arch = .x86_64, .os_tag = .linux },
