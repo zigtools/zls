@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0 # required to resolve the version string
 
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: master
 
