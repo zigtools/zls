@@ -100,6 +100,7 @@ fn logFn(
 }
 
 fn defaultLogFilePath(allocator: std.mem.Allocator) std.mem.Allocator.Error!?[]const u8 {
+    if (zig_builtin.target.os.tag == .wasi) return null;
     const cache_path = known_folders.getPath(allocator, .cache) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.ParseError => return null,
@@ -282,7 +283,7 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
         }
     }
 
-    if (std.io.getStdIn().isTty()) {
+    if (zig_builtin.target.os.tag != .wasi and std.io.getStdIn().isTty()) {
         log.warn("ZLS is not a CLI tool, it communicates over the Language Server Protocol.", .{});
         log.warn("Did you mean to run 'zls --help'?", .{});
         log.warn("", .{});

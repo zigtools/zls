@@ -69,9 +69,9 @@ test fromPath {
 
 /// Parses a Uri and returns the unescaped path
 /// Caller owns the returned memory
-pub fn parse(allocator: std.mem.Allocator, str: []const u8) (std.Uri.ParseError || error{OutOfMemory})![]u8 {
+pub fn parse(allocator: std.mem.Allocator, str: []const u8) (std.Uri.ParseError || error{ UnsupportedScheme, OutOfMemory })![]u8 {
     var uri = try std.Uri.parse(str);
-    if (!std.mem.eql(u8, uri.scheme, "file")) return error.InvalidFormat;
+    if (!std.mem.eql(u8, uri.scheme, "file")) return error.UnsupportedScheme;
     if (builtin.os.tag == .windows and uri.path.percent_encoded.len != 0 and uri.path.percent_encoded[0] == '/') {
         uri.path.percent_encoded = uri.path.percent_encoded[1..];
     }

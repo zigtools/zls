@@ -527,6 +527,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
     }
 
+    // TODO Instead of checking `is_test`, possible config paths should be provided by the main function.
     if (!zig_builtin.is_test) {
         var maybe_config_result = if (server.config_path) |config_path|
             configuration.loadFromFile(server.allocator, config_path)
@@ -877,9 +878,12 @@ fn removeWorkspace(server: *Server, uri: types.URI) void {
 fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
     var updated_files: usize = 0;
     for (notification.changes) |change| {
-        const file_path = Uri.parse(arena, change.uri) catch |err| {
-            log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
-            continue;
+        const file_path = Uri.parse(arena, change.uri) catch |err| switch (err) {
+            error.UnsupportedScheme => continue,
+            else => {
+                log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
+                continue;
+            },
         };
         const file_extension = std.fs.path.extension(file_path);
         if (!std.mem.eql(u8, file_extension, ".zig") and !std.mem.eql(u8, file_extension, ".zon")) continue;
@@ -1079,7 +1083,7 @@ pub fn updateConfiguration(
         }
     }
 
-    if (new_zig_exe_path or new_zig_lib_path) {
+    if (DocumentStore.supports_build_system and (new_zig_exe_path or new_zig_lib_path)) {
         for (server.document_store.cimports.values()) |*result| {
             result.deinit(server.document_store.allocator);
         }
@@ -1145,14 +1149,6 @@ pub fn updateConfiguration(
                 "ZLS {} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
                 .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
             );
-        }
-    }
-
-    if (server.config.prefer_ast_check_as_child_process) {
-        if (!std.process.can_spawn) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because the '{s}' operating system can't spawn child processes", .{@tagName(zig_builtin.target.os.tag)});
-        } else if (server.status == .initialized and server.config.zig_exe_path == null) {
-            log.warn("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
     }
 
