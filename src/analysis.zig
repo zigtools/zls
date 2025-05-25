@@ -917,7 +917,7 @@ pub fn resolveReturnType(analyser: *Analyser, func_type_param: Type) error{OutOf
     return info.return_value.*;
 }
 
-fn resolveValueTypeOfFuncNode(
+fn resolveReturnValueOfFuncNode(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     func_node: Ast.Node.Index,
@@ -2295,7 +2295,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 });
             }
 
-            const return_value = try analyser.resolveValueTypeOfFuncNode(handle, node) orelse
+            const return_value = try analyser.resolveReturnValueOfFuncNode(handle, node) orelse
                 Type.fromIP(analyser, .unknown_type, null);
 
             const info: Type.Data.Function = .{
