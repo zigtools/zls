@@ -329,7 +329,7 @@ fn functionTypeCompletion(
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser).toExpr());
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
@@ -1386,7 +1386,7 @@ fn collectContainerFields(
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
-                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                expected_ty = expected_ty.typeOf(builder.analyser).toExpr().resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);

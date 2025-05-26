@@ -230,7 +230,7 @@ pub fn main() Error!void {
                 continue;
             }
 
-            const actual_value = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeVal(&analyser, .{
+            const actual_value = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtValue(&analyser, .{
                 .truncate_container_decls = false,
             })});
             defer gpa.free(actual_value);

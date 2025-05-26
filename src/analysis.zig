@@ -390,7 +390,7 @@ pub fn isInstanceCall(
     const container_node, _ = call_handle.tree.nodeData(call.ast.fn_expr).node_and_token;
 
     const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
-        container_instance.typeOf(analyser)
+        container_instance.typeOf(analyser).toExpr()
     else
         func_ty.data.function.container_type.*;
 
@@ -403,7 +403,7 @@ pub fn hasSelfParam(analyser: *Analyser, func_ty: Expr) bool {
     std.debug.assert(func_ty.isFunc());
     const container = func_ty.data.function.container_type.*;
     if (container.is_type_val) return false;
-    const in_container = container.typeOf(analyser);
+    const in_container = container.typeOf(analyser).toExpr();
     if (in_container.isNamespace()) return false;
     return Analyser.firstParamIs(func_ty, in_container);
 }
@@ -874,7 +874,7 @@ fn resolveGenericTypeInternal(
 ) !Expr {
     var resolved = ty;
     if (!ty.is_type_val) {
-        resolved = resolved.typeOf(analyser);
+        resolved = resolved.typeOf(analyser).toExpr();
     }
     std.debug.assert(resolved.is_type_val);
     resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visiting);
@@ -990,7 +990,7 @@ pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Expr) error{Out
                 .size = .one,
                 .sentinel = .none,
                 .is_const = is_const,
-                .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
+                .elem_ty = try analyser.allocType(ty.typeOf(analyser).toExpr()),
             },
         },
         .is_type_val = false,
@@ -1912,7 +1912,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const elem_ty_slice = try analyser.arena.alloc(Expr, array_init_info.ast.elements.len);
             for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
                 elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
-                elem_ty.* = elem_ty.typeOf(analyser);
+                elem_ty.* = elem_ty.typeOf(analyser).toExpr();
             }
             return .{
                 .data = .{ .tuple = elem_ty_slice },
@@ -2098,7 +2098,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (params.len < 1) return null;
                 var resolved_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
-                return resolved_type.typeOf(analyser);
+                return resolved_type.typeOf(analyser).toExpr();
             }
 
             if (std.mem.eql(u8, call_name, "@typeInfo")) {
@@ -2169,7 +2169,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
                 const field = try analyser.lookupSymbolContainer(container_type, field_name, .field) orelse return null;
                 const result = try field.resolveType(analyser) orelse return null;
-                return result.typeOf(analyser);
+                return result.typeOf(analyser).toExpr();
             }
 
             if (std.mem.eql(u8, call_name, "@field")) {
@@ -2412,7 +2412,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const label_token = ast.blockLabel(tree, node) orelse {
                 const last_statement = statements[statements.len - 1];
                 if (try analyser.resolveTypeOfNodeInternal(.of(last_statement, handle))) |ty| {
-                    if (ty.typeOf(analyser).isNoreturnType()) {
+                    if (ty.typeOf(analyser).toExpr().isNoreturnType()) {
                         return Expr.fromIP(analyser, .noreturn_type, null);
                     }
                 }
@@ -2881,7 +2881,6 @@ pub const Binding = struct {
     is_const: bool,
 };
 
-/// Represents a resolved Zig type.
 /// This is the return type of `resolveTypeOfNode`.
 pub const Expr = struct {
     data: Data,
@@ -3451,7 +3450,7 @@ pub const Expr = struct {
 
         switch (a.data) {
             .optional => |a_type| {
-                if (a_type.eql(b.typeOf(analyser))) {
+                if (a_type.eql(b.typeOf(analyser).toExpr())) {
                     return a;
                 }
             },
@@ -3459,7 +3458,7 @@ pub const Expr = struct {
                 .null_type => switch (b.data) {
                     .optional => return b,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
+                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser).toExpr()) },
                         .is_type_val = false,
                     },
                 },
@@ -3470,7 +3469,7 @@ pub const Expr = struct {
 
         switch (b.data) {
             .optional => |b_type| {
-                if (b_type.eql(a.typeOf(analyser))) {
+                if (b_type.eql(a.typeOf(analyser).toExpr())) {
                     return b;
                 }
             },
@@ -3478,7 +3477,7 @@ pub const Expr = struct {
                 .null_type => switch (a.data) {
                     .optional => return a,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
+                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser).toExpr()) },
                         .is_type_val = false,
                     },
                 },
@@ -3518,18 +3517,17 @@ pub const Expr = struct {
         };
     }
 
-    pub fn typeOf(self: Expr, analyser: *Analyser) Expr {
+    pub fn typeOf(self: Expr, analyser: *Analyser) Type {
         if (self.is_type_val) {
-            return fromIP(analyser, .type_type, .type_type);
+            return Type.fromIP(analyser, .type_type);
         }
 
         if (self.data == .ip_index) {
-            return fromIP(analyser, .type_type, self.data.ip_index.type);
+            return Type.fromIP(analyser, self.data.ip_index.type);
         }
 
         return .{
             .data = self.data,
-            .is_type_val = true,
         };
     }
 
@@ -3737,12 +3735,17 @@ pub const Expr = struct {
 
     const Formatter = std.fmt.Formatter(format);
 
-    pub fn fmt(ty: Expr, analyser: *Analyser, options: FormatOptions) Formatter {
+    pub fn fmt(ty: Expr, analyser: *Analyser, options: FormatOptions) Type.Formatter {
         const typeof = ty.typeOf(analyser);
         return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
     }
 
     pub fn fmtTypeVal(ty: Expr, analyser: *Analyser, options: FormatOptions) Formatter {
+        std.debug.assert(ty.is_type_val);
+        return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
+    }
+
+    pub fn fmtValue(ty: Expr, analyser: *Analyser, options: FormatOptions) Formatter {
         std.debug.assert(ty.data == .ip_index or ty.is_type_val);
         return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
     }
@@ -3756,6 +3759,67 @@ pub const Expr = struct {
         ty: Expr,
         analyser: *Analyser,
         options: FormatOptions,
+    };
+
+    fn format(
+        ctx: FormatContext,
+        comptime fmt_str: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.ty);
+
+        const ty = ctx.ty;
+        const analyser = ctx.analyser;
+        const options = ctx.options;
+
+        switch (ty.data) {
+            .ip_index => |payload| {
+                const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
+                try analyser.ip.print(ip_index, writer, .{
+                    .truncate_container = options.truncate_container_decls,
+                });
+            },
+            else => {
+                std.debug.assert(ty.is_type_val);
+                try writer.print("{}", .{Type.fromExpr(ty).fmt(analyser, options)});
+            },
+        }
+    }
+};
+
+/// Represents a resolved Zig type.
+pub const Type = struct {
+    /// if `data == .ip_index` then `data.ip_index.type == .type_type`
+    data: Expr.Data,
+
+    /// Asserts `expr.is_type_val`
+    pub fn fromExpr(expr: Expr) Type {
+        std.debug.assert(expr.is_type_val);
+        return .{ .data = expr.data };
+    }
+
+    pub fn toExpr(ty: Type) Expr {
+        return .{ .data = ty.data, .is_type_val = true };
+    }
+
+    pub fn fromIP(analyser: *Analyser, index: ?InternPool.Index) Type {
+        if (index) |idx| std.debug.assert(analyser.ip.typeOf(idx) == .type_type);
+        return .{
+            .data = .{ .ip_index = .{ .type = .type_type, .index = index } },
+        };
+    }
+
+    const Formatter = std.fmt.Formatter(format);
+
+    pub fn fmt(ty: Type, analyser: *Analyser, options: Expr.FormatOptions) Formatter {
+        return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
+    }
+
+    const FormatContext = struct {
+        ty: Type,
+        analyser: *Analyser,
+        options: Expr.FormatOptions,
     };
 
     fn format(
@@ -5048,7 +5112,7 @@ pub const DeclWithHandle = struct {
 
         return .{
             .data = .{ .pointer = .{
-                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser)),
+                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser).toExpr()),
                 .sentinel = .none,
                 .is_const = false,
                 .size = .one,
@@ -5514,17 +5578,17 @@ pub fn lookupSymbolFieldInit(
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct => {},
-        .keyword_enum => if (try analyser.lookupSymbolContainer(container_type.typeOf(analyser), field_name, .field)) |ty| return ty,
+        .keyword_enum => if (try analyser.lookupSymbolContainer(container_type.typeOf(analyser).toExpr(), field_name, .field)) |ty| return ty,
         .keyword_union => if (try analyser.lookupSymbolContainer(container_type, field_name, .field)) |ty| return ty,
         else => return null,
     }
 
     // Assume we are doing decl literals
-    const decl = try analyser.lookupSymbolContainer(container_type.typeOf(analyser), field_name, .other) orelse return null;
+    const decl = try analyser.lookupSymbolContainer(container_type.typeOf(analyser).toExpr(), field_name, .other) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
     resolved_type = resolved_type.resolveDeclLiteralResultType();
-    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
+    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser).toExpr())) return decl;
     return null;
 }
 
