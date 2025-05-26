@@ -423,14 +423,13 @@ pub fn firstParamIs(
     const func_info = func_type.data.function;
     if (func_info.parameters.len == 0) return false;
     const resolved_type = func_info.parameters[0].type orelse return true;
-    if (!resolved_type.is_type_val) return false;
 
     const deref_type = switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
             .one => info.elem_ty.*,
             .many, .slice, .c => return false,
         },
-        else => resolved_type,
+        else => resolved_type.toExpr(),
     };
 
     const deref_expected_type = switch (expected_type.data) {
@@ -1750,8 +1749,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const min_len = @min(parameters.len, arguments.len);
             for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
                 const param_name_token = param.name_token orelse continue;
-                const param_type = param.type orelse continue;
-                if (!param_type.is_type_val) continue;
 
                 const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
@@ -2274,7 +2271,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         if (!ty.is_type_val) {
                             break :blk;
                         }
-                        break :param_type ty;
+                        break :param_type Type.fromExpr(ty);
                     }
                     if (param.anytype_ellipsis3) |token_index| {
                         switch (tree.tokenTag(token_index)) {
@@ -2288,7 +2285,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                             else => unreachable,
                         }
                     }
-                    break :param_type Expr.fromIP(analyser, .type_type, .unknown_type);
+                    break :param_type Type.fromIP(analyser, .unknown_type);
                 };
 
                 try parameters.append(analyser.arena, .{
@@ -2992,7 +2989,7 @@ pub const Expr = struct {
             name: ?[]const u8,
             name_token: ?Ast.TokenIndex,
             /// null if anytype
-            type: ?Expr,
+            type: ?Type,
 
             pub const Modifier = enum {
                 comptime_param,
@@ -3320,7 +3317,7 @@ pub const Expr = struct {
                                     .modifier = old.modifier,
                                     .name = old.name,
                                     .name_token = old.name_token,
-                                    .type = if (old.type) |t| try analyser.resolveGenericTypeInternal(t, bound_params, visiting) else null,
+                                    .type = if (old.type) |t| Type.fromExpr(try analyser.resolveGenericTypeInternal(t.toExpr(), bound_params, visiting)) else null,
                                 };
                             }
                             break :blk parameters;
