@@ -1747,7 +1747,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
 
-                try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
+                try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, Type.fromExpr(argument_type));
             }
 
             return try analyser.resolveGenericType(return_value, meta_params);
@@ -3248,7 +3248,6 @@ pub const Expr = struct {
                 => unreachable,
                 .type_parameter => |token_handle| {
                     const t = bound_params.get(token_handle) orelse return data;
-                    std.debug.assert(t.is_type_val);
                     return t.data.resolveGeneric(analyser, bound_params, visiting);
                 },
                 .pointer => |info| return .{
@@ -3294,7 +3293,7 @@ pub const Expr = struct {
                             var new_params: TokenToTypeMap = .empty;
                             try new_params.ensureTotalCapacity(analyser.arena, info.bound_params.count());
                             for (info.bound_params.keys(), info.bound_params.values()) |k, v| {
-                                const t = try analyser.resolveGenericTypeInternal(v, bound_params, visiting);
+                                const t = Type.fromExpr(try analyser.resolveGenericTypeInternal(v.toExpr(), bound_params, visiting));
                                 new_params.putAssumeCapacity(k, t);
                             }
                             break :blk new_params;
@@ -4717,7 +4716,7 @@ pub fn getPositionContext(
     return .empty;
 }
 
-pub const TokenToTypeMap = std.ArrayHashMapUnmanaged(TokenWithHandle, Expr, TokenWithHandle.Context, true);
+pub const TokenToTypeMap = std.ArrayHashMapUnmanaged(TokenWithHandle, Type, TokenWithHandle.Context, true);
 
 pub const TokenWithHandle = struct {
     token: Ast.TokenIndex,
@@ -5411,7 +5410,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                     if (!Analyser.isMetaType(tree, param_type_expr)) continue;
                     const param_name_token = param.name_token orelse continue;
                     const token_handle: TokenWithHandle = .{ .token = param_name_token, .handle = handle };
-                    const ty: Expr = .{ .data = .{ .type_parameter = token_handle }, .is_type_val = true };
+                    const ty: Type = .{ .data = .{ .type_parameter = token_handle } };
                     try meta_params.put(analyser.arena, token_handle, ty);
                 }
             },
