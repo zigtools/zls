@@ -247,7 +247,7 @@ fn fieldTokenType(
 
 fn colorIdentifierBasedOnType(
     builder: *Builder,
-    type_node: Analyser.Type,
+    type_node: Analyser.Expr,
     target_tok: Ast.TokenIndex,
     is_parameter: bool,
     tok_mod: TokenModifiers,
@@ -1025,7 +1025,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     }
 }
 
-fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
+fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Expr) error{OutOfMemory}!void {
     const tree = builder.handle.tree;
 
     const var_decl = tree.fullVarDecl(var_decl_node).?;

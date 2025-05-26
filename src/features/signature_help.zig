@@ -17,7 +17,7 @@ fn fnProtoToSignatureInfo(
     arena: std.mem.Allocator,
     commas: u32,
     skip_self_param: bool,
-    func_type: Analyser.Type,
+    func_type: Analyser.Expr,
     markup_kind: types.MarkupKind,
 ) !types.SignatureInformation {
     const info = func_type.data.function;

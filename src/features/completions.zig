@@ -28,7 +28,7 @@ const Builder = struct {
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
 };
 
-fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!void {
+fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -144,7 +144,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
         ),
         .either => |either_entries| {
             for (either_entries) |entry| {
-                const entry_ty: Analyser.Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
+                const entry_ty: Analyser.Expr = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
                 try typeToCompletion(builder, entry_ty);
             }
         },
@@ -317,8 +317,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
 fn functionTypeCompletion(
     builder: *Builder,
     func_name: []const u8,
-    parent_container_ty: ?Analyser.Type,
-    func_ty: Analyser.Type,
+    parent_container_ty: ?Analyser.Expr,
+    func_ty: Analyser.Expr,
 ) error{OutOfMemory}!?types.CompletionItem {
     std.debug.assert(func_ty.isFunc());
 
@@ -1303,7 +1303,7 @@ fn getReturnTypeNode(tree: Ast, nodes: []const Ast.Node.Index) ?Ast.Node.Index {
 fn collectContainerFields(
     builder: *Builder,
     likely: EnumLiteralContext.Likely,
-    container: Analyser.Type,
+    container: Analyser.Expr,
     omit_members: std.BufSet,
 ) error{OutOfMemory}!void {
     const info = switch (container.data) {
@@ -1422,13 +1422,13 @@ fn collectContainerNodes(
     builder: *Builder,
     handle: *DocumentStore.Handle,
     dot_context: EnumLiteralContext,
-) error{OutOfMemory}![]Analyser.Type {
+) error{OutOfMemory}![]Analyser.Expr {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const gpa = builder.analyser.gpa;
 
-    var types_with_handles: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    var types_with_handles: std.ArrayListUnmanaged(Analyser.Expr) = .empty;
     const token_index = switch (dot_context.type_info) {
         .identifier_token_index => |token| token,
         .expr_node_index => |node| {
@@ -1478,7 +1478,7 @@ fn resolveBuiltinFnArg(
     arg_index: usize,
     /// Includes leading `@`
     name: []const u8,
-) std.mem.Allocator.Error!?Analyser.Type {
+) std.mem.Allocator.Error!?Analyser.Expr {
     const builtin_name: []const u8 = name: {
         if (std.mem.eql(u8, name, "@Type")) {
             switch (arg_index) {
@@ -1576,7 +1576,7 @@ fn collectBuiltinContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Expr),
 ) error{OutOfMemory}!void {
     if (dot_context.need_ret_type) return;
     if (try resolveBuiltinFnArg(
@@ -1593,7 +1593,7 @@ fn collectVarAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Expr),
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1625,7 +1625,7 @@ fn collectFieldAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Expr),
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1697,7 +1697,7 @@ fn collectEnumLiteralContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     nodes: []const Ast.Node.Index,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Expr),
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1719,7 +1719,7 @@ fn collectKeywordFnContainerNodes(
     builder: *Builder,
     tag: std.zig.Token.Tag,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *std.ArrayListUnmanaged(Analyser.Expr),
 ) error{OutOfMemory}!void {
     const builtin_type_name: []const u8 = name: {
         switch (tag) {
