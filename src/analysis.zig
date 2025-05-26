@@ -72,6 +72,12 @@ fn allocExpr(analyser: *Analyser, expr: Expr) error{OutOfMemory}!*Expr {
     return ptr;
 }
 
+fn allocType(analyser: *Analyser, ty: Type) error{OutOfMemory}!*Type {
+    const ptr = try analyser.arena.create(Type);
+    ptr.* = ty;
+    return ptr;
+}
+
 pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex) error{OutOfMemory}!?[]const u8 {
     const doc_comment_index = getDocCommentTokenIndex(&tree, base) orelse return null;
     return try collectDocComments(allocator, tree, doc_comment_index, false);
@@ -965,7 +971,6 @@ pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Expr) error{OutOfMem
     // TODO: some uses of this function don't expect C pointers to be unwrapped
     switch (optional.data) {
         .optional => |child_ty| {
-            std.debug.assert(child_ty.is_type_val);
             return child_ty.instanceTypeVal(analyser);
         },
         .pointer => |ptr| {
@@ -1039,7 +1044,7 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Expr, symbol: []const u8) erro
         return null;
 
     if (container_decl.ast.enum_token != null)
-        return .{ .data = .{ .union_tag = try analyser.allocExpr(ty) }, .is_type_val = false };
+        return .{ .data = .{ .union_tag = try analyser.allocType(Type.fromExpr(ty)) }, .is_type_val = false };
 
     if (container_decl.ast.arg.unwrap()) |arg| {
         const tag_type = (try analyser.resolveTypeOfNode(.of(arg, handle))) orelse return null;
@@ -1429,7 +1434,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Expr, name: []const u8) error{Ou
 
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
-                return child_ty.*;
+                return child_ty.toExpr();
             }
         },
 
@@ -1835,7 +1840,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const child_ty = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
             if (!child_ty.is_type_val) return null;
 
-            return .{ .data = .{ .optional = try analyser.allocExpr(child_ty) }, .is_type_val = true };
+            return .{ .data = .{ .optional = try analyser.allocType(Type.fromExpr(child_ty)) }, .is_type_val = true };
         },
         .ptr_type_aligned,
         .ptr_type_sentinel,
@@ -2917,7 +2922,7 @@ pub const Expr = struct {
         tuple: []Expr,
 
         /// `?T`
-        optional: *Expr,
+        optional: *Type,
 
         /// `error_set!payload`
         error_union: struct {
@@ -2927,7 +2932,7 @@ pub const Expr = struct {
         },
 
         /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
-        union_tag: *Expr,
+        union_tag: *Type,
 
         /// - `struct {}`
         /// - `enum {}`
@@ -3275,7 +3280,7 @@ pub const Expr = struct {
                     },
                 },
                 .optional => |info| return .{
-                    .optional = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
+                    .optional = try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(info.toExpr(), bound_params, visiting))),
                 },
                 .error_union => |info| return .{
                     .error_union = .{
@@ -3284,7 +3289,7 @@ pub const Expr = struct {
                     },
                 },
                 .union_tag => |info| return .{
-                    .union_tag = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
+                    .union_tag = try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(info.toExpr(), bound_params, visiting))),
                 },
                 .container => |info| return .{
                     .container = .{
@@ -3450,7 +3455,7 @@ pub const Expr = struct {
 
         switch (a.data) {
             .optional => |a_type| {
-                if (a_type.eql(b.typeOf(analyser).toExpr())) {
+                if (a_type.eql(b.typeOf(analyser))) {
                     return a;
                 }
             },
@@ -3458,7 +3463,7 @@ pub const Expr = struct {
                 .null_type => switch (b.data) {
                     .optional => return b,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocExpr(b.typeOf(analyser).toExpr()) },
+                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
                         .is_type_val = false,
                     },
                 },
@@ -3469,7 +3474,7 @@ pub const Expr = struct {
 
         switch (b.data) {
             .optional => |b_type| {
-                if (b_type.eql(a.typeOf(analyser).toExpr())) {
+                if (b_type.eql(a.typeOf(analyser))) {
                     return b;
                 }
             },
@@ -3477,7 +3482,7 @@ pub const Expr = struct {
                 .null_type => switch (a.data) {
                     .optional => return a,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocExpr(a.typeOf(analyser).toExpr()) },
+                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
                         .is_type_val = false,
                     },
                 },
@@ -3511,10 +3516,7 @@ pub const Expr = struct {
 
     pub fn instanceTypeVal(self: Expr, analyser: *Analyser) ?Expr {
         if (!self.is_type_val) return null;
-        return switch (self.data) {
-            .ip_index => |payload| fromIP(analyser, payload.index orelse return null, null),
-            else => .{ .data = self.data, .is_type_val = false },
-        };
+        return Type.fromExpr(self).instanceTypeVal(analyser);
     }
 
     pub fn typeOf(self: Expr, analyser: *Analyser) Type {
@@ -3630,7 +3632,7 @@ pub const Expr = struct {
         var result_type = ty;
         while (true) {
             result_type = switch (result_type.data) {
-                .optional => |child_ty| child_ty.*,
+                .optional => |child_ty| child_ty.toExpr(),
                 .error_union => |info| info.payload.*,
                 .pointer => |child_ty| child_ty.elem_ty.*,
                 else => return result_type,
@@ -3810,11 +3812,31 @@ pub const Type = struct {
         };
     }
 
+    pub fn hashWithHasher(ty: Type, hasher: anytype) void {
+        ty.data.hashWithHasher(hasher);
+    }
+
+    pub fn eql(a: Type, b: Type) bool {
+        if (!a.data.eql(b.data)) return false;
+        return true;
+    }
+
+    // TODO: rename to instanceExpr
+    pub fn instanceTypeVal(ty: Type, analyser: *Analyser) ?Expr {
+        return switch (ty.data) {
+            .ip_index => |payload| Expr.fromIP(analyser, payload.index orelse return null, null),
+            else => .{ .data = ty.data, .is_type_val = false },
+        };
+    }
+
     const Formatter = std.fmt.Formatter(format);
 
     pub fn fmt(ty: Type, analyser: *Analyser, options: Expr.FormatOptions) Formatter {
         return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
     }
+
+    // TODO: delete this and use fmt once all relevant Expr's have been changed to Type's
+    pub const fmtTypeVal = fmt;
 
     const FormatContext = struct {
         ty: Type,
