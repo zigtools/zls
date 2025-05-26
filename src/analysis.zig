@@ -955,7 +955,7 @@ fn resolveReturnValueOfFuncNode(
         return .{
             .data = .{ .error_union = .{
                 .error_set = null,
-                .payload = try analyser.allocExpr(child_type),
+                .payload = try analyser.allocType(Type.fromExpr(child_type)),
             } },
             .is_type_val = false,
         };
@@ -1935,8 +1935,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             return .{
                 .data = .{ .error_union = .{
-                    .error_set = try analyser.allocExpr(error_set),
-                    .payload = try analyser.allocExpr(payload),
+                    .error_set = try analyser.allocType(Type.fromExpr(error_set)),
+                    .payload = try analyser.allocType(Type.fromExpr(payload)),
                 } },
                 .is_type_val = true,
             };
@@ -2927,8 +2927,8 @@ pub const Expr = struct {
         /// `error_set!payload`
         error_union: struct {
             /// `null` if inferred error
-            error_set: ?*Expr,
-            payload: *Expr,
+            error_set: ?*Type,
+            payload: *Type,
         },
 
         /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
@@ -3284,8 +3284,8 @@ pub const Expr = struct {
                 },
                 .error_union => |info| return .{
                     .error_union = .{
-                        .error_set = if (info.error_set) |t| try analyser.allocExpr(try analyser.resolveGenericTypeInternal(t.*, bound_params, visiting)) else null,
-                        .payload = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.payload.*, bound_params, visiting)),
+                        .error_set = if (info.error_set) |t| try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(t.toExpr(), bound_params, visiting))) else null,
+                        .payload = try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(info.payload.toExpr(), bound_params, visiting))),
                     },
                 },
                 .union_tag => |info| return .{
@@ -3633,7 +3633,7 @@ pub const Expr = struct {
         while (true) {
             result_type = switch (result_type.data) {
                 .optional => |child_ty| child_ty.toExpr(),
-                .error_union => |info| info.payload.*,
+                .error_union => |info| info.payload.toExpr(),
                 .pointer => |child_ty| child_ty.elem_ty.*,
                 else => return result_type,
             };
