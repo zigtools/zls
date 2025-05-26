@@ -329,7 +329,7 @@ fn functionTypeCompletion(
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser).toExpr());
+        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);

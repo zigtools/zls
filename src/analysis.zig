@@ -396,11 +396,9 @@ pub fn isInstanceCall(
     const container_node, _ = call_handle.tree.nodeData(call.ast.fn_expr).node_and_token;
 
     const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
-        container_instance.typeOf(analyser).toExpr()
+        container_instance.typeOf(analyser)
     else
-        func_ty.data.function.container_type.*;
-
-    std.debug.assert(container_ty.is_type_val);
+        Type.fromExpr(func_ty.data.function.container_type.*);
 
     return firstParamIs(func_ty, container_ty);
 }
@@ -409,16 +407,15 @@ pub fn hasSelfParam(analyser: *Analyser, func_ty: Expr) bool {
     std.debug.assert(func_ty.isFunc());
     const container = func_ty.data.function.container_type.*;
     if (container.is_type_val) return false;
-    const in_container = container.typeOf(analyser).toExpr();
-    if (in_container.isNamespace()) return false;
+    const in_container = container.typeOf(analyser);
+    if (in_container.toExpr().isNamespace()) return false;
     return Analyser.firstParamIs(func_ty, in_container);
 }
 
 pub fn firstParamIs(
     func_type: Expr,
-    expected_type: Expr,
+    expected_type: Type,
 ) bool {
-    std.debug.assert(expected_type.is_type_val);
     std.debug.assert(func_type.isFunc());
     const func_info = func_type.data.function;
     if (func_info.parameters.len == 0) return false;
@@ -426,15 +423,15 @@ pub fn firstParamIs(
 
     const deref_type = switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.toExpr(),
+            .one => info.elem_ty.*,
             .many, .slice, .c => return false,
         },
-        else => resolved_type.toExpr(),
+        else => resolved_type,
     };
 
     const deref_expected_type = switch (expected_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.toExpr(),
+            .one => info.elem_ty.*,
             .many, .slice, .c => return false,
         },
         else => expected_type,
@@ -1766,7 +1763,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .container_field_init,
         .container_field_align,
         => {
-            const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+            const container_type = options.container_type orelse (try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)))).toExpr();
             if (container_type.isEnumType())
                 return container_type.instanceTypeVal(analyser);
 
@@ -2022,7 +2019,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             // TODO: use map? idk
-            return try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+            return (try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)))).toExpr();
         },
         .builtin_call,
         .builtin_call_comma,
@@ -2035,7 +2032,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const call_name = tree.tokenSlice(tree.nodeMainToken(node));
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (params.len != 0) return null;
-                return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+                return options.container_type orelse (try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)))).toExpr();
             }
 
             const cast_map: std.StaticStringMap(void) = .initComptime(.{
@@ -2240,7 +2237,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buf, node).?;
 
-            const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+            const container_type = options.container_type orelse (try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token))).toExpr();
             const doc_comments = try getDocComments(analyser.arena, tree, node);
             const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
 
@@ -5220,7 +5217,6 @@ pub fn collectDeclarationsOfContainer(
 
                         if (!firstParamIs(func_ty, .{
                             .data = .{ .container = info },
-                            .is_type_val = true,
                         })) continue;
                     }
                 },
@@ -5395,12 +5391,11 @@ pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) A
     return ast_node.?; // the DocumentScope's root scope is guaranteed to have an Ast Node
 }
 
-pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Expr {
+pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
     const tree = handle.tree;
     const document_scope = try handle.getDocumentScope();
     if (document_scope.scopes.len == 1) return .{
         .data = .{ .container = .root(handle) },
-        .is_type_val = true,
     };
 
     var current: DocumentScope.Scope.Index = .root;
@@ -5436,7 +5431,6 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                 .bound_params = meta_params,
             },
         },
-        .is_type_val = true,
     };
 }
 
