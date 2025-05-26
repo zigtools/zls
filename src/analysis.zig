@@ -1911,10 +1911,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 return array_ty.instanceTypeVal(analyser);
             }
 
-            const elem_ty_slice = try analyser.arena.alloc(Expr, array_init_info.ast.elements.len);
+            const elem_ty_slice = try analyser.arena.alloc(Type, array_init_info.ast.elements.len);
             for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
-                elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
-                elem_ty.* = elem_ty.typeOf(analyser).toExpr();
+                const expr = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
+                elem_ty.* = expr.typeOf(analyser);
             }
             return .{
                 .data = .{ .tuple = elem_ty_slice },
@@ -1992,17 +1992,22 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const container_decl = tree.fullContainerDecl(&buffer, node).?;
                 if (container_decl.ast.members.len == 0) break :not_a_tuple; // technically a tuple
                 if (tree.tokenTag(container_decl.ast.main_token) != .keyword_struct) break :not_a_tuple;
-                const elem_ty_slice = try analyser.arena.alloc(Expr, container_decl.ast.members.len);
+                const elem_ty_slice = try analyser.arena.alloc(Type, container_decl.ast.members.len);
 
                 var has_unresolved_fields = false;
                 for (elem_ty_slice, container_decl.ast.members) |*elem_ty, member_node| {
                     const container_field = tree.fullContainerField(member_node) orelse break :not_a_tuple;
                     if (!container_field.ast.tuple_like) break :not_a_tuple;
                     const type_expr = container_field.ast.type_expr.unwrap().?;
-                    elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(type_expr, handle)) orelse {
+                    const expr = try analyser.resolveTypeOfNodeInternal(.of(type_expr, handle)) orelse {
                         has_unresolved_fields = true;
                         continue;
                     };
+                    if (!expr.is_type_val) {
+                        has_unresolved_fields = true;
+                        continue;
+                    }
+                    elem_ty.* = Type.fromExpr(expr);
                 }
 
                 if (has_unresolved_fields) return null;
@@ -2916,7 +2921,7 @@ pub const Expr = struct {
         },
 
         /// `.{a,b}`
-        tuple: []Expr,
+        tuple: []Type,
 
         /// `?T`
         optional: *Type,
@@ -3269,9 +3274,9 @@ pub const Expr = struct {
                 },
                 .tuple => |info| return .{
                     .tuple = blk: {
-                        const types = try analyser.arena.alloc(Expr, info.len);
+                        const types = try analyser.arena.alloc(Type, info.len);
                         for (info, types) |old, *new| {
-                            new.* = try analyser.resolveGenericTypeInternal(old, bound_params, visiting);
+                            new.* = Type.fromExpr(try analyser.resolveGenericTypeInternal(old.toExpr(), bound_params, visiting));
                         }
                         break :blk types;
                     },
