@@ -1386,7 +1386,7 @@ fn collectContainerFields(
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
-                expected_ty = expected_ty.typeOf(builder.analyser).toExpr().resolveDeclLiteralResultType();
+                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType().toExpr();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);
@@ -1403,7 +1403,7 @@ fn collectContainerFields(
                 // decl literal
                 const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
-                expected_ty = expected_ty.resolveDeclLiteralResultType();
+                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType().toExpr();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;

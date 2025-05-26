@@ -3630,19 +3630,6 @@ pub const Expr = struct {
         }
     }
 
-    // TODO: Expr -> Type
-    pub fn resolveDeclLiteralResultType(ty: Expr) Expr {
-        var result_type = ty;
-        while (true) {
-            result_type = switch (result_type.data) {
-                .optional => |child_ty| child_ty.toExpr(),
-                .error_union => |info| info.payload.toExpr(),
-                .pointer => |child_ty| child_ty.elem_ty.toExpr(),
-                else => return result_type,
-            };
-        }
-    }
-
     pub fn isTypeFunc(self: Expr) bool {
         return switch (self.data) {
             .function => |info| info.return_value.is_type_val,
@@ -3830,6 +3817,18 @@ pub const Type = struct {
             .ip_index => |payload| Expr.fromIP(analyser, payload.index orelse return null, null),
             else => .{ .data = ty.data, .is_type_val = false },
         };
+    }
+
+    pub fn resolveDeclLiteralResultType(ty: Type) Type {
+        var result_type = ty;
+        while (true) {
+            result_type = switch (result_type.data) {
+                .optional => |child_ty| child_ty.*,
+                .error_union => |info| info.payload.*,
+                .pointer => |child_ty| child_ty.elem_ty.*,
+                else => return result_type,
+            };
+        }
     }
 
     const Formatter = std.fmt.Formatter(format);
@@ -5608,8 +5607,8 @@ pub fn lookupSymbolFieldInit(
     const decl = try analyser.lookupSymbolContainer(container_type.typeOf(analyser).toExpr(), field_name, .other) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
-    resolved_type = resolved_type.resolveDeclLiteralResultType();
-    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser).toExpr())) return decl;
+    const resolved_ty = resolved_type.typeOf(analyser).resolveDeclLiteralResultType();
+    if (resolved_ty.eql(container_type.typeOf(analyser))) return decl;
     return null;
 }
 
