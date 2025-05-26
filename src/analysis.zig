@@ -426,7 +426,7 @@ pub fn firstParamIs(
 
     const deref_type = switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.*,
+            .one => info.elem_ty.toExpr(),
             .many, .slice, .c => return false,
         },
         else => resolved_type.toExpr(),
@@ -434,7 +434,7 @@ pub fn firstParamIs(
 
     const deref_expected_type = switch (expected_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.*,
+            .one => info.elem_ty.toExpr(),
             .many, .slice, .c => return false,
         },
         else => expected_type,
@@ -994,7 +994,7 @@ pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Expr) error{Out
                 .size = .one,
                 .sentinel = .none,
                 .is_const = is_const,
-                .elem_ty = try analyser.allocExpr(ty.typeOf(analyser).toExpr()),
+                .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
             },
         },
         .is_type_val = false,
@@ -1163,7 +1163,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = is_const,
-                                .elem_ty = try analyser.allocExpr(.{
+                                .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1171,7 +1171,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                             .elem_ty = info.elem_ty,
                                         },
                                     },
-                                    .is_type_val = true,
                                 }),
                             },
                         },
@@ -1204,7 +1203,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = is_const,
-                                .elem_ty = try analyser.allocExpr(.{
+                                .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1212,7 +1211,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                             .elem_ty = info.elem_ty,
                                         },
                                     },
-                                    .is_type_val = true,
                                 }),
                             },
                         },
@@ -1254,7 +1252,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                     .size = .one,
                                     .sentinel = .none,
                                     .is_const = info.is_const,
-                                    .elem_ty = try analyser.allocExpr(.{
+                                    .elem_ty = try analyser.allocType(.{
                                         .data = .{
                                             .array = .{
                                                 .elem_count = elem_count,
@@ -1262,7 +1260,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                                 .elem_ty = info.elem_ty,
                                             },
                                         },
-                                        .is_type_val = true,
                                     }),
                                 },
                             },
@@ -1284,7 +1281,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                     .size = .one,
                                     .sentinel = .none,
                                     .is_const = info.is_const,
-                                    .elem_ty = try analyser.allocExpr(.{
+                                    .elem_ty = try analyser.allocType(.{
                                         .data = .{
                                             .array = .{
                                                 .elem_count = elem_count,
@@ -1292,7 +1289,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                                 .elem_ty = info.elem_ty,
                                             },
                                         },
-                                        .is_type_val = true,
                                     }),
                                 },
                             },
@@ -1324,7 +1320,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = info.is_const,
-                                .elem_ty = try analyser.allocExpr(.{
+                                .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1332,7 +1328,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                             .elem_ty = info.elem_ty,
                                         },
                                     },
-                                    .is_type_val = true,
                                 }),
                             },
                         },
@@ -1352,7 +1347,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = info.is_const,
-                                .elem_ty = try analyser.allocExpr(.{
+                                .elem_ty = try analyser.allocType(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1360,7 +1355,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                             .elem_ty = info.elem_ty,
                                         },
                                     },
-                                    .is_type_val = true,
                                 }),
                             },
                         },
@@ -1860,7 +1854,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         .size = ptr_info.size,
                         .sentinel = sentinel,
                         .is_const = ptr_info.const_token != null,
-                        .elem_ty = try analyser.allocExpr(elem_ty),
+                        .elem_ty = try analyser.allocType(Type.fromExpr(elem_ty)),
                     },
                 },
                 .is_type_val = true,
@@ -1884,7 +1878,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 .data = .{ .array = .{
                     .elem_count = elem_count,
                     .sentinel = sentinel,
-                    .elem_ty = try analyser.allocExpr(elem_ty),
+                    .elem_ty = try analyser.allocType(Type.fromExpr(elem_ty)),
                 } },
                 .is_type_val = true,
             };
@@ -2909,7 +2903,7 @@ pub const Expr = struct {
             /// `.none` means no sentinel
             sentinel: InternPool.Index,
             is_const: bool,
-            elem_ty: *Expr,
+            elem_ty: *Type,
         },
 
         /// `[elem_count :sentinel]elem_ty`
@@ -2917,7 +2911,7 @@ pub const Expr = struct {
             elem_count: ?u64,
             /// `.none` means no sentinel
             sentinel: InternPool.Index,
-            elem_ty: *Expr,
+            elem_ty: *Type,
         },
 
         /// `.{a,b}`
@@ -3262,14 +3256,14 @@ pub const Expr = struct {
                         .size = info.size,
                         .sentinel = info.sentinel,
                         .is_const = info.is_const,
-                        .elem_ty = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
+                        .elem_ty = try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.toExpr(), bound_params, visiting))),
                     },
                 },
                 .array => |info| return .{
                     .array = .{
                         .elem_count = info.elem_count,
                         .sentinel = info.sentinel,
-                        .elem_ty = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
+                        .elem_ty = try analyser.allocType(Type.fromExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.toExpr(), bound_params, visiting))),
                     },
                 },
                 .tuple => |info| return .{
@@ -3630,13 +3624,14 @@ pub const Expr = struct {
         }
     }
 
+    // TODO: Expr -> Type
     pub fn resolveDeclLiteralResultType(ty: Expr) Expr {
         var result_type = ty;
         while (true) {
             result_type = switch (result_type.data) {
                 .optional => |child_ty| child_ty.toExpr(),
                 .error_union => |info| info.payload.toExpr(),
-                .pointer => |child_ty| child_ty.elem_ty.*,
+                .pointer => |child_ty| child_ty.elem_ty.toExpr(),
                 else => return result_type,
             };
         }
@@ -5136,7 +5131,7 @@ pub const DeclWithHandle = struct {
 
         return .{
             .data = .{ .pointer = .{
-                .elem_ty = try analyser.allocExpr(resolved_ty.typeOf(analyser).toExpr()),
+                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser)),
                 .sentinel = .none,
                 .is_const = false,
                 .size = .one,
