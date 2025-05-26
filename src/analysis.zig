@@ -66,9 +66,9 @@ pub fn deinit(self: *Analyser) void {
     self.use_trail.deinit(self.gpa);
 }
 
-fn allocType(analyser: *Analyser, ty: Expr) error{OutOfMemory}!*Expr {
+fn allocExpr(analyser: *Analyser, expr: Expr) error{OutOfMemory}!*Expr {
     const ptr = try analyser.arena.create(Expr);
-    ptr.* = ty;
+    ptr.* = expr;
     return ptr;
 }
 
@@ -949,7 +949,7 @@ fn resolveReturnValueOfFuncNode(
         return .{
             .data = .{ .error_union = .{
                 .error_set = null,
-                .payload = try analyser.allocType(child_type),
+                .payload = try analyser.allocExpr(child_type),
             } },
             .is_type_val = false,
         };
@@ -990,7 +990,7 @@ pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Expr) error{Out
                 .size = .one,
                 .sentinel = .none,
                 .is_const = is_const,
-                .elem_ty = try analyser.allocType(ty.typeOf(analyser).toExpr()),
+                .elem_ty = try analyser.allocExpr(ty.typeOf(analyser).toExpr()),
             },
         },
         .is_type_val = false,
@@ -1039,7 +1039,7 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Expr, symbol: []const u8) erro
         return null;
 
     if (container_decl.ast.enum_token != null)
-        return .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = false };
+        return .{ .data = .{ .union_tag = try analyser.allocExpr(ty) }, .is_type_val = false };
 
     if (container_decl.ast.arg.unwrap()) |arg| {
         const tag_type = (try analyser.resolveTypeOfNode(.of(arg, handle))) orelse return null;
@@ -1159,7 +1159,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = is_const,
-                                .elem_ty = try analyser.allocType(.{
+                                .elem_ty = try analyser.allocExpr(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1200,7 +1200,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = is_const,
-                                .elem_ty = try analyser.allocType(.{
+                                .elem_ty = try analyser.allocExpr(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1250,7 +1250,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                     .size = .one,
                                     .sentinel = .none,
                                     .is_const = info.is_const,
-                                    .elem_ty = try analyser.allocType(.{
+                                    .elem_ty = try analyser.allocExpr(.{
                                         .data = .{
                                             .array = .{
                                                 .elem_count = elem_count,
@@ -1280,7 +1280,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                     .size = .one,
                                     .sentinel = .none,
                                     .is_const = info.is_const,
-                                    .elem_ty = try analyser.allocType(.{
+                                    .elem_ty = try analyser.allocExpr(.{
                                         .data = .{
                                             .array = .{
                                                 .elem_count = elem_count,
@@ -1320,7 +1320,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = info.is_const,
-                                .elem_ty = try analyser.allocType(.{
+                                .elem_ty = try analyser.allocExpr(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1348,7 +1348,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                                 .size = .one,
                                 .sentinel = .none,
                                 .is_const = info.is_const,
-                                .elem_ty = try analyser.allocType(.{
+                                .elem_ty = try analyser.allocExpr(.{
                                     .data = .{
                                         .array = .{
                                             .elem_count = elem_count,
@@ -1835,7 +1835,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const child_ty = try analyser.resolveTypeOfNodeInternal(.of(expr_node, handle)) orelse return null;
             if (!child_ty.is_type_val) return null;
 
-            return .{ .data = .{ .optional = try analyser.allocType(child_ty) }, .is_type_val = true };
+            return .{ .data = .{ .optional = try analyser.allocExpr(child_ty) }, .is_type_val = true };
         },
         .ptr_type_aligned,
         .ptr_type_sentinel,
@@ -1858,7 +1858,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         .size = ptr_info.size,
                         .sentinel = sentinel,
                         .is_const = ptr_info.const_token != null,
-                        .elem_ty = try analyser.allocType(elem_ty),
+                        .elem_ty = try analyser.allocExpr(elem_ty),
                     },
                 },
                 .is_type_val = true,
@@ -1882,7 +1882,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 .data = .{ .array = .{
                     .elem_count = elem_count,
                     .sentinel = sentinel,
-                    .elem_ty = try analyser.allocType(elem_ty),
+                    .elem_ty = try analyser.allocExpr(elem_ty),
                 } },
                 .is_type_val = true,
             };
@@ -1930,8 +1930,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             return .{
                 .data = .{ .error_union = .{
-                    .error_set = try analyser.allocType(error_set),
-                    .payload = try analyser.allocType(payload),
+                    .error_set = try analyser.allocExpr(error_set),
+                    .payload = try analyser.allocExpr(payload),
                 } },
                 .is_type_val = true,
             };
@@ -2301,12 +2301,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const info: Expr.Data.Function = .{
                 .handle = handle,
                 .fn_token = fn_proto.ast.fn_token,
-                .container_type = try analyser.allocType(container_type),
+                .container_type = try analyser.allocExpr(container_type),
                 .doc_comments = doc_comments,
                 .name = name,
                 .parameters = parameters.items,
                 .has_varargs = has_varargs,
-                .return_value = try analyser.allocType(return_value),
+                .return_value = try analyser.allocExpr(return_value),
             };
 
             // This is a function type
@@ -3255,14 +3255,14 @@ pub const Expr = struct {
                         .size = info.size,
                         .sentinel = info.sentinel,
                         .is_const = info.is_const,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
+                        .elem_ty = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
                     },
                 },
                 .array => |info| return .{
                     .array = .{
                         .elem_count = info.elem_count,
                         .sentinel = info.sentinel,
-                        .elem_ty = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
+                        .elem_ty = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting)),
                     },
                 },
                 .tuple => |info| return .{
@@ -3275,16 +3275,16 @@ pub const Expr = struct {
                     },
                 },
                 .optional => |info| return .{
-                    .optional = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
+                    .optional = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
                 },
                 .error_union => |info| return .{
                     .error_union = .{
-                        .error_set = if (info.error_set) |t| try analyser.allocType(try analyser.resolveGenericTypeInternal(t.*, bound_params, visiting)) else null,
-                        .payload = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.payload.*, bound_params, visiting)),
+                        .error_set = if (info.error_set) |t| try analyser.allocExpr(try analyser.resolveGenericTypeInternal(t.*, bound_params, visiting)) else null,
+                        .payload = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.payload.*, bound_params, visiting)),
                     },
                 },
                 .union_tag => |info| return .{
-                    .union_tag = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
+                    .union_tag = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting)),
                 },
                 .container => |info| return .{
                     .container = .{
@@ -3304,7 +3304,7 @@ pub const Expr = struct {
                     .function = .{
                         .fn_token = info.fn_token,
                         .handle = info.handle,
-                        .container_type = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.container_type.*, bound_params, visiting)),
+                        .container_type = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.container_type.*, bound_params, visiting)),
                         .doc_comments = info.doc_comments,
                         .name = info.name,
                         .parameters = blk: {
@@ -3321,7 +3321,7 @@ pub const Expr = struct {
                             break :blk parameters;
                         },
                         .has_varargs = info.has_varargs,
-                        .return_value = try analyser.allocType(try analyser.resolveGenericTypeInternal(info.return_value.*, bound_params, visiting)),
+                        .return_value = try analyser.allocExpr(try analyser.resolveGenericTypeInternal(info.return_value.*, bound_params, visiting)),
                     },
                 },
                 .either => |info| return .{
@@ -3458,7 +3458,7 @@ pub const Expr = struct {
                 .null_type => switch (b.data) {
                     .optional => return b,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser).toExpr()) },
+                        .data = .{ .optional = try analyser.allocExpr(b.typeOf(analyser).toExpr()) },
                         .is_type_val = false,
                     },
                 },
@@ -3477,7 +3477,7 @@ pub const Expr = struct {
                 .null_type => switch (a.data) {
                     .optional => return a,
                     else => return .{
-                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser).toExpr()) },
+                        .data = .{ .optional = try analyser.allocExpr(a.typeOf(analyser).toExpr()) },
                         .is_type_val = false,
                     },
                 },
@@ -5112,7 +5112,7 @@ pub const DeclWithHandle = struct {
 
         return .{
             .data = .{ .pointer = .{
-                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser).toExpr()),
+                .elem_ty = try analyser.allocExpr(resolved_ty.typeOf(analyser).toExpr()),
                 .sentinel = .none,
                 .is_const = false,
                 .size = .one,
