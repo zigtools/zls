@@ -190,7 +190,7 @@ fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlace
 
 pub const FormatParameterOptions = struct {
     referenced: ?*ReferencedType.Set = null,
-    info: Expr.Data.Parameter,
+    info: Type.Data.Parameter,
     index: usize,
 
     include_modifier: bool,
@@ -272,7 +272,7 @@ pub fn fmtParameter(analyser: *Analyser, options: FormatParameterOptions) std.fm
 
 pub const FormatFunctionOptions = struct {
     referenced: ?*ReferencedType.Set = null,
-    info: Expr.Data.Function,
+    info: Type.Data.Function,
 
     include_fn_keyword: bool,
     /// only included if available
@@ -863,7 +863,7 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
 }
 
 pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) !Type {
-    var visiting: Expr.Data.GenericSet = .empty;
+    var visiting: Type.Data.GenericSet = .empty;
     defer visiting.deinit(analyser.gpa);
     return analyser.resolveGenericTypeInternal(ty, bound_params, &visiting);
 }
@@ -872,7 +872,7 @@ fn resolveGenericTypeInternal(
     analyser: *Analyser,
     ty: Type,
     bound_params: TokenToTypeMap,
-    visiting: *Expr.Data.GenericSet,
+    visiting: *Type.Data.GenericSet,
 ) !Type {
     var resolved = ty;
     resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visiting);
@@ -1470,7 +1470,7 @@ fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: Resolve
     return analyser.ip.toInt(ip_index, T);
 }
 
-fn extractArrayData(data: *Expr.Data) ?*Expr.Data {
+fn extractArrayData(data: *Type.Data) ?*Type.Data {
     return switch (data.*) {
         .array => data,
         .pointer => |*p| switch (p.elem_ty.data) {
@@ -2241,7 +2241,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const doc_comments = try getDocComments(analyser.arena, tree, node);
             const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
 
-            var parameters: std.ArrayListUnmanaged(Expr.Data.Parameter) = .empty;
+            var parameters: std.ArrayListUnmanaged(Type.Data.Parameter) = .empty;
             var has_varargs = false;
 
             var it = fn_proto.iterate(&tree);
@@ -2255,7 +2255,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     param_comments = try collectDocComments(analyser.arena, tree, dc, false);
                 }
 
-                var param_modifier: ?Expr.Data.Parameter.Modifier = null;
+                var param_modifier: ?Type.Data.Parameter.Modifier = null;
                 if (param.comptime_noalias) |token_index| {
                     switch (tree.tokenTag(token_index)) {
                         .keyword_comptime => param_modifier = .comptime_param,
@@ -2306,7 +2306,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const return_value = try analyser.resolveReturnValueOfFuncNode(handle, node) orelse
                 Expr.fromIP(analyser, .unknown_type, null);
 
-            const info: Expr.Data.Function = .{
+            const info: Type.Data.Function = .{
                 .handle = handle,
                 .fn_token = fn_proto.ast.fn_token,
                 .container_type = try analyser.allocExpr(container_type),
@@ -3403,13 +3403,13 @@ pub const Expr = struct {
         // duplicates
 
         const DeduplicatorContext = struct {
-            pub fn hash(self: @This(), item: Expr.Data.EitherEntry) u32 {
+            pub fn hash(self: @This(), item: Type.Data.EitherEntry) u32 {
                 _ = self;
                 const ty: Expr = .{ .data = item.type_data, .is_type_val = true };
                 return ty.hash32();
             }
 
-            pub fn eql(self: @This(), a: Expr.Data.EitherEntry, b: Expr.Data.EitherEntry, b_index: usize) bool {
+            pub fn eql(self: @This(), a: Type.Data.EitherEntry, b: Type.Data.EitherEntry, b_index: usize) bool {
                 _ = b_index;
                 _ = self;
                 const a_ty: Expr = .{ .data = a.type_data, .is_type_val = true };
@@ -3417,7 +3417,7 @@ pub const Expr = struct {
                 return a_ty.eql(b_ty);
             }
         };
-        const Deduplicator = std.ArrayHashMapUnmanaged(Expr.Data.EitherEntry, void, DeduplicatorContext, true);
+        const Deduplicator = std.ArrayHashMapUnmanaged(Type.Data.EitherEntry, void, DeduplicatorContext, true);
 
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
@@ -3439,7 +3439,7 @@ pub const Expr = struct {
             return entries[0].type;
 
         return .{
-            .data = .{ .either = try arena.dupe(Expr.Data.EitherEntry, deduplicator.keys()) },
+            .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
             .is_type_val = has_type_val,
         };
     }
@@ -3783,7 +3783,9 @@ pub const Expr = struct {
 /// Represents a resolved Zig type.
 pub const Type = struct {
     /// if `data == .ip_index` then `data.ip_index.type == .type_type`
-    data: Expr.Data,
+    data: Data,
+
+    const Data = Expr.Data;
 
     /// Asserts `expr.is_type_val`
     pub fn fromExpr(expr: Expr) Type {
