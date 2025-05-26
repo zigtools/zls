@@ -328,8 +328,6 @@ test "function alias" {
 }
 
 test "generic function" {
-    // TODO doesn't work for std.ArrayList
-
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn ArrayList(comptime T: type) type {
@@ -368,7 +366,7 @@ test "generic function" {
         \\const foo = s2.<cursor>;
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, comptime T: type) (unknown type)" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, comptime T: type) T" },
     });
     try testCompletion(
         \\const S = struct {
@@ -380,7 +378,7 @@ test "generic function" {
         \\const foo = s2.<cursor>;
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, any: anytype, comptime T: type) (unknown type)" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S, any: anytype, comptime T: type) T" },
     });
 }
 
@@ -402,8 +400,8 @@ test "nested generic function" {
         \\
         \\var list: ArrayList(u8) = .<cursor>;
     , &.{
-        .{ .label = "items", .kind = .Field, .detail = "[]T" },
-        .{ .label = "empty", .kind = .Constant, .detail = "ArrayListAligned((unknown type))" }, // detail should be `ArrayListAligned(u8)`
+        .{ .label = "items", .kind = .Field, .detail = "[]u8" },
+        .{ .label = "empty", .kind = .Constant, .detail = "ArrayListAligned(u8)" },
     });
 }
 
@@ -1413,8 +1411,8 @@ test "enum" {
         \\};
         \\const foo: E = .<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .EnumMember },
-        .{ .label = "beta", .kind = .EnumMember, .detail = "beta = 42" },
+        .{ .label = "alpha", .kind = .EnumMember, .detail = "E" },
+        .{ .label = "beta", .kind = .EnumMember, .detail = "E = 42" },
     });
     try testCompletion(
         \\const E = enum {
@@ -1678,7 +1676,7 @@ test "decl literal function" {
         \\}
         \\const foo: Empty() = .in<cursor>it();
     , &.{
-        .{ .label = "init", .kind = .Function, .detail = "fn () Empty" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () Empty()" },
     });
 }
 
@@ -2481,6 +2479,28 @@ test "return - decl literal" {
     });
 }
 
+test "return - generic decl literal" {
+    try testCompletion(
+        \\fn S(T: type) type {
+        \\    return struct {
+        \\        alpha: T,
+        \\        beta: []const u8,
+        \\
+        \\        const default: @This() = .{};
+        \\        fn init() @This() {}
+        \\    };
+        \\}
+        \\fn foo() S(u8) {
+        \\    return .<cursor>;
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u8" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+        .{ .label = "init", .kind = .Function, .detail = "fn () S(u8)" },
+        .{ .label = "default", .kind = .Constant, .detail = "S(u8)" },
+    });
+}
+
 test "return - structinit" {
     try testCompletion(
         \\const S = struct {
@@ -2595,6 +2615,75 @@ test "declarations - meta type" {
     });
 }
 
+test "generic method - @This() parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        fn bar(self: @This()) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
+    });
+}
+
+test "generic method - Self parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        const Self = @This();
+        \\        fn bar(self: Self) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
+    });
+}
+
+test "generic method - recursive self parameter" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\        fn bar(self: Foo(T)) void {
+        \\            _ = self;
+        \\        }
+        \\    };
+        \\}
+        \\const foo: Foo(u8) = .{};
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+        .{ .label = "bar", .kind = .Method, .detail = "fn (self: Foo(u8)) void" },
+    });
+}
+
+test "function taking a generic struct arg" {
+    try testCompletion(
+        \\fn Foo(T: type) type {
+        \\    return struct {
+        \\        field: T,
+        \\    };
+        \\}
+        \\fn foo(_: Foo(u8)) void {}
+        \\const bar = foo(.{.<cursor>
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u8" },
+    });
+}
+
 test "usingnamespace" {
     try testCompletion(
         \\const S1 = struct {
@@ -2620,6 +2709,9 @@ test "usingnamespace" {
     , &.{
         .{ .label = "inner", .kind = .Function, .detail = "fn () void" },
     });
+}
+
+test "usingnamespace - generics" {
     try testCompletion(
         \\fn Bar(comptime Self: type) type {
         \\    return struct {
@@ -2635,9 +2727,13 @@ test "usingnamespace" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        .{ .label = "inner", .kind = .Method, .detail = "fn (self: Foo) void" },
+        // should be Method, but usingnamespace will be removed anyways https://github.com/ziglang/zig/issues/20663
+        .{ .label = "inner", .kind = .Function, .detail = "fn (self: Foo) void" },
         .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
     });
+}
+
+test "usingnamespace - comptime" {
     try testCompletion(
         \\const Alpha = struct {
         \\    fn alpha() void {}
@@ -2878,7 +2974,7 @@ test "builtin fns taking an enum arg" {
         .{ .label = "null", .kind = .Field, .detail = "void" },
         .{ .label = "optional", .kind = .Field, .detail = "Optional" },
         .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
-        .{ .label = "error_set", .kind = .Field, .detail = "ErrorSet" },
+        .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
         .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
         .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
         .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },

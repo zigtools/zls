@@ -299,7 +299,9 @@ test "comptime return types" {
         \\const str<[]u8> = try std.mem.concat(allocator, u8, .{ "foo", "bar" });
         \\const int<[]i32> = try std.mem.concat(allocator, i32, .{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
     , .{ .kind = .Type });
+}
 
+test "comptime return types - HashMap" {
     try testInlayHints(
         \\const std<type> = @import("std");
         \\const boolMap<HashMap(i32,bool,AutoContext(i32))> = std.AutoHashMap(i32, bool).init(allocator);
@@ -403,10 +405,9 @@ test "function with error union" {
 }
 
 test "generic function parameter" {
-    // TODO there should be an inlay hint that shows `T`
     try testInlayHints(
         \\fn foo(comptime T: type, param: T) void {
-        \\    const val = param;
+        \\    const val: T = param;
         \\}
     , .{ .kind = .Type });
 }
