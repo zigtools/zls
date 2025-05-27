@@ -330,7 +330,7 @@ fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
         "{}",
-        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+        .{resolved_type.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
     );
     if (type_str.len == 0) return null;
 
@@ -348,7 +348,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
         "{}",
-        .{resolved_type.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+        .{resolved_type.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
     );
     if (type_str.len == 0) return null;
 
@@ -542,7 +542,7 @@ fn writeNodeInlayHint(
                 const type_str: []const u8 = try std.fmt.allocPrint(
                     builder.arena,
                     "{}",
-                    .{ty.fmt(builder.analyser, .{ .truncate_container_decls = true })},
+                    .{ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
                 );
                 if (type_str.len == 0) continue;
                 try appendTypeHintString(

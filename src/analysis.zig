@@ -373,7 +373,7 @@ pub fn formatFunction(
 
     if (data.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{info.return_value.fmt(analyser, .{
+        try writer.print("{}", .{info.return_value.fmtTypeOf(analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
         })});
@@ -3720,7 +3720,7 @@ pub const Expr = struct {
 
     const Formatter = std.fmt.Formatter(format);
 
-    pub fn fmt(ty: Expr, analyser: *Analyser, options: FormatOptions) Type.Formatter {
+    pub fn fmtTypeOf(ty: Expr, analyser: *Analyser, options: FormatOptions) Type.Formatter {
         const typeof = ty.typeOf(analyser);
         return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
     }

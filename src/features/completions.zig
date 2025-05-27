@@ -56,7 +56,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                         .detail = try std.fmt.allocPrint(
                             builder.arena,
                             "{}",
-                            .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                            .{ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })},
                         ),
                     });
                     return;
@@ -273,7 +273,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                         break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
                     }
                 }
-                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{expr.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{expr.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })});
             } else null;
 
             const label_details: ?types.CompletionItemLabelDetails = blk: {
@@ -403,7 +403,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_value.fmt(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_value.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
@@ -1358,7 +1358,7 @@ fn collectContainerFields(
                 };
 
                 const detail = if (try decl_handle.resolveExpr(builder.analyser)) |ty| detail: {
-                    const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
+                    const type_fmt = ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
                         break :detail try std.fmt.allocPrint(builder.arena, "{} = {s}", .{ type_fmt, value_str });

@@ -192,7 +192,7 @@ pub fn main() Error!void {
         };
 
         if (expect_unknown) {
-            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{ty.fmt(&analyser, .{
+            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeOf(&analyser, .{
                 .truncate_container_decls = false,
             })});
             defer gpa.free(actual_type);
@@ -208,7 +208,7 @@ pub fn main() Error!void {
         }
 
         if (test_item.expected_type) |expected_type| {
-            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{ty.fmt(&analyser, .{
+            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeOf(&analyser, .{
                 .truncate_container_decls = false,
             })});
             defer gpa.free(actual_type);
