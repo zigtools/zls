@@ -2103,7 +2103,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             if (std.mem.eql(u8, call_name, "@typeInfo")) {
-                return analyser.instanceStdBuiltinType("Type");
+                return analyser.instanceStdBuiltinExpr("Type");
             }
 
             const type_map: std.StaticStringMap(InternPool.Index) = .initComptime(.{
@@ -2184,7 +2184,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
 
             if (std.mem.eql(u8, call_name, "@src")) {
-                return analyser.instanceStdBuiltinType("SourceLocation");
+                return analyser.instanceStdBuiltinExpr("SourceLocation");
             }
 
             if (std.mem.eql(u8, call_name, "@compileError")) {
@@ -4069,7 +4069,7 @@ pub const ScopeWithHandle = struct {
 
 /// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
-pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Expr {
+pub fn instanceStdBuiltinExpr(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Expr {
     const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
     const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "builtin.zig" });
     const builtin_uri = try URI.fromPath(analyser.arena, builtin_path);
@@ -4337,7 +4337,7 @@ pub fn getFieldAccessExpr(
                 }
 
                 if (std.mem.eql(u8, binfn_name, "@typeInfo")) {
-                    current_type = try analyser.instanceStdBuiltinType("Type") orelse return null;
+                    current_type = try analyser.instanceStdBuiltinExpr("Type") orelse return null;
                     // Skip to the right paren
                     var paren_count: usize = 0;
                     var next = tokenizer.next();
@@ -5903,85 +5903,85 @@ pub fn resolveEnumLiteralExprFromAncestors(
             if (std.mem.eql(u8, call_name, "@branchHint")) {
                 if (params.len == 0) return null;
                 if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("BranchHint");
+                return analyser.instanceStdBuiltinExpr("BranchHint");
             }
 
             if (std.mem.eql(u8, call_name, "@atomicLoad")) {
                 if (params.len <= 2) return null;
                 if (params[2] != node) return null;
-                return analyser.instanceStdBuiltinType("AtomicOrder");
+                return analyser.instanceStdBuiltinExpr("AtomicOrder");
             }
 
             if (std.mem.eql(u8, call_name, "@atomicRmw")) {
                 if (params.len > 2 and params[2] == node)
-                    return analyser.instanceStdBuiltinType("AtomicRmwOp");
+                    return analyser.instanceStdBuiltinExpr("AtomicRmwOp");
                 if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
+                    return analyser.instanceStdBuiltinExpr("AtomicOrder");
                 return null;
             }
 
             if (std.mem.eql(u8, call_name, "@atomicStore")) {
                 if (params.len <= 3) return null;
                 if (params[3] != node) return null;
-                return analyser.instanceStdBuiltinType("AtomicOrder");
+                return analyser.instanceStdBuiltinExpr("AtomicOrder");
             }
 
             if (std.mem.eql(u8, call_name, "@cmpxchgStrong")) {
                 if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
+                    return analyser.instanceStdBuiltinExpr("AtomicOrder");
                 if (params.len > 5 and params[5] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
+                    return analyser.instanceStdBuiltinExpr("AtomicOrder");
                 return null;
             }
 
             if (std.mem.eql(u8, call_name, "@cmpxchgWeak")) {
                 if (params.len > 4 and params[4] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
+                    return analyser.instanceStdBuiltinExpr("AtomicOrder");
                 if (params.len > 5 and params[5] == node)
-                    return analyser.instanceStdBuiltinType("AtomicOrder");
+                    return analyser.instanceStdBuiltinExpr("AtomicOrder");
                 return null;
             }
 
             if (std.mem.eql(u8, call_name, "@call")) {
                 if (params.len == 0) return null;
                 if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("CallModifier");
+                return analyser.instanceStdBuiltinExpr("CallModifier");
             }
 
             if (std.mem.eql(u8, call_name, "@export")) {
                 if (params.len <= 1) return null;
                 if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("ExportOptions");
+                return analyser.instanceStdBuiltinExpr("ExportOptions");
             }
 
             if (std.mem.eql(u8, call_name, "@extern")) {
                 if (params.len <= 1) return null;
                 if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("ExternOptions");
+                return analyser.instanceStdBuiltinExpr("ExternOptions");
             }
 
             if (std.mem.eql(u8, call_name, "@prefetch")) {
                 if (params.len <= 1) return null;
                 if (params[1] != node) return null;
-                return analyser.instanceStdBuiltinType("PrefetchOptions");
+                return analyser.instanceStdBuiltinExpr("PrefetchOptions");
             }
 
             if (std.mem.eql(u8, call_name, "@reduce")) {
                 if (params.len == 0) return null;
                 if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("ReduceOp");
+                return analyser.instanceStdBuiltinExpr("ReduceOp");
             }
 
             if (std.mem.eql(u8, call_name, "@setFloatMode")) {
                 if (params.len == 0) return null;
                 if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("FloatMode");
+                return analyser.instanceStdBuiltinExpr("FloatMode");
             }
 
             if (std.mem.eql(u8, call_name, "@Type")) {
                 if (params.len == 0) return null;
                 if (params[0] != node) return null;
-                return analyser.instanceStdBuiltinType("Type");
+                return analyser.instanceStdBuiltinExpr("Type");
             }
         },
 

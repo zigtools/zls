@@ -1568,7 +1568,7 @@ fn resolveBuiltinFnArg(
         return null;
     };
 
-    return analyser.instanceStdBuiltinType(builtin_name);
+    return analyser.instanceStdBuiltinExpr(builtin_name);
 }
 
 fn collectBuiltinContainerNodes(
@@ -1734,6 +1734,6 @@ fn collectKeywordFnContainerNodes(
             else => return,
         }
     };
-    const ty = try builder.analyser.instanceStdBuiltinType(builtin_type_name) orelse return;
+    const ty = try builder.analyser.instanceStdBuiltinExpr(builtin_type_name) orelse return;
     try types_with_handles.append(builder.arena, ty);
 }
