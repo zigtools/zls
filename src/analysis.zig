@@ -5557,7 +5557,7 @@ pub fn lookupSymbolFieldInit(
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?DeclWithHandle {
-    var container_type = (try analyser.resolveExpressionType(
+    var container_type = (try analyser.resolveEnumLiteralExpr(
         handle,
         node,
         ancestors,
@@ -5606,20 +5606,20 @@ pub fn lookupSymbolFieldInit(
     return null;
 }
 
-pub fn resolveExpressionType(
+pub fn resolveEnumLiteralExpr(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
 ) error{OutOfMemory}!?Expr {
-    return (try analyser.resolveExpressionTypeFromAncestors(
+    return (try analyser.resolveEnumLiteralExprFromAncestors(
         handle,
         node,
         ancestors,
     )) orelse (try analyser.resolveExprOfNode(.of(node, handle)));
 }
 
-pub fn resolveExpressionTypeFromAncestors(
+pub fn resolveEnumLiteralExprFromAncestors(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
@@ -5664,7 +5664,7 @@ pub fn resolveExpressionTypeFromAncestors(
             const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
                 return null;
 
-            if (try analyser.resolveExpressionType(
+            if (try analyser.resolveEnumLiteralExpr(
                 handle,
                 ancestors[0],
                 ancestors[1..],
@@ -5673,7 +5673,7 @@ pub fn resolveExpressionTypeFromAncestors(
             }
 
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
-                if (try analyser.resolveExpressionType(
+                if (try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[1],
                     ancestors[2..],
@@ -5706,7 +5706,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             const if_node = ast.fullIf(tree, ancestors[0]).?;
             if (node == if_node.ast.then_expr or node.toOptional() == if_node.ast.else_expr) {
-                return try analyser.resolveExpressionType(
+                return try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[0],
                     ancestors[1..],
@@ -5718,7 +5718,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             const for_node = ast.fullFor(tree, ancestors[0]).?;
             if (node.toOptional() == for_node.ast.else_expr) {
-                return try analyser.resolveExpressionType(
+                return try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[0],
                     ancestors[1..],
@@ -5731,7 +5731,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             const while_node = ast.fullWhile(tree, ancestors[0]).?;
             if (node.toOptional() == while_node.ast.else_expr) {
-                return try analyser.resolveExpressionType(
+                return try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[0],
                     ancestors[1..],
@@ -5749,7 +5749,7 @@ pub fn resolveExpressionTypeFromAncestors(
             const ancestor_switch = tree.fullSwitch(ancestors[1]) orelse return null;
 
             if (node == switch_case.ast.target_expr) {
-                return try analyser.resolveExpressionType(
+                return try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[1],
                     ancestors[2..],
@@ -5775,7 +5775,7 @@ pub fn resolveExpressionTypeFromAncestors(
             const call = tree.fullCall(&buffer, ancestors[0]).?;
 
             if (call.ast.fn_expr == node) {
-                return try analyser.resolveExpressionType(
+                return try analyser.resolveEnumLiteralExpr(
                     handle,
                     ancestors[0],
                     ancestors[1..],
@@ -5868,7 +5868,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 }
             } else return null;
 
-            return try analyser.resolveExpressionType(
+            return try analyser.resolveEnumLiteralExpr(
                 handle,
                 ancestors[index],
                 ancestors[index + 1 ..],
@@ -5878,7 +5878,7 @@ pub fn resolveExpressionTypeFromAncestors(
         .grouped_expression,
         .@"try",
         => {
-            return try analyser.resolveExpressionType(
+            return try analyser.resolveEnumLiteralExpr(
                 handle,
                 ancestors[0],
                 ancestors[1..],
