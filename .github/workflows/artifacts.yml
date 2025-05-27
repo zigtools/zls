@@ -48,6 +48,6 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
 
       - name: Publish release
-        run: zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary new
+        run: zig build publish -Doptimize=ReleaseSafe --summary new
         env:
           ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
