@@ -32,25 +32,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: mlugg/setup-zig@v2
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         with:
           version: master
 
       - name: Install APT packages
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install tar 7zip s3cmd
 
       - name: Install minisign
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           wget https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz
           tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
       - name: Build release artifacts
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           echo "${MINISIGN_SECRET_FILE}" > minisign.key
           zig build release -Drelease-minisign -Doptimize=ReleaseSafe --summary all
@@ -59,7 +59,7 @@ jobs:
           MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
 
       - name: Upload release artifacts
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
         env:
@@ -69,7 +69,7 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
 
       - name: Publish release
-        if: ${{ env.SKIP_DEPLOY != true }}
+        if: env.SKIP_DEPLOY != 'true'
         run: zig run .github/workflows/publish_release.zig
         env:
           ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
