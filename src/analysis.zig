@@ -1432,12 +1432,6 @@ fn resolvePropertyType(analyser: *Analyser, ty: Expr, name: []const u8) error{Ou
             return try analyser.resolveBracketAccessType(ty, .{ .single = index });
         },
 
-        .optional => |child_ty| {
-            if (std.mem.eql(u8, "?", name)) {
-                return child_ty.toExpr();
-            }
-        },
-
         .container => {},
 
         else => {},
