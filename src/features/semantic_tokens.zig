@@ -899,7 +899,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .aligned_var_decl,
                     .simple_var_decl,
                     => {
-                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessType(ty, .{ .single = index }) else null;
+                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessExpr(ty, .{ .single = index }) else null;
                         try writeVarDecl(builder, lhs_node, field_type);
                     },
                     .identifier => {
@@ -1142,7 +1142,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
         return;
     };
 
-    const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+    const lhs_type = try builder.analyser.resolveDerefExpr(lhs) orelse lhs;
     if (lhs_type.isErrorSetType(builder.analyser)) {
         try writeToken(builder, field_name_token, .errorTag);
         return;

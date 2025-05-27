@@ -41,8 +41,8 @@ fn gotoDefinitionSymbol(
                 var resolved_ty = ty;
                 while (true) {
                     resolved_ty =
-                        try analyser.resolveUnwrapErrorUnionType(resolved_ty, .payload) orelse
-                        try analyser.resolveDerefType(resolved_ty) orelse
+                        try analyser.resolveUnwrapErrorUnionExpr(resolved_ty, .payload) orelse
+                        try analyser.resolveDerefExpr(resolved_ty) orelse
                         try analyser.resolveOptionalUnwrap(resolved_ty) orelse break;
                 }
                 if (try resolved_ty.typeDefinitionToken()) |token_handle| break :blk token_handle;

@@ -845,9 +845,9 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
         return .{ .type = t, .is_const = true };
 
     // If we are accessing a pointer type, remove one pointerness level :)
-    const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
+    const left_type = (try analyser.resolveDerefExpr(lhs)) orelse lhs;
 
-    if (try analyser.resolvePropertyType(left_type, field_name)) |t|
+    if (try analyser.resolvePropertyExpr(left_type, field_name)) |t|
         return .{
             .type = t,
             .is_const = lhs_binding.is_const,
@@ -923,7 +923,7 @@ fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
 
 /// if `func_type_param` is callable, returns an instance of the return type.
 /// otherwise, returns null.
-pub fn resolveReturnType(analyser: *Analyser, func_type_param: Expr) error{OutOfMemory}!?Expr {
+pub fn resolveReturnExpr(analyser: *Analyser, func_type_param: Expr) error{OutOfMemory}!?Expr {
     const func_type = try analyser.resolveFuncProtoOfCallable(func_type_param) orelse return null;
     const info = func_type.data.function;
     return info.return_value.*;
@@ -987,7 +987,7 @@ pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Expr) error{OutOfMem
     }
 }
 
-pub fn resolveOrelseType(analyser: *Analyser, lhs: Expr, rhs: Expr) error{OutOfMemory}!?Expr {
+pub fn resolveOrelseExpr(analyser: *Analyser, lhs: Expr, rhs: Expr) error{OutOfMemory}!?Expr {
     return switch (rhs.data) {
         .optional => rhs,
         else => try analyser.resolveOptionalUnwrap(lhs),
@@ -1010,7 +1010,7 @@ pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Expr) error{Out
 
 pub const ErrorUnionSide = enum { error_set, payload };
 
-pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Expr, side: ErrorUnionSide) error{OutOfMemory}!?Expr {
+pub fn resolveUnwrapErrorUnionExpr(analyser: *Analyser, ty: Expr, side: ErrorUnionSide) error{OutOfMemory}!?Expr {
     if (ty.is_type_val) return null;
 
     return switch (ty.data) {
@@ -1061,14 +1061,14 @@ fn resolveUnionTagAccess(analyser: *Analyser, expr: Expr, symbol: []const u8) er
 }
 
 pub fn resolveFuncProtoOfCallable(analyser: *Analyser, ty: Expr) error{OutOfMemory}!?Expr {
-    const deref_type = try analyser.resolveDerefType(ty) orelse ty;
+    const deref_type = try analyser.resolveDerefExpr(ty) orelse ty;
     if (!deref_type.isFunc()) return null;
     return deref_type;
 }
 
 /// resolve a pointer dereference
 /// `pointer.*`
-pub fn resolveDerefType(analyser: *Analyser, pointer: Expr) error{OutOfMemory}!?Expr {
+pub fn resolveDerefExpr(analyser: *Analyser, pointer: Expr) error{OutOfMemory}!?Expr {
     const binding = try analyser.resolveDerefBinding(pointer) orelse return null;
     return binding.type;
 }
@@ -1136,11 +1136,11 @@ pub const BracketAccess = union(enum) {
 /// - `lhs[index]` (single)
 /// - `lhs[start..]` (open)
 /// - `lhs[start..end]` (range)
-pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Expr, rhs: BracketAccess) error{OutOfMemory}!?Expr {
-    return analyser.resolveBracketAccessTypeFromBinding(.{ .type = lhs, .is_const = false }, rhs);
+pub fn resolveBracketAccessExpr(analyser: *Analyser, lhs: Expr, rhs: BracketAccess) error{OutOfMemory}!?Expr {
+    return analyser.resolveBracketAccessExprFromBinding(.{ .type = lhs, .is_const = false }, rhs);
 }
 
-pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Binding, rhs: BracketAccess) error{OutOfMemory}!?Expr {
+pub fn resolveBracketAccessExprFromBinding(analyser: *Analyser, lhs_binding: Binding, rhs: BracketAccess) error{OutOfMemory}!?Expr {
     const lhs = lhs_binding.type;
     const is_const = lhs_binding.is_const;
     if (lhs.is_type_val) return null;
@@ -1241,11 +1241,11 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
             .one => switch (info.elem_ty.data) {
                 .tuple => |tuple_info| {
                     const inner_ty: Expr = .{ .data = .{ .tuple = tuple_info }, .is_type_val = false };
-                    return analyser.resolveBracketAccessTypeFromBinding(.{ .type = inner_ty, .is_const = info.is_const }, rhs);
+                    return analyser.resolveBracketAccessExprFromBinding(.{ .type = inner_ty, .is_const = info.is_const }, rhs);
                 },
                 .array => |array_info| {
                     const inner_ty: Expr = .{ .data = .{ .array = array_info }, .is_type_val = false };
-                    return analyser.resolveBracketAccessTypeFromBinding(.{ .type = inner_ty, .is_const = info.is_const }, rhs);
+                    return analyser.resolveBracketAccessExprFromBinding(.{ .type = inner_ty, .is_const = info.is_const }, rhs);
                 },
                 else => switch (rhs) {
                     .single, .open => return null,
@@ -1384,13 +1384,13 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
     }
 }
 
-fn resolvePropertyType(analyser: *Analyser, ty: Expr, name: []const u8) error{OutOfMemory}!?Expr {
+fn resolvePropertyExpr(analyser: *Analyser, ty: Expr, name: []const u8) error{OutOfMemory}!?Expr {
     if (ty.is_type_val)
         return null;
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .one => {}, // One level of indirection is handled by resolveDerefType
+            .one => {}, // One level of indirection is handled by resolveDerefExpr
             .slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return Expr.fromIP(analyser, .usize_type, null);
@@ -1429,7 +1429,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Expr, name: []const u8) error{Ou
         .tuple => {
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
-            return try analyser.resolveBracketAccessType(ty, .{ .single = index });
+            return try analyser.resolveBracketAccessExpr(ty, .{ .single = index });
         },
 
         .container => {},
@@ -1810,21 +1810,21 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             const rhs = try analyser.resolveExprOfNodeInternal(.of(rhs_node, handle)) orelse return try analyser.resolveOptionalUnwrap(lhs);
 
-            return try analyser.resolveOrelseType(lhs, rhs);
+            return try analyser.resolveOrelseExpr(lhs, rhs);
         },
         .@"catch" => {
             const lhs_node, _ = tree.nodeData(node).node_and_node;
 
             const lhs = try analyser.resolveExprOfNodeInternal(.of(lhs_node, handle)) orelse return null;
 
-            return try analyser.resolveUnwrapErrorUnionType(lhs, .payload);
+            return try analyser.resolveUnwrapErrorUnionExpr(lhs, .payload);
         },
         .@"try" => {
             const expr_node = tree.nodeData(node).node;
 
             const base_type = try analyser.resolveExprOfNodeInternal(.of(expr_node, handle)) orelse return null;
 
-            return try analyser.resolveUnwrapErrorUnionType(base_type, .payload);
+            return try analyser.resolveUnwrapErrorUnionExpr(base_type, .payload);
         },
         .optional_type => {
             const expr_node = tree.nodeData(node).node;
@@ -2832,7 +2832,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) er
             const kind: BracketAccess = try .fromSlice(analyser, handle, slice.ast.start, slice.ast.end.unwrap());
 
             return .{
-                .type = try analyser.resolveBracketAccessTypeFromBinding(sliced, kind) orelse return null,
+                .type = try analyser.resolveBracketAccessExprFromBinding(sliced, kind) orelse return null,
                 .is_const = true,
             };
         },
@@ -2845,7 +2845,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) er
             const index = try analyser.resolveIntegerLiteral(u64, .of(rhs_node, handle));
 
             return .{
-                .type = try analyser.resolveBracketAccessTypeFromBinding(lhs, .{ .single = index }) orelse return null,
+                .type = try analyser.resolveBracketAccessExprFromBinding(lhs, .{ .single = index }) orelse return null,
                 .is_const = true,
             };
         },
@@ -4230,7 +4230,7 @@ pub fn getFieldAccessType(
                 }
             },
             .period_asterisk => {
-                current_type = (try analyser.resolveDerefType(current_type orelse return null)) orelse return null;
+                current_type = (try analyser.resolveDerefExpr(current_type orelse return null)) orelse return null;
             },
             .l_paren => {
                 if (current_type == null) {
@@ -4266,10 +4266,10 @@ pub fn getFieldAccessType(
                 if (current_type.?.is_type_val) return null;
 
                 // TODO Actually bind params here when calling functions instead of just skipping args.
-                current_type = try analyser.resolveReturnType(ty) orelse return null;
+                current_type = try analyser.resolveReturnExpr(ty) orelse return null;
 
                 if (do_unwrap_error_payload) {
-                    if (try analyser.resolveUnwrapErrorUnionType(current_type.?, .payload)) |unwrapped| current_type = unwrapped;
+                    if (try analyser.resolveUnwrapErrorUnionExpr(current_type.?, .payload)) |unwrapped| current_type = unwrapped;
                     do_unwrap_error_payload = false;
                 }
 
@@ -4313,7 +4313,7 @@ pub fn getFieldAccessType(
                     }
                 } else unreachable;
 
-                current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, kind)) orelse return null;
+                current_type = (try analyser.resolveBracketAccessExpr(current_type orelse return null, kind)) orelse return null;
             },
             .builtin => {
                 const binfn_name = tokenizer.buffer[tok.loc.start..tok.loc.end];
@@ -5063,18 +5063,18 @@ pub const DeclWithHandle = struct {
                 const ty = (try analyser.resolveExprOfNodeInternal(.of(pay.condition, self.handle))) orelse return null;
                 break :blk try analyser.resolveOptionalUnwrap(ty);
             },
-            .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
+            .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionExpr(
                 (try analyser.resolveExprOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
                 .payload,
             ),
-            .error_union_error => |pay| try analyser.resolveUnwrapErrorUnionType(
+            .error_union_error => |pay| try analyser.resolveUnwrapErrorUnionExpr(
                 (try analyser.resolveExprOfNodeInternal(.of(
                     pay.condition.unwrap() orelse return null,
                     self.handle,
                 ))) orelse return null,
                 .error_set,
             ),
-            .for_loop_payload => |pay| try analyser.resolveBracketAccessType(
+            .for_loop_payload => |pay| try analyser.resolveBracketAccessExpr(
                 (try analyser.resolveExprOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
                 .{ .single = null },
             ),
@@ -5089,7 +5089,7 @@ pub const DeclWithHandle = struct {
                 const node = try analyser.resolveExprOfNode(.of(init_node, self.handle)) orelse return null;
                 break :blk switch (node.data) {
                     .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
-                    .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
+                    .tuple => try analyser.resolveBracketAccessExpr(node, .{ .single = pay.index }),
                     else => null,
                 };
             },
@@ -5580,7 +5580,7 @@ pub fn lookupSymbolFieldInit(
 
     while (true) {
         const unwrapped =
-            try analyser.resolveUnwrapErrorUnionType(container_type, .payload) orelse
+            try analyser.resolveUnwrapErrorUnionExpr(container_type, .payload) orelse
             try analyser.resolveOptionalUnwrap(container_type) orelse
             break;
         container_type = unwrapped;
@@ -5600,7 +5600,7 @@ pub fn lookupSymbolFieldInit(
     // Assume we are doing decl literals
     const decl = try analyser.lookupSymbolContainer(container_type.typeOf(analyser).toExpr(), field_name, .other) orelse return null;
     var resolved_type = try decl.resolveExpr(analyser) orelse return null;
-    resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+    resolved_type = try analyser.resolveReturnExpr(resolved_type) orelse resolved_type;
     const resolved_ty = resolved_type.typeOf(analyser).resolveDeclLiteralResultType();
     if (resolved_ty.eql(container_type.typeOf(analyser))) return decl;
     return null;
@@ -5669,7 +5669,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[0],
                 ancestors[1..],
             )) |array_type| {
-                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
+                return (try analyser.resolveBracketAccessExpr(array_type, .{ .single = element_index }));
             }
 
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
@@ -5678,7 +5678,7 @@ pub fn resolveExpressionTypeFromAncestors(
                     ancestors[1],
                     ancestors[2..],
                 )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
+                    return try analyser.resolveBracketAccessExpr(slice_type, .{ .single = element_index });
                 }
             }
         },
@@ -5998,7 +5998,7 @@ pub fn resolveExpressionTypeFromAncestors(
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == rhs) {
                 const lhs_ty = try analyser.resolveExprOfNode(.of(lhs, handle)) orelse return null;
-                return try analyser.resolveUnwrapErrorUnionType(lhs_ty, .payload);
+                return try analyser.resolveUnwrapErrorUnionExpr(lhs_ty, .payload);
             }
         },
 
@@ -6038,7 +6038,7 @@ pub fn getSymbolFieldAccesses(
     var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
 
     if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
-        const container_handle = try analyser.resolveDerefType(ty) orelse ty;
+        const container_handle = try analyser.resolveDerefExpr(ty) orelse ty;
 
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
 

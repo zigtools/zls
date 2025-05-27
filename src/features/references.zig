@@ -133,7 +133,7 @@ const Builder = struct {
             .field_access => {
                 const lhs_node, const field_name = tree.nodeData(node).node_and_token;
                 const lhs = try builder.analyser.resolveExprOfNode(.of(lhs_node, handle)) orelse return;
-                const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+                const deref_lhs = try builder.analyser.resolveDerefExpr(lhs) orelse lhs;
 
                 const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
                 const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
@@ -361,7 +361,7 @@ const CallBuilder = struct {
                     .field_access => {
                         const lhs_node, const field_name = tree.nodeData(called_node).node_and_token;
                         const lhs = (try builder.analyser.resolveExprOfNode(.of(lhs_node, handle))) orelse return;
-                        const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+                        const deref_lhs = try builder.analyser.resolveDerefExpr(lhs) orelse lhs;
 
                         const symbol = offsets.tokenToSlice(tree, field_name);
                         const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;

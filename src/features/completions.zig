@@ -62,7 +62,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                     return;
                 }
 
-                if (try builder.analyser.resolveDerefType(ty)) |child_ty| {
+                if (try builder.analyser.resolveDerefExpr(ty)) |child_ty| {
                     try typeToCompletion(builder, child_ty);
                 }
             },
@@ -1402,7 +1402,7 @@ fn collectContainerFields(
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 const resolved_ty = try decl_handle.resolveExpr(builder.analyser) orelse continue;
-                var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                var expected_ty = try builder.analyser.resolveReturnExpr(resolved_ty) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType().toExpr();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
@@ -1600,7 +1600,7 @@ fn collectVarAccessContainerNodes(
 
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
     const result = try symbol_decl.resolveExpr(analyser) orelse return;
-    const type_expr = try analyser.resolveDerefType(result) orelse result;
+    const type_expr = try analyser.resolveDerefExpr(result) orelse result;
     if (!type_expr.isFunc()) {
         try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
@@ -1609,8 +1609,8 @@ fn collectVarAccessContainerNodes(
     const info = type_expr.data.function;
 
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
-        var node_type = try analyser.resolveReturnType(type_expr) orelse return;
-        if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+        var node_type = try analyser.resolveReturnExpr(type_expr) orelse return;
+        if (try analyser.resolveUnwrapErrorUnionExpr(node_type, .payload)) |unwrapped| node_type = unwrapped;
         try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
         return;
     }
@@ -1636,8 +1636,8 @@ fn collectFieldAccessContainerNodes(
     // it also fails for `abc.xyz.*` ... currently we take advantage of this quirk
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, loc.end) orelse {
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
-        const container = try analyser.resolveDerefType(result) orelse result;
-        if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
+        const container = try analyser.resolveDerefExpr(result) orelse result;
+        if (try analyser.resolveUnwrapErrorUnionExpr(container, .payload)) |unwrapped| {
             if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
                 try types_with_handles.append(arena, unwrapped);
                 return;
@@ -1663,8 +1663,8 @@ fn collectFieldAccessContainerNodes(
         const info = node_type.data.function;
 
         if (dot_context.need_ret_type) { // => we need f()'s return type
-            node_type = try analyser.resolveReturnType(node_type) orelse continue;
-            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+            node_type = try analyser.resolveReturnExpr(node_type) orelse continue;
+            if (try analyser.resolveUnwrapErrorUnionExpr(node_type, .payload)) |unwrapped| node_type = unwrapped;
             try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
             continue;
         }
