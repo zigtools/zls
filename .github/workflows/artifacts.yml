@@ -40,7 +40,7 @@ jobs:
           MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
 
       - name: Upload release artifacts
-        run: s3cmd --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
+        run: s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
