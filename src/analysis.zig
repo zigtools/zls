@@ -4172,7 +4172,7 @@ pub const NodeWithHandle = struct {
     }
 };
 
-pub fn getFieldAccessType(
+pub fn getFieldAccessExpr(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     source_index: usize,
@@ -4245,7 +4245,7 @@ pub fn getFieldAccessType(
                             paren_count += 1;
                         }
                     } else return null;
-                    current_type = try getFieldAccessType(
+                    current_type = try getFieldAccessExpr(
                         analyser,
                         handle,
                         source_index,
@@ -6036,7 +6036,7 @@ pub fn getSymbolFieldAccesses(
 
     var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
 
-    if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
+    if (try analyser.getFieldAccessExpr(handle, source_index, held_loc)) |ty| {
         const container_handle = try analyser.resolveDerefExpr(ty) orelse ty;
 
         const container_handle_nodes = try container_handle.getAllExprs(arena);

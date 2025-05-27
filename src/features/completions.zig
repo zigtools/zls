@@ -571,7 +571,7 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!v
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const ty = try builder.analyser.getFieldAccessType(builder.orig_handle, builder.source_index, loc) orelse return;
+    const ty = try builder.analyser.getFieldAccessExpr(builder.orig_handle, builder.source_index, loc) orelse return;
     try typeToCompletion(builder, ty);
 }
 
@@ -1635,7 +1635,7 @@ fn collectFieldAccessContainerNodes(
     // `abc.method() == .` => fails, `abc.method(.{}){.}` => ok
     // it also fails for `abc.xyz.*` ... currently we take advantage of this quirk
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, loc.end) orelse {
-        const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
+        const result = try analyser.getFieldAccessExpr(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefExpr(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionExpr(container, .payload)) |unwrapped| {
             if (unwrapped.isEnumType() or unwrapped.isUnionType()) {

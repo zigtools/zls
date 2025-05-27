@@ -260,7 +260,7 @@ pub fn getSignatureInfo(
                         ) orelse continue;
                         break :blk try decl.resolveExpr(analyser) orelse continue;
                     },
-                    else => try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue,
+                    else => try analyser.getFieldAccessExpr(handle, loc.start, loc) orelse continue,
                 };
 
                 if (try analyser.resolveFuncProtoOfCallable(ty)) |func_type| {
