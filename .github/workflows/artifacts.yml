@@ -17,7 +17,7 @@ jobs:
 
       - name: Skip if no new commits
         run: |
-          LAST_SUCCESS_COMMIT=$(curl -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/zigtools/zls/actions/runs?branch=master&status=success&per_page=1" | jq --raw-output ".workflow_runs[0].head_sha")
+          LAST_SUCCESS_COMMIT=$(curl -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/zigtools/zls/actions/workflows/artifacts.yml/runs?branch=master&status=success&per_page=1" | jq --raw-output ".workflow_runs[0].head_sha")
           CURRENT_COMMIT=$(git rev-parse HEAD)
 
           echo "Latest commit with successfull CI: $LAST_SUCCESS_COMMIT"
@@ -54,7 +54,8 @@ jobs:
           MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
 
       - name: Upload release artifacts
-        run: s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
+        run: |
+          s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
