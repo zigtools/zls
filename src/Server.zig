@@ -34,6 +34,7 @@ const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const BuildOnSave = diagnostics_gen.BuildOnSave;
 const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
@@ -559,7 +560,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -1560,6 +1561,67 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) Error!lsp.ResultType("workspace/symbol") {
+    if (request.query.len < 3) return null;
+
+    for (server.workspaces.items) |workspace| {
+        const path = workspace.uri.toFsPath(arena) catch |err| switch (err) {
+            error.UnsupportedScheme => return null, // https://github.com/microsoft/language-server-protocol/issues/1264
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        var dir = std.Io.Dir.cwd().openDir(server.io, path, .{ .iterate = true }) catch return error.InternalError;
+        defer dir.close(server.io);
+
+        var walker = try dir.walk(arena);
+        defer walker.deinit();
+
+        while (walker.next(server.io) catch return error.InternalError) |entry| {
+            if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
+                const uri = Uri.fromPath(
+                    arena,
+                    std.fs.path.join(arena, &.{ path, entry.path }) catch return error.InternalError,
+                ) catch return error.InternalError;
+
+                server.document_store.trigramIndexUri(
+                    uri,
+                    server.offset_encoding,
+                ) catch return error.InternalError;
+            }
+        }
+    }
+
+    var symbols: std.ArrayListUnmanaged(types.workspace.Symbol) = .empty;
+    var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
+
+    for (
+        server.document_store.trigram_stores.keys(),
+        server.document_store.trigram_stores.values(),
+    ) |uri, trigram_store| {
+        try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
+
+        const slice = trigram_store.declarations.slice();
+        const names = slice.items(.name);
+        const ranges = slice.items(.range);
+
+        for (declaration_buffer.items) |declaration| {
+            const name = names[@intFromEnum(declaration)];
+            const range = ranges[@intFromEnum(declaration)];
+            try symbols.append(arena, .{
+                .name = trigram_store.names.items[name.start..name.end],
+                .kind = .Variable,
+                .location = .{
+                    .location = .{
+                        .uri = uri.raw,
+                        .range = range,
+                    },
+                },
+            });
+        }
+    }
+
+    return .{ .workspace_symbols = symbols.items };
+}
+
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1583,6 +1645,7 @@ const HandledRequestParams = union(enum) {
     @"textDocument/codeAction": types.CodeAction.Params,
     @"textDocument/foldingRange": types.FoldingRange.Params,
     @"textDocument/selectionRange": types.SelectionRange.Params,
+    @"workspace/symbol": types.workspace.Symbol.Params,
     other: lsp.MethodWithParams,
 };
 
@@ -1627,6 +1690,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
             .other => return false,
         },
@@ -1791,6 +1855,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
         .other => return null,
     };
 }
