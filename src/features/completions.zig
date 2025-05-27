@@ -1433,7 +1433,7 @@ fn collectContainerNodes(
         .identifier_token_index => |token| token,
         .expr_node_index => |node| {
             if (try builder.analyser.resolveExprOfNode(.of(node, handle))) |ty| {
-                try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
+                try ty.getAllExprsArrayList(builder.arena, &types_with_handles);
             }
             return types_with_handles.toOwnedSlice(builder.arena);
         },
@@ -1453,7 +1453,7 @@ fn collectContainerNodes(
                 const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
                 if (nodes[0].toOptional() == var_decl.ast.type_node) {
                     if (try builder.analyser.resolveExprOfNode(.of(nodes[0], handle))) |ty| {
-                        try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
+                        try ty.getAllExprsArrayList(builder.arena, &types_with_handles);
                         return types_with_handles.toOwnedSlice(builder.arena);
                     }
                 }
@@ -1602,7 +1602,7 @@ fn collectVarAccessContainerNodes(
     const result = try symbol_decl.resolveExpr(analyser) orelse return;
     const type_expr = try analyser.resolveDerefExpr(result) orelse result;
     if (!type_expr.isFunc()) {
-        try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try type_expr.getAllExprsArrayList(arena, types_with_handles);
         return;
     }
 
@@ -1611,7 +1611,7 @@ fn collectVarAccessContainerNodes(
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
         var node_type = try analyser.resolveReturnExpr(type_expr) orelse return;
         if (try analyser.resolveUnwrapErrorUnionExpr(node_type, .payload)) |unwrapped| node_type = unwrapped;
-        try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try node_type.getAllExprsArrayList(arena, types_with_handles);
         return;
     }
     const param_index = dot_context.fn_arg_index;
@@ -1644,7 +1644,7 @@ fn collectFieldAccessContainerNodes(
             }
         }
         // if (dot_context.likely == .enum_literal and !(container.isEnumType() or container.isUnionType())) return;
-        try container.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try container.getAllExprsArrayList(arena, types_with_handles);
         return;
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -1656,7 +1656,7 @@ fn collectFieldAccessContainerNodes(
             if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (!node_type.isFunc()) {
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllExprsArrayList(arena, types_with_handles);
             continue;
         }
 
@@ -1665,7 +1665,7 @@ fn collectFieldAccessContainerNodes(
         if (dot_context.need_ret_type) { // => we need f()'s return type
             node_type = try analyser.resolveReturnExpr(node_type) orelse continue;
             if (try analyser.resolveUnwrapErrorUnionExpr(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllExprsArrayList(arena, types_with_handles);
             continue;
         }
         // don't have the luxury of referencing an `Ast.full.Call`
@@ -1688,7 +1688,7 @@ fn collectFieldAccessContainerNodes(
         const param_index = dot_context.fn_arg_index + additional_index;
         if (param_index >= params.len) continue;
         const param_type = params[param_index].type orelse continue;
-        try param_type.toExpr().getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try param_type.toExpr().getAllExprsArrayList(arena, types_with_handles);
     }
 }
 

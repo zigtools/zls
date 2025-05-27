@@ -3491,18 +3491,18 @@ pub const Expr = struct {
 
     /// Resolves possible types of a type (single for all except either)
     /// Drops duplicates
-    pub fn getAllTypesWithHandles(ty: Expr, arena: std.mem.Allocator) ![]const Expr {
+    pub fn getAllExprs(ty: Expr, arena: std.mem.Allocator) ![]const Expr {
         var all_types: std.ArrayListUnmanaged(Expr) = .empty;
-        try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
+        try ty.getAllExprsArrayList(arena, &all_types);
         return try all_types.toOwnedSlice(arena);
     }
 
-    pub fn getAllTypesWithHandlesArrayList(ty: Expr, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(Expr)) !void {
+    pub fn getAllExprsArrayList(ty: Expr, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(Expr)) !void {
         switch (ty.data) {
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Expr = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                    try entry_ty.getAllTypesWithHandlesArrayList(arena, all_types);
+                    try entry_ty.getAllExprsArrayList(arena, all_types);
                 }
             },
             else => try all_types.append(arena, ty),
@@ -6040,7 +6040,7 @@ pub fn getSymbolFieldAccesses(
     if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
         const container_handle = try analyser.resolveDerefExpr(ty) orelse ty;
 
-        const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
+        const container_handle_nodes = try container_handle.getAllExprs(arena);
 
         for (container_handle_nodes) |t| {
             try decls_with_handles.append(arena, (try t.lookupSymbol(analyser, name)) orelse continue);
