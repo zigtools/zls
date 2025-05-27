@@ -14,6 +14,7 @@ const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -25,6 +26,7 @@ thread_pool: *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
 build_files: if (supports_build_system) std.StringArrayHashMapUnmanaged(*BuildFile) else void = if (supports_build_system) .empty else {},
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
+trigram_stores: std.StringArrayHashMapUnmanaged(TrigramStore) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?*lsp.Transport = null,
@@ -603,6 +605,12 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.handles.deinit(self.allocator);
 
+    for (self.trigram_stores.keys(), self.trigram_stores.values()) |uri, *trigram_store| {
+        self.allocator.free(uri);
+        trigram_store.deinit(self.allocator);
+    }
+    self.trigram_stores.deinit(self.allocator);
+
     if (supports_build_system) {
         for (self.build_files.values()) |build_file| {
             build_file.deinit(self.allocator);
@@ -690,6 +698,31 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
+}
+
+pub fn trigramIndexUri(
+    store: *DocumentStore,
+    uri: Uri,
+    encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const gop = try store.trigram_stores.getOrPut(store.allocator, uri);
+
+    if (gop.found_existing) {
+        return;
+    }
+
+    errdefer {
+        store.allocator.free(gop.key_ptr.*);
+        store.trigram_stores.swapRemoveAt(gop.index);
+    }
+
+    gop.key_ptr.* = try store.allocator.dupe(u8, uri);
+    gop.value_ptr.* = .empty;
+
+    const file_contents = store.readFile(uri) orelse return;
+    defer store.allocator.free(file_contents);
+
+    try gop.value_ptr.fill(store.allocator, file_contents, encoding);
 }
 
 /// **Thread safe** takes a shared lock
