@@ -252,7 +252,7 @@ pub fn formatParameter(
         if (has_parameter_name) try writer.writeAll(": ");
 
         if (info.type) |ty| {
-            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{
+            try writer.print("{}", .{ty.fmt(analyser, .{
                 .referenced = referenced,
                 .truncate_container_decls = true,
             })});
@@ -3725,11 +3725,6 @@ pub const Expr = struct {
         return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
     }
 
-    pub fn fmtTypeVal(ty: Expr, analyser: *Analyser, options: FormatOptions) Formatter {
-        std.debug.assert(ty.is_type_val);
-        return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
-    }
-
     pub fn fmtValue(ty: Expr, analyser: *Analyser, options: FormatOptions) Formatter {
         std.debug.assert(ty.data == .ip_index or ty.is_type_val);
         return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
@@ -3830,9 +3825,6 @@ pub const Type = struct {
         return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
     }
 
-    // TODO: delete this and use fmt once all relevant Expr's have been changed to Type's
-    pub const fmtTypeVal = fmt;
-
     const FormatContext = struct {
         ty: Type,
         analyser: *Analyser,
@@ -3874,7 +3866,7 @@ pub const Type = struct {
                     .c => try writer.writeAll("[*c]"),
                 }
                 if (info.is_const) try writer.writeAll("const ");
-                return try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
+                return try writer.print("{}", .{info.elem_ty.fmt(analyser, ctx.options)});
             },
             .array => |info| {
                 try writer.writeByte('[');
@@ -3887,7 +3879,7 @@ pub const Type = struct {
                     try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
                 }
                 try writer.writeByte(']');
-                try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
+                try writer.print("{}", .{info.elem_ty.fmt(analyser, ctx.options)});
             },
             .tuple => |elem_ty_slice| {
                 try writer.writeAll("struct { ");
@@ -3895,18 +3887,18 @@ pub const Type = struct {
                     if (i != 0) {
                         try writer.writeAll(", ");
                     }
-                    try writer.print("{}", .{elem_ty.fmtTypeVal(analyser, ctx.options)});
+                    try writer.print("{}", .{elem_ty.fmt(analyser, ctx.options)});
                 }
                 try writer.writeAll(" }");
             },
-            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser, ctx.options)}),
+            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmt(analyser, ctx.options)}),
             .error_union => |info| {
                 if (info.error_set) |error_set| {
-                    try writer.print("{}", .{error_set.fmtTypeVal(analyser, ctx.options)});
+                    try writer.print("{}", .{error_set.fmt(analyser, ctx.options)});
                 }
-                try writer.print("!{}", .{info.payload.fmtTypeVal(analyser, ctx.options)});
+                try writer.print("!{}", .{info.payload.fmt(analyser, ctx.options)});
             },
-            .union_tag => |t| try writer.print("@typeInfo({}).@\"union\".tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
+            .union_tag => |t| try writer.print("@typeInfo({}).@\"union\".tag_type.?", .{t.fmt(analyser, ctx.options)}),
             .container => |info| {
                 const scope_handle = info.scope_handle;
                 const handle = scope_handle.handle;
@@ -3972,7 +3964,7 @@ pub const Type = struct {
                                 const param_ty = try analyser.resolveGenericType(.{
                                     .data = .{ .type_parameter = .{ .token = param_name_token, .handle = handle } },
                                 }, info.bound_params);
-                                try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
+                                try writer.print("{}", .{param_ty.fmt(analyser, .{
                                     .referenced = referenced,
                                     .truncate_container_decls = options.truncate_container_decls,
                                 })});

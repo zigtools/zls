@@ -45,7 +45,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                     .detail = try std.fmt.allocPrint(
                         builder.arena,
                         "{}",
-                        .{info.elem_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                        .{info.elem_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
                     ),
                 });
 
@@ -75,8 +75,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                     .kind = .Field,
                 });
 
-                var many_ptr_ty = ty;
-                many_ptr_ty.is_type_val = true;
+                var many_ptr_ty = ty.typeOf(builder.analyser);
                 many_ptr_ty.data.pointer.size = .many;
                 builder.completions.appendAssumeCapacity(.{
                     .label = "ptr",
@@ -84,7 +83,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                     .detail = try std.fmt.allocPrint(
                         builder.arena,
                         "{}",
-                        .{many_ptr_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                        .{many_ptr_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
                     ),
                 });
             },
@@ -111,7 +110,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                     .detail = try std.fmt.allocPrint(
                         builder.arena,
                         "{}",
-                        .{elem_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                        .{elem_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
                     ),
                 });
             }
@@ -124,7 +123,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Expr) error{OutOfMemory}!voi
                 .detail = try std.fmt.allocPrint(
                     builder.arena,
                     "{}",
-                    .{child_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
+                    .{child_ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
                 ),
             });
         },
@@ -268,12 +267,13 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 }
             }
 
-            const detail = if (maybe_resolved_ty) |ty| blk: {
-                if (ty.is_type_val and ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
-                } else {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+            const detail = if (maybe_resolved_ty) |expr| blk: {
+                if (Analyser.Type.fromExpr(expr)) |ty| {
+                    if (ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
+                        break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                    }
                 }
+                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{expr.fmt(builder.analyser, .{ .truncate_container_decls = false })});
             } else null;
 
             const label_details: ?types.CompletionItemLabelDetails = blk: {

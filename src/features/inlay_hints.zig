@@ -267,7 +267,7 @@ fn writeCallHint(
         const comp_time = if (param.modifier) |m| m == .comptime_param else false;
 
         const tooltip = if (param.type) |param_ty|
-            try std.fmt.allocPrint(builder.arena, "{}", .{param_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })})
+            try std.fmt.allocPrint(builder.arena, "{}", .{param_ty.fmt(builder.analyser, .{ .truncate_container_decls = true })})
         else
             "anytype";
 
