@@ -258,7 +258,7 @@ pub fn getSignatureInfo(
                             loc.start,
                             offsets.locToSlice(tree.source, loc),
                         ) orelse continue;
-                        break :blk try decl.resolveType(analyser) orelse continue;
+                        break :blk try decl.resolveExpr(analyser) orelse continue;
                     },
                     else => try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue,
                 };

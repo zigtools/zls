@@ -37,7 +37,7 @@ fn gotoDefinitionSymbol(
         .declaration => try decl_handle.definitionToken(analyser, false),
         .definition => try decl_handle.definitionToken(analyser, true),
         .type_definition => blk: {
-            if (try decl_handle.resolveType(analyser)) |ty| {
+            if (try decl_handle.resolveExpr(analyser)) |ty| {
                 var resolved_ty = ty;
                 while (true) {
                     resolved_ty =

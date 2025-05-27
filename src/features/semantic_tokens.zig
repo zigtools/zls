@@ -333,7 +333,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
+            const resolved_type = try builder.analyser.resolveExprOfNode(.of(node, handle));
             try writeVarDecl(builder, node, resolved_type);
         },
         .@"usingnamespace" => {
@@ -415,7 +415,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             var is_generic = false;
             var func_name_tok_type: TokenType = .function;
-            if (try builder.analyser.resolveTypeOfNode(.of(node, handle))) |func_ty| {
+            if (try builder.analyser.resolveExprOfNode(.of(node, handle))) |func_ty| {
                 is_generic = func_ty.isGenericFunc();
                 if (func_ty.isTypeFunc()) {
                     func_name_tok_type = .type;
@@ -623,7 +623,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (struct_init.ast.type_expr.unwrap()) |type_expr| {
                 try writeNodeTokens(builder, type_expr);
 
-                if (try builder.analyser.resolveTypeOfNode(.of(type_expr, handle))) |struct_type| {
+                if (try builder.analyser.resolveExprOfNode(.of(type_expr, handle))) |struct_type| {
                     switch (struct_type.data) {
                         .container => |info| {
                             const scope_handle = info.scope_handle;
@@ -890,7 +890,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .assign_destructure => {
             const data = tree.assignDestructure(node);
 
-            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(data.ast.value_expr, handle));
+            const resolved_type = try builder.analyser.resolveExprOfNode(.of(data.ast.value_expr, handle));
 
             for (data.ast.variables, 0..) |lhs_node, index| {
                 switch (tree.nodeTag(lhs_node)) {
@@ -1101,7 +1101,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
     )) |child| {
         const is_param = child.decl == .function_parameter;
         const mutable = !child.isConst();
-        if (try child.resolveType(builder.analyser)) |decl_type| {
+        if (try child.resolveExpr(builder.analyser)) |decl_type| {
             return try colorIdentifierBasedOnType(
                 builder,
                 decl_type,
@@ -1137,7 +1137,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
 
     try writeNodeTokens(builder, lhs_node);
 
-    const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse {
+    const lhs = try builder.analyser.resolveExprOfNode(.of(lhs_node, handle)) orelse {
         try writeToken(builder, field_name_token, .variable);
         return;
     };
@@ -1170,7 +1170,7 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
             return;
         }
 
-        const resolved_type = try decl_type.resolveType(builder.analyser) orelse break :decl_blk;
+        const resolved_type = try decl_type.resolveExpr(builder.analyser) orelse break :decl_blk;
         try colorIdentifierBasedOnType(
             builder,
             resolved_type,

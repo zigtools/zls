@@ -183,7 +183,7 @@ pub fn main() Error!void {
             (if (test_item.expected_value) |expected_value| std.mem.eql(u8, expected_value, "unknown") else true) and
             test_item.expected_error == null;
 
-        const ty = try decl.resolveType(&analyser) orelse {
+        const ty = try decl.resolveExpr(&analyser) orelse {
             if (expect_unknown) continue;
             try error_builder.msgAtLoc("failed to resolve type of '{s}'", file_path, annotation.loc, .err, .{
                 identifier,

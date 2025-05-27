@@ -235,7 +235,7 @@ fn writeCallHint(
 
     const handle = builder.handle;
 
-    const ty = try builder.analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return;
+    const ty = try builder.analyser.resolveExprOfNode(.of(call.ast.fn_expr, handle)) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
     const fn_info = fn_ty.data.function;
 
@@ -325,7 +325,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
-    const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, builder.handle)) orelse return null;
+    const resolved_type = try builder.analyser.resolveExprOfNode(.of(node, builder.handle)) orelse return null;
 
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
@@ -343,7 +343,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
         offsets.tokenToSlice(builder.handle.tree, token),
         builder.handle.tree.tokenStart(token),
     ) orelse return null;
-    const resolved_type = try things.resolveType(builder.analyser) orelse return null;
+    const resolved_type = try things.resolveExpr(builder.analyser) orelse return null;
 
     const type_str: []const u8 = try std.fmt.allocPrint(
         builder.arena,
@@ -538,7 +538,7 @@ fn writeNodeInlayHint(
                 const name_loc = offsets.tokenToLoc(tree, name_token);
                 const name = offsets.locToSlice(tree.source, name_loc);
                 const decl = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
-                const ty = try decl.resolveType(builder.analyser) orelse continue;
+                const ty = try decl.resolveExpr(builder.analyser) orelse continue;
                 const type_str: []const u8 = try std.fmt.allocPrint(
                     builder.arena,
                     "{}",

@@ -181,7 +181,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         doc_comments.appendAssumeCapacity(docs);
     }
 
-    const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
+    const maybe_resolved_ty = try decl_handle.resolveExpr(builder.analyser);
 
     if (maybe_resolved_ty) |resolve_ty| {
         if (try resolve_ty.docComments(builder.arena)) |docs| {
@@ -1357,7 +1357,7 @@ fn collectContainerFields(
                     break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
                 };
 
-                const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
+                const detail = if (try decl_handle.resolveExpr(builder.analyser)) |ty| detail: {
                     const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
@@ -1385,7 +1385,7 @@ fn collectContainerFields(
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
-                var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                var expected_ty = try decl_handle.resolveExpr(builder.analyser) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType().toExpr();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
@@ -1401,7 +1401,7 @@ fn collectContainerFields(
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
-                const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                const resolved_ty = try decl_handle.resolveExpr(builder.analyser) orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
                 expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType().toExpr();
                 if (expected_ty.data != .container) continue;
@@ -1432,7 +1432,7 @@ fn collectContainerNodes(
     const token_index = switch (dot_context.type_info) {
         .identifier_token_index => |token| token,
         .expr_node_index => |node| {
-            if (try builder.analyser.resolveTypeOfNode(.of(node, handle))) |ty| {
+            if (try builder.analyser.resolveExprOfNode(.of(node, handle))) |ty| {
                 try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
             }
             return types_with_handles.toOwnedSlice(builder.arena);
@@ -1452,7 +1452,7 @@ fn collectContainerNodes(
             => {
                 const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
                 if (nodes[0].toOptional() == var_decl.ast.type_node) {
-                    if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+                    if (try builder.analyser.resolveExprOfNode(.of(nodes[0], handle))) |ty| {
                         try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
                         return types_with_handles.toOwnedSlice(builder.arena);
                     }
@@ -1599,7 +1599,7 @@ fn collectVarAccessContainerNodes(
     const arena = builder.arena;
 
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
-    const result = try symbol_decl.resolveType(analyser) orelse return;
+    const result = try symbol_decl.resolveExpr(analyser) orelse return;
     const type_expr = try analyser.resolveDerefType(result) orelse result;
     if (!type_expr.isFunc()) {
         try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
@@ -1650,7 +1650,7 @@ fn collectFieldAccessContainerNodes(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, loc, name) orelse return;
     for (decls) |decl| {
-        var node_type = try decl.resolveType(analyser) orelse continue;
+        var node_type = try decl.resolveExpr(analyser) orelse continue;
         // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
             if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
@@ -1677,7 +1677,7 @@ fn collectFieldAccessContainerNodes(
             var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
             const first_symbol = symbol_iter.next() orelse continue;
             const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-            const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
+            const symbol_type = try symbol_decl.resolveExpr(analyser) orelse continue;
             if (!symbol_type.is_type_val) { // then => instance_of_T
                 const container_type = try analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
                 if (Analyser.firstParamIs(node_type, container_type)) break :blk 1;
@@ -1708,7 +1708,7 @@ fn collectEnumLiteralContainerNodes(
     for (containers) |container| {
         const container_instance = container.instanceTypeVal(analyser) orelse container;
         const member_decl = try container_instance.lookupSymbol(analyser, alleged_field_name) orelse continue;
-        var member_type = try member_decl.resolveType(analyser) orelse continue;
+        var member_type = try member_decl.resolveExpr(analyser) orelse continue;
         // Unwrap `x{ .fld_w_opt_type =`
         if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
