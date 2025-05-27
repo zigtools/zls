@@ -157,6 +157,11 @@ pub fn eql(a: Uri, b: Uri) bool {
     return std.mem.eql(u8, a.raw, b.raw);
 }
 
+pub fn toStdUri(uri: Uri) std.Uri {
+    // The Uri is guranteed to be valid
+    return std.Uri.parse(uri.raw) catch unreachable;
+}
+
 pub const format = @compileError("Cannot format @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
 pub const jsonStringify = @compileError("Cannot stringify @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
 

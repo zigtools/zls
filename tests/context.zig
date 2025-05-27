@@ -84,9 +84,13 @@ pub const Context = struct {
     pub fn addDocument(self: *Context, options: struct {
         source: []const u8,
         mode: std.zig.Ast.Mode = .zig,
+        base_directory: []const u8 = "/",
     }) !zls.Uri {
+        std.debug.assert(std.mem.startsWith(u8, options.base_directory, "/"));
+        std.debug.assert(std.mem.endsWith(u8, options.base_directory, "/"));
+
         const arena = self.arena.allocator();
-        const path = try std.fmt.allocPrint(arena, "untitled:///Untitled-{d}.{t}", .{ self.file_id, options.mode });
+        const path = try std.fmt.allocPrint(arena, "untitled://{s}Untitled-{d}.{t}", .{ options.base_directory, self.file_id, options.mode });
         const uri: zls.Uri = try .parse(arena, path);
 
         const params: types.TextDocument.DidOpenParams = .{
@@ -102,5 +106,26 @@ pub const Context = struct {
 
         self.file_id += 1;
         return uri;
+    }
+
+    pub fn addWorkspace(self: *Context, name: []const u8, base_directory: []const u8) !void {
+        std.debug.assert(std.mem.startsWith(u8, base_directory, "/"));
+        std.debug.assert(std.mem.endsWith(u8, base_directory, "/"));
+
+        try self.server.sendNotificationSync(
+            self.arena.allocator(),
+            "workspace/didChangeWorkspaceFolders",
+            .{
+                .event = .{
+                    .added = &.{
+                        .{
+                            .uri = try std.fmt.allocPrint(self.arena.allocator(), "untitled:{s}", .{base_directory}),
+                            .name = name,
+                        },
+                    },
+                    .removed = &.{},
+                },
+            },
+        );
     }
 };

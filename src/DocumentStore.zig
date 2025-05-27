@@ -14,6 +14,7 @@ const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -171,6 +172,7 @@ pub const Handle = struct {
     /// or has been closed with `textDocument/didClose`.
     lsp_synced: bool,
     document_scope: Lazy(DocumentScope, DocumentStoreContext) = .unset,
+    trigram_store: Lazy(TrigramStore, TrigramStoreContext) = .unset,
 
     /// private field
     impl: struct {
@@ -454,6 +456,8 @@ pub const Handle = struct {
 
         old_handle.document_scope = handle.document_scope;
         handle.document_scope = .unset;
+        old_handle.trigram_store = handle.trigram_store;
+        handle.trigram_store = .unset;
     }
 
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
@@ -485,7 +489,7 @@ pub const Handle = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        const parsed_uri = std.Uri.parse(uri.raw) catch unreachable; // The Uri is guranteed to be valid
+        const parsed_uri = uri.toStdUri();
 
         const node_tags = tree.nodes.items(.tag);
         for (node_tags, 0..) |tag, i| {
@@ -564,6 +568,7 @@ pub const Handle = struct {
             self.tree.deinit(allocator);
         }
         self.document_scope.deinit(allocator);
+        self.trigram_store.deinit(allocator);
         for (self.file_imports) |uri| uri.deinit(allocator);
         allocator.free(self.file_imports);
 
@@ -620,6 +625,17 @@ pub const Handle = struct {
                 return &lazy.value.?;
             }
 
+            pub fn getOrNull(lazy: *LazyResource, handle: *Handle) ?*const T {
+                const tracy_zone = tracy.traceNamed(@src(), "Lazy(" ++ @typeName(T) ++ ").getOrNull");
+                defer tracy_zone.end();
+
+                const store = handle.impl.store;
+                const io = store.io;
+                handle.impl.lock.lockUncancelable(io);
+                defer handle.impl.lock.unlock(io);
+                return if (lazy.value) |*value| value else null;
+            }
+
             pub fn getCached(lazy: *LazyResource) *const T {
                 return &lazy.value.?;
             }
@@ -640,6 +656,15 @@ pub const Handle = struct {
         }
         fn deinit(document_scope: *DocumentScope, allocator: std.mem.Allocator) void {
             document_scope.deinit(allocator);
+        }
+    };
+
+    const TrigramStoreContext = struct {
+        fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!TrigramStore {
+            return try .init(allocator, &handle.tree);
+        }
+        fn deinit(trigram_store: *TrigramStore, allocator: std.mem.Allocator) void {
+            trigram_store.deinit(allocator);
         }
     };
 };
@@ -942,6 +967,128 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     const build_file = self.getBuildFile(build_file_uri) orelse return;
 
     self.wait_group.async(self.io, invalidateBuildFileWorker, .{ self, build_file });
+}
+
+const LoadDirectoryError = error{UnsupportedScheme} || std.mem.Allocator.Error || std.Io.Dir.OpenError;
+
+pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) LoadDirectoryError!usize {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const workspace_path = try directory_uri.toFsPath(store.allocator);
+    defer store.allocator.free(workspace_path);
+
+    var workspace_dir = try std.Io.Dir.cwd().openDir(store.io, workspace_path, .{ .iterate = true });
+    defer workspace_dir.close(store.io);
+
+    var walker = try workspace_dir.walk(store.allocator);
+    defer walker.deinit();
+
+    const getOrLoadHandleVoid = struct {
+        fn getOrLoadHandleVoid(
+            s: *DocumentStore,
+            uri: Uri,
+            did_out_of_memory: *std.atomic.Value(bool),
+        ) std.Io.Cancelable!void {
+            _ = s.getOrLoadHandle(uri) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.OutOfMemory => did_out_of_memory.store(true, .release),
+            };
+            uri.deinit(s.allocator);
+        }
+    }.getOrLoadHandleVoid;
+
+    var group: std.Io.Group = .init;
+    var did_out_of_memory: std.atomic.Value(bool) = .init(false);
+
+    var file_count: usize = 0;
+    while (try walker.next(store.io)) |entry| {
+        if (entry.kind == .directory) {
+            // Keep in sync with `loadTrigramStores`
+            if (std.mem.startsWith(u8, entry.basename, ".") or
+                std.mem.eql(u8, entry.basename, "zig-cache") or
+                std.mem.eql(u8, entry.basename, "zig-pkg"))
+            {
+                walker.leave(store.io);
+            }
+            continue;
+        }
+        if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
+
+        file_count += 1;
+
+        const path = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+        defer store.allocator.free(path);
+
+        const uri: Uri = try .fromPath(store.allocator, path);
+        errdefer comptime unreachable;
+
+        group.async(store.io, getOrLoadHandleVoid, .{ store, uri, &did_out_of_memory });
+    }
+    try group.await(store.io);
+
+    if (did_out_of_memory.load(.acquire)) return error.OutOfMemory;
+
+    return file_count;
+}
+
+pub fn loadTrigramStores(
+    store: *DocumentStore,
+    filter_uris: []const std.Uri,
+) error{ OutOfMemory, Canceled }![]*DocumentStore.Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var handles: std.ArrayList(*DocumentStore.Handle) = .empty;
+    errdefer handles.deinit(store.allocator);
+
+    var it: HandleIterator = .{ .store = store };
+    while (it.next()) |handle| {
+        const uri = handle.uri.toStdUri();
+
+        var component_it = std.fs.path.componentIterator(uri.path.percent_encoded);
+        const skip = while (component_it.next()) |component| {
+            // Keep in sync with `loadDirectoryRecursive`
+            if (std.mem.startsWith(u8, component.name, ".")) break true;
+            if (std.mem.eql(u8, component.name, "zig-cache")) break true;
+            if (std.mem.eql(u8, component.name, "zig-pkg")) break true;
+        } else false;
+        if (skip) continue;
+
+        for (filter_uris) |filter_uri| {
+            if (!std.ascii.eqlIgnoreCase(uri.scheme, filter_uri.scheme)) continue;
+            if (std.mem.startsWith(u8, uri.path.percent_encoded, filter_uri.path.percent_encoded)) break;
+        } else continue;
+        try handles.append(store.allocator, handle);
+    }
+
+    const loadTrigramStore = struct {
+        fn loadTrigramStore(
+            handle: *DocumentStore.Handle,
+            did_out_of_memory: *std.atomic.Value(bool),
+        ) void {
+            _ = handle.trigram_store.get(handle) catch |err| switch (err) {
+                error.OutOfMemory => {
+                    did_out_of_memory.store(true, .release);
+                    return;
+                },
+            };
+        }
+    }.loadTrigramStore;
+
+    var group: std.Io.Group = .init;
+    var did_out_of_memory: std.atomic.Value(bool) = .init(false);
+
+    for (handles.items) |handle| {
+        const has_trigram_store = handle.trigram_store.getOrNull(handle) != null;
+        if (has_trigram_store) continue;
+        group.async(store.io, loadTrigramStore, .{ handle, &did_out_of_memory });
+    }
+    try group.await(store.io);
+
+    if (did_out_of_memory.load(.acquire)) return error.OutOfMemory;
+
+    return try handles.toOwnedSlice(store.allocator);
 }
 
 const progress_token = "buildProgressToken";
@@ -1840,7 +1987,7 @@ pub fn uriFromImportStr(
     defer tracy_zone.end();
 
     if (std.mem.endsWith(u8, import_str, ".zig") or std.mem.endsWith(u8, import_str, ".zon")) {
-        const parsed_uri = std.Uri.parse(handle.uri.raw) catch unreachable; // The Uri is guranteed to be valid
+        const parsed_uri = handle.uri.toStdUri();
         return .{ .one = try Uri.resolveImport(allocator, handle.uri, parsed_uri, import_str) };
     }
 
