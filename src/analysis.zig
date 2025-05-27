@@ -893,7 +893,7 @@ fn resolveGenericExprInternal(
 ) !Expr {
     var resolved = Type.fromExpr(expr) orelse expr.typeOf(analyser);
     resolved = try analyser.resolveGenericTypeInternal(resolved, bound_params, visiting);
-    return if (expr.is_type_val) resolved.toExpr() else resolved.instanceTypeVal(analyser).?;
+    return if (expr.is_type_val) resolved.toExpr() else resolved.instanceExpr(analyser).?;
 }
 
 fn findReturnStatementInternal(tree: Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
@@ -967,7 +967,7 @@ fn resolveReturnValueOfFuncNode(
         };
     }
 
-    return child_type.instanceTypeVal(analyser);
+    return child_type.instanceExpr(analyser);
 }
 
 /// `optional.?`
@@ -977,7 +977,7 @@ pub fn resolveOptionalUnwrap(analyser: *Analyser, optional: Expr) error{OutOfMem
     // TODO: some uses of this function don't expect C pointers to be unwrapped
     switch (optional.data) {
         .optional => |child_ty| {
-            return child_ty.instanceTypeVal(analyser);
+            return child_ty.instanceExpr(analyser);
         },
         .pointer => |ptr| {
             if (ptr.size == .c) return optional;
@@ -1015,8 +1015,8 @@ pub fn resolveUnwrapErrorUnionExpr(analyser: *Analyser, ty: Expr, side: ErrorUni
 
     return switch (ty.data) {
         .error_union => |info| switch (side) {
-            .error_set => (info.error_set orelse return null).instanceTypeVal(analyser),
-            .payload => info.payload.instanceTypeVal(analyser),
+            .error_set => (info.error_set orelse return null).instanceExpr(analyser),
+            .payload => info.payload.instanceExpr(analyser),
         },
         else => return null,
     };
@@ -1054,7 +1054,7 @@ fn resolveUnionTagAccess(analyser: *Analyser, expr: Expr, symbol: []const u8) er
 
     if (container_decl.ast.arg.unwrap()) |arg| {
         const tag_type = (try analyser.resolveExprOfNode(.of(arg, handle))) orelse return null;
-        return tag_type.instanceTypeVal(analyser) orelse return null;
+        return tag_type.instanceExpr(analyser) orelse return null;
     }
 
     return null;
@@ -1079,7 +1079,7 @@ pub fn resolveDerefBinding(analyser: *Analyser, pointer: Expr) error{OutOfMemory
     switch (pointer.data) {
         .pointer => |info| switch (info.size) {
             .one, .c => return .{
-                .type = info.elem_ty.instanceTypeVal(analyser) orelse return null,
+                .type = info.elem_ty.instanceExpr(analyser) orelse return null,
                 .is_const = info.is_const,
             },
             .many, .slice => return null,
@@ -1151,12 +1151,12 @@ pub fn resolveBracketAccessExprFromBinding(analyser: *Analyser, lhs_binding: Bin
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
                 if (index >= fields.len) return null;
-                return fields[@intCast(index)].instanceTypeVal(analyser);
+                return fields[@intCast(index)].instanceExpr(analyser);
             },
             .open, .range => return null,
         },
         .array => |info| switch (rhs) {
-            .single => return info.elem_ty.instanceTypeVal(analyser),
+            .single => return info.elem_ty.instanceExpr(analyser),
             .open => |start_maybe| {
                 if (start_maybe) |start| {
                     const elem_count = blk: {
@@ -1276,7 +1276,7 @@ pub fn resolveBracketAccessExprFromBinding(analyser: *Analyser, lhs_binding: Bin
                 },
             },
             .many => switch (rhs) {
-                .single => info.elem_ty.instanceTypeVal(analyser),
+                .single => info.elem_ty.instanceExpr(analyser),
                 .open => lhs,
                 .range => |range_maybe| {
                     if (range_maybe) |range| {
@@ -1316,7 +1316,7 @@ pub fn resolveBracketAccessExprFromBinding(analyser: *Analyser, lhs_binding: Bin
                 },
             },
             .slice => switch (rhs) {
-                .single => info.elem_ty.instanceTypeVal(analyser),
+                .single => info.elem_ty.instanceExpr(analyser),
                 .open => lhs,
                 .range => |range_maybe| {
                     const start, const end = range_maybe orelse return lhs;
@@ -1343,7 +1343,7 @@ pub fn resolveBracketAccessExprFromBinding(analyser: *Analyser, lhs_binding: Bin
                 },
             },
             .c => switch (rhs) {
-                .single => info.elem_ty.instanceTypeVal(analyser),
+                .single => info.elem_ty.instanceExpr(analyser),
                 .open => lhs,
                 .range => |range_maybe| if (range_maybe) |range| {
                     const start, const end = range;
@@ -1699,7 +1699,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     fallback_type = decl_type;
                     break :blk;
                 }
-                return decl_type.instanceTypeVal(analyser);
+                return decl_type.instanceExpr(analyser);
             }
 
             if (var_decl.ast.init_node.unwrap()) |init_node| blk: {
@@ -1759,7 +1759,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {
             const container_type = options.container_type orelse (try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)))).toExpr();
             if (container_type.isEnumType())
-                return container_type.instanceTypeVal(analyser);
+                return container_type.instanceExpr(analyser);
 
             var field = tree.fullContainerField(node).?;
 
@@ -1771,7 +1771,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             const base = field.ast.type_expr.unwrap().?;
             const base_type = (try analyser.resolveExprOfNodeInternal(.of(base, handle))) orelse return null;
-            return base_type.instanceTypeVal(analyser);
+            return base_type.instanceExpr(analyser);
         },
         .@"comptime",
         .@"nosuspend",
@@ -1792,9 +1792,9 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (lhs.data == .array and lhs.data.array.elem_count == null) {
                 var ty = lhs;
                 ty.data.array.elem_count = struct_init.ast.fields.len;
-                return ty.instanceTypeVal(analyser);
+                return ty.instanceExpr(analyser);
             }
-            return lhs.instanceTypeVal(analyser);
+            return lhs.instanceExpr(analyser);
         },
         .unwrap_optional => {
             const lhs_node, _ = tree.nodeData(node).node_and_token;
@@ -1901,9 +1901,9 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 if (array_ty.data == .array and array_ty.data.array.elem_count == null) {
                     var ty = array_ty;
                     ty.data.array.elem_count = array_init_info.ast.elements.len;
-                    return ty.instanceTypeVal(analyser);
+                    return ty.instanceExpr(analyser);
                 }
-                return array_ty.instanceTypeVal(analyser);
+                return array_ty.instanceExpr(analyser);
             }
 
             const elem_ty_slice = try analyser.arena.alloc(Type, array_init_info.ast.elements.len);
@@ -2040,7 +2040,7 @@ fn resolveExprOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (cast_map.has(call_name)) {
                 if (params.len < 1) return null;
                 const ty = (try analyser.resolveExprOfNodeInternal(.of(params[0], handle))) orelse return null;
-                return ty.instanceTypeVal(analyser);
+                return ty.instanceExpr(analyser);
             }
 
             const float_map: std.StaticStringMap(void) = .initComptime(.{
@@ -3509,9 +3509,9 @@ pub const Expr = struct {
         }
     }
 
-    pub fn instanceTypeVal(self: Expr, analyser: *Analyser) ?Expr {
+    pub fn instanceExpr(self: Expr, analyser: *Analyser) ?Expr {
         const ty = Type.fromExpr(self) orelse return null;
-        return ty.instanceTypeVal(analyser);
+        return ty.instanceExpr(analyser);
     }
 
     pub fn typeOf(self: Expr, analyser: *Analyser) Type {
@@ -3805,8 +3805,7 @@ pub const Type = struct {
         return true;
     }
 
-    // TODO: rename to instanceExpr
-    pub fn instanceTypeVal(ty: Type, analyser: *Analyser) ?Expr {
+    pub fn instanceExpr(ty: Type, analyser: *Analyser) ?Expr {
         return switch (ty.data) {
             .ip_index => |payload| Expr.fromIP(analyser, payload.index orelse return null, null),
             else => .{ .data = ty.data, .is_type_val = false },
@@ -4083,7 +4082,7 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
 
     const builtin_type_decl = try builtin_root_struct_type.lookupSymbol(analyser, type_name) orelse return null;
     const builtin_type = try builtin_type_decl.resolveExpr(analyser) orelse return null;
-    return builtin_type.instanceTypeVal(analyser);
+    return builtin_type.instanceExpr(analyser);
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
@@ -4372,7 +4371,7 @@ pub fn getFieldAccessType(
                 if (current_type) |ct| {
                     if (ct.isStructType() or ct.isUnionType()) {
                         // struct initialization
-                        current_type = ct.instanceTypeVal(analyser);
+                        current_type = ct.instanceExpr(analyser);
                     }
                 }
             },
@@ -5057,7 +5056,7 @@ pub const DeclWithHandle = struct {
                     };
                 }
 
-                break :blk param_type.instanceTypeVal(analyser);
+                break :blk param_type.instanceExpr(analyser);
             },
             .optional_payload => |pay| blk: {
                 const ty = (try analyser.resolveExprOfNodeInternal(.of(pay.condition, self.handle))) orelse return null;
@@ -5082,13 +5081,13 @@ pub const DeclWithHandle = struct {
                 const var_decl = pay.getFullVarDecl(tree);
                 if (var_decl.ast.type_node.unwrap()) |type_node| {
                     if (try analyser.resolveExprOfNode(.of(type_node, self.handle))) |ty|
-                        break :blk ty.instanceTypeVal(analyser);
+                        break :blk ty.instanceExpr(analyser);
                 }
 
                 const init_node = tree.nodeData(pay.node).extra_and_node[1];
                 const node = try analyser.resolveExprOfNode(.of(init_node, self.handle)) orelse return null;
                 break :blk switch (node.data) {
-                    .array => |array_info| array_info.elem_ty.instanceTypeVal(analyser),
+                    .array => |array_info| array_info.elem_ty.instanceExpr(analyser),
                     .tuple => try analyser.resolveBracketAccessExpr(node, .{ .single = pay.index }),
                     else => null,
                 };
@@ -5800,7 +5799,7 @@ pub fn resolveEnumLiteralExprFromAncestors(
             if (param_index >= fn_info.parameters.len) return null;
             const param = fn_info.parameters[param_index];
             const param_ty = param.type orelse return null;
-            return param_ty.instanceTypeVal(analyser);
+            return param_ty.instanceExpr(analyser);
         },
         .assign => {
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
@@ -5828,7 +5827,7 @@ pub fn resolveEnumLiteralExprFromAncestors(
                 const func = tree.fullFnProto(&func_buf, ancestors[index]) orelse continue;
                 const return_type = func.ast.return_type.unwrap() orelse continue;
                 const return_ty = try analyser.resolveExprOfNode(.of(return_type, handle)) orelse return null;
-                return return_ty.instanceTypeVal(analyser);
+                return return_ty.instanceExpr(analyser);
             }
         },
 
@@ -5898,7 +5897,7 @@ pub fn resolveEnumLiteralExprFromAncestors(
                 if (params.len != 2) return null;
                 if (params[1] != node) return null;
                 const ty = try analyser.resolveExprOfNode(.of(params[0], handle)) orelse return null;
-                return ty.instanceTypeVal(analyser);
+                return ty.instanceExpr(analyser);
             }
 
             if (std.mem.eql(u8, call_name, "@branchHint")) {
