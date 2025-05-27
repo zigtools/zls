@@ -23,7 +23,7 @@ jobs:
       - name: Install APT packages
         run: |
           sudo apt-get update
-          sudo apt-get install tar 7zip
+          sudo apt-get install tar 7zip s3cmd
 
       - name: Install minisign
         run: |
@@ -31,11 +31,23 @@ jobs:
           tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
-      - name: Build and Publish artifacts
+      - name: Build release artifacts
         run: |
           echo "${MINISIGN_SECRET_FILE}" > minisign.key
-          zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary all
+          zig build release -Drelease-minisign -Doptimize=ReleaseSafe --summary all
           rm -f minisign.key
         env:
-          ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
           MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
+
+      - name: Upload release artifacts
+        run: s3cmd --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Publish release
+        run: zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary new
+        env:
+          ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}

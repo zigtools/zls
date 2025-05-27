@@ -451,56 +451,24 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
     std.debug.assert(release_artifacts.len > 0);
     for (release_artifacts) |compile| std.debug.assert(compile.version != null);
 
-    const publish_step = b.step("publish", "Publish release artifacts to releases.zigtools.org");
+    const publish_step = b.step("publish", "Publish release artifacts to releases.zigtools.org (requires curl)");
     const release_step = b.step("release", "Build all release artifacts. (requires tar and 7z)");
     const release_minisign = b.option(bool, "release-minisign", "Sign release artifacts with Minisign") orelse false;
+
+    publish_step.dependOn(release_step);
+
+    // It is possible for the version to be something like `0.12.0-dev` when `git describe` failed.
+    // Ideally we would want to report a failure about this when running one of the release/publish steps.
+    // The problem is during the configure phase, it is not possible to know which top level steps gets run.
+    // So instead we use rely on the release-worker to reject this version string during the make phase.
+    // One possible alternative would be to use a configuration option (i.e. -Dpublish) to conditionally run an assertion.
+    const released_zls_version = release_artifacts[0].version.?;
 
     const FileExtension = enum {
         zip,
         @"tar.xz",
         @"tar.gz",
     };
-
-    const uri: std.Uri = if (b.graph.env_map.get("ZLS_WORKER_ENDPOINT")) |endpoint| blk: {
-        var uri = std.Uri.parse(endpoint) catch std.debug.panic("invalid URI: '{s}'", .{endpoint});
-        if (!uri.path.isEmpty()) std.debug.panic("ZLS_WORKER_ENDPOINT URI must have no path component: '{s}'", .{endpoint});
-        uri.path = .{ .raw = "/v1/zls/publish" };
-        break :blk uri;
-    } else .{
-        .scheme = "https",
-        .host = .{ .raw = "releases.zigtools.org" },
-        .path = .{ .raw = "/v1/zls/publish" },
-    };
-
-    const password = b.graph.env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
-
-    const publish_exe = b.addExecutable(.{
-        .name = "publish",
-        .target = b.graph.host,
-        .root_source_file = b.path("src/tools/publish_http_form.zig"),
-    });
-
-    // var publish_artifacts = b.addSystemCommand("curl")
-    var publish_artifacts = b.addRunArtifact(publish_exe);
-    publish_step.dependOn(&publish_artifacts.step);
-
-    publish_artifacts.addArgs(&.{
-        b.fmt("{}", .{uri}),
-        "--user",
-        b.fmt("admin:{s}", .{password}),
-    });
-    // It is possible for the version to be something like `0.12.0-dev` when `git describe` failed.
-    // Ideally we would want to report a failure about this when running one of the release/publish steps.
-    // The problem is during the configure phase, it is not possible to know which top level steps gets run.
-    // So instead we use rely on the release-worker to reject this version string during the make phase.
-    // One possible alternative would be to use a configuration option (i.e. -Dpublish) to conditionally run an assertion.
-    publish_artifacts.addArgs(&.{
-        "--form", b.fmt("zls-version={}", .{release_artifacts[0].version.?}),
-        "--form", "compatibility=full",
-        "--form", b.fmt("zig-version={s}", .{builtin.zig_version_string}),
-        "--form", b.fmt("minimum-build-zig-version={s}", .{minimum_build_zig_version}),
-        "--form", b.fmt("minimum-runtime-zig-version={s}", .{minimum_runtime_zig_version}),
-    });
 
     var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
 
@@ -524,6 +492,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
             });
 
             const compress_cmd = std.Build.Step.Run.create(b, "compress artifact");
+            compress_cmd.clearEnvironment();
             compress_cmd.step.max_rss = switch (extension) {
                 .zip => 160 * 1024 * 1024, // 160 MiB
                 .@"tar.xz" => 512 * 1024 * 1024, // 512 MiB
@@ -568,24 +537,77 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
 
         const install_tarball = b.addInstallFileWithDir(file_path, install_dir, file_name);
         release_step.dependOn(&install_tarball.step);
-        publish_artifacts.addArg("--form");
-        publish_artifacts.addPrefixedFileArg(b.fmt("{s}=@", .{file_name}), file_path);
 
         if (release_minisign) {
             const minisign_basename = b.fmt("{s}.minisig", .{file_name});
 
             const minising_cmd = b.addSystemCommand(&.{ "minisign", "-Sm" });
+            minising_cmd.clearEnvironment();
             minising_cmd.addFileArg(file_path);
             minising_cmd.addPrefixedFileArg("-s", .{ .cwd_relative = "minisign.key" });
             const minising_file_path = minising_cmd.addPrefixedOutputFileArg("-x", minisign_basename);
 
             const install_minising = b.addInstallFileWithDir(minising_file_path, install_dir, minisign_basename);
             release_step.dependOn(&install_minising.step);
-
-            publish_artifacts.addArg("--form");
-            publish_artifacts.addPrefixedFileArg(b.fmt("{s}=@", .{minisign_basename}), minising_file_path);
         }
     }
+
+    // Create JSON request data
+
+    const prepare_release = b.addRunArtifact(b.addExecutable(.{
+        .name = "prepare_release",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/prepare_release.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    }));
+
+    prepare_release.addArgs(&.{
+        "--zls-version",
+        b.fmt("{}", .{released_zls_version}),
+        "--zig-version",
+        b.fmt("{s}", .{builtin.zig_version_string}),
+        "--minimum-build-zig-version",
+        b.fmt("{s}", .{minimum_build_zig_version}),
+        "--minimum-runtime-zig-version",
+        b.fmt("{s}", .{minimum_runtime_zig_version}),
+        "--compatibility",
+        "full",
+    });
+
+    for (compressed_artifacts.values()) |path| {
+        prepare_release.addFileArg(path);
+    }
+
+    // Send Post request to `https://releases.zigtools.org/v1/zls/publish`
+
+    const uri: std.Uri = if (b.graph.env_map.get("ZLS_WORKER_ENDPOINT")) |endpoint| blk: {
+        var uri = std.Uri.parse(endpoint) catch std.debug.panic("invalid URI: '{s}'", .{endpoint});
+        if (!uri.path.isEmpty()) std.debug.panic("ZLS_WORKER_ENDPOINT URI must have no path component: '{s}'", .{endpoint});
+        uri.path = .{ .raw = "/v1/zls/publish" };
+        break :blk uri;
+    } else .{
+        .scheme = "https",
+        .host = .{ .raw = "releases.zigtools.org" },
+        .path = .{ .raw = "/v1/zls/publish" },
+    };
+
+    const password = b.graph.env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
+
+    var publish_artifacts = b.addSystemCommand(&.{"curl"});
+    publish_artifacts.has_side_effects = true;
+    publish_step.dependOn(&publish_artifacts.step);
+
+    publish_artifacts.addArgs(&.{
+        b.fmt("{}", .{uri}),
+        "--fail",
+        "--show-error",
+        "--user",
+        b.fmt("admin:{s}", .{password}),
+        "--json",
+    });
+    publish_artifacts.addPrefixedFileArg("@", prepare_release.captureStdOut());
 }
 
 const Build = blk: {
