@@ -5550,7 +5550,7 @@ pub fn lookupSymbolContainer(
     return null;
 }
 
-pub fn lookupSymbolFieldInit(
+pub fn lookupSymbolEnumLiteral(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     field_name: []const u8,
@@ -5645,7 +5645,7 @@ pub fn resolveEnumLiteralExprFromAncestors(
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
+                if (try analyser.lookupSymbolEnumLiteral(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
                     return try field_decl.resolveExpr(analyser);
                 }
             }
@@ -5786,7 +5786,7 @@ pub fn resolveEnumLiteralExprFromAncestors(
 
             const fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
-                const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
+                const decl = try analyser.lookupSymbolEnumLiteral(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
                 const ty = try decl.resolveExpr(analyser) orelse return null;
                 break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             } else blk: {
@@ -6020,7 +6020,7 @@ pub fn getSymbolEnumLiteral(
     const tree = handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
     if (nodes.len == 0) return null;
-    return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
+    return analyser.lookupSymbolEnumLiteral(handle, name, nodes[0], nodes[1..]);
 }
 
 /// Multiple when using branched types
