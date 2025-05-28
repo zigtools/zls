@@ -1787,6 +1787,10 @@ pub fn indexOfBreakTarget(
             const break_label = break_label_maybe orelse return index;
             const while_label = tree.tokenSlice(while_node.label_token orelse continue);
             if (std.mem.eql(u8, break_label, while_label)) return index;
+        } else if (tree.fullSwitch(node)) |switch_node| {
+            const break_label = break_label_maybe orelse continue;
+            const switch_label = tree.tokenSlice(switch_node.label_token orelse continue);
+            if (std.mem.eql(u8, break_label, switch_label)) return index;
         } else switch (tree.nodeTag(node)) {
             .block,
             .block_semicolon,

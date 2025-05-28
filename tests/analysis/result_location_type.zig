@@ -224,6 +224,13 @@ const break_while_1: StructType =
         //            ^^^^ (u32)()
     };
 
+const break_switch: StructType = blk: switch (some_tagged_union) {
+    .bar => |bar| break :blk .{ .foo = bar },
+    //                          ^^^^ (u32)()
+    .baz => |baz| .{ .foo = baz },
+    //               ^^^^ (u32)()
+};
+
 const break_block: StructType =
     blk: {
         break :blk .{ .foo = 1 };
