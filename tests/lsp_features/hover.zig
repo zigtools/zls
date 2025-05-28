@@ -1053,5 +1053,5 @@ fn testHoverWithOptions(
     const markup_context = response.contents.MarkupContent;
 
     try std.testing.expectEqual(options.markup_kind, markup_context.kind);
-    try std.testing.expectEqualStrings(expected, markup_context.value);
+    try zls.testing.expectEqualStrings(expected, markup_context.value);
 }
