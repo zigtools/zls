@@ -1711,7 +1711,7 @@ fn collectEnumLiteralContainerNodes(
     const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(builder, handle, el_dot_context);
     for (containers) |container| {
-        const container_instance = container.instanceTypeVal(analyser) orelse container;
+        const container_instance = try container.instanceTypeVal(analyser) orelse container;
         const member_decl = try container_instance.lookupSymbol(analyser, alleged_field_name) orelse continue;
         var member_type = try member_decl.resolveType(analyser) orelse continue;
         // Unwrap `x{ .fld_w_opt_type =`
