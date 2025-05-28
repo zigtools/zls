@@ -10,19 +10,21 @@ const Config = @import("Config.zig");
 
 const logger = std.log.scoped(.config);
 
-pub fn getLocalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
+fn getLocalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
     const folder_path = try known_folders.getPath(allocator, .local_configuration) orelse return null;
     defer allocator.free(folder_path);
     return try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
 }
 
-pub fn getGlobalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
+fn getGlobalConfigPath(allocator: std.mem.Allocator) known_folders.Error!?[]const u8 {
     const folder_path = try known_folders.getPath(allocator, .global_configuration) orelse return null;
     defer allocator.free(folder_path);
     return try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
 }
 
 pub fn load(allocator: std.mem.Allocator) error{OutOfMemory}!LoadConfigResult {
+    if (builtin.target.os.tag == .wasi) return .not_found;
+
     const local_config_path = getLocalConfigPath(allocator) catch |err| blk: {
         logger.warn("failed to resolve local configuration path: {}", .{err});
         break :blk null;

@@ -129,6 +129,8 @@ fn gotoDefinitionBuiltin(
     const name_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     if (std.mem.eql(u8, name, "@cImport")) {
+        if (!DocumentStore.supports_build_system) return null;
+
         const tree = handle.tree;
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = tree.nodeMainToken(cimport_node);
@@ -205,6 +207,8 @@ fn gotoDefinitionString(
         .cinclude_string_literal => try URI.fromPath(
             arena,
             blk: {
+                if (!DocumentStore.supports_build_system) return null;
+
                 if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
                 var include_dirs: std.ArrayListUnmanaged([]const u8) = .empty;
                 _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
