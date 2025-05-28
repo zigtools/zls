@@ -2570,6 +2570,35 @@ test "break - enum/decl literal" {
     });
 }
 
+test "break - structinit" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: S = while (true) {
+        \\    break .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\const foo: S = while (true) {
+        \\    break .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+}
+
 test "break with label - enum/decl literal" {
     try testCompletion(
         \\const E = enum {

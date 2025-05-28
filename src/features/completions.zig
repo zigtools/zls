@@ -666,7 +666,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     if (dot_token_index < 2) return;
 
     blk: {
-        const nodes = try ast.nodesOverlappingIndex(builder.arena, tree, loc.start);
+        const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
         const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
         const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
         const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
@@ -1177,6 +1177,14 @@ fn getSwitchOrStructInitContext(
                         if (upper_index < 3) return null;
                         upper_index -= 1;
                         if (tree.tokenTag(upper_index) == .ampersand) upper_index -= 1; // `&.{.`
+                        switch (tree.tokenTag(upper_index)) {
+                            .keyword_break => { // `break .{.`
+                                const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
+                                upper_index = tree.firstToken(nodes[i]);
+                                upper_index -= 1;
+                            },
+                            else => {},
+                        }
                         if (tree.tokenTag(upper_index) == .equal) { // `= .{.`
                             upper_index -= 1; // eat the `=`
                             switch (tree.tokenTag(upper_index)) {
