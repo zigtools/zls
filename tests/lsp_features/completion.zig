@@ -2619,6 +2619,35 @@ test "break with label - enum/decl literal" {
     });
 }
 
+test "break with label - structinit" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: S = blk: {
+        \\    break :blk .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\const foo: S = blk: {
+        \\    break :blk .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

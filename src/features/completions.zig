@@ -1183,6 +1183,14 @@ fn getSwitchOrStructInitContext(
                                 upper_index = tree.firstToken(nodes[i]);
                                 upper_index -= 1;
                             },
+                            .identifier => {
+                                if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_break, .colon })) { // `break :blk .{.`
+                                    const break_label = tree.tokenSlice(upper_index);
+                                    const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
+                                    upper_index = tree.firstToken(nodes[i]);
+                                    upper_index -= 1;
+                                }
+                            },
                             else => {},
                         }
                         if (tree.tokenTag(upper_index) == .equal) { // `= .{.`
