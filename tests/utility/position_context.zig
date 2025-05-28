@@ -459,6 +459,24 @@ test "enum literal after break label" {
     , .enum_literal, .{});
 }
 
+test "enum literal in 'then' expression of 'if' statement" {
+    try testContext(
+        \\var foo = if (bar) <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = if (bar) <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+}
+
+test "enum literal in 'else' expression of 'if' statement" {
+    try testContext(
+        \\var foo = if (bar) .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = if (bar) .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+}
+
 test "label access" {
     try testContext(
         \\var foo = blk: { break :<loc><cursor>blk</loc> null };

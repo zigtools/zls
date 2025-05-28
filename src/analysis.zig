@@ -4384,8 +4384,10 @@ pub const PositionContext = union(enum) {
 
 const StackState = struct {
     ctx: PositionContext,
-    stack_id: enum { paren, bracket, global },
+    stack_id: StackId,
 };
+
+const StackId = enum { paren, bracket, global };
 
 fn peek(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(StackState)) !*StackState {
     if (arr.items.len == 0) {
@@ -4567,7 +4569,14 @@ pub fn getPositionContext(
             },
             .l_paren => {
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
-                try stack.append(allocator, .{ .ctx = .empty, .stack_id = .paren });
+                const stack_id: StackId = switch (curr_ctx.ctx) {
+                    .keyword => |tag| switch (tag) {
+                        .keyword_if => .global,
+                        else => .paren,
+                    },
+                    else => .paren,
+                };
+                try stack.append(allocator, .{ .ctx = .empty, .stack_id = stack_id });
             },
             .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
             .r_paren => {
@@ -4597,6 +4606,7 @@ pub fn getPositionContext(
             .keyword_continue,
             .keyword_callconv,
             .keyword_addrspace,
+            .keyword_if,
             => curr_ctx.ctx = .{ .keyword = tok.tag },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
             else => curr_ctx.ctx = .empty,
