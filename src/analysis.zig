@@ -4548,9 +4548,13 @@ pub fn getPositionContext(
                 else => {},
             },
             .period, .period_asterisk => switch (curr_ctx.ctx) {
+                // TODO: only set context to enum literal if token tag is "." (not ".*")
                 .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                 .enum_literal => curr_ctx.ctx = .empty,
-                .keyword => curr_ctx.ctx = .other, // no keyword can be `.`/`.*` accessed
+                .keyword => |tag| switch (tag) {
+                    .keyword_break => curr_ctx.ctx = .{ .enum_literal = tok.loc },
+                    else => curr_ctx.ctx = .other,
+                },
                 .comment, .other, .field_access, .global_error_set => {},
                 else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc() orelse tok.loc, tok) },
             },
