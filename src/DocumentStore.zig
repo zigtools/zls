@@ -14,6 +14,7 @@ const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -23,6 +24,7 @@ config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
+trigram_stores: std.StringArrayHashMapUnmanaged(TrigramStore) = .empty,
 build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .empty,
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
@@ -634,6 +636,12 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.handles.deinit(self.allocator);
 
+    for (self.trigram_stores.keys(), self.trigram_stores.values()) |uri, *trigram_store| {
+        self.allocator.free(uri);
+        trigram_store.deinit(self.allocator);
+    }
+    self.trigram_stores.deinit(self.allocator);
+
     for (self.build_files.values()) |build_file| {
         build_file.deinit(self.allocator);
         self.allocator.destroy(build_file);
@@ -656,21 +664,12 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     return self.handles.get(uri);
 }
 
-/// Returns a handle to the given document
-/// Will load the document from disk if it hasn't been already
-/// **Thread safe** takes an exclusive lock
-/// This function does not protect against data races from modifying the Handle
-pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.getHandle(uri)) |handle| return handle;
-
-    const file_path = URI.parse(self.allocator, uri) catch |err| {
+pub fn readUri(store: *DocumentStore, uri: Uri) ?[:0]const u8 {
+    const file_path = URI.parse(store.allocator, uri) catch |err| {
         log.err("failed to parse URI '{s}': {}", .{ uri, err });
         return null;
     };
-    defer self.allocator.free(file_path);
+    defer store.allocator.free(file_path);
 
     if (!std.fs.path.isAbsolute(file_path)) {
         log.err("file path is not absolute '{s}'", .{file_path});
@@ -681,8 +680,8 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
             // look up whether the file path refers to a preopen directory.
             for ([_]?std.Build.Cache.Directory{
-                self.config.zig_lib_dir,
-                self.config.global_cache_dir,
+                store.config.zig_lib_dir,
+                store.config.global_cache_dir,
             }) |opt_preopen_dir| {
                 const preopen_dir = opt_preopen_dir orelse continue;
                 const preopen_path = preopen_dir.path.?;
@@ -697,8 +696,8 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         break :blk .{ std.fs.cwd(), file_path };
     };
 
-    const file_contents = dir.readFileAllocOptions(
-        self.allocator,
+    return dir.readFileAllocOptions(
+        store.allocator,
         sub_path,
         max_document_size,
         null,
@@ -708,11 +707,49 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         log.err("failed to read document '{s}': {}", .{ file_path, err });
         return null;
     };
+}
 
-    return self.createAndStoreDocument(uri, file_contents) catch |err| {
-        log.err("failed to store document '{s}': {}", .{ file_path, err });
+/// Returns a handle to the given document
+/// Will load the document from disk if it hasn't been already
+/// **Thread safe** takes an exclusive lock
+/// This function does not protect against data races from modifying the Handle
+pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (store.getHandle(uri)) |handle| return handle;
+
+    const file_contents = store.readUri(uri) orelse return null;
+
+    return store.createAndStoreDocument(uri, file_contents) catch |err| {
+        log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
+}
+
+pub fn trigramIndexUri(
+    store: *DocumentStore,
+    uri: Uri,
+    encoding: offsets.Encoding,
+) error{OutOfMemory}!void {
+    const gop = try store.trigram_stores.getOrPut(store.allocator, uri);
+
+    if (gop.found_existing) {
+        return;
+    }
+
+    errdefer {
+        store.allocator.free(gop.key_ptr.*);
+        store.trigram_stores.swapRemoveAt(gop.index);
+    }
+
+    gop.key_ptr.* = try store.allocator.dupe(u8, uri);
+    gop.value_ptr.* = .empty;
+
+    const file_contents = store.readUri(uri) orelse return;
+    defer store.allocator.free(file_contents);
+
+    try gop.value_ptr.fill(store.allocator, file_contents, encoding);
 }
 
 /// **Thread safe** takes a shared lock
