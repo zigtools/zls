@@ -96,6 +96,18 @@ test "for/while capture" {
     );
 }
 
+test "break/continue operands" {
+    try testReferences(
+        \\comptime {
+        \\    const <0> = 0;
+        \\    sw: switch (0) {
+        \\        0 => continue :sw <0>,
+        \\        else => break :sw <0>,
+        \\    }
+        \\}
+    );
+}
+
 test "enum field access" {
     try testReferences(
         \\const E = enum {

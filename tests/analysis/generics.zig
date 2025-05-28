@@ -226,3 +226,10 @@ const some_list_items = some_list.items;
 //    ^^^^^^^^^^^^^^^ ([]u8)()
 
 const std = @import("std");
+
+// TODO this should be `fn (T: type) T`
+fn Identity(comptime T: type) T {}
+// ^^^^^^^^ (fn (comptime type) T)()
+
+const identity_of_unknown_type = Identity(@as(type, undefined));
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ ((unknown type))()

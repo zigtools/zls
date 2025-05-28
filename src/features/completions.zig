@@ -722,6 +722,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
+        if (!DocumentStore.supports_build_system) return;
         _ = store.collectIncludeDirs(builder.arena, builder.orig_handle, &search_paths) catch |err| {
             log.err("failed to resolve include paths: {}", .{err});
             return;
@@ -782,31 +783,35 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     }
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
-        if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| blk: {
-            const build_file = store.getBuildFile(uri).?;
-            const build_config = build_file.tryLockConfig() orelse break :blk;
-            defer build_file.unlockConfig();
+        no_modules: {
+            if (!DocumentStore.supports_build_system) break :no_modules;
 
-            try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
-            for (build_config.packages) |pkg| {
-                completions.putAssumeCapacity(.{
-                    .label = pkg.name,
-                    .kind = .Module,
-                    .detail = pkg.path,
-                }, {});
-            }
-        } else if (DocumentStore.isBuildFile(builder.orig_handle.uri)) blk: {
-            const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :blk;
-            const build_config = build_file.tryLockConfig() orelse break :blk;
-            defer build_file.unlockConfig();
+            if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| {
+                const build_file = store.getBuildFile(uri).?;
+                const build_config = build_file.tryLockConfig() orelse break :no_modules;
+                defer build_file.unlockConfig();
 
-            try completions.ensureUnusedCapacity(builder.arena, build_config.deps_build_roots.len);
-            for (build_config.deps_build_roots) |dbr| {
-                completions.putAssumeCapacity(.{
-                    .label = dbr.name,
-                    .kind = .Module,
-                    .detail = dbr.path,
-                }, {});
+                try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
+                for (build_config.packages) |pkg| {
+                    completions.putAssumeCapacity(.{
+                        .label = pkg.name,
+                        .kind = .Module,
+                        .detail = pkg.path,
+                    }, {});
+                }
+            } else if (DocumentStore.isBuildFile(builder.orig_handle.uri)) {
+                const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :no_modules;
+                const build_config = build_file.tryLockConfig() orelse break :no_modules;
+                defer build_file.unlockConfig();
+
+                try completions.ensureUnusedCapacity(builder.arena, build_config.deps_build_roots.len);
+                for (build_config.deps_build_roots) |dbr| {
+                    completions.putAssumeCapacity(.{
+                        .label = dbr.name,
+                        .kind = .Module,
+                        .detail = dbr.path,
+                    }, {});
+                }
             }
         }
 
@@ -1621,7 +1626,7 @@ fn collectEnumLiteralContainerNodes(
     const el_dot_context = getSwitchOrStructInitContext(handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(builder, handle, el_dot_context);
     for (containers) |container| {
-        const container_instance = container.instanceTypeVal(analyser) orelse container;
+        const container_instance = try container.instanceTypeVal(analyser) orelse container;
         const member_decl = try container_instance.lookupSymbol(analyser, alleged_field_name) orelse continue;
         var member_type = try member_decl.resolveType(analyser) orelse continue;
         // Unwrap `x{ .fld_w_opt_type =`

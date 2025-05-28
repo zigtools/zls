@@ -4176,10 +4176,10 @@ fn testCompletionWithOptions(
 
             if (actual_doc != null and std.mem.eql(u8, expected_doc, actual_doc.?)) break :doc_blk;
 
-            try error_builder.msgAtIndex("completion item '{s}' should have doc '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should have doc '{'}' but was '{?'}'!", test_uri, cursor_idx, .err, .{
                 label,
-                expected_doc,
-                actual_doc,
+                std.zig.fmtEscapes(expected_doc),
+                if (actual_doc) |str| std.zig.fmtEscapes(str) else null,
             });
             return error.InvalidCompletionDoc;
         }

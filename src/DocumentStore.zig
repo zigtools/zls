@@ -23,8 +23,8 @@ config: Config,
 lock: std.Thread.RwLock = .{},
 thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
-build_files: std.StringArrayHashMapUnmanaged(*BuildFile) = .empty,
-cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .empty,
+build_files: if (supports_build_system) std.StringArrayHashMapUnmanaged(*BuildFile) else void = if (supports_build_system) .empty else {},
+cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?lsp.AnyTransport = null,
@@ -40,6 +40,8 @@ pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
 pub const Hash = [Hasher.mac_length]u8;
 
 pub const max_document_size = std.math.maxInt(u32);
+
+pub const supports_build_system = std.process.can_spawn;
 
 pub fn computeHash(bytes: []const u8) Hash {
     var hasher: Hasher = .init(&@splat(0));
@@ -316,6 +318,7 @@ pub const Handle = struct {
     /// `DocumentStore.build_files` is guaranteed to contain this Uri.
     /// Uri memory managed by its build_file
     pub fn getAssociatedBuildFileUri(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!?Uri {
+        comptime std.debug.assert(supports_build_system);
         switch (try self.getAssociatedBuildFileUri2(document_store)) {
             .none,
             .unresolved,
@@ -336,6 +339,8 @@ pub const Handle = struct {
         /// The associated build file (build.zig) has been successfully resolved.
         resolved: *BuildFile,
     } {
+        comptime std.debug.assert(supports_build_system);
+
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
 
@@ -634,16 +639,19 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.handles.deinit(self.allocator);
 
-    for (self.build_files.values()) |build_file| {
-        build_file.deinit(self.allocator);
-        self.allocator.destroy(build_file);
-    }
-    self.build_files.deinit(self.allocator);
+    if (supports_build_system) {
+        for (self.build_files.values()) |build_file| {
+            build_file.deinit(self.allocator);
+            self.allocator.destroy(build_file);
+        }
+        self.build_files.deinit(self.allocator);
 
-    for (self.cimports.values()) |*result| {
-        result.deinit(self.allocator);
+        for (self.cimports.values()) |*result| {
+            result.deinit(self.allocator);
+        }
+        self.cimports.deinit(self.allocator);
     }
-    self.cimports.deinit(self.allocator);
+
     self.* = undefined;
 }
 
@@ -718,6 +726,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 /// **Thread safe** takes a shared lock
 /// This function does not protect against data races from modifying the BuildFile
 pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
+    comptime std.debug.assert(supports_build_system);
     self.lock.lockShared();
     defer self.lock.unlockShared();
     return self.build_files.get(uri);
@@ -727,6 +736,8 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 /// **Thread safe** takes an exclusive lock
 /// This function does not protect against data races from modifying the BuildFile
 fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
+    comptime std.debug.assert(supports_build_system);
+
     if (self.getBuildFile(uri)) |build_file| return build_file;
 
     const new_build_file: *BuildFile = blk: {
@@ -754,9 +765,7 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 
     // this code path is only reached when the build file is new
 
-    if (std.process.can_spawn) {
-        self.invalidateBuildFile(new_build_file.uri);
-    }
+    self.invalidateBuildFile(new_build_file.uri);
 
     return new_build_file;
 }
@@ -817,8 +826,10 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     defer self.lock.unlock();
 
     self.garbageCollectionImports() catch {};
-    self.garbageCollectionCImports() catch {};
-    self.garbageCollectionBuildFiles() catch {};
+    if (supports_build_system) {
+        self.garbageCollectionCImports() catch {};
+        self.garbageCollectionBuildFiles() catch {};
+    }
 }
 
 /// Takes ownership of `new_text` which has to be allocated with this DocumentStore's allocator.
@@ -864,7 +875,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
 /// Invalidates a build files.
 /// **Thread safe** takes a shared lock
 pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
-    comptime std.debug.assert(std.process.can_spawn);
+    comptime std.debug.assert(supports_build_system);
 
     if (self.config.zig_exe_path == null) return;
     if (self.config.build_runner_path == null) return;
@@ -1464,7 +1475,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
 
     _ = handle.setOpen(open);
 
-    if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
+    if (!supports_build_system) {
+        // nothing to do
+    } else if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         _ = self.getOrLoadBuildFile(handle.uri);
     } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         const potential_build_files = self.collectPotentialBuildFiles(uri) catch {
@@ -1614,6 +1627,8 @@ fn collectDependenciesInternal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (!supports_build_system) return;
+
     {
         if (lock) store.lock.lockShared();
         defer if (lock) store.lock.unlockShared();
@@ -1656,6 +1671,8 @@ pub fn collectIncludeDirs(
     handle: *Handle,
     include_dirs: *std.ArrayListUnmanaged([]const u8),
 ) !bool {
+    comptime std.debug.assert(supports_build_system);
+
     var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
     defer arena_allocator.deinit();
 
@@ -1695,6 +1712,8 @@ pub fn collectCMacros(
     handle: *Handle,
     c_macros: *std.ArrayListUnmanaged([]const u8),
 ) !bool {
+    comptime std.debug.assert(supports_build_system);
+
     const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
         .none => true,
         .unresolved => false,
@@ -1719,10 +1738,11 @@ pub fn collectCMacros(
 /// returned memory is owned by DocumentStore
 /// **Thread safe** takes an exclusive lock
 pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
+    comptime std.debug.assert(supports_build_system);
+
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!std.process.can_spawn) return null;
     if (self.config.zig_exe_path == null) return null;
     if (self.config.zig_lib_dir == null) return null;
     if (self.config.global_cache_dir == null) return null;
@@ -1891,10 +1911,12 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
 
         return try URI.fromPath(allocator, std_path);
     } else if (std.mem.eql(u8, import_str, "builtin")) {
-        if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| {
-            const build_file = self.getBuildFile(build_file_uri).?;
-            if (build_file.builtin_uri) |builtin_uri| {
-                return try allocator.dupe(u8, builtin_uri);
+        if (supports_build_system) {
+            if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| {
+                const build_file = self.getBuildFile(build_file_uri).?;
+                if (build_file.builtin_uri) |builtin_uri| {
+                    return try allocator.dupe(u8, builtin_uri);
+                }
             }
         }
         if (self.config.builtin_path) |builtin_path| {
@@ -1902,6 +1924,8 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
+        if (!supports_build_system) return null;
+
         if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| blk: {
             const build_file = self.getBuildFile(build_file_uri).?;
             const build_config = build_file.tryLockConfig() orelse break :blk;

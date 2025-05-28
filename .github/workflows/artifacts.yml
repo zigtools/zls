@@ -1,9 +1,8 @@
 name: Deploy release artifacts
 
 on:
-  push:
-    branches:
-      - master
+  schedule:
+    - cron: "0 0 * * *"
   workflow_dispatch:
   # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/v1/zls/publish`.
 
@@ -16,26 +15,61 @@ jobs:
         with:
           fetch-depth: 0 # required to resolve the version string
 
+      - name: Skip if no new commits
+        run: |
+          LAST_SUCCESS_COMMIT=$(curl -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/zigtools/zls/actions/workflows/artifacts.yml/runs?branch=master&status=success&per_page=1" | jq --raw-output ".workflow_runs[0].head_sha")
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+
+          echo "Latest commit with successfull CI: $LAST_SUCCESS_COMMIT"
+          echo "Current commit: $CURRENT_COMMIT"
+
+          if [ $LAST_SUCCESS_COMMIT = $CURRENT_COMMIT ]; then
+            echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
+            echo "skipped=yes" >> $GITHUB_OUTPUT
+            echo "Commits are equal, skipping."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: mlugg/setup-zig@v2
+        if: env.SKIP_DEPLOY != 'true'
         with:
           version: master
 
       - name: Install APT packages
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install tar 7zip
+          sudo apt-get install tar 7zip s3cmd
 
       - name: Install minisign
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           wget https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz
           tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
-      - name: Build and Publish artifacts
+      - name: Build release artifacts
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           echo "${MINISIGN_SECRET_FILE}" > minisign.key
-          zig build publish -Drelease-minisign -Doptimize=ReleaseSafe --summary all
+          zig build release -Drelease-minisign -Doptimize=ReleaseSafe --summary all
           rm -f minisign.key
         env:
-          ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
           MINISIGN_SECRET_FILE: ${{ secrets.MINISIGN_SECRET_FILE }}
+
+      - name: Upload release artifacts
+        if: env.SKIP_DEPLOY != 'true'
+        run: |
+          s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Publish release
+        if: env.SKIP_DEPLOY != 'true'
+        run: zig run .github/workflows/publish_release.zig
+        env:
+          ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
