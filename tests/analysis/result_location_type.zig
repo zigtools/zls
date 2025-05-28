@@ -197,6 +197,17 @@ fn return_2() Error!?StructType {
 }
 
 //
+// continue
+//
+
+const continue_switch: StructType = blk: switch (some_tagged_union) {
+    .bar => |bar| continue :blk .{ .baz = @truncate(bar) },
+    //                             ^^^^ (u8)()
+    .baz => |baz| .{ .foo = baz },
+    //               ^^^^ (u32)()
+};
+
+//
 // break
 //
 

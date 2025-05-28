@@ -5760,6 +5760,29 @@ pub fn resolveExpressionTypeFromAncestors(
             }
         },
 
+        .@"continue" => {
+            const opt_target, const opt_continue_expr = tree.nodeData(ancestors[0]).opt_token_and_opt_node;
+            const target = opt_target.unwrap() orelse return null;
+            const continue_expr = opt_continue_expr.unwrap() orelse return null;
+            if (node != continue_expr) return null;
+
+            const continue_label = tree.tokenSlice(target);
+
+            const ancestor_switch = for (ancestors[1..]) |ancestor| {
+                if (tree.fullSwitch(ancestor)) |switch_node| {
+                    const switch_label_token = switch_node.label_token orelse continue;
+                    const switch_label = tree.tokenSlice(switch_label_token);
+                    if (std.mem.eql(u8, continue_label, switch_label)) {
+                        break switch_node;
+                    }
+                }
+            } else {
+                return null;
+            };
+
+            return try analyser.resolveTypeOfNode(.of(ancestor_switch.ast.condition, handle));
+        },
+
         .@"break" => {
             const opt_target, const opt_break_expr = tree.nodeData(ancestors[0]).opt_token_and_opt_node;
             const break_expr = opt_break_expr.unwrap() orelse return null;
