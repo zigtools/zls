@@ -788,19 +788,12 @@ fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, sig
     defer parameters.deinit(allocator);
 
     var argument_start: usize = 0;
-    var type_start: ?usize = null;
     var index: usize = 0;
+    var type_start: ?usize = null;
     while (std.mem.indexOfAnyPos(u8, signature, index, ",():")) |token_index| {
         if (signature[token_index] == '(') {
             index = token_index + 1;
-            var paren_depth: usize = 1;
-            while (paren_depth > 0) : (index += 1) {
-                switch (signature[index]) {
-                    '(' => paren_depth += 1,
-                    ')' => paren_depth -= 1,
-                    else => {},
-                }
-            }
+            skipUntilClosingParenthesis(signature, &index);
             continue;
         }
         if (signature[token_index] == ':') {
@@ -842,8 +835,8 @@ fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const 
     var i: u32 = 1;
     while (std.mem.indexOfAnyPos(u8, signature, index, ",()")) |token_index| {
         if (signature[token_index] == '(') {
-            argument_start = index;
-            index = 1 + std.mem.indexOfScalarPos(u8, signature, token_index + 1, ')').?;
+            index = token_index + 1;
+            skipUntilClosingParenthesis(signature, &index);
             continue;
         }
         const argument = std.mem.trim(u8, signature[argument_start..token_index], &std.ascii.whitespace);
@@ -851,14 +844,25 @@ fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const 
             if (i != 1) try writer.writeAll(", ");
             try writer.print("${{{d}:{s}}}", .{ i, argument });
         }
-        if (signature[token_index] == ')') break;
         argument_start = token_index + 1;
         index = token_index + 1;
         i += 1;
+        if (signature[token_index] == ')') break;
     }
     try writer.writeByte(')');
 
     return snippet.toOwnedSlice(allocator);
+}
+
+fn skipUntilClosingParenthesis(signature: []const u8, index: *usize) void {
+    var paren_depth: usize = 1;
+    while (paren_depth > 0) : (index.* += 1) {
+        switch (signature[index.*]) {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            else => {},
+        }
+    }
 }
 
 fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
