@@ -36,6 +36,7 @@ const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const BuildOnSave = diagnostics_gen.BuildOnSave;
 const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
@@ -584,7 +585,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -1578,6 +1579,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
         return error.InternalError;
     }
 
+    try server.document_store.trigramIndexUri(notification.textDocument.uri, server.offset_encoding);
     try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1959,6 +1961,111 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!lsp.ResultType("workspace/symbol") {
+    if (request.query.len < 3) return null;
+
+    // for (server.client_capabilities.workspace_folders) |workspace_folder| {
+    //     const path = URI.parse(arena, workspace_folder) catch return error.InternalError;
+    //     var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return error.InternalError;
+    //     defer dir.close();
+
+    //     var walker = try dir.walk(arena);
+    //     defer walker.deinit();
+
+    //     while (walker.next() catch return error.InternalError) |entry| {
+    //         if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
+    //             const uri = URI.pathRelative(arena, workspace_folder, entry.path) catch return error.InternalError;
+    //             _ = try server.document_store.getOrConstructTrigramStore(uri);
+    //         }
+    //     }
+    // }
+
+    var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
+    var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
+
+    for (
+        server.document_store.trigram_stores.keys(),
+        server.document_store.trigram_stores.values(),
+    ) |uri, trigram_store| {
+        try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
+
+        const slice = trigram_store.declarations.slice();
+        const names = slice.items(.name);
+        const ranges = slice.items(.range);
+
+        for (declaration_buffer.items) |declaration| {
+            const name = names[@intFromEnum(declaration)];
+            const range = ranges[@intFromEnum(declaration)];
+            try symbols.append(arena, .{
+                .name = trigram_store.names.items[name.start..name.end],
+                .kind = .Variable,
+                .location = .{
+                    .Location = .{
+                        .uri = uri,
+                        .range = range,
+                    },
+                },
+            });
+        }
+    }
+
+    // var symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
+    // var candidate_decls_buffer = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
+
+    // doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
+    //     const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
+
+    //     const tree = handle.tree;
+    //     const doc_scope = try handle.getDocumentScope();
+
+    //     for (trigrams.items) |trigram| {
+    //         if (!trigram_store.filter.contain(@bitCast(trigram))) continue :doc_loop;
+    //     }
+
+    //     candidate_decls_buffer.clearRetainingCapacity();
+
+    //     const first = trigram_store.getDeclarationsForTrigram(trigrams.items[0]) orelse continue;
+
+    //     try candidate_decls_buffer.resize(arena, first.len * 2);
+
+    //     var len = first.len;
+
+    //     @memcpy(candidate_decls_buffer.items[0..len], first);
+    //     @memcpy(candidate_decls_buffer.items[len..], first);
+
+    //     for (trigrams.items[1..]) |trigram| {
+    //         len = workspace_symbols.mergeIntersection(
+    //             trigram_store.getDeclarationsForTrigram(trigram) orelse continue :doc_loop,
+    //             candidate_decls_buffer.items[len..],
+    //             candidate_decls_buffer.items[0..len],
+    //         );
+    //         candidate_decls_buffer.items.len = len * 2;
+    //         @memcpy(candidate_decls_buffer.items[len..], candidate_decls_buffer.items[0..len]);
+    //     }
+
+    //     candidate_decls_buffer.items.len = len;
+
+    //     for (candidate_decls_buffer.items) |decl_idx| {
+    //         const decl = doc_scope.declarations.get(@intFromEnum(decl_idx));
+    //         const name_token = decl.nameToken(tree);
+
+    //         // TODO: integrate with document_symbol.zig for right kind info
+    //         try symbols.append(arena, .{
+    //             .name = tree.tokenSlice(name_token),
+    //             .kind = .Variable,
+    //             .location = .{
+    //                 .Location = .{
+    //                     .uri = handle.uri,
+    //                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
+    //                 },
+    //             },
+    //         });
+    //     }
+    // }
+
+    return .{ .array_of_WorkspaceSymbol = symbols.items };
+}
+
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1982,6 +2089,7 @@ const HandledRequestParams = union(enum) {
     @"textDocument/codeAction": types.CodeActionParams,
     @"textDocument/foldingRange": types.FoldingRangeParams,
     @"textDocument/selectionRange": types.SelectionRangeParams,
+    @"workspace/symbol": types.WorkspaceSymbolParams,
     other: lsp.MethodWithParams,
 };
 
@@ -2026,6 +2134,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
             .other => return false,
         },
@@ -2200,6 +2309,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
         .other => return null,
     };
 }
