@@ -84,7 +84,6 @@ pub fn build(b: *Build) !void {
         test_options.step.name = "ZLS test options";
 
         test_options.addOptionPath("zig_exe_path", .{ .cwd_relative = b.graph.zig_exe });
-        // TODO these paths may be relative
         test_options.addOptionPath("zig_lib_path", .{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
         test_options.addOptionPath("global_cache_path", .{ .cwd_relative = b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM") });
 
