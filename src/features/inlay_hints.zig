@@ -282,26 +282,28 @@ fn writeCallHint(
     }
 }
 
-/// takes parameter nodes from the ast and function parameter names from `Builtin.arguments` and writes parameter hints into `builder.hints`
-fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, arguments: []const []const u8) !void {
+/// takes parameter nodes from the ast and function parameter names from `Builtin.parameters` and writes parameter hints into `builder.hints`
+fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, params: []const data.Builtin.Parameter) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = builder.handle;
     const tree = handle.tree;
 
-    const len = @min(arguments.len, parameters.len);
-    for (arguments[0..len], parameters[0..len]) |arg, parameter| {
-        if (arg.len == 0) continue;
+    const len = @min(params.len, parameters.len);
+    for (params[0..len], parameters[0..len]) |param, parameter| {
+        const signature = param.signature;
+        if (signature.len == 0) continue;
 
-        const colonIndex = std.mem.indexOfScalar(u8, arg, ':');
-        const type_expr: []const u8 = if (colonIndex) |index| arg[index + 1 ..] else &.{};
+        const colonIndex = std.mem.indexOfScalar(u8, signature, ':');
+        const type_expr = param.type orelse "";
 
+        // TODO: parse noalias/comptime/label in config_gen.zig
         var maybe_label: ?[]const u8 = null;
         var no_alias = false;
         var comp_time = false;
 
-        var it = std.mem.splitScalar(u8, arg[0 .. colonIndex orelse arg.len], ' ');
+        var it = std.mem.splitScalar(u8, signature[0 .. colonIndex orelse signature.len], ' ');
         while (it.next()) |item| {
             if (item.len == 0) continue;
             maybe_label = item;
@@ -518,7 +520,7 @@ fn writeNodeInlayHint(
             if (params.len == 0) return;
 
             if (data.builtins.get(name)) |builtin| {
-                try writeBuiltinHint(builder, params, builtin.arguments);
+                try writeBuiltinHint(builder, params, builtin.parameters);
             }
         },
         .struct_init_one,
