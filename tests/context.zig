@@ -7,17 +7,13 @@ const Config = zls.Config;
 const Server = zls.Server;
 const types = zls.types;
 
+const allocator = std.testing.allocator;
+
 const default_config: Config = .{
     .semantic_tokens = .full,
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,
-
-    .zig_exe_path = if (builtin.target.os.tag != .wasi) test_options.zig_exe_path else null,
-    .zig_lib_path = if (builtin.target.os.tag != .wasi) test_options.zig_lib_path else null,
-    .global_cache_path = if (builtin.target.os.tag != .wasi) test_options.global_cache_path else null,
 };
-
-const allocator = std.testing.allocator;
 
 pub const Context = struct {
     server: *Server,
@@ -33,7 +29,21 @@ pub const Context = struct {
         errdefer server.destroy();
 
         if (cached_config == null and cached_resolved_config == null) {
-            try server.updateConfiguration2(default_config, .{ .leaky_config_arena = true });
+            var config = default_config;
+            defer if (builtin.target.os.tag != .wasi) {
+                if (config.zig_exe_path) |zig_exe_path| allocator.free(zig_exe_path);
+                if (config.zig_lib_path) |zig_lib_path| allocator.free(zig_lib_path);
+                if (config.global_cache_path) |global_cache_path| allocator.free(global_cache_path);
+            };
+            if (builtin.target.os.tag != .wasi) {
+                const cwd = try std.process.getCwdAlloc(allocator);
+                defer allocator.free(cwd);
+                config.zig_exe_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
+                config.zig_lib_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_lib_path });
+                config.global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
+            }
+
+            try server.updateConfiguration2(config, .{ .leaky_config_arena = true });
         } else {
             // the configuration has previously been resolved and cached.
             server.config_arena = config_arena;
