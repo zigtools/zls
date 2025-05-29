@@ -135,6 +135,9 @@ const type_null: @Type(.null) = null;
 const type_enum_literal: @Type(.enum_literal) = .foo;
 //    ^^^^^^^^^^^^^^^^^ (@Type(.enum_literal))()
 
+const type_info = @typeInfo(u8);
+//    ^^^^^^^^^ (Type)()
+
 comptime {
     // Use @compileLog to verify the expected type with the compiler
     // @compileLog(vector_builtin_13);
@@ -170,4 +173,8 @@ fn builtin_calls() void {
     //            ^^^^^^^ (FloatMode)()
     @Type(.type);
     //    ^^^^^ (void)()
+
+    const src = @src();
+    //    ^^^ (SourceLocation)()
+    _ = src;
 }

@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// compiler: Allow configuring UBSan mode at the module level.
+/// std.Build: resolved generated paths are cwd-relative
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.393+5668c8b7b";
+const minimum_build_zig_version = "0.15.0-dev.631+9a3540d61";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.14.0
@@ -84,7 +84,6 @@ pub fn build(b: *Build) !void {
         test_options.step.name = "ZLS test options";
 
         test_options.addOptionPath("zig_exe_path", .{ .cwd_relative = b.graph.zig_exe });
-        // TODO these paths may be relative
         test_options.addOptionPath("zig_lib_path", .{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
         test_options.addOptionPath("global_cache_path", .{ .cwd_relative = b.cache_root.join(b.allocator, &.{"zls"}) catch @panic("OOM") });
 

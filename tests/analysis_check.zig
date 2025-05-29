@@ -64,15 +64,24 @@ pub fn main() Error!void {
                 std.log.err("expected argument after '--zig-lib-path'.", .{});
                 std.process.exit(1);
             };
-            var zig_lib_dir = std.fs.cwd().openDir(zig_lib_path, .{}) catch |err| {
-                std.log.err("failed to open zig library directory '{s}: {}'", .{ zig_lib_path, err });
+            const cwd = std.process.getCwdAlloc(arena) catch |err| {
+                std.log.err("failed to get current working directory: {}", .{err});
+                std.process.exit(1);
+            };
+            const resolved_zig_lib_path = std.fs.path.resolve(arena, &.{ cwd, zig_lib_path }) catch |err| {
+                std.log.err("failed to resolve zig library directory '{s}/{s}': {}", .{ cwd, zig_lib_path, err });
+                std.process.exit(1);
+            };
+
+            var zig_lib_dir = std.fs.cwd().openDir(resolved_zig_lib_path, .{}) catch |err| {
+                std.log.err("failed to open zig library directory '{s}: {}'", .{ resolved_zig_lib_path, err });
                 std.process.exit(1);
             };
             errdefer zig_lib_dir.close();
 
             config.zig_lib_dir = .{
                 .handle = zig_lib_dir,
-                .path = try arena.dupe(u8, zig_lib_path),
+                .path = try arena.dupe(u8, resolved_zig_lib_path),
             };
         } else {
             std.log.err("Unrecognized argument '{s}'.", .{arg});
