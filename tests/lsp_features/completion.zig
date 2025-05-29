@@ -2986,7 +2986,7 @@ test "builtin fns taking an enum arg" {
     });
     try testCompletion(
         \\test {
-        \\    @Type(.{.Struct = .{.<cursor>
+        \\    @Type(.{.@"struct" = .{.<cursor>
         \\}
     , &.{
         .{ .label = "layout", .kind = .Field, .detail = "ContainerLayout" },
