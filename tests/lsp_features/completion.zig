@@ -1234,7 +1234,6 @@ test "namespace" {
         \\const instance: namespace = undefined;
         \\const bar = instance.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
         .{ .label = "gamma", .kind = .Function, .detail = "fn (_: namespace) void" },
     });
@@ -1246,7 +1245,6 @@ test "namespace" {
         \\const foo: @This() = undefined;
         \\const bar = foo.<cursor>;
     , &.{
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
         .{ .label = "gamma", .kind = .Function, .detail = "fn (_: test-0) void" },
     });
@@ -2591,14 +2589,14 @@ test "declarations" {
 
     try testCompletion(
         \\const S = struct {
-        \\    pub fn public() S {}
-        \\    fn private() !void {}
+        \\    pub fn public(self: S) S {}
+        \\    fn private(self: S) !void {}
         \\};
         \\const foo: S = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        .{ .label = "public", .kind = .Function, .detail = "fn () S" },
-        .{ .label = "private", .kind = .Function, .detail = "fn () !void" },
+        .{ .label = "public", .kind = .Function, .detail = "fn (self: S) S" },
+        .{ .label = "private", .kind = .Function, .detail = "fn (self: S) !void" },
     });
 }
 
@@ -2782,12 +2780,12 @@ test "usingnamespace - comptime" {
 test "anytype resolution based on callsite-references" {
     try testCompletion(
         \\const Writer1 = struct {
-        \\    fn write1() void {}
-        \\    fn writeAll1() void {}
+        \\    fn write1(self: Writer1) void {}
+        \\    fn writeAll1(self: Writer1) void {}
         \\};
         \\const Writer2 = struct {
-        \\    fn write2() void {}
-        \\    fn writeAll2() void {}
+        \\    fn write2(self: Writer2) void {}
+        \\    fn writeAll2(self: Writer2) void {}
         \\};
         \\fn caller(a: Writer1, b: Writer2) void {
         \\    callee(a);
@@ -2797,19 +2795,19 @@ test "anytype resolution based on callsite-references" {
         \\    writer.<cursor>
         \\}
     , &.{
-        .{ .label = "write1", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "write2", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "writeAll1", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "writeAll2", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "write1", .kind = .Function, .detail = "fn (self: Writer1) void" },
+        .{ .label = "write2", .kind = .Function, .detail = "fn (self: Writer2) void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn (self: Writer1) void" },
+        .{ .label = "writeAll2", .kind = .Function, .detail = "fn (self: Writer2) void" },
     });
     try testCompletion(
         \\const Writer1 = struct {
-        \\    fn write1() void {}
-        \\    fn writeAll1() void {}
+        \\    fn write1(self: Writer1) void {}
+        \\    fn writeAll1(self: Writer1) void {}
         \\};
         \\const Writer2 = struct {
-        \\    fn write2() void {}
-        \\    fn writeAll2() void {}
+        \\    fn write2(self: Writer2) void {}
+        \\    fn writeAll2(self: Writer2) void {}
         \\};
         \\fn caller(a: Writer1, b: Writer2) void {
         \\    callee(a);
@@ -2819,8 +2817,8 @@ test "anytype resolution based on callsite-references" {
         \\    writer.<cursor>
         \\}
     , &.{
-        .{ .label = "write1", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "writeAll1", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "write1", .kind = .Function, .detail = "fn (self: Writer1) void" },
+        .{ .label = "writeAll1", .kind = .Function, .detail = "fn (self: Writer1) void" },
     });
 }
 
@@ -3143,7 +3141,7 @@ test "label" {
 test "either" {
     try testCompletion(
         \\const Alpha = struct {
-        \\    fn alpha() void {}
+        \\    fn alpha(_: @This()) void {}
         \\};
         \\const Beta = struct {
         \\    field: u32,
@@ -3153,12 +3151,12 @@ test "either" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "alpha", .kind = .Function, .detail = "fn (_: Alpha) void" },
         .{ .label = "beta", .kind = .Method, .detail = "fn (_: Beta) void" },
     });
     try testCompletion(
         \\const Alpha = struct {
-        \\    fn alpha() void {}
+        \\    fn alpha(_: @This()) void {}
         \\};
         \\const Beta = struct {
         \\    field: u32,
@@ -3170,13 +3168,13 @@ test "either" {
         \\const foo = gamma.<cursor>
     , &.{
         .{ .label = "field", .kind = .Field, .detail = "u32" },
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "alpha", .kind = .Function, .detail = "fn (_: Alpha) void" },
         .{ .label = "beta", .kind = .Method, .detail = "fn (_: Beta) void" },
     });
 
     try testCompletion(
         \\const Alpha = struct {
-        \\    fn alpha() void {}
+        \\    fn alpha(_: @This()) void {}
         \\};
         \\const Beta = struct {
         \\    fn beta(_: @This()) void {}
@@ -3184,7 +3182,7 @@ test "either" {
         \\const T = if (undefined) Alpha else Beta;
         \\const bar = T.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
+        .{ .label = "alpha", .kind = .Function, .detail = "fn (_: Alpha) void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: Beta) void" },
     });
 }

@@ -5117,6 +5117,11 @@ pub fn collectDeclarationsOfContainer(
                         if (!instance_access) continue;
                     }
                 },
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
                 .global_var_decl,
                 .local_var_decl,
                 .simple_var_decl,
@@ -5125,7 +5130,7 @@ pub fn collectDeclarationsOfContainer(
                     if (instance_access) {
                         // allow declarations which evaluate to functions where
                         // the first parameter has the type of the container:
-                        const alias_type = try analyser.resolveTypeOfNode(.of(node, handle)) orelse continue;
+                        const alias_type = try decl_with_handle.resolveType(analyser) orelse continue;
                         const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
                         if (!firstParamIs(func_ty, .{
