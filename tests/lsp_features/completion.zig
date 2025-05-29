@@ -1496,7 +1496,7 @@ test "enum" {
         \\    sef2,
         \\};
         \\const S = struct {
-        \\    pub fn retEnum() SomeEnum {}
+        \\    pub fn retEnum(self: S) SomeEnum {}
         \\};
         \\test {
         \\    const s = S{};
@@ -1887,7 +1887,7 @@ test "switch cases" {
         \\    sef2,
         \\};
         \\const S = struct {
-        \\    pub fn retEnum() SomeEnum {}
+        \\    pub fn retEnum(self: S) SomeEnum {}
         \\};
         \\test {
         \\    const s = S{};

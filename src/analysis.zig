@@ -763,11 +763,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
             const name_token = ast.identifierTokenFromIdentifierNode(tree, node_handle.node) orelse break :blk null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             if (options.container_type) |ty| {
-                break :blk try analyser.lookupSymbolContainer(
-                    ty,
-                    name,
-                    .other,
-                );
+                break :blk try ty.lookupSymbol(analyser, name);
             }
             break :blk try analyser.lookupSymbolGlobal(
                 handle,
@@ -786,11 +782,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
 
             const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name);
 
-            break :blk try analyser.lookupSymbolContainer(
-                resolved,
-                symbol_name,
-                .other,
-            );
+            break :blk try resolved.lookupSymbol(analyser, symbol_name);
         },
         .global_var_decl,
         .local_var_decl,
@@ -2163,10 +2155,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 if (params.len < 2) return null;
 
                 const container_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                const instance = try container_type.instanceTypeVal(analyser) orelse return null;
 
                 const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
 
-                const field = try analyser.lookupSymbolContainer(container_type, field_name, .field) orelse return null;
+                const field = try instance.lookupSymbol(analyser, field_name) orelse return null;
                 const result = try field.resolveType(analyser) orelse return null;
                 return result.typeOf(analyser);
             }
@@ -3718,17 +3711,25 @@ pub const Type = struct {
             else => {},
         }
         if (self.is_type_val) {
-            if (try analyser.lookupSymbolContainer(self, symbol, .other)) |decl|
-                return decl;
-            if (self.isEnumType() or self.isTaggedUnion())
-                return analyser.lookupSymbolContainer(self, symbol, .field);
-            return null;
+            if (self.isEnumType() or self.isTaggedUnion()) {
+                if (try analyser.lookupSymbolContainer(self, symbol, .field)) |decl| {
+                    return decl;
+                }
+            }
+            return try analyser.lookupSymbolContainer(self, symbol, .other);
+        } else {
+            if (try analyser.lookupSymbolContainer(self, symbol, .other)) |decl| {
+                const ty = try decl.resolveType(analyser) orelse return null;
+                const func_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+                if (firstParamIs(func_type, self.typeOf(analyser))) {
+                    return decl;
+                }
+            }
+            if (self.isEnumType()) {
+                return null;
+            }
+            return try analyser.lookupSymbolContainer(self, symbol, .field);
         }
-        if (self.isEnumType())
-            return analyser.lookupSymbolContainer(self, symbol, .other);
-        if (try analyser.lookupSymbolContainer(self, symbol, .field)) |decl|
-            return decl;
-        return analyser.lookupSymbolContainer(self, symbol, .other);
     }
 
     const Formatter = std.fmt.Formatter(format);
@@ -5509,18 +5510,18 @@ pub fn lookupSymbolFieldInit(
     }
 
     if (is_struct_init) {
-        return try analyser.lookupSymbolContainer(container_type, field_name, .field);
+        return try container_type.lookupSymbol(analyser, field_name);
     }
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct => {},
-        .keyword_enum => if (try analyser.lookupSymbolContainer(container_type.typeOf(analyser), field_name, .field)) |ty| return ty,
-        .keyword_union => if (try analyser.lookupSymbolContainer(container_type, field_name, .field)) |ty| return ty,
+        .keyword_enum => if (try container_type.typeOf(analyser).lookupSymbol(analyser, field_name)) |ty| return ty,
+        .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |ty| return ty,
         else => return null,
     }
 
     // Assume we are doing decl literals
-    const decl = try analyser.lookupSymbolContainer(container_type.typeOf(analyser), field_name, .other) orelse return null;
+    const decl = try container_type.typeOf(analyser).lookupSymbol(analyser, field_name) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
     resolved_type = resolved_type.resolveDeclLiteralResultType();
