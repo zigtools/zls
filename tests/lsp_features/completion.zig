@@ -2690,6 +2690,71 @@ test "continue with label - enum/decl literal" {
     });
 }
 
+test "continue with label - structinit" {
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .{ .<cursor> }
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        // .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .{ .<cursor> }
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: *const U,
+        \\    beta: u32,
+        \\    gamma: ?U,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "gamma", .kind = .Field, .detail = "?U" },
+        // .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        // .{ .label = "alpha", .kind = .Field, .detail = "*const U" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: *const U,
+        \\    beta: u32,
+        \\    gamma: ?U,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .{ .gamma = .{ .<cursor> }
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?U" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const U" },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

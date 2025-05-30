@@ -1207,6 +1207,25 @@ fn getSwitchOrStructInitContext(
                                     const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
                                     upper_index = tree.firstToken(nodes[i]);
                                     upper_index -= 1;
+                                } else if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_continue, .colon })) { // `continue :blk .{.`
+                                    const continue_label = tree.tokenSlice(upper_index);
+                                    const ancestor_switch = for (nodes) |node| {
+                                        if (tree.fullSwitch(node)) |switch_node| {
+                                            const switch_label_token = switch_node.label_token orelse continue;
+                                            const switch_label = tree.tokenSlice(switch_label_token);
+                                            if (std.mem.eql(u8, continue_label, switch_label)) {
+                                                break switch_node;
+                                            }
+                                        }
+                                    } else {
+                                        return null;
+                                    };
+                                    return .{
+                                        .likely = likely,
+                                        .type_info = .{ .expr_node_index = ancestor_switch.ast.condition },
+                                        .fn_arg_index = fn_arg_index,
+                                        .need_ret_type = need_ret_type,
+                                    };
                                 }
                             },
                             else => {},
