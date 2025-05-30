@@ -189,12 +189,13 @@ fn Map(Context: type) type {
         const Self = @This();
         fn clone(self: Self) Self {
             const unmanaged = self.unmanaged.cloneContext(self.ctx);
-            //    ^^^^^^^^^ (MapUnmanaged(either type))()
+            //    ^^^^^^^^^ (MapUnmanaged(Context))()
             return .{ .unmanaged = unmanaged, .ctx = self.ctx };
         }
         fn clone2(self: Self) Self {
+            // TODO this should be `MapUnmanaged(*Context)`
             const unmanaged = self.unmanaged.cloneContext2(self.ctx);
-            //    ^^^^^^^^^ (MapUnmanaged(*either type))()
+            //    ^^^^^^^^^ (MapUnmanaged(Context))()
             return .{ .unmanaged = unmanaged, .ctx = self.ctx };
         }
     };
@@ -205,13 +206,18 @@ fn MapUnmanaged(Context: type) type {
         size: u32,
         const Self = @This();
         fn clone(self: Self) Self {
-            return self.cloneContext(@as(Context, undefined));
+            const cloned = self.cloneContext(@as(Context, undefined));
+            //    ^^^^^^ (MapUnmanaged(Context))()
+            return cloned;
         }
         fn cloneContext(self: Self, new_ctx: anytype) MapUnmanaged(@TypeOf(new_ctx)) {
             _ = self;
         }
         fn clone2(self: Self) Self {
-            return self.cloneContext2(@as(Context, undefined));
+            // TODO this should be `MapUnmanaged(*Context)`
+            const cloned = self.cloneContext2(@as(Context, undefined));
+            //    ^^^^^^ (MapUnmanaged(Context))()
+            return cloned;
         }
         fn cloneContext2(self: Self, new_ctx: anytype) MapUnmanaged(*@TypeOf(new_ctx)) {
             _ = self;

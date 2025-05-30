@@ -543,28 +543,30 @@ test "call" {
     });
 }
 
-test "function call on return value of generic function" {
+test "method call on return value of generic function" {
     try testSemanticTokens(
         \\const S = struct {
-        \\    fn foo() void {}
+        \\    fn foo(self: S) void {}
         \\};
         \\fn Map(comptime V: type) type {
         \\    return struct {
-        \\        fn getValue() V {}
+        \\        fn getValue(self: @This()) V {}
         \\    };
         \\}
         \\const map = Map(S){};
         \\const value = map.getValue();
         \\const foo = value.foo();
-        //                  ^^^ resolving foo as a function here requires thatthe `V`
-        //                      function parameter of `Map` is still bound to `S`
+        //                  ^^^ resolving foo as a method here requires that the `V`
+        //                      type parameter of `Map` is still bound to `S`
     , &.{
         .{ "const", .keyword, .{} },
         .{ "S", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
         .{ "fn", .keyword, .{} },
-        .{ "foo", .function, .{ .declaration = true } },
+        .{ "foo", .method, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "S", .namespace, .{} },
         .{ "void", .type, .{} },
 
         .{ "fn", .keyword, .{} },
@@ -577,7 +579,9 @@ test "function call on return value of generic function" {
         .{ "return", .keyword, .{} },
         .{ "struct", .keyword, .{} },
         .{ "fn", .keyword, .{} },
-        .{ "getValue", .function, .{ .declaration = true } },
+        .{ "getValue", .method, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "@This", .builtin, .{} },
         .{ "V", .typeParameter, .{} },
 
         .{ "const", .keyword, .{} },
