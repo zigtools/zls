@@ -940,9 +940,7 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    try server.updateConfiguration(new_config, .{
-        .allowRelative = true,
-    });
+    try server.updateConfiguration(new_config, .{});
 }
 
 pub const UpdateConfigurationOptions = struct {
@@ -990,7 +988,7 @@ pub fn updateConfiguration(
             break :dir try uri.path.toRawMaybeAlloc(config_arena);
         } else null;
 
-        inline for (&.{
+        check_relative: inline for (&.{
             "zig_exe_path",
             "builtin_path",
             "build_runner_path",
@@ -999,18 +997,18 @@ pub fn updateConfiguration(
         }) |fieldName| {
             const field: *?[]const u8 = &@field(new_config, fieldName);
             if (field.*) |maybe_relative| resolve: {
+                if (maybe_relative.len == 0) break :resolve;
                 if (std.fs.path.isAbsolute(maybe_relative)) break :resolve;
 
                 const root_dir = maybe_root_dir orelse {
                     log.err("relative path only supported for {s} with exactly one workspace", .{fieldName});
-                    break :resolve;
+                    break :check_relative;
                 };
 
                 const absolute = try std.fs.path.join(config_arena, &.{
                     root_dir, maybe_relative,
                 });
 
-                log.debug("resolved '{s}' to {s}", .{ fieldName, absolute });
                 field.* = absolute;
             }
         }
