@@ -2550,6 +2550,211 @@ test "return - structinit decl literal" {
     });
 }
 
+test "break - enum/decl literal" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = while (true) {
+        \\    break .<cursor>
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        .{ .label = "default", .kind = .EnumMember },
+    });
+}
+
+test "break - structinit" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: S = while (true) {
+        \\    break .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\const foo: S = while (true) {
+        \\    break .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+}
+
+test "break with label - enum/decl literal" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = blk: {
+        \\    break :blk .<cursor>
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        .{ .label = "default", .kind = .EnumMember },
+    });
+}
+
+test "break with label - structinit" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: S = blk: {
+        \\    break :blk .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\const foo: S = blk: {
+        \\    break :blk .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const S" },
+    });
+}
+
+test "continue with label - enum/decl literal" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = .alpha;
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .<cursor>,
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "alpha", .kind = .EnumMember },
+        // .{ .label = "beta", .kind = .EnumMember },
+        // .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        // .{ .label = "default", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = .alpha;
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .<cursor>
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        .{ .label = "default", .kind = .EnumMember },
+    });
+}
+
+test "continue with label - structinit" {
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .{ .<cursor> }
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        // .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .{ .<cursor> }
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: *const U,
+        \\    beta: u32,
+        \\    gamma: ?U,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .{ .gamma = .{ .<cursor> }
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "gamma", .kind = .Field, .detail = "?U" },
+        // .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        // .{ .label = "alpha", .kind = .Field, .detail = "*const U" },
+    });
+    try testCompletion(
+        \\const U = union(enum) {
+        \\    alpha: *const U,
+        \\    beta: u32,
+        \\    gamma: ?U,
+        \\};
+        \\const foo: U = .{};
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .{ .gamma = .{ .<cursor> }
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "?U" },
+        .{ .label = "beta", .kind = .Field, .detail = "u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "*const U" },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

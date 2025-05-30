@@ -666,7 +666,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     if (dot_token_index < 2) return;
 
     blk: {
-        const nodes = try ast.nodesOverlappingIndex(builder.arena, tree, loc.start);
+        const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
         const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
         const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
         const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
@@ -1043,6 +1043,10 @@ const EnumLiteralContext = struct {
         enum_assignment,
         /// `return .`
         enum_return,
+        /// `break .` or `break :blk .`
+        enum_break,
+        /// `continue :blk .`
+        enum_continue,
         // `==`, `!=`
         enum_comparison,
         /// the enum is a fn arg, eg `f(.`
@@ -1061,6 +1065,8 @@ const EnumLiteralContext = struct {
             return switch (likely) {
                 .enum_assignment,
                 .enum_return,
+                .enum_break,
+                .enum_continue,
                 .enum_arg,
                 => true,
                 else => false,
@@ -1100,6 +1106,34 @@ fn getEnumLiteralContext(
         .keyword_return => {
             dot_context.type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null };
             dot_context.likely = .enum_return;
+        },
+        .keyword_break => {
+            const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
+            dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+            dot_context.likely = .enum_break;
+        },
+        .identifier => {
+            if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_break, .colon })) {
+                const break_label = tree.tokenSlice(token_index);
+                const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
+                dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+                dot_context.likely = .enum_break;
+            } else if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_continue, .colon })) {
+                const continue_label = tree.tokenSlice(token_index);
+                const ancestor_switch = for (nodes) |node| {
+                    if (tree.fullSwitch(node)) |switch_node| {
+                        const switch_label_token = switch_node.label_token orelse continue;
+                        const switch_label = tree.tokenSlice(switch_label_token);
+                        if (std.mem.eql(u8, continue_label, switch_label)) {
+                            break switch_node;
+                        }
+                    }
+                } else {
+                    return null;
+                };
+                dot_context.type_info = .{ .expr_node_index = ancestor_switch.ast.condition };
+                dot_context.likely = .enum_continue;
+            }
         },
         .equal_equal, .bang_equal => {
             token_index -= 1;
@@ -1161,6 +1195,41 @@ fn getSwitchOrStructInitContext(
                         if (upper_index < 3) return null;
                         upper_index -= 1;
                         if (tree.tokenTag(upper_index) == .ampersand) upper_index -= 1; // `&.{.`
+                        switch (tree.tokenTag(upper_index)) {
+                            .keyword_break => { // `break .{.`
+                                const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
+                                upper_index = tree.firstToken(nodes[i]);
+                                upper_index -= 1;
+                            },
+                            .identifier => {
+                                if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_break, .colon })) { // `break :blk .{.`
+                                    const break_label = tree.tokenSlice(upper_index);
+                                    const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
+                                    upper_index = tree.firstToken(nodes[i]);
+                                    upper_index -= 1;
+                                } else if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_continue, .colon })) { // `continue :blk .{.`
+                                    const continue_label = tree.tokenSlice(upper_index);
+                                    const ancestor_switch = for (nodes) |node| {
+                                        if (tree.fullSwitch(node)) |switch_node| {
+                                            const switch_label_token = switch_node.label_token orelse continue;
+                                            const switch_label = tree.tokenSlice(switch_label_token);
+                                            if (std.mem.eql(u8, continue_label, switch_label)) {
+                                                break switch_node;
+                                            }
+                                        }
+                                    } else {
+                                        return null;
+                                    };
+                                    return .{
+                                        .likely = likely,
+                                        .type_info = .{ .expr_node_index = ancestor_switch.ast.condition },
+                                        .fn_arg_index = fn_arg_index,
+                                        .need_ret_type = need_ret_type,
+                                    };
+                                }
+                            },
+                            else => {},
+                        }
                         if (tree.tokenTag(upper_index) == .equal) { // `= .{.`
                             upper_index -= 1; // eat the `=`
                             switch (tree.tokenTag(upper_index)) {
