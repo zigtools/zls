@@ -961,6 +961,30 @@ pub fn blockLabel(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     return main_token - 2;
 }
 
+pub fn nodeLabelToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    return switch (tree.nodeTag(node)) {
+        .for_simple,
+        .@"for",
+        => tree.fullFor(node).?.label_token,
+        .while_simple,
+        .while_cont,
+        .@"while",
+        => tree.fullWhile(node).?.label_token,
+        .block_two_semicolon,
+        .block_two,
+        .block_semicolon,
+        .block,
+        => blockLabel(tree, node),
+        .@"break",
+        .@"continue",
+        => tree.nodeData(node).opt_token_and_opt_node[0].unwrap(),
+        .switch_comma,
+        .@"switch",
+        => tree.switchFull(node).label_token,
+        else => null,
+    };
+}
+
 pub fn errorSetFieldCount(tree: Ast, node: Ast.Node.Index) usize {
     std.debug.assert(tree.nodeTag(node) == .error_set_decl);
     var count: usize = 0;

@@ -180,6 +180,7 @@ pub const Declaration = union(enum) {
     /// always an identifier
     /// used as child declarations of an error set declaration
     error_token: Ast.TokenIndex,
+    keyword: Ast.TokenIndex,
 
     pub const Param = struct {
         param_index: u16,
@@ -268,6 +269,7 @@ pub const Declaration = union(enum) {
                 const payload_token = case.payload_token.?;
                 return payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
             },
+            .keyword => |kw_token| kw_token,
         };
     }
 };
@@ -1150,6 +1152,11 @@ noinline fn walkWhileNode(
 ) error{OutOfMemory}!void {
     const while_node = ast.fullWhile(tree, node_idx).?;
 
+    const while_scope = try context.startScope(
+        .other,
+        undefined,
+        locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
+    );
     try walkNode(context, tree, while_node.ast.cond_expr);
 
     const payload_declaration, const payload_name_token = if (while_node.payload_token) |payload_token| blk: {
@@ -1177,7 +1184,7 @@ noinline fn walkWhileNode(
         const then_scope = try walkNodeEnsureScope(context, tree, while_node.ast.then_expr, then_start);
 
         if (while_node.label_token) |label| {
-            try then_scope.pushDeclaration(
+            try while_scope.pushDeclaration(
                 label,
                 .{ .label = .{ .identifier = label, .block = while_node.ast.then_expr } },
                 .label,
@@ -1218,6 +1225,7 @@ noinline fn walkWhileNode(
             try walkNode(context, tree, else_expr);
         }
     }
+    try while_scope.finalize();
 }
 
 /// label_token: inline_token for (inputs) |capture_tokens| then_expr else else_expr
@@ -1228,6 +1236,11 @@ noinline fn walkForNode(
 ) error{OutOfMemory}!void {
     const for_node = ast.fullFor(tree, node_idx).?;
 
+    const for_scope = try context.startScope(
+        .other,
+        undefined,
+        locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
+    );
     for (for_node.ast.inputs) |input_node| {
         try walkNode(context, tree, input_node);
     }
@@ -1250,8 +1263,8 @@ noinline fn walkForNode(
     }
 
     if (for_node.label_token) |label_token| {
-        try then_scope.pushDeclaration(
-            for_node.label_token.?,
+        try for_scope.pushDeclaration(
+            label_token,
             .{ .label = .{ .identifier = label_token, .block = for_node.ast.then_expr } },
             .label,
         );
@@ -1272,6 +1285,7 @@ noinline fn walkForNode(
             try walkNode(context, tree, else_expr);
         }
     }
+    try for_scope.finalize();
 }
 
 noinline fn walkSwitchNode(
@@ -1284,7 +1298,7 @@ noinline fn walkSwitchNode(
     const switch_scope = if (full.label_token) |label_token| blk: {
         const scope = try context.startScope(
             .other,
-            .{ .ast_node = node_idx },
+            undefined,
             locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
         );
         try scope.pushDeclaration(

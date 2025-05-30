@@ -96,6 +96,7 @@ fn hoverSymbolRecursive(
         .switch_payload,
         .label,
         .error_token,
+        .keyword,
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 

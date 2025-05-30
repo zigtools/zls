@@ -311,6 +311,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 .detail = try std.fmt.allocPrint(builder.arena, "error.{s}", .{name}),
             });
         },
+        .keyword => {},
     }
 }
 
