@@ -2648,6 +2648,48 @@ test "break with label - structinit" {
     });
 }
 
+test "continue with label - enum/decl literal" {
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = .alpha;
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => continue :blk .<cursor>,
+        \\};
+    , &.{
+        // TODO this should have the following completion items
+        // .{ .label = "alpha", .kind = .EnumMember },
+        // .{ .label = "beta", .kind = .EnumMember },
+        // .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        // .{ .label = "default", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\
+        \\    const default: E = .alpha;
+        \\    fn init() E {}
+        \\};
+        \\const foo: E = .alpha;
+        \\const bar = blk: switch (foo) {
+        \\    .alpha => {
+        \\        continue :blk .<cursor>
+        \\    },
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "init", .kind = .Function, .detail = "fn () E" },
+        .{ .label = "default", .kind = .EnumMember },
+    });
+}
+
 test "deprecated " {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(

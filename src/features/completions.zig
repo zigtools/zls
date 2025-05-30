@@ -1045,6 +1045,8 @@ const EnumLiteralContext = struct {
         enum_return,
         /// `break .` or `break :blk .`
         enum_break,
+        /// `continue :blk .`
+        enum_continue,
         // `==`, `!=`
         enum_comparison,
         /// the enum is a fn arg, eg `f(.`
@@ -1064,6 +1066,7 @@ const EnumLiteralContext = struct {
                 .enum_assignment,
                 .enum_return,
                 .enum_break,
+                .enum_continue,
                 .enum_arg,
                 => true,
                 else => false,
@@ -1115,6 +1118,21 @@ fn getEnumLiteralContext(
                 const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
                 dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
                 dot_context.likely = .enum_break;
+            } else if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_continue, .colon })) {
+                const continue_label = tree.tokenSlice(token_index);
+                const ancestor_switch = for (nodes) |node| {
+                    if (tree.fullSwitch(node)) |switch_node| {
+                        const switch_label_token = switch_node.label_token orelse continue;
+                        const switch_label = tree.tokenSlice(switch_label_token);
+                        if (std.mem.eql(u8, continue_label, switch_label)) {
+                            break switch_node;
+                        }
+                    }
+                } else {
+                    return null;
+                };
+                dot_context.type_info = .{ .expr_node_index = ancestor_switch.ast.condition };
+                dot_context.likely = .enum_continue;
             }
         },
         .equal_equal, .bang_equal => {
