@@ -131,7 +131,7 @@ test "struct field access" {
 test "struct decl access" {
     try testReferences(
         \\const S = struct {
-        \\    fn <0>() void {}
+        \\    fn <0>(self: S) void {}
         \\};
         \\pub fn foo() bool {
         \\    const s: S = .{};
