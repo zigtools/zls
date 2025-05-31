@@ -1550,7 +1550,6 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
         return error.InternalError;
     }
 
-    try server.document_store.trigramIndexUri(notification.textDocument.uri, server.offset_encoding);
     try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1932,21 +1931,28 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
 fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!lsp.ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    // for (server.client_capabilities.workspace_folders) |workspace_folder| {
-    //     const path = URI.parse(arena, workspace_folder) catch return error.InternalError;
-    //     var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return error.InternalError;
-    //     defer dir.close();
+    for (server.workspaces.items) |workspace| {
+        const path = Uri.parse(arena, workspace.uri) catch return error.InternalError;
+        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return error.InternalError;
+        defer dir.close();
 
-    //     var walker = try dir.walk(arena);
-    //     defer walker.deinit();
+        var walker = try dir.walk(arena);
+        defer walker.deinit();
 
-    //     while (walker.next() catch return error.InternalError) |entry| {
-    //         if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
-    //             const uri = URI.pathRelative(arena, workspace_folder, entry.path) catch return error.InternalError;
-    //             _ = try server.document_store.getOrConstructTrigramStore(uri);
-    //         }
-    //     }
-    // }
+        while (walker.next() catch return error.InternalError) |entry| {
+            if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
+                const uri = Uri.fromPath(
+                    arena,
+                    std.fs.path.join(arena, &.{ path, entry.path }) catch return error.InternalError,
+                ) catch return error.InternalError;
+
+                server.document_store.trigramIndexUri(
+                    uri,
+                    server.offset_encoding,
+                ) catch return error.InternalError;
+            }
+        }
+    }
 
     var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
     var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
@@ -1976,60 +1982,6 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
             });
         }
     }
-
-    // var symbols = std.ArrayListUnmanaged(types.WorkspaceSymbol){};
-    // var candidate_decls_buffer = std.ArrayListUnmanaged(Analyser.Declaration.Index){};
-
-    // doc_loop: for (server.document_store.trigram_stores.keys(), server.document_store.trigram_stores.values()) |uri, trigram_store| {
-    //     const handle = server.document_store.getOrLoadHandle(uri) orelse continue;
-
-    //     const tree = handle.tree;
-    //     const doc_scope = try handle.getDocumentScope();
-
-    //     for (trigrams.items) |trigram| {
-    //         if (!trigram_store.filter.contain(@bitCast(trigram))) continue :doc_loop;
-    //     }
-
-    //     candidate_decls_buffer.clearRetainingCapacity();
-
-    //     const first = trigram_store.getDeclarationsForTrigram(trigrams.items[0]) orelse continue;
-
-    //     try candidate_decls_buffer.resize(arena, first.len * 2);
-
-    //     var len = first.len;
-
-    //     @memcpy(candidate_decls_buffer.items[0..len], first);
-    //     @memcpy(candidate_decls_buffer.items[len..], first);
-
-    //     for (trigrams.items[1..]) |trigram| {
-    //         len = workspace_symbols.mergeIntersection(
-    //             trigram_store.getDeclarationsForTrigram(trigram) orelse continue :doc_loop,
-    //             candidate_decls_buffer.items[len..],
-    //             candidate_decls_buffer.items[0..len],
-    //         );
-    //         candidate_decls_buffer.items.len = len * 2;
-    //         @memcpy(candidate_decls_buffer.items[len..], candidate_decls_buffer.items[0..len]);
-    //     }
-
-    //     candidate_decls_buffer.items.len = len;
-
-    //     for (candidate_decls_buffer.items) |decl_idx| {
-    //         const decl = doc_scope.declarations.get(@intFromEnum(decl_idx));
-    //         const name_token = decl.nameToken(tree);
-
-    //         // TODO: integrate with document_symbol.zig for right kind info
-    //         try symbols.append(arena, .{
-    //             .name = tree.tokenSlice(name_token),
-    //             .kind = .Variable,
-    //             .location = .{
-    //                 .Location = .{
-    //                     .uri = handle.uri,
-    //                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
-    //                 },
-    //             },
-    //         });
-    //     }
-    // }
 
     return .{ .array_of_WorkspaceSymbol = symbols.items };
 }
