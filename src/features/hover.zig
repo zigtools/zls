@@ -104,8 +104,9 @@ fn hoverSymbolRecursive(
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
-        for (try resolved_type.getAllTypesWithHandles(arena)) |ty| {
-            try resolved_type_strings.append(arena, try std.fmt.allocPrint(arena, "{}", .{try ty.fmtTypeOf(analyser, .{
+        const typeof = try resolved_type.typeOf(analyser);
+        for (try typeof.getAllTypesWithHandles(arena)) |ty| {
+            try resolved_type_strings.append(arena, try std.fmt.allocPrint(arena, "{}", .{ty.fmtTypeVal(analyser, .{
                 .referenced = &referenced,
                 .truncate_container_decls = true,
             })}));
