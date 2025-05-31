@@ -3438,6 +3438,10 @@ pub const Type = struct {
             return fromIP(analyser, resolved_type, null);
         }
 
+        return try resolvePeerTypesInternal(analyser, a, b) orelse try resolvePeerTypesInternal(analyser, b, a);
+    }
+
+    fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
         switch (a.data) {
             .optional => |a_type| {
                 if (a_type.eql(b.typeOf(analyser))) {
@@ -3449,25 +3453,6 @@ pub const Type = struct {
                     .optional => return b,
                     else => return .{
                         .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
-                        .is_type_val = false,
-                    },
-                },
-                else => {},
-            },
-            else => {},
-        }
-
-        switch (b.data) {
-            .optional => |b_type| {
-                if (b_type.eql(a.typeOf(analyser))) {
-                    return b;
-                }
-            },
-            .ip_index => |b_payload| switch (b_payload.type) {
-                .null_type => switch (a.data) {
-                    .optional => return a,
-                    else => return .{
-                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
                         .is_type_val = false,
                     },
                 },
