@@ -56,7 +56,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                         .detail = try std.fmt.allocPrint(
                             builder.arena,
                             "{}",
-                            .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                            .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })},
                         ),
                     });
                     return;
@@ -276,7 +276,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 if (ty.is_type_val and ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
                     break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
                 } else {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })});
                 }
             } else null;
 
@@ -333,7 +333,7 @@ fn functionTypeCompletion(
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+        break :blk Analyser.firstParamIs(func_ty, try container_ty.typeOf(builder.analyser));
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
@@ -407,7 +407,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_value.fmt(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{try info.return_value.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
@@ -1436,7 +1436,7 @@ fn collectContainerFields(
                 };
 
                 const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
-                    const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
+                    const type_fmt = try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
                         break :detail try std.fmt.allocPrint(builder.arena, "{} = {s}", .{ type_fmt, value_str });
@@ -1464,7 +1464,8 @@ fn collectContainerFields(
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
-                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                expected_ty = try expected_ty.typeOf(builder.analyser);
+                expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);

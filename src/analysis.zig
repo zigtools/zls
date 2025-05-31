@@ -365,7 +365,7 @@ pub fn formatFunction(
 
     if (data.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{info.return_value.fmt(analyser, .{
+        try writer.print("{}", .{try info.return_value.fmtTypeOf(analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
         })});
@@ -388,7 +388,7 @@ pub fn isInstanceCall(
     const container_node, _ = call_handle.tree.nodeData(call.ast.fn_expr).node_and_token;
 
     const container_ty = if (try analyser.resolveTypeOfNodeInternal(.of(container_node, call_handle))) |container_instance|
-        container_instance.typeOf(analyser)
+        try container_instance.typeOf(analyser)
     else
         func_ty.data.function.container_type.*;
 
@@ -397,11 +397,11 @@ pub fn isInstanceCall(
     return firstParamIs(func_ty, container_ty);
 }
 
-pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) bool {
+pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) !bool {
     std.debug.assert(func_ty.isFunc());
     const container = func_ty.data.function.container_type.*;
     if (container.is_type_val) return false;
-    const in_container = container.typeOf(analyser);
+    const in_container = try container.typeOf(analyser);
     if (in_container.isNamespace()) return false;
     return Analyser.firstParamIs(func_ty, in_container);
 }
@@ -865,7 +865,7 @@ fn resolveGenericTypeInternal(
 ) !Type {
     var resolved = ty;
     if (!ty.is_type_val) {
-        resolved = resolved.typeOf(analyser);
+        resolved = try resolved.typeOf(analyser);
     }
     std.debug.assert(resolved.is_type_val);
     resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visiting);
@@ -981,7 +981,7 @@ pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Type) error{Out
                 .size = .one,
                 .sentinel = .none,
                 .is_const = is_const,
-                .elem_ty = try analyser.allocType(ty.typeOf(analyser)),
+                .elem_ty = try analyser.allocType(try ty.typeOf(analyser)),
             },
         },
         .is_type_val = false,
@@ -1601,7 +1601,7 @@ fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.In
 fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
     switch (a.data) {
         .optional => |a_type| {
-            if (a_type.eql(b.typeOf(analyser))) {
+            if (a_type.eql(try b.typeOf(analyser))) {
                 return a;
             }
             switch (b.data) {
@@ -1611,7 +1611,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                             .data = .{
                                 .error_union = .{
                                     .error_set = b_info.error_set,
-                                    .payload = try analyser.allocType(a.typeOf(analyser)),
+                                    .payload = try analyser.allocType(try a.typeOf(analyser)),
                                 },
                             },
                             .is_type_val = false,
@@ -1622,7 +1622,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
             }
         },
         .error_union => |a_info| {
-            if (a_info.payload.eql(b.typeOf(analyser))) {
+            if (a_info.payload.eql(try b.typeOf(analyser))) {
                 return a;
             }
             switch (b.data) {
@@ -1648,7 +1648,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                         const a_instance = try a_info.payload.instanceTypeVal(analyser) orelse return null;
                         const b_instance = try b_info.payload.instanceTypeVal(analyser) orelse return null;
                         const resolved_instance = try analyser.resolvePeerTypes(a_instance, b_instance) orelse return null;
-                        break :blk try analyser.allocType(resolved_instance.typeOf(analyser));
+                        break :blk try analyser.allocType(try resolved_instance.typeOf(analyser));
                     };
                     return .{
                         .data = .{
@@ -1681,7 +1681,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                     };
                 },
                 else => return .{
-                    .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
+                    .data = .{ .optional = try analyser.allocType(try b.typeOf(analyser)) },
                     .is_type_val = false,
                 },
             },
@@ -1947,7 +1947,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
                     },
                     .anytype_parameter => |info| {
-                        try meta_params.put(analyser.arena, info.token_handle, argument_type.typeOf(analyser));
+                        try meta_params.put(analyser.arena, info.token_handle, try argument_type.typeOf(analyser));
                     },
                     else => {},
                 }
@@ -2111,7 +2111,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const elem_ty_slice = try analyser.arena.alloc(Type, array_init_info.ast.elements.len);
             for (elem_ty_slice, array_init_info.ast.elements) |*elem_ty, element| {
                 elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
-                elem_ty.* = elem_ty.typeOf(analyser);
+                elem_ty.* = try elem_ty.typeOf(analyser);
             }
             return .{
                 .data = .{ .tuple = elem_ty_slice },
@@ -2298,7 +2298,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (params.len < 1) return null;
                 var resolved_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
-                return resolved_type.typeOf(analyser);
+                return try resolved_type.typeOf(analyser);
             }
 
             const type_map: std.StaticStringMap(InternPool.Index) = .initComptime(.{
@@ -2367,7 +2367,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
                 const field = try instance.lookupSymbol(analyser, field_name) orelse return null;
                 const result = try field.resolveType(analyser) orelse return null;
-                return result.typeOf(analyser);
+                return try result.typeOf(analyser);
             }
 
             if (std.mem.eql(u8, call_name, "@field")) {
@@ -2615,7 +2615,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const label_token = ast.blockLabel(tree, node) orelse {
                 const last_statement = statements[statements.len - 1];
                 if (try analyser.resolveTypeOfNodeInternal(.of(last_statement, handle))) |ty| {
-                    if (ty.typeOf(analyser).isNoreturnType()) {
+                    if ((try ty.typeOf(analyser)).isNoreturnType()) {
                         return Type.fromIP(analyser, .noreturn_type, null);
                     }
                 }
@@ -2650,7 +2650,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
             const ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse
                 return Type.fromIP(analyser, .bool_type, null);
-            const typeof = ty.typeOf(analyser);
+            const typeof = try ty.typeOf(analyser);
 
             if (typeof.data == .ip_index and typeof.data.ip_index.index != null) {
                 const key = analyser.ip.indexToKey(typeof.data.ip_index.index.?);
@@ -3633,7 +3633,12 @@ pub const Type = struct {
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
 
-        var has_type_val: bool = false;
+        const has_type_val = for (entries) |entry| {
+            if (entry.type.data == .compile_error) {
+                continue;
+            }
+            break entry.type.is_type_val;
+        } else entries[0].type.is_type_val;
 
         for (entries) |entry| {
             try deduplicator.put(
@@ -3641,8 +3646,11 @@ pub const Type = struct {
                 .{ .type_data = entry.type.data, .descriptor = entry.descriptor },
                 {},
             );
-            if (entry.type.is_type_val) {
-                has_type_val = true;
+            if (entry.type.data == .compile_error) {
+                continue;
+            }
+            if (entry.type.is_type_val != has_type_val) {
+                return null;
             }
         }
 
@@ -3679,17 +3687,49 @@ pub const Type = struct {
         if (!self.is_type_val) return null;
         return switch (self.data) {
             .ip_index => |payload| fromIP(analyser, payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type), null),
+            .either => |old_entries| {
+                const new_entries = try analyser.arena.alloc(Type.Data.EitherEntry, old_entries.len);
+                for (old_entries, new_entries) |old, *new| {
+                    const old_type: Type = .{ .data = old.type_data, .is_type_val = self.is_type_val };
+                    const new_type = try old_type.instanceTypeVal(analyser) orelse return null;
+                    new.* = .{
+                        .type_data = new_type.data,
+                        .descriptor = old.descriptor,
+                    };
+                }
+                return .{
+                    .data = .{ .either = new_entries },
+                    .is_type_val = false,
+                };
+            },
             else => .{ .data = self.data, .is_type_val = false },
         };
     }
 
-    pub fn typeOf(self: Type, analyser: *Analyser) Type {
+    pub fn typeOf(self: Type, analyser: *Analyser) error{OutOfMemory}!Type {
         if (self.is_type_val) {
             return fromIP(analyser, .type_type, .type_type);
         }
 
         if (self.data == .ip_index) {
             return fromIP(analyser, .type_type, self.data.ip_index.type);
+        }
+
+        if (self.data == .either) {
+            const old_entries = self.data.either;
+            const new_entries = try analyser.arena.alloc(Type.Data.EitherEntry, old_entries.len);
+            for (old_entries, new_entries) |old, *new| {
+                const old_type: Type = .{ .data = old.type_data, .is_type_val = self.is_type_val };
+                const new_type = try old_type.typeOf(analyser);
+                new.* = .{
+                    .type_data = new_type.data,
+                    .descriptor = old.descriptor,
+                };
+            }
+            return .{
+                .data = .{ .either = new_entries },
+                .is_type_val = true,
+            };
         }
 
         return .{
@@ -3897,7 +3937,7 @@ pub const Type = struct {
             if (try analyser.lookupSymbolContainer(self, symbol, .other)) |decl| {
                 const ty = try decl.resolveType(analyser) orelse return null;
                 const func_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
-                if (firstParamIs(func_type, self.typeOf(analyser))) {
+                if (firstParamIs(func_type, try self.typeOf(analyser))) {
                     return decl;
                 }
             }
@@ -3910,8 +3950,8 @@ pub const Type = struct {
 
     const Formatter = std.fmt.Formatter(format);
 
-    pub fn fmt(ty: Type, analyser: *Analyser, options: FormatOptions) Formatter {
-        const typeof = ty.typeOf(analyser);
+    pub fn fmtTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) !Formatter {
+        const typeof = try ty.typeOf(analyser);
         return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
     }
 
@@ -5215,7 +5255,7 @@ pub const DeclWithHandle = struct {
 
         return .{
             .data = .{ .pointer = .{
-                .elem_ty = try analyser.allocType(resolved_ty.typeOf(analyser)),
+                .elem_ty = try analyser.allocType(try resolved_ty.typeOf(analyser)),
                 .sentinel = .none,
                 .is_const = false,
                 .size = .one,
@@ -5678,17 +5718,17 @@ pub fn lookupSymbolFieldInit(
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct => {},
-        .keyword_enum => if (try container_type.typeOf(analyser).lookupSymbol(analyser, field_name)) |ty| return ty,
+        .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |ty| return ty,
         .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |ty| return ty,
         else => return null,
     }
 
     // Assume we are doing decl literals
-    const decl = try container_type.typeOf(analyser).lookupSymbol(analyser, field_name) orelse return null;
+    const decl = try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
     resolved_type = resolved_type.resolveDeclLiteralResultType();
-    if (resolved_type.eql(container_type) or resolved_type.eql(container_type.typeOf(analyser))) return decl;
+    if (resolved_type.eql(container_type) or resolved_type.eql(try container_type.typeOf(analyser))) return decl;
     return null;
 }
 
@@ -5882,7 +5922,7 @@ pub fn resolveExpressionTypeFromAncestors(
             if (fn_type.is_type_val) return null;
 
             const fn_info = fn_type.data.function;
-            const param_index = arg_index + @intFromBool(analyser.hasSelfParam(fn_type));
+            const param_index = arg_index + @intFromBool(try analyser.hasSelfParam(fn_type));
             if (param_index >= fn_info.parameters.len) return null;
             const param = fn_info.parameters[param_index];
             const param_ty = param.type;

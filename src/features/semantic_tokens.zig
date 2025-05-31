@@ -277,7 +277,7 @@ fn colorIdentifierBasedOnType(
             new_tok_mod.generic = true;
         }
 
-        const has_self_param = builder.analyser.hasSelfParam(type_node);
+        const has_self_param = try builder.analyser.hasSelfParam(type_node);
 
         try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
