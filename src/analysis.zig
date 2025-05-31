@@ -803,7 +803,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
     } orelse return null;
 
     const resolved_node = switch (resolved.decl) {
-        .ast_node => |node| node,
+        .ast_node, .local_variable => |node| node,
         else => return resolved,
     };
 
@@ -1542,11 +1542,12 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
 fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const u8 {
     var node_with_handle = options.node_handle;
     if (try analyser.resolveVarDeclAlias(options)) |decl_with_handle| {
-        if (decl_with_handle.decl == .ast_node) {
-            node_with_handle = .{
-                .node = decl_with_handle.decl.ast_node,
+        switch (decl_with_handle.decl) {
+            .ast_node, .local_variable => |node| node_with_handle = .{
+                .node = node,
                 .handle = decl_with_handle.handle,
-            };
+            },
+            else => {},
         }
     }
     const string_literal_node = switch (node_with_handle.handle.tree.nodeTag(node_with_handle.node)) {
@@ -4685,7 +4686,7 @@ pub const DeclWithHandle = struct {
     pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) error{OutOfMemory}!TokenWithHandle {
         if (resolve_alias) {
             switch (self.decl) {
-                .ast_node => |node| {
+                .ast_node, .local_variable => |node| {
                     if (try analyser.resolveVarDeclAlias(.{
                         .node_handle = .of(node, self.handle),
                         .container_type = self.container_type,
@@ -4709,7 +4710,7 @@ pub const DeclWithHandle = struct {
     pub fn typeDeclarationNode(self: DeclWithHandle) error{OutOfMemory}!?NodeWithHandle {
         const tree = self.handle.tree;
         switch (self.decl) {
-            .ast_node => |node| switch (tree.nodeTag(node)) {
+            .ast_node, .local_variable => |node| switch (tree.nodeTag(node)) {
                 .global_var_decl,
                 .local_var_decl,
                 .simple_var_decl,
@@ -4755,7 +4756,7 @@ pub const DeclWithHandle = struct {
     pub fn isConst(self: DeclWithHandle) bool {
         const tree = self.handle.tree;
         return switch (self.decl) {
-            .ast_node => |node| switch (tree.nodeTag(node)) {
+            .ast_node, .local_variable => |node| switch (tree.nodeTag(node)) {
                 .global_var_decl,
                 .local_var_decl,
                 .aligned_var_decl,
@@ -4805,6 +4806,7 @@ pub const DeclWithHandle = struct {
             .assign_destructure,
             .label,
             .error_token,
+            .local_variable,
             => false,
             inline .optional_payload,
             .for_loop_payload,
@@ -4878,7 +4880,7 @@ pub const DeclWithHandle = struct {
 
         const tree = self.handle.tree;
         var resolved_ty = switch (self.decl) {
-            .ast_node => |node| try analyser.resolveTypeOfNodeInternal(.{
+            .ast_node, .local_variable => |node| try analyser.resolveTypeOfNodeInternal(.{
                 .node_handle = .of(node, self.handle),
                 .container_type = self.container_type,
             }),

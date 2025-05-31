@@ -104,7 +104,26 @@ const Builder = struct {
     fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
+        const decl_name = offsets.identifierTokenToNameSlice(
+            builder.decl_handle.handle.tree,
+            builder.decl_handle.nameToken(),
+        );
 
+        // these decls can only be local to functions, blocks, etc
+        // so use this to skip checking dot accesses
+        const local_only_decl = switch (builder.decl_handle.decl) {
+            .local_variable,
+            .function_parameter,
+            .optional_payload,
+            .for_loop_payload,
+            .error_union_payload,
+            .error_union_error,
+            .assign_destructure,
+            .switch_payload,
+            .label,
+            => true,
+            .ast_node, .error_token => false,
+        };
         switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
@@ -119,6 +138,7 @@ const Builder = struct {
                     else => unreachable,
                 };
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
 
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
@@ -131,11 +151,14 @@ const Builder = struct {
                 }
             },
             .field_access => {
+                if (local_only_decl) return;
                 const lhs_node, const field_name = tree.nodeData(node).node_and_token;
+                const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
+                if (!std.mem.eql(u8, symbol, decl_name)) return;
+
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
                 const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
@@ -151,12 +174,14 @@ const Builder = struct {
             .struct_init_dot_two,
             .struct_init_dot_two_comma,
             => {
+                if (local_only_decl) return;
                 var buffer: [2]Ast.Node.Index = undefined;
                 const struct_init = tree.fullStructInit(&buffer, node).?;
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                     const name_loc = offsets.tokenToLoc(tree, name_token);
                     const name = offsets.locToSlice(tree.source, name_loc);
+                    if (!std.mem.eql(u8, name, decl_name)) continue;
 
                     const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, node, &.{}) orelse continue;
 
@@ -166,8 +191,10 @@ const Builder = struct {
                 }
             },
             .enum_literal => {
+                if (local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
                 const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
 
                 if (builder.decl_handle.eql(lookup)) {
@@ -254,14 +281,18 @@ fn symbolReferences(
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
     switch (decl_handle.decl) {
-        .ast_node => {
-            try builder.collectReferences(curr_handle, .root);
-
+        .ast_node, .local_variable => {
             const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
+            const doc_scope = try curr_handle.getDocumentScope();
+            const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
+            try builder.collectReferences(
+                curr_handle,
+                // `.local_variable` is only used in function and block scopes so there must be a scope node
+                if (decl_handle.decl == .local_variable) doc_scope.getScopeAstNode(scope_index).? else .root,
+            );
+
             // highlight requests only pertain to the current document, otherwise we can try to narrow things down
             const workspace = if (request == .highlight) false else blk: {
-                const doc_scope = try curr_handle.getDocumentScope();
-                const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
                 break :blk switch (doc_scope.getScopeTag(scope_index)) {
                     .function, .block => false,
                     .container, .container_usingnamespace => decl_handle.isPublic(),
@@ -272,15 +303,19 @@ fn symbolReferences(
                 try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
             }
         },
-        .optional_payload,
+        .assign_destructure => {
+            const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
+            const doc_scope = try curr_handle.getDocumentScope();
+            const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
+            // destructuring can only happen in functions and blocks
+            try builder.collectReferences(curr_handle, doc_scope.getScopeAstNode(scope_index).?);
+        },
+        .switch_payload => |capture| try builder.collectReferences(curr_handle, capture.getCase(curr_handle.tree).ast.target_expr),
+        inline .optional_payload,
         .error_union_payload,
         .error_union_error,
         .for_loop_payload,
-        .assign_destructure,
-        .switch_payload,
-        => {
-            try builder.collectReferences(curr_handle, .root);
-        },
+        => |branchy| try builder.collectReferences(curr_handle, branchy.body),
         .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
         .label => unreachable, // handled separately by labelReferences
         .error_token => {},

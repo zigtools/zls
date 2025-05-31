@@ -1150,8 +1150,10 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
 
     if (try lhs_type.lookupSymbol(builder.analyser, symbol_name)) |decl_type| decl_blk: {
         field_blk: {
-            if (decl_type.decl != .ast_node) break :field_blk;
-            const decl_node = decl_type.decl.ast_node;
+            const decl_node = switch (decl_type.decl) {
+                .ast_node, .local_variable => |n| n,
+                else => break :field_blk,
+            };
             if (!decl_type.handle.tree.nodeTag(decl_node).isContainerField()) break :field_blk;
             if (lhs_type.data != .container) break :field_blk;
             const scope_handle = lhs_type.data.container.scope_handle;

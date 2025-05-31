@@ -88,6 +88,7 @@ fn hoverSymbolRecursive(
             const param = pay.get(tree).?;
             break :def ast.paramSlice(tree, param, false);
         },
+        .local_variable,
         .optional_payload,
         .error_union_payload,
         .error_union_error,
