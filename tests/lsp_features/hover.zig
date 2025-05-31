@@ -1110,7 +1110,7 @@ test "deprecated" {
         \\const foo = @compileError("some message")
         \\```
         \\```zig
-        \\(@compileError("some message"))
+        \\(@compileError(...))
         \\```
     );
 }

@@ -4155,7 +4155,13 @@ pub const Type = struct {
                 });
             },
             .either => try writer.writeAll("either type"), // TODO
-            .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+            .compile_error => |node_handle| {
+                if (options.truncate_container_decls) {
+                    try writer.writeAll("@compileError(...)");
+                } else {
+                    try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node));
+                }
+            },
             .type_parameter => |token_handle| {
                 const token = token_handle.token;
                 const handle = token_handle.handle;
