@@ -675,7 +675,7 @@ test "function" {
         \\bar: enum { fizz, buzz }
         \\```
         \\```zig
-        \\(enum { fizz, buzz })
+        \\(enum {...})
         \\```
     );
     try testHover(
@@ -1040,7 +1040,7 @@ test "integer overflow on top level container" {
         \\baz
         \\```
         \\```zig
-        \\(enum {  foo.bar: baz,})
+        \\(enum {...})
         \\```
     );
 }
