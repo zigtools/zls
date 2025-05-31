@@ -3479,23 +3479,196 @@ pub const Type = struct {
         return null;
     }
 
-    /// Resolves possible types of a type (single for all except either)
-    /// Drops duplicates
+    /// Resolves all possible types by recursively expanding any conditional types.
+    /// TODO: Drop duplicates
     pub fn getAllTypesWithHandles(ty: Type, arena: std.mem.Allocator) error{OutOfMemory}![]const Type {
         var all_types: std.ArrayListUnmanaged(Type) = .empty;
         try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
         return try all_types.toOwnedSlice(arena);
     }
 
+    fn isConditional(ty: Type) bool {
+        return switch (ty.data) {
+            .either => true,
+            .pointer => |info| info.elem_ty.isConditional(),
+            .array => |info| info.elem_ty.isConditional(),
+            .tuple => |types| {
+                for (types) |t| {
+                    if (t.isConditional()) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            .optional => |child_ty| child_ty.isConditional(),
+            .error_union => |info| info.payload.isConditional() or if (info.error_set) |e| e.isConditional() else false,
+            .container => |info| {
+                for (info.bound_params.values()) |t| {
+                    if (t.isConditional()) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            .function => |info| {
+                if (info.container_type.isConditional() or info.return_value.isConditional()) {
+                    return true;
+                }
+                for (info.parameters) |param| {
+                    if (param.type) |param_type| {
+                        if (param_type.isConditional()) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            .union_tag,
+            .for_range,
+            .compile_error,
+            .type_parameter,
+            .ip_index,
+            => false,
+        };
+    }
+
+    fn calculateTotalCombos(T: type, arrays: []const []const T) usize {
+        var total: usize = 1;
+        for (arrays) |arr| total *= arr.len;
+        return total;
+    }
+
+    fn elementsFromComboCounter(T: type, arena: std.mem.Allocator, arrays: []const []const T, counter: usize) ![]T {
+        const result = try arena.alloc(T, arrays.len);
+        var i = counter;
+        for (arrays, result) |arr, *res| {
+            res.* = arr[i % arr.len];
+            i /= arr.len;
+        }
+        return result;
+    }
+
+    // is infinite recursion possible here?
     pub fn getAllTypesWithHandlesArrayList(ty: Type, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(Type)) !void {
+        if (!ty.isConditional()) {
+            try all_types.append(arena, ty);
+            return;
+        }
         switch (ty.data) {
+            .union_tag,
+            .for_range,
+            .compile_error,
+            .type_parameter,
+            .ip_index,
+            => unreachable,
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
                     try entry_ty.getAllTypesWithHandlesArrayList(arena, all_types);
                 }
             },
-            else => try all_types.append(arena, ty),
+            .pointer => |info| {
+                for (try info.elem_ty.getAllTypesWithHandles(arena)) |t| {
+                    var new_info = info;
+                    new_info.elem_ty = try arena.create(Type);
+                    new_info.elem_ty.* = t;
+                    try all_types.append(arena, .{ .data = .{ .pointer = new_info }, .is_type_val = ty.is_type_val });
+                }
+            },
+            .array => |info| {
+                for (try info.elem_ty.getAllTypesWithHandles(arena)) |t| {
+                    var new_info = info;
+                    new_info.elem_ty = try arena.create(Type);
+                    new_info.elem_ty.* = t;
+                    try all_types.append(arena, .{ .data = .{ .array = new_info }, .is_type_val = ty.is_type_val });
+                }
+            },
+            .tuple => |types| {
+                const types_arrays = try arena.alloc([]const Type, types.len);
+                for (types, types_arrays) |old, *new| {
+                    new.* = try old.getAllTypesWithHandles(arena);
+                }
+                const types_combos = calculateTotalCombos(Type, types_arrays);
+                for (0..types_combos) |counter| {
+                    const new_types = try elementsFromComboCounter(Type, arena, types_arrays, counter);
+                    try all_types.append(arena, .{ .data = .{ .tuple = new_types }, .is_type_val = ty.is_type_val });
+                }
+            },
+            .optional => |child_ty| {
+                for (try child_ty.getAllTypesWithHandles(arena)) |t| {
+                    const new_child_ty = try arena.create(Type);
+                    new_child_ty.* = t;
+                    try all_types.append(arena, .{ .data = .{ .optional = new_child_ty }, .is_type_val = ty.is_type_val });
+                }
+            },
+            .error_union => |info| {
+                const payload_types = try info.payload.getAllTypesWithHandles(arena);
+                var error_set_types: []const Type = &.{};
+                if (info.error_set) |e| {
+                    error_set_types = try e.getAllTypesWithHandles(arena);
+                }
+                if (error_set_types.len == 0) {
+                    for (payload_types) |p| {
+                        const new_payload = try arena.create(Type);
+                        new_payload.* = p;
+                        try all_types.append(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = null } }, .is_type_val = ty.is_type_val });
+                    }
+                } else for (error_set_types) |e| {
+                    for (payload_types) |p| {
+                        const new_payload = try arena.create(Type);
+                        new_payload.* = p;
+                        const new_error_set = try arena.create(Type);
+                        new_error_set.* = e;
+                        try all_types.append(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = new_error_set } }, .is_type_val = ty.is_type_val });
+                    }
+                }
+            },
+            .container => |info| {
+                const types = info.bound_params.values();
+                const types_arrays = try arena.alloc([]const Type, types.len);
+                for (types, types_arrays) |old, *new| {
+                    new.* = try old.getAllTypesWithHandles(arena);
+                }
+                const types_combos = calculateTotalCombos(Type, types_arrays);
+                for (0..types_combos) |counter| {
+                    const new_types = try elementsFromComboCounter(Type, arena, types_arrays, counter);
+                    var new_info = info;
+                    new_info.bound_params = try .init(arena, info.bound_params.keys(), new_types);
+                    try all_types.append(arena, .{ .data = .{ .container = new_info }, .is_type_val = ty.is_type_val });
+                }
+            },
+            .function => |info| {
+                const container_types = try info.container_type.getAllTypesWithHandles(arena);
+                const return_values = try info.return_value.getAllTypesWithHandles(arena);
+                const parameters_arrays = try arena.alloc([]const Data.Parameter, info.parameters.len);
+                for (info.parameters, parameters_arrays) |*old, *new| {
+                    if (old.type) |old_type| {
+                        const new_types = try old_type.getAllTypesWithHandles(arena);
+                        const new_parameters = try arena.alloc(Data.Parameter, new_types.len);
+                        for (new_types, new_parameters) |t, *p| {
+                            p.* = old.*;
+                            p.type = t;
+                        }
+                        new.* = new_parameters;
+                    } else {
+                        new.* = @ptrCast(old);
+                    }
+                }
+                const parameters_combos = calculateTotalCombos(Data.Parameter, parameters_arrays);
+                for (container_types) |c| {
+                    for (0..parameters_combos) |counter| {
+                        for (return_values) |r| {
+                            var new_info = info;
+                            new_info.container_type = try arena.create(Type);
+                            new_info.container_type.* = c;
+                            new_info.return_value = try arena.create(Type);
+                            new_info.return_value.* = r;
+                            new_info.parameters = try elementsFromComboCounter(Data.Parameter, arena, parameters_arrays, counter);
+                            try all_types.append(arena, .{ .data = .{ .function = new_info }, .is_type_val = ty.is_type_val });
+                        }
+                    }
+                }
+            },
         }
     }
 
