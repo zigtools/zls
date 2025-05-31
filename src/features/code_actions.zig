@@ -408,7 +408,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
     )) orelse return;
 
     const node = switch (decl.decl) {
-        .ast_node => |node| node,
+        .local_variable => |node| node,
         .assign_destructure => |payload| payload.node,
         else => return,
     };
@@ -869,8 +869,10 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
 
                         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
 
-                        if (decl != .ast_node) continue :next_decl;
-                        const decl_found = decl.ast_node;
+                        const decl_found = switch (decl) {
+                            .ast_node, .local_variable => |found| found,
+                            else => continue :next_decl,
+                        };
 
                         const import_decl = imports.getKeyAdapted(decl_found, ImportDecl.AstNodeAdapter{}) orelse {
                             // We may find the import in a future loop iteration

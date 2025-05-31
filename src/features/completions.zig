@@ -228,6 +228,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         .for_loop_payload,
         .assign_destructure,
         .switch_payload,
+        .local_variable,
         => {
             var kind: types.CompletionItemKind = blk: {
                 const parent_is_type_val = if (decl_handle.container_type) |container_ty| container_ty.is_type_val else null;
@@ -1323,19 +1324,22 @@ fn collectContainerFields(
     const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
-        if (decl != .ast_node) continue;
+        const node = switch (decl) {
+            .ast_node, .local_variable => |node| node,
+            else => continue,
+        };
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
         const tree = scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        const completion_item: types.CompletionItem = switch (tree.nodeTag(decl.ast_node)) {
+        const completion_item: types.CompletionItem = switch (tree.nodeTag(node)) {
             .container_field_init,
             .container_field_align,
             .container_field,
             => blk: {
-                const field = tree.fullContainerField(decl.ast_node).?;
+                const field = tree.fullContainerField(node).?;
 
                 const insert_text = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {

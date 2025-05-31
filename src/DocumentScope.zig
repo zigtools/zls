@@ -142,33 +142,38 @@ pub const Declaration = union(enum) {
     ///   - `.var_decl`
     ///   - `.block`
     ast_node: Ast.Node.Index,
+    local_variable: Ast.Node.Index,
     /// Function parameter
     function_parameter: Param,
-    /// - `if (condition) |identifier| {}`
-    /// - `while (condition) |identifier| {}`
+    /// - `if (condition) |identifier| body`
+    /// - `while (condition) |identifier| body`
     optional_payload: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.Index,
+        body: Ast.Node.Index,
     },
-    /// - `for (condition) |identifier| {}`
-    /// - `for (..., condition, ...) |..., identifier, ...| {}`
+    /// - `for (condition) |identifier| body`
+    /// - `for (..., condition, ...) |..., identifier, ...| body`
     for_loop_payload: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.Index,
+        body: Ast.Node.Index,
     },
-    /// - `if (condition) |identifier| {} else |_| {}`
-    /// - `while (condition) |identifier| {} else |_| {}`
+    /// - `if (condition) |identifier| body else |_| {}`
+    /// - `while (condition) |identifier| body else |_| {}`
     error_union_payload: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.Index,
+        body: Ast.Node.Index,
     },
-    /// - `if (condition) |_| {} else |identifier| {}`
-    /// - `while (condition) |_| {} else |identifier| {}`
-    /// - `condition catch |identifier| {}`
-    /// - `errdefer |identifier| {}` (condition is `.none`)
+    /// - `if (condition) |_| {} else |identifier| body`
+    /// - `while (condition) |_| {} else |identifier| body`
+    /// - `condition catch |identifier| body`
+    /// - `errdefer |identifier| body` (condition is `.none`)
     error_union_error: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.OptionalIndex,
+        body: Ast.Node.Index,
     },
     assign_destructure: AssignDestructure,
     // a switch case capture
@@ -250,7 +255,7 @@ pub const Declaration = union(enum) {
     /// Returns a `.identifier` or `.builtin` token.
     pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
         return switch (decl) {
-            .ast_node => |n| getDeclNameToken(tree, n).?,
+            .ast_node, .local_variable => |n| getDeclNameToken(tree, n).?,
             .function_parameter => |payload| payload.get(tree).?.name_token.?,
             .optional_payload => |payload| payload.identifier,
             .error_union_payload => |payload| payload.identifier,
@@ -1056,7 +1061,7 @@ fn walkBlockNodeKeepOpen(
             => {
                 const var_decl = tree.fullVarDecl(idx).?;
                 const name_token = var_decl.ast.mut_token + 1;
-                try scope.pushDeclaration(name_token, .{ .ast_node = idx }, .other);
+                try scope.pushDeclaration(name_token, .{ .local_variable = idx }, .other);
             },
             .assign_destructure => {
                 const assign_destructure = tree.assignDestructure(idx);
@@ -1091,9 +1096,9 @@ noinline fn walkIfNode(
         const name_token = payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
 
         const decl: Declaration = if (if_node.error_token != null)
-            .{ .error_union_payload = .{ .identifier = name_token, .condition = if_node.ast.cond_expr } }
+            .{ .error_union_payload = .{ .identifier = name_token, .condition = if_node.ast.cond_expr, .body = if_node.ast.then_expr } }
         else
-            .{ .optional_payload = .{ .identifier = name_token, .condition = if_node.ast.cond_expr } };
+            .{ .optional_payload = .{ .identifier = name_token, .condition = if_node.ast.cond_expr, .body = if_node.ast.then_expr } };
 
         const then_scope = try walkNodeEnsureScope(context, tree, if_node.ast.then_expr, name_token);
         try then_scope.pushDeclaration(name_token, decl, .other);
@@ -1107,7 +1112,7 @@ noinline fn walkIfNode(
             const else_scope = try walkNodeEnsureScope(context, tree, else_expr, error_token);
             try else_scope.pushDeclaration(
                 error_token,
-                .{ .error_union_error = .{ .identifier = error_token, .condition = if_node.ast.cond_expr.toOptional() } },
+                .{ .error_union_error = .{ .identifier = error_token, .condition = if_node.ast.cond_expr.toOptional(), .body = else_expr } },
                 .other,
             );
             try else_scope.finalize();
@@ -1133,7 +1138,7 @@ noinline fn walkCatchNode(
         const expr_scope = try walkNodeEnsureScope(context, tree, rhs, catch_token);
         try expr_scope.pushDeclaration(
             catch_token,
-            .{ .error_union_error = .{ .identifier = catch_token, .condition = lhs.toOptional() } },
+            .{ .error_union_error = .{ .identifier = catch_token, .condition = lhs.toOptional(), .body = rhs } },
             .other,
         );
         try expr_scope.finalize();
@@ -1156,9 +1161,9 @@ noinline fn walkWhileNode(
         const name_token = payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
 
         const decl: Declaration = if (while_node.error_token != null)
-            .{ .error_union_payload = .{ .identifier = name_token, .condition = while_node.ast.cond_expr } }
+            .{ .error_union_payload = .{ .identifier = name_token, .condition = while_node.ast.cond_expr, .body = while_node.ast.then_expr } }
         else
-            .{ .optional_payload = .{ .identifier = name_token, .condition = while_node.ast.cond_expr } };
+            .{ .optional_payload = .{ .identifier = name_token, .condition = while_node.ast.cond_expr, .body = while_node.ast.then_expr } };
         break :blk .{ decl, name_token };
     } else .{ null, null };
 
@@ -1208,7 +1213,14 @@ noinline fn walkWhileNode(
             if (while_node.error_token) |error_token| {
                 try else_scope.pushDeclaration(
                     error_token,
-                    .{ .error_union_error = .{ .identifier = error_token, .condition = while_node.ast.cond_expr.toOptional() } },
+                    .{
+                        .error_union_error = .{
+                            .identifier = error_token,
+                            .condition = while_node.ast.cond_expr.toOptional(),
+                            // `error_token` is only set if `else_expr` is
+                            .body = while_node.ast.else_expr.unwrap().?,
+                        },
+                    },
                     .other,
                 );
             }
@@ -1244,7 +1256,7 @@ noinline fn walkForNode(
         if (tree.tokenTag(name_token) != .identifier) break;
         try then_scope.pushDeclaration(
             name_token,
-            .{ .for_loop_payload = .{ .identifier = name_token, .condition = input } },
+            .{ .for_loop_payload = .{ .identifier = name_token, .condition = input, .body = node_idx } },
             .other,
         );
     }
@@ -1328,7 +1340,7 @@ noinline fn walkErrdeferNode(
         const expr_scope = try walkNodeEnsureScope(context, tree, rhs, payload_token);
         try expr_scope.pushDeclaration(
             payload_token,
-            .{ .error_union_error = .{ .identifier = payload_token, .condition = .none } },
+            .{ .error_union_error = .{ .identifier = payload_token, .condition = .none, .body = rhs } },
             .other,
         );
         try expr_scope.finalize();
