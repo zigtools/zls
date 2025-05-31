@@ -90,6 +90,14 @@ pub fn main() void {
     _ = error_union_5 catch {};
     //  ^^^^^^^^^^^^^ (error{A}!?S)()
 
+    const error_union_6 = if (runtime_bool) @as(error{B}!S, s) else @as(error{A}!S, s);
+    _ = error_union_6 catch {};
+    //  ^^^^^^^^^^^^^ (error{B,A}!S)()
+
+    const error_union_7 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!S, s);
+    _ = error_union_7 catch {};
+    //  ^^^^^^^^^^^^^ (error{A,B}!S)()
+
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(error_union_0);
 
