@@ -1582,6 +1582,121 @@ fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) error{Ou
     return ip_index;
 }
 
+fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
+    if (a.is_type_val or b.is_type_val) return null;
+    if (a.eql(b)) return a;
+
+    if (a.data == .ip_index and b.data == .ip_index) {
+        const a_type = a.data.ip_index.type;
+        const b_type = b.data.ip_index.type;
+        const resolved_type = try analyser.resolvePeerTypesIP(a_type, b_type) orelse return null;
+        return Type.fromIP(analyser, resolved_type, null);
+    }
+
+    return try analyser.resolvePeerTypesInternal(a, b) orelse try analyser.resolvePeerTypesInternal(b, a);
+}
+
+fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.Index) error{OutOfMemory}!?InternPool.Index {
+    const resolved = try analyser.ip.resolvePeerTypes(analyser.gpa, &.{ a, b }, builtin.target);
+    if (resolved == .none) return null;
+    return resolved;
+}
+
+fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
+    switch (a.data) {
+        .optional => |a_type| {
+            if (a_type.eql(b.typeOf(analyser))) {
+                return a;
+            }
+            switch (b.data) {
+                .error_union => |b_info| {
+                    if (a_type.eql(b_info.payload.*)) {
+                        return .{
+                            .data = .{
+                                .error_union = .{
+                                    .error_set = b_info.error_set,
+                                    .payload = try analyser.allocType(a.typeOf(analyser)),
+                                },
+                            },
+                            .is_type_val = false,
+                        };
+                    }
+                },
+                else => {},
+            }
+        },
+        .error_union => |a_info| {
+            if (a_info.payload.eql(b.typeOf(analyser))) {
+                return a;
+            }
+            switch (b.data) {
+                .error_union => |b_info| {
+                    const resolved_error_set = blk: {
+                        const a_error_set = a_info.error_set orelse break :blk null;
+                        const b_error_set = b_info.error_set orelse break :blk null;
+                        if (a_error_set.eql(b_error_set.*)) break :blk a_error_set;
+                        if (a_error_set.data != .ip_index) return null;
+                        if (b_error_set.data != .ip_index) return null;
+                        if (a_error_set.data.ip_index.type != .type_type) return null;
+                        if (b_error_set.data.ip_index.type != .type_type) return null;
+                        const a_index = a_error_set.data.ip_index.index orelse return null;
+                        const b_index = b_error_set.data.ip_index.index orelse return null;
+                        if (analyser.ip.zigTypeTag(a_index) != .error_set) return null;
+                        if (analyser.ip.zigTypeTag(b_index) != .error_set) return null;
+                        const resolved_index = try analyser.ip.errorSetMerge(analyser.gpa, a_index, b_index);
+                        const resolved_error_set = Type.fromIP(analyser, .type_type, resolved_index);
+                        break :blk try analyser.allocType(resolved_error_set);
+                    };
+                    const resolved_payload = blk: {
+                        if (a_info.payload.eql(b_info.payload.*)) break :blk a_info.payload;
+                        const a_instance = try a_info.payload.instanceTypeVal(analyser) orelse return null;
+                        const b_instance = try b_info.payload.instanceTypeVal(analyser) orelse return null;
+                        const resolved_instance = try analyser.resolvePeerTypes(a_instance, b_instance) orelse return null;
+                        break :blk try analyser.allocType(resolved_instance.typeOf(analyser));
+                    };
+                    return .{
+                        .data = .{
+                            .error_union = .{
+                                .error_set = resolved_error_set,
+                                .payload = resolved_payload,
+                            },
+                        },
+                        .is_type_val = false,
+                    };
+                },
+                else => {},
+            }
+        },
+        .ip_index => |a_payload| switch (a_payload.type) {
+            .null_type => switch (b.data) {
+                .optional => return b,
+                .error_union => |b_info| {
+                    return .{
+                        .data = .{
+                            .error_union = .{
+                                .error_set = b_info.error_set,
+                                .payload = try analyser.allocType(.{
+                                    .data = .{ .optional = try analyser.allocType(b_info.payload.*) },
+                                    .is_type_val = true,
+                                }),
+                            },
+                        },
+                        .is_type_val = false,
+                    };
+                },
+                else => return .{
+                    .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
+                    .is_type_val = false,
+                },
+            },
+            else => {},
+        },
+        else => {},
+    }
+
+    return null;
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -2602,7 +2717,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             if (lhs_ty.is_type_val) return null;
             const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
-            return Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty);
+            return analyser.resolvePeerTypes(lhs_ty, rhs_ty);
         },
 
         .add => {
@@ -2616,7 +2731,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     .many, .c => lhs_ty,
                     else => null,
                 },
-                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+                else => try analyser.resolvePeerTypes(lhs_ty, rhs_ty),
             };
         },
 
@@ -2638,7 +2753,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         else => null,
                     },
                 },
-                else => try Type.resolvePeerTypes(analyser, lhs_ty, rhs_ty),
+                else => try analyser.resolvePeerTypes(lhs_ty, rhs_ty),
             };
         },
 
@@ -3377,7 +3492,7 @@ pub const Type = struct {
             var chosen = entries[0].type;
             for (entries[1..]) |entry| {
                 const candidate = entry.type;
-                chosen = try resolvePeerTypes(analyser, chosen, candidate) orelse break :peer_type_resolution;
+                chosen = try analyser.resolvePeerTypes(chosen, candidate) orelse break :peer_type_resolution;
             }
             return chosen;
         }
@@ -3425,58 +3540,6 @@ pub const Type = struct {
             .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
             .is_type_val = has_type_val,
         };
-    }
-
-    fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
-        if (a.is_type_val or b.is_type_val) return null;
-        if (a.eql(b)) return a;
-
-        if (a.data == .ip_index and b.data == .ip_index) {
-            const types = [_]InternPool.Index{ a.data.ip_index.type, b.data.ip_index.type };
-            const resolved_type = try analyser.ip.resolvePeerTypes(analyser.gpa, &types, builtin.target);
-            if (resolved_type == .none) return null;
-            return fromIP(analyser, resolved_type, null);
-        }
-
-        switch (a.data) {
-            .optional => |a_type| {
-                if (a_type.eql(b.typeOf(analyser))) {
-                    return a;
-                }
-            },
-            .ip_index => |a_payload| switch (a_payload.type) {
-                .null_type => switch (b.data) {
-                    .optional => return b,
-                    else => return .{
-                        .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
-                        .is_type_val = false,
-                    },
-                },
-                else => {},
-            },
-            else => {},
-        }
-
-        switch (b.data) {
-            .optional => |b_type| {
-                if (b_type.eql(a.typeOf(analyser))) {
-                    return b;
-                }
-            },
-            .ip_index => |b_payload| switch (b_payload.type) {
-                .null_type => switch (a.data) {
-                    .optional => return a,
-                    else => return .{
-                        .data = .{ .optional = try analyser.allocType(a.typeOf(analyser)) },
-                        .is_type_val = false,
-                    },
-                },
-                else => {},
-            },
-            else => {},
-        }
-
-        return null;
     }
 
     /// Resolves possible types of a type (single for all except either)
