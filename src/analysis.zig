@@ -1602,6 +1602,22 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
             if (a_type.eql(b.typeOf(analyser))) {
                 return a;
             }
+            switch (b.data) {
+                .error_union => |b_info| {
+                    if (a_type.eql(b_info.payload.*)) {
+                        return .{
+                            .data = .{
+                                .error_union = .{
+                                    .error_set = b_info.error_set,
+                                    .payload = try analyser.allocType(a.typeOf(analyser)),
+                                },
+                            },
+                            .is_type_val = false,
+                        };
+                    }
+                },
+                else => {},
+            }
         },
         .error_union => |a_info| {
             if (a_info.payload.eql(b.typeOf(analyser))) {
