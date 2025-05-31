@@ -43,28 +43,39 @@ pub fn main() void {
     //  ^^^^^^^^^^ (?S)()
 
     const error_set_0 = if (runtime_bool) error.A else @as(error{ A, B }, error.A);
-    _ = error_set_0;
+    _ = error_set_0 catch {};
     //  ^^^^^^^^^^^ (error{A,B})()
 
     const error_set_1 = if (runtime_bool) @as(error{ A, B }, error.A) else error.A;
-    _ = error_set_1;
+    _ = error_set_1 catch {};
     //  ^^^^^^^^^^^ (error{A,B})()
 
     const error_set_2 = if (runtime_bool) error.B else error.A;
-    _ = error_set_2;
+    _ = error_set_2 catch {};
     //  ^^^^^^^^^^^ (error{B,A})()
 
     const error_set_3 = if (runtime_bool) error.A else error.B;
-    _ = error_set_3;
+    _ = error_set_3 catch {};
     //  ^^^^^^^^^^^ (error{A,B})()
 
     const error_set_4 = if (runtime_bool) @as(error{ B, C }, error.B) else @as(error{ A, B }, error.A);
-    _ = error_set_4;
+    _ = error_set_4 catch {};
     //  ^^^^^^^^^^^ (error{B,C,A})()
 
     const error_set_5 = if (runtime_bool) @as(error{ A, B }, error.A) else @as(error{ B, C }, error.B);
-    _ = error_set_5;
+    _ = error_set_5 catch {};
     //  ^^^^^^^^^^^ (error{A,B,C})()
+
+    const error_union_0 = if (runtime_bool) s else @as(error{A}!S, s);
+    _ = error_union_0 catch {};
+    //  ^^^^^^^^^^^^^ (error{A}!S)()
+
+    const error_union_1 = if (runtime_bool) @as(error{A}!S, s) else s;
+    _ = error_union_1 catch {};
+    //  ^^^^^^^^^^^^^ (error{A}!S)()
+
+    // Use @compileLog to verify the expected type with the compiler:
+    // @compileLog(error_union_0);
 
     _ = &runtime_bool;
 }
