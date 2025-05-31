@@ -107,7 +107,7 @@ fn hoverSymbolRecursive(
         for (try resolved_type.getAllTypesWithHandles(arena)) |ty| {
             try resolved_type_strings.append(arena, try std.fmt.allocPrint(arena, "{}", .{try ty.fmtTypeOf(analyser, .{
                 .referenced = &referenced,
-                .truncate_container_decls = false,
+                .truncate_container_decls = true,
             })}));
         }
     }
