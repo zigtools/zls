@@ -1627,6 +1627,20 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
         .ip_index => |a_payload| switch (a_payload.type) {
             .null_type => switch (b.data) {
                 .optional => return b,
+                .error_union => |b_info| {
+                    return .{
+                        .data = .{
+                            .error_union = .{
+                                .error_set = b_info.error_set,
+                                .payload = try analyser.allocType(.{
+                                    .data = .{ .optional = try analyser.allocType(b_info.payload.*) },
+                                    .is_type_val = true,
+                                }),
+                            },
+                        },
+                        .is_type_val = false,
+                    };
+                },
                 else => return .{
                     .data = .{ .optional = try analyser.allocType(b.typeOf(analyser)) },
                     .is_type_val = false,
