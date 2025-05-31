@@ -3351,6 +3351,21 @@ pub const Type = struct {
         return true;
     }
 
+    pub const ArraySet = std.ArrayHashMapUnmanaged(Type, void, ArraySetContext, true);
+
+    pub const ArraySetContext = struct {
+        pub fn hash(self: ArraySetContext, ty: Type) u32 {
+            _ = self;
+            return ty.hash32();
+        }
+
+        pub fn eql(self: ArraySetContext, a: Type, b: Type, b_index: usize) bool {
+            _ = self;
+            _ = b_index;
+            return a.eql(b);
+        }
+    };
+
     pub fn fromIP(analyser: *Analyser, ty: InternPool.Index, index: ?InternPool.Index) Type {
         std.debug.assert(analyser.ip.isType(ty));
         if (index) |idx| std.debug.assert(analyser.ip.typeOf(idx) == ty);
@@ -3480,11 +3495,11 @@ pub const Type = struct {
     }
 
     /// Resolves all possible types by recursively expanding any conditional types.
-    /// TODO: Drop duplicates
+    /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: Type, arena: std.mem.Allocator) error{OutOfMemory}![]const Type {
-        var all_types: std.ArrayListUnmanaged(Type) = .empty;
-        try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
-        return try all_types.toOwnedSlice(arena);
+        var all_types: ArraySet = .empty;
+        try ty.getAllTypesWithHandlesArraySet(arena, &all_types);
+        return all_types.keys();
     }
 
     fn isConditional(ty: Type) bool {
@@ -3549,9 +3564,9 @@ pub const Type = struct {
     }
 
     // is infinite recursion possible here?
-    pub fn getAllTypesWithHandlesArrayList(ty: Type, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(Type)) !void {
+    pub fn getAllTypesWithHandlesArraySet(ty: Type, arena: std.mem.Allocator, all_types: *ArraySet) !void {
         if (!ty.isConditional()) {
-            try all_types.append(arena, ty);
+            try all_types.put(arena, ty, {});
             return;
         }
         switch (ty.data) {
@@ -3564,7 +3579,7 @@ pub const Type = struct {
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                    try entry_ty.getAllTypesWithHandlesArrayList(arena, all_types);
+                    try entry_ty.getAllTypesWithHandlesArraySet(arena, all_types);
                 }
             },
             .pointer => |info| {
@@ -3572,7 +3587,7 @@ pub const Type = struct {
                     var new_info = info;
                     new_info.elem_ty = try arena.create(Type);
                     new_info.elem_ty.* = t;
-                    try all_types.append(arena, .{ .data = .{ .pointer = new_info }, .is_type_val = ty.is_type_val });
+                    try all_types.put(arena, .{ .data = .{ .pointer = new_info }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             .array => |info| {
@@ -3580,7 +3595,7 @@ pub const Type = struct {
                     var new_info = info;
                     new_info.elem_ty = try arena.create(Type);
                     new_info.elem_ty.* = t;
-                    try all_types.append(arena, .{ .data = .{ .array = new_info }, .is_type_val = ty.is_type_val });
+                    try all_types.put(arena, .{ .data = .{ .array = new_info }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             .tuple => |types| {
@@ -3591,14 +3606,14 @@ pub const Type = struct {
                 const types_combos = calculateTotalCombos(Type, types_arrays);
                 for (0..types_combos) |counter| {
                     const new_types = try elementsFromComboCounter(Type, arena, types_arrays, counter);
-                    try all_types.append(arena, .{ .data = .{ .tuple = new_types }, .is_type_val = ty.is_type_val });
+                    try all_types.put(arena, .{ .data = .{ .tuple = new_types }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             .optional => |child_ty| {
                 for (try child_ty.getAllTypesWithHandles(arena)) |t| {
                     const new_child_ty = try arena.create(Type);
                     new_child_ty.* = t;
-                    try all_types.append(arena, .{ .data = .{ .optional = new_child_ty }, .is_type_val = ty.is_type_val });
+                    try all_types.put(arena, .{ .data = .{ .optional = new_child_ty }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             .error_union => |info| {
@@ -3611,7 +3626,7 @@ pub const Type = struct {
                     for (payload_types) |p| {
                         const new_payload = try arena.create(Type);
                         new_payload.* = p;
-                        try all_types.append(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = null } }, .is_type_val = ty.is_type_val });
+                        try all_types.put(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = null } }, .is_type_val = ty.is_type_val }, {});
                     }
                 } else for (error_set_types) |e| {
                     for (payload_types) |p| {
@@ -3619,7 +3634,7 @@ pub const Type = struct {
                         new_payload.* = p;
                         const new_error_set = try arena.create(Type);
                         new_error_set.* = e;
-                        try all_types.append(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = new_error_set } }, .is_type_val = ty.is_type_val });
+                        try all_types.put(arena, .{ .data = .{ .error_union = .{ .payload = new_payload, .error_set = new_error_set } }, .is_type_val = ty.is_type_val }, {});
                     }
                 }
             },
@@ -3634,7 +3649,7 @@ pub const Type = struct {
                     const new_types = try elementsFromComboCounter(Type, arena, types_arrays, counter);
                     var new_info = info;
                     new_info.bound_params = try .init(arena, info.bound_params.keys(), new_types);
-                    try all_types.append(arena, .{ .data = .{ .container = new_info }, .is_type_val = ty.is_type_val });
+                    try all_types.put(arena, .{ .data = .{ .container = new_info }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             .function => |info| {
@@ -3664,7 +3679,7 @@ pub const Type = struct {
                             new_info.return_value = try arena.create(Type);
                             new_info.return_value.* = r;
                             new_info.parameters = try elementsFromComboCounter(Data.Parameter, arena, parameters_arrays, counter);
-                            try all_types.append(arena, .{ .data = .{ .function = new_info }, .is_type_val = ty.is_type_val });
+                            try all_types.put(arena, .{ .data = .{ .function = new_info }, .is_type_val = ty.is_type_val }, {});
                         }
                     }
                 }

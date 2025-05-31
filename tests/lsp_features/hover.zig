@@ -818,9 +818,7 @@ test "either type instances" {
     try testHoverWithOptions(
         \\const EitherType<cursor> = if (undefined) u32 else f64;
     ,
-        // TODO: (type) should only appear once
         \\const EitherType = if (undefined) u32 else f64
-        \\(type)
         \\(type)
     , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
