@@ -1647,7 +1647,13 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                         const resolved_error_set = Type.fromIP(analyser, .type_type, resolved_index);
                         break :blk try analyser.allocType(resolved_error_set);
                     };
-                    const resolved_payload = if (a_info.payload.eql(b_info.payload.*)) a_info.payload else return null;
+                    const resolved_payload = blk: {
+                        if (a_info.payload.eql(b_info.payload.*)) break :blk a_info.payload;
+                        const a_instance = try a_info.payload.instanceTypeVal(analyser) orelse return null;
+                        const b_instance = try b_info.payload.instanceTypeVal(analyser) orelse return null;
+                        const resolved_instance = try analyser.resolvePeerTypes(a_instance, b_instance) orelse return null;
+                        break :blk try analyser.allocType(resolved_instance.typeOf(analyser));
+                    };
                     return .{
                         .data = .{
                             .error_union = .{
