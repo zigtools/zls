@@ -261,6 +261,19 @@ test "builtin" {
     try testContext(
         \\fn foo() void { <loc>@setRuntime</loc><cursor>(false); };
     , .builtin, .{});
+
+    try testContext(
+        \\if (true) <cursor><loc>@setRuntime</loc>(false)
+    , .builtin, .{ .lookahead = true });
+    try testContext(
+        \\if (true) <loc>@<cursor>setRuntime</loc>(false)
+    , .builtin, .{ .lookahead = true });
+    try testContext(
+        \\if (true) <loc>@set<cursor>Runtime</loc>(false)
+    , .builtin, .{ .lookahead = true });
+    try testContext(
+        \\if (true) <loc>@setRuntime</loc><cursor>(false)
+    , .builtin, .{});
 }
 
 test "comment" {

@@ -4540,10 +4540,7 @@ pub fn getPositionContext(
                     .{ .var_access = tok.loc },
                 else => curr_ctx.ctx = .{ .var_access = tok.loc },
             },
-            .builtin => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .builtin = tok.loc },
-                else => {},
-            },
+            .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
             .period, .period_asterisk => switch (curr_ctx.ctx) {
                 // TODO: only set context to enum literal if token tag is "." (not ".*")
                 .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
