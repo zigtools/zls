@@ -197,6 +197,17 @@ fn return_2() Error!?StructType {
 }
 
 //
+// continue
+//
+
+const continue_switch: StructType = blk: switch (some_tagged_union) {
+    .bar => |bar| continue :blk .{ .baz = @truncate(bar) },
+    //                             ^^^^ (u8)()
+    .baz => |baz| .{ .foo = baz },
+    //               ^^^^ (u32)()
+};
+
+//
 // break
 //
 
@@ -223,6 +234,13 @@ const break_while_1: StructType =
         break :blk .{ .foo = 1 };
         //            ^^^^ (u32)()
     };
+
+const break_switch: StructType = blk: switch (some_tagged_union) {
+    .bar => |bar| break :blk .{ .foo = bar },
+    //                          ^^^^ (u32)()
+    .baz => |baz| .{ .foo = baz },
+    //               ^^^^ (u32)()
+};
 
 const break_block: StructType =
     blk: {
