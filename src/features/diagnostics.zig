@@ -347,6 +347,15 @@ fn getErrorBundleFromAstCheck(
         if (term != .Exited) return .empty;
     }
 
+    return try getErrorBundleFromStderr(allocator, stderr_bytes, true, source);
+}
+
+pub fn getErrorBundleFromStderr(
+    allocator: std.mem.Allocator,
+    stderr_bytes: []const u8,
+    ignore_src_path: bool,
+    single_file_source: ?[]const u8,
+) !std.zig.ErrorBundle {
     if (stderr_bytes.len == 0) return .empty;
 
     var last_error_message: ?std.zig.ErrorBundle.ErrorMessage = null;
@@ -357,7 +366,7 @@ fn getErrorBundleFromAstCheck(
     try error_bundle.init(allocator);
     defer error_bundle.deinit();
 
-    const eb_file_path = try error_bundle.addString("");
+    const eb_empty_string = try error_bundle.addString("");
 
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
     while (line_iterator.next()) |line| {
@@ -368,31 +377,44 @@ fn getErrorBundleFromAstCheck(
         const column_string = pos_and_diag_iterator.next() orelse continue;
         const msg = pos_and_diag_iterator.rest();
 
-        if (!std.mem.eql(u8, src_path, "<stdin>")) continue;
+        const eb_src_path = if (ignore_src_path) eb_empty_string else try error_bundle.addString(src_path);
 
         // zig uses utf-8 encoding for character offsets
         const utf8_position: types.Position = .{
             .line = (std.fmt.parseInt(u32, line_string, 10) catch continue) -| 1,
             .character = (std.fmt.parseInt(u32, column_string, 10) catch continue) -| 1,
         };
-        const source_index = offsets.positionToIndex(source, utf8_position, .@"utf-8");
-        const source_line = offsets.lineSliceAtIndex(source, source_index);
 
-        var loc: offsets.Loc = .{ .start = source_index, .end = source_index };
+        const src_loc = if (single_file_source) |source| src_loc: {
+            const source_index = offsets.positionToIndex(source, utf8_position, .@"utf-8");
+            const source_line = offsets.lineSliceAtIndex(source, source_index);
 
-        while (loc.end < source.len and Analyser.isSymbolChar(source[loc.end])) {
-            loc.end += 1;
-        }
+            var loc: offsets.Loc = .{ .start = source_index, .end = source_index };
 
-        const src_loc = try error_bundle.addSourceLocation(.{
-            .src_path = eb_file_path,
-            .line = utf8_position.line,
-            .column = utf8_position.character,
-            .span_start = @intCast(loc.start),
-            .span_main = @intCast(source_index),
-            .span_end = @intCast(loc.end),
-            .source_line = try error_bundle.addString(source_line),
-        });
+            while (loc.end < source.len and Analyser.isSymbolChar(source[loc.end])) {
+                loc.end += 1;
+            }
+
+            break :src_loc try error_bundle.addSourceLocation(.{
+                .src_path = eb_src_path,
+                .line = utf8_position.line,
+                .column = utf8_position.character,
+                .span_start = @intCast(loc.start),
+                .span_main = @intCast(source_index),
+                .span_end = @intCast(loc.end),
+                .source_line = try error_bundle.addString(source_line),
+            });
+        } else src_loc: {
+            break :src_loc try error_bundle.addSourceLocation(.{
+                .src_path = eb_src_path,
+                .line = utf8_position.line,
+                .column = utf8_position.character,
+                .span_start = 0,
+                .span_main = 0,
+                .span_end = 0,
+                .source_line = eb_empty_string,
+            });
+        };
 
         if (std.mem.startsWith(u8, msg, " note: ")) {
             try notes.append(allocator, try error_bundle.addErrorMessage(.{

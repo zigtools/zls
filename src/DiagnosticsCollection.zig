@@ -135,13 +135,18 @@ pub fn pushErrorBundle(
 
     if (error_bundle.errorMessageCount() == 0 and gop.value_ptr.error_bundle.errorMessageCount() == 0) return;
 
-    try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
     if (error_bundle.errorMessageCount() != 0) {
+        try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
         try new_error_bundle.addBundleAsRoots(error_bundle);
     }
 
     if (version_order == .gt) {
-        try collectUrisFromErrorBundle(collection.allocator, gop.value_ptr.error_bundle, src_base_path, &collection.outdated_files);
+        try collectUrisFromErrorBundle(
+            collection.allocator,
+            gop.value_ptr.error_bundle,
+            gop.value_ptr.error_bundle_src_base_path,
+            &collection.outdated_files,
+        );
     } else {
         if (gop.value_ptr.error_bundle.errorMessageCount() != 0) {
             try new_error_bundle.addBundleAsRoots(gop.value_ptr.error_bundle);
