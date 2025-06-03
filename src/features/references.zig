@@ -596,8 +596,6 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree, source_index, true);
 
     var analyser = server.initAnalyser(arena, handle);
@@ -610,6 +608,19 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
     // TODO: Make this work with branching types
     const locations = locs: {
+        if (pos_context == .keyword) {
+            break :locs try controlFlowReferences(
+                arena,
+                request,
+                .{ .token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft(), .handle = handle },
+                server.offset_encoding,
+                include_decl,
+            );
+        }
+
+        const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+        const name = offsets.locToSlice(handle.tree.source, name_loc);
+
         const decl = switch (pos_context) {
             .var_access => try analyser.lookupSymbolGlobal(handle, name, source_index),
             .field_access => |loc| z: {
@@ -623,13 +634,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             },
             .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
             .enum_literal => try analyser.getSymbolEnumLiteral(handle, source_index, name),
-            .keyword => break :locs try controlFlowReferences(
-                arena,
-                request,
-                .{ .token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft(), .handle = handle },
-                server.offset_encoding,
-                include_decl,
-            ),
+            .keyword => unreachable,
             else => null,
         } orelse return null;
 
