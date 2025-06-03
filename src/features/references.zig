@@ -356,6 +356,7 @@ fn controlFlowReferences(
     request: GeneralReferencesRequest,
     token_handle: Analyser.TokenWithHandle,
     encoding: offsets.Encoding,
+    include_decl: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
     if (request == .rename) return .empty;
     const handle = token_handle.handle;
@@ -374,7 +375,9 @@ fn controlFlowReferences(
         .nodes = nodes,
     };
 
-    try builder.add(kw_token);
+    if (include_decl) {
+        try builder.add(kw_token);
+    }
 
     switch (tree.tokenTag(kw_token)) {
         .keyword_continue,
@@ -600,6 +603,11 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
 
+    const include_decl = switch (request) {
+        .references => |ref| ref.context.includeDeclaration,
+        else => true,
+    };
+
     // TODO: Make this work with branching types
     const locations = locs: {
         const decl = switch (pos_context) {
@@ -620,14 +628,10 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 request,
                 .{ .token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft(), .handle = handle },
                 server.offset_encoding,
+                include_decl,
             ),
             else => null,
         } orelse return null;
-
-        const include_decl = switch (request) {
-            .references => |ref| ref.context.includeDeclaration,
-            else => true,
-        };
 
         break :locs switch (decl.decl) {
             .label => try labelReferences(arena, decl, server.offset_encoding, include_decl),
