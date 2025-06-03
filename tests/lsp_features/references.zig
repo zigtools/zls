@@ -11,38 +11,38 @@ const offsets = zls.offsets;
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "references" {
-    try testReferences(
+    try testSymbolReferences(
         \\const <0> = 0;
         \\const foo = <0>;
     );
-    try testReferences(
+    try testSymbolReferences(
         \\var <0> = 0;
         \\var foo = <0>;
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const <0> = struct {};
         \\var foo: <0> = <0>{};
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const <0> = enum {};
         \\var foo: <0> = undefined;
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const <0> = union {};
         \\var foo: <0> = <0>{};
     );
-    try testReferences(
+    try testSymbolReferences(
         \\fn <0>() void {}
         \\var foo = <0>();
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const <0> = error{};
         \\fn bar() <0>!void {}
     );
 }
 
 test "global scope" {
-    try testReferences(
+    try testSymbolReferences(
         \\const foo = <0>;
         \\const <0> = 0;
         \\const bar = <0>;
@@ -50,12 +50,12 @@ test "global scope" {
 }
 
 test "local scope" {
-    try testReferences(
+    try testSymbolReferences(
         \\fn foo(<0>: u32, bar: u32) void {
         \\    return <0> + bar;
         \\}
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const foo = outer: {
         \\    _ = inner: {
         \\        const <0> = 0;
@@ -69,13 +69,13 @@ test "local scope" {
 }
 
 test "destructuring" {
-    try testReferences(
+    try testSymbolReferences(
         \\const blk = {
         \\    const <0>, const foo = .{ 1, 2 };
         \\    const bar = <0>;
         \\};
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const blk = {
         \\    const foo, const <0> = .{ 1, 2 };
         \\    const bar = <0>;
@@ -84,7 +84,7 @@ test "destructuring" {
 }
 
 test "for/while capture" {
-    try testReferences(
+    try testSymbolReferences(
         \\const blk = {
         \\    for ("") |<0>| {
         \\        _ = <0>;
@@ -97,7 +97,7 @@ test "for/while capture" {
 }
 
 test "break/continue operands" {
-    try testReferences(
+    try testSymbolReferences(
         \\comptime {
         \\    const <0> = 0;
         \\    sw: switch (0) {
@@ -109,7 +109,7 @@ test "break/continue operands" {
 }
 
 test "enum field access" {
-    try testReferences(
+    try testSymbolReferences(
         \\const E = enum {
         \\  <0>,
         \\  bar
@@ -119,7 +119,7 @@ test "enum field access" {
 }
 
 test "struct field access" {
-    try testReferences(
+    try testSymbolReferences(
         \\const S = struct {<0>: u32 = 3};
         \\pub fn foo() bool {
         \\    const s: S = .{};
@@ -129,7 +129,7 @@ test "struct field access" {
 }
 
 test "struct decl access" {
-    try testReferences(
+    try testSymbolReferences(
         \\const S = struct {
         \\    fn <0>(self: S) void {}
         \\};
@@ -144,21 +144,21 @@ test "struct decl access" {
 }
 
 test "struct one field init" {
-    try testReferences(
+    try testSymbolReferences(
         \\const S = struct {<0>: u32};
         \\const s = S{.<0> = 0 };
     );
 }
 
 test "struct multi-field init" {
-    try testReferences(
+    try testSymbolReferences(
         \\const S = struct {<0>: u32, a: bool};
         \\const s = S{.<0> = 0, .a = true};
     );
 }
 
 test "decl literal on generic type" {
-    try testReferences(
+    try testSymbolReferences(
         \\fn Box(comptime T: type) type {
         \\    return struct {
         \\        item: T,
@@ -172,7 +172,7 @@ test "decl literal on generic type" {
 }
 
 test "while continue expression" {
-    try testReferences(
+    try testSymbolReferences(
         \\ pub fn foo() void {
         \\     var <0>: u32 = 0;
         \\     while (true) : (<0> += 1) {}
@@ -181,7 +181,7 @@ test "while continue expression" {
 }
 
 test "test with identifier" {
-    try testReferences(
+    try testSymbolReferences(
         \\pub fn <0>() bool {}
         \\test <0> {}
         \\test "placeholder" {}
@@ -190,19 +190,19 @@ test "test with identifier" {
 }
 
 test "label" {
-    try testReferences(
+    try testSymbolReferences(
         \\const foo = <0>: {
         \\    break :<0> 0;
         \\};
     );
-    try testReferences(
+    try testSymbolReferences(
         \\const foo = <0>: {
         \\    const <1> = 0;
         \\    _ = <1>;
         \\    break :<0> 0;
         \\};
     );
-    try testReferences(
+    try testSymbolReferences(
         \\comptime {
         \\    <0>: switch (0) {
         \\        else => break :<0>,
@@ -212,7 +212,7 @@ test "label" {
 }
 
 test "asm" {
-    try testReferences(
+    try testSymbolReferences(
         \\fn foo(<0>: u32) void {
         \\    asm ("bogus"
         \\        : [ret] "={rax}" (-> void),
@@ -220,7 +220,7 @@ test "asm" {
         \\    );
         \\}
     );
-    try testReferences(
+    try testSymbolReferences(
         \\fn foo(comptime <0>: type) void {
         \\    asm ("bogus"
         \\        : [ret] "={rax}" (-> <0>),
@@ -230,17 +230,17 @@ test "asm" {
 }
 
 test "function header" {
-    try testReferences(
+    try testSymbolReferences(
         \\fn foo(<0>: anytype) @TypeOf(<0>) {}
     );
-    try testReferences(
+    try testSymbolReferences(
         \\fn foo(<0>: type, bar: <0>) <0> {}
     );
 }
 
 test "cross-file reference" {
     if (true) return error.SkipZigTest; // https://github.com/zigtools/zls/issues/1071
-    try testMFReferences(&.{
+    try testMultiFileSymbolReferences(&.{
         \\pub const <0> = struct {};
         ,
         \\const file = @import("file_0.zig");
@@ -248,12 +248,12 @@ test "cross-file reference" {
     });
 }
 
-fn testReferences(source: []const u8) !void {
-    return testMFReferences(&.{source});
+fn testSymbolReferences(source: []const u8) !void {
+    return testMultiFileSymbolReferences(&.{source});
 }
 
 /// source files have the following name pattern: `file_{d}.zig`
-fn testMFReferences(sources: []const []const u8) !void {
+fn testMultiFileSymbolReferences(sources: []const []const u8) !void {
     const placeholder_name = "placeholder";
 
     var ctx: Context = try .init();
