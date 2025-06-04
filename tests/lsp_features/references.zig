@@ -365,3 +365,260 @@ fn testMultiFileSymbolReferences(sources: []const []const u8) !void {
         }
     }
 }
+
+test "matching control flow - unlabeled loop" {
+    try testSimpleReferences(
+        \\const foo = for<cursor> (0..1) |i| {
+        \\    <loc>break</loc> i;
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = <loc>for</loc> (0..1) |i| {
+        \\    break<cursor> i;
+        \\};
+    );
+
+    try testSimpleReferences(
+        \\const foo = while<cursor> (true) {
+        \\    <loc>continue</loc>;
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = <loc>for</loc> (0..1) |i| {
+        \\    continue<cursor> i;
+        \\};
+    );
+}
+
+test "matching control flow - labeled loop" {
+    try testSimpleReferences(
+        \\const foo = blk: for<cursor> (0..1) |i| {
+        \\    if (i == 0) {
+        \\        <loc>continue</loc>;
+        \\    } else {
+        \\        <loc>break</loc> :blk 5;
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = blk: <loc>for</loc> (0..1) |i| {
+        \\    if (i == 0) {
+        \\        continue<cursor>;
+        \\    } else {
+        \\        break :blk 5;
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = blk: <loc>while</loc> (true) {
+        \\    if (i == 0) {
+        \\        continue;
+        \\    } else {
+        \\        break<cursor> :blk 5;
+        \\    }
+        \\};
+    );
+}
+
+test "matching control flow - nested loop with outer label" {
+    try testSimpleReferences(
+        \\const foo = outer: for<cursor> (0..1) |i| {
+        \\    for (0..1) |j| {
+        \\        if (i == j) {
+        \\            break;
+        \\        } else {
+        \\            <loc>break</loc> :outer 5;
+        \\        }
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = outer: for (0..1) |i| {
+        \\    <loc>for</loc> (0..1) |j| {
+        \\        if (i == j) {
+        \\            break<cursor>;
+        \\        } else {
+        \\            break :outer 5;
+        \\        }
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = outer: <loc>for</loc> (0..1) |i| {
+        \\    for (0..1) |j| {
+        \\        if (i == j) {
+        \\            break;
+        \\        } else {
+        \\            break<cursor> :outer 5;
+        \\        }
+        \\    }
+        \\};
+    );
+}
+
+test "matching control flow - nested loop with inner label" {
+    try testSimpleReferences(
+        \\const foo = for (0..1) |i| {
+        \\    inner: for<cursor> (0..1) |j| {
+        \\        if (i == j) {
+        \\            <loc>break</loc>;
+        \\        } else {
+        \\            <loc>break</loc> :inner 5;
+        \\        }
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = for (0..1) |i| {
+        \\    inner: <loc>for</loc> (0..1) |j| {
+        \\        if (i == j) {
+        \\            break<cursor>;
+        \\        } else {
+        \\            break :outer 5;
+        \\        }
+        \\    }
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = for (0..1) |i| {
+        \\    inner: <loc>for</loc> (0..1) |j| {
+        \\        if (i == j) {
+        \\            break;
+        \\        } else {
+        \\            break<cursor> :inner 5;
+        \\        }
+        \\    }
+        \\};
+    );
+}
+
+test "matching control flow - labeled switch" {
+    try testSimpleReferences(
+        \\const foo = blk: switch<cursor> (undefined) {
+        \\    .foo => <loc>break</loc> :blk 5,
+        \\    .bar => <loc>continue</loc> :blk 5,
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = blk: <loc>switch</loc> (undefined) {
+        \\    .foo => break<cursor> :blk 5,
+        \\    .bar => continue :blk 5,
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = blk: <loc>switch</loc> (undefined) {
+        \\    .foo => break :blk 5,
+        \\    .bar => continue<cursor> :blk 5,
+        \\};
+    );
+}
+
+test "matching control flow - unlabeled switch" {
+    try testSimpleReferences(
+        \\const foo = switch<cursor> (undefined) {
+        \\    .foo => break 5,
+        \\    .foo => continue 5,
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = switch (undefined) {
+        \\    .foo => break<cursor> 5,
+        \\    .foo => continue 5,
+        \\};
+    );
+    try testSimpleReferences(
+        \\const foo = switch (undefined) {
+        \\    .foo => break 5,
+        \\    .foo => continue<cursor> 5,
+        \\};
+    );
+}
+
+fn testSimpleReferences(source: []const u8) !void {
+    var phr = try helper.collectClearPlaceholders(allocator, source);
+    defer phr.deinit(allocator);
+
+    std.debug.assert(phr.locations.len % 2 == 1);
+    var expected_locations: std.ArrayListUnmanaged(offsets.Loc) = try .initCapacity(allocator, phr.locations.len / 2);
+    defer expected_locations.deinit(allocator);
+
+    const cursor_index = for (phr.locations.items(.old), phr.locations.items(.new), 0..) |old, new, i| {
+        const name = offsets.locToSlice(source, old);
+        if (!std.mem.eql(u8, name, "<cursor>")) continue;
+        phr.locations.orderedRemove(i);
+        std.debug.assert(new.start == new.end);
+        break new.start;
+    } else @panic("missing <cursor> placeholder");
+
+    {
+        var i: usize = 0;
+        while (i != phr.locations.len) : (i += 2) {
+            std.debug.assert(std.mem.eql(u8, "<loc>", offsets.locToSlice(source, phr.locations.items(.old)[i])));
+            std.debug.assert(std.mem.eql(u8, "</loc>", offsets.locToSlice(source, phr.locations.items(.old)[i + 1])));
+            const start_loc = phr.locations.items(.new)[i];
+            const end_loc = phr.locations.items(.new)[i + 1];
+            std.debug.assert(start_loc.start == start_loc.end);
+            std.debug.assert(end_loc.start == end_loc.end);
+            expected_locations.appendAssumeCapacity(.{ .start = start_loc.start, .end = end_loc.start });
+        }
+    }
+
+    var ctx: Context = try .init();
+    defer ctx.deinit();
+
+    const file_uri = try ctx.addDocument(.{ .source = phr.new_source });
+
+    var error_builder: ErrorBuilder = .init(allocator);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
+
+    try error_builder.addFile(file_uri, phr.new_source);
+    try error_builder.msgAtIndex("requested references here", file_uri, cursor_index, .info, .{});
+
+    const params: types.ReferenceParams = .{
+        .textDocument = .{ .uri = file_uri },
+        .position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding),
+        .context = .{ .includeDeclaration = false },
+    };
+    const actual_locations: []const types.Location = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
+
+    // keeps track of expected locations that have been given by the server
+    // used to detect double references and missing references
+    var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, expected_locations.items.len);
+    defer visited.deinit(allocator);
+
+    for (actual_locations) |response_location| {
+        std.debug.assert(std.mem.eql(u8, response_location.uri, file_uri));
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
+
+        const index = found_index: {
+            for (expected_locations.items, 0..) |expected_loc, idx| {
+                if (expected_loc.start != actual_loc.start) continue;
+                if (expected_loc.end != actual_loc.end) continue;
+                break :found_index idx;
+            }
+            try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
+            return error.UnexpectedReference;
+        };
+
+        if (visited.isSet(index)) {
+            try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
+            return error.DuplicateReference;
+        } else {
+            visited.set(index);
+        }
+    }
+
+    var has_unvisited = false;
+    var unvisited_it = visited.iterator(.{ .kind = .unset });
+    while (unvisited_it.next()) |index| {
+        const unvisited_loc = expected_locations.items[index];
+        try error_builder.msgAtLoc("expected reference here!", file_uri, unvisited_loc, .err, .{});
+        has_unvisited = true;
+    }
+
+    if (has_unvisited) return error.ExpectedReference;
+}
