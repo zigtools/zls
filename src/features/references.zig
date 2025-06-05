@@ -65,6 +65,8 @@ const Builder = struct {
     locations: std.ArrayListUnmanaged(types.Location) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
+    /// the decl is local to a function, block, etc
+    local_only_decl: bool,
     /// Whether the `decl_handle` has been added
     did_add_decl_handle: bool = false,
     analyser: *Analyser,
@@ -104,6 +106,10 @@ const Builder = struct {
     fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
+        const decl_name = offsets.identifierTokenToNameSlice(
+            builder.decl_handle.handle.tree,
+            builder.decl_handle.nameToken(),
+        );
 
         switch (tree.nodeTag(node)) {
             .identifier,
@@ -119,6 +125,7 @@ const Builder = struct {
                     else => unreachable,
                 };
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
 
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
@@ -131,15 +138,18 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                const lhs_node, const field_name = tree.nodeData(node).node_and_token;
+                if (builder.local_only_decl) return;
+                const lhs_node, const field_token = tree.nodeData(node).node_and_token;
+                const name = offsets.identifierTokenToNameSlice(tree, field_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
+
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
-                const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
+                const child = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
-                    try builder.add(handle, field_name);
+                    try builder.add(handle, field_token);
                 }
             },
             .struct_init_one,
@@ -151,23 +161,28 @@ const Builder = struct {
             .struct_init_dot_two,
             .struct_init_dot_two_comma,
             => {
+                if (builder.local_only_decl) return;
                 var buffer: [2]Ast.Node.Index = undefined;
                 const struct_init = tree.fullStructInit(&buffer, node).?;
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                     const name_loc = offsets.tokenToLoc(tree, name_token);
                     const name = offsets.locToSlice(tree.source, name_loc);
+                    if (!std.mem.eql(u8, name, decl_name)) continue;
 
                     const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, node, &.{}) orelse continue;
 
                     if (builder.decl_handle.eql(lookup)) {
                         try builder.add(handle, name_token);
+                        return;
                     }
                 }
             },
             .enum_literal => {
+                if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
                 const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
 
                 if (builder.decl_handle.eql(lookup)) {
@@ -277,6 +292,7 @@ fn symbolReferences(
         .allocator = allocator,
         .analyser = analyser,
         .decl_handle = decl_handle,
+        .local_only_decl = local_node != null,
         .encoding = encoding,
     };
     errdefer builder.deinit();
