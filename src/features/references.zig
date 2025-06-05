@@ -353,12 +353,10 @@ const ControlFlowBuilder = struct {
 
 fn controlFlowReferences(
     allocator: std.mem.Allocator,
-    request: GeneralReferencesRequest,
     token_handle: Analyser.TokenWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
-    if (request == .rename) return .empty;
     const handle = token_handle.handle;
     const tree = handle.tree;
     const kw_token = token_handle.token;
@@ -611,10 +609,9 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
     // TODO: Make this work with branching types
     const locations = locs: {
-        if (pos_context == .keyword) {
+        if (pos_context == .keyword and request != .rename) {
             break :locs try controlFlowReferences(
                 arena,
-                request,
                 .{ .token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft(), .handle = handle },
                 server.offset_encoding,
                 include_decl,
@@ -637,7 +634,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             },
             .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
             .enum_literal => try analyser.getSymbolEnumLiteral(handle, source_index, name),
-            .keyword => unreachable,
+            .keyword => null,
             else => null,
         } orelse return null;
 
