@@ -77,70 +77,13 @@ pub const DeclarationLookupContext = struct {
     }
 };
 
-/// Assumes that the `node` is not a container_field of a struct tuple field.
-/// Returns a `.identifier` or `.builtin` token.
-fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
-    var buffer: [1]Ast.Node.Index = undefined;
-    const token_index = switch (tree.nodeTag(node)) {
-        .local_var_decl,
-        .global_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        => tree.nodeMainToken(node) + 1,
-        .fn_proto,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_decl,
-        => tree.fullFnProto(&buffer, node).?.name_token orelse return null,
-
-        .identifier => tree.nodeMainToken(node),
-        .test_decl => tree.nodeData(node).opt_token_and_node[0].unwrap() orelse return null,
-
-        .container_field,
-        .container_field_init,
-        .container_field_align,
-        => tree.nodeMainToken(node),
-
-        .root,
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        .block,
-        .block_semicolon,
-        .block_two,
-        .block_two_semicolon,
-        => return null,
-
-        else => unreachable,
-    };
-
-    return switch (tree.tokenTag(token_index)) {
-        .identifier, .builtin => token_index,
-        else => null,
-    };
-}
-
 pub const Declaration = union(enum) {
     /// Index of the ast node.
     /// Can have one of the following tags:
-    ///   - `.root`
-    ///   - `.container_decl`
-    ///   - `.tagged_union`
     ///   - `.container_field`
     ///   - `.fn_proto`
     ///   - `.fn_decl`
     ///   - `.var_decl`
-    ///   - `.block`
     ast_node: Ast.Node.Index,
     /// Function parameter
     function_parameter: Param,
@@ -250,7 +193,34 @@ pub const Declaration = union(enum) {
     /// Returns a `.identifier` or `.builtin` token.
     pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
         return switch (decl) {
-            .ast_node => |n| getDeclNameToken(tree, n).?,
+            .ast_node => |node| {
+                var buffer: [1]Ast.Node.Index = undefined;
+                const token_index = switch (tree.nodeTag(node)) {
+                    .local_var_decl,
+                    .global_var_decl,
+                    .simple_var_decl,
+                    .aligned_var_decl,
+                    => tree.nodeMainToken(node) + 1,
+                    .fn_proto,
+                    .fn_proto_multi,
+                    .fn_proto_one,
+                    .fn_proto_simple,
+                    .fn_decl,
+                    => tree.fullFnProto(&buffer, node).?.name_token.?,
+
+                    .container_field,
+                    .container_field_init,
+                    .container_field_align,
+                    => tree.nodeMainToken(node),
+
+                    else => unreachable,
+                };
+
+                switch (tree.tokenTag(token_index)) {
+                    .identifier, .builtin => return token_index,
+                    else => unreachable,
+                }
+            },
             .function_parameter => |payload| payload.get(tree).?.name_token.?,
             .optional_payload => |payload| payload.identifier,
             .error_union_payload => |payload| payload.identifier,
