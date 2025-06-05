@@ -242,7 +242,38 @@ fn symbolReferences(
 
     std.debug.assert(decl_handle.decl != .label); // use `labelReferences` instead
 
-    var builder = Builder{
+    const doc_scope = try decl_handle.handle.getDocumentScope();
+    const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
+    const scope_index = Analyser.innermostScopeAtIndexWithTag(doc_scope, source_index, .init(.{
+        .block = true,
+        .container = true,
+        .container_usingnamespace = true,
+        .function = false,
+        .other = false,
+    })).unwrap().?;
+    const scope_node = doc_scope.getScopeAstNode(scope_index).?;
+
+    // If `local_node != null`, references to the declaration can only be
+    // found inside of the given ast node.
+    const local_node: ?Ast.Node.Index = switch (decl_handle.decl) {
+        .ast_node => switch (doc_scope.getScopeTag(scope_index)) {
+            .block => scope_node,
+            .container, .container_usingnamespace => null,
+            .function, .other => unreachable,
+        },
+        .optional_payload,
+        .error_union_payload,
+        .error_union_error,
+        .for_loop_payload,
+        .assign_destructure,
+        => scope_node,
+        .switch_payload => |payload| payload.node,
+        .function_parameter => |payload| payload.func,
+        .label => unreachable, // handled separately by labelReferences
+        .error_token => return .empty,
+    };
+
+    var builder: Builder = .{
         .allocator = allocator,
         .analyser = analyser,
         .decl_handle = decl_handle,
@@ -250,40 +281,21 @@ fn symbolReferences(
     };
     errdefer builder.deinit();
 
-    const curr_handle = decl_handle.handle;
-    if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
+    if (include_decl) try builder.add(decl_handle.handle, decl_handle.nameToken());
 
-    switch (decl_handle.decl) {
-        .ast_node => {
-            try builder.collectReferences(curr_handle, .root);
+    try builder.collectReferences(decl_handle.handle, local_node orelse .root);
 
-            const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
-            // highlight requests only pertain to the current document, otherwise we can try to narrow things down
-            const workspace = if (request == .highlight) false else blk: {
-                const doc_scope = try curr_handle.getDocumentScope();
-                const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
-                break :blk switch (doc_scope.getScopeTag(scope_index)) {
-                    .function, .block => false,
-                    .container, .container_usingnamespace => decl_handle.isPublic(),
-                    .other => true,
-                };
-            };
-            if (workspace) {
-                try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
-            }
-        },
-        .optional_payload,
-        .error_union_payload,
-        .error_union_error,
-        .for_loop_payload,
-        .assign_destructure,
-        .switch_payload,
-        => {
-            try builder.collectReferences(curr_handle, .root);
-        },
-        .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
-        .label => unreachable, // handled separately by labelReferences
-        .error_token => {},
+    const workspace = local_node == null and request != .highlight and decl_handle.isPublic();
+    if (workspace) {
+        try gatherReferences(
+            allocator,
+            analyser,
+            decl_handle.handle,
+            skip_std_references,
+            include_decl,
+            &builder,
+            .get,
+        );
     }
 
     return builder.locations;
