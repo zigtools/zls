@@ -302,9 +302,10 @@ const ControlFlowBuilder = struct {
         const main_token = tree.nodeMainToken(node);
         switch (tree.nodeTag(node)) {
             .@"break", .@"continue" => {
-                if (tree.nodeData(node).opt_token_and_opt_node[0].unwrap()) |label| {
+                if (tree.nodeData(node).opt_token_and_opt_node[0].unwrap()) |label_token| {
                     const loop_or_switch_label = builder.label orelse return;
-                    if (std.mem.eql(u8, loop_or_switch_label, tree.tokenSlice(label))) {
+                    const label = offsets.identifierTokenToNameSlice(tree, label_token);
+                    if (std.mem.eql(u8, loop_or_switch_label, label)) {
                         try builder.add(main_token);
                     }
                 } else for (builder.nodes) |n| switch (tree.nodeTag(n)) {
@@ -386,7 +387,7 @@ fn controlFlowReferences(
                 if (kw_token + 2 >= tree.tokens.len) break :blk null;
                 if (tree.tokenTag(kw_token + 1) != .colon) break :blk null;
                 if (tree.tokenTag(kw_token + 2) != .identifier) break :blk null;
-                break :blk kw_token + 2;
+                break :blk offsets.identifierTokenToNameSlice(tree, kw_token + 2);
             };
             for (nodes) |node| switch (tree.nodeTag(node)) {
                 .for_simple,
@@ -399,10 +400,10 @@ fn controlFlowReferences(
                     const main_token = tree.nodeMainToken(node);
                     const label = maybe_label orelse break try builder.add(main_token);
                     const loop_label = if (tree.isTokenPrecededByTags(main_token, &.{ .identifier, .colon }))
-                        main_token - 2
+                        offsets.identifierTokenToNameSlice(tree, main_token - 2)
                     else
                         continue;
-                    if (std.mem.eql(u8, tree.tokenSlice(label), tree.tokenSlice(loop_label))) {
+                    if (std.mem.eql(u8, label, loop_label)) {
                         try builder.add(main_token);
                     }
                 },
@@ -412,10 +413,10 @@ fn controlFlowReferences(
                     const label = maybe_label orelse continue;
                     const main_token = tree.nodeMainToken(node);
                     const switch_label = if (tree.tokenTag(main_token) == .identifier)
-                        main_token
+                        offsets.identifierTokenToNameSlice(tree, main_token)
                     else
                         continue;
-                    if (std.mem.eql(u8, tree.tokenSlice(label), tree.tokenSlice(switch_label))) {
+                    if (std.mem.eql(u8, label, switch_label)) {
                         try builder.add(
                             // we already know the switch is labeled so we can just offset
                             main_token + 2,
