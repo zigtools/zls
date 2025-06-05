@@ -459,6 +459,84 @@ test "enum literal after break label" {
     , .enum_literal, .{});
 }
 
+test "enum literal in 'then' expression of 'if' statement" {
+    try testContext(
+        \\var foo = if (bar) <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = if (bar) <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+}
+
+test "enum literal in 'else' expression of 'if' statement" {
+    try testContext(
+        \\var foo = if (bar) .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = if (bar) .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+}
+
+test "enum literal in body of 'while' loop" {
+    try testContext(
+        \\var foo = while (bar) <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = while (bar) <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+    try testContext(
+        \\var foo = while (bar) |baz| <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = while (bar) |baz| <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+}
+
+test "enum literal in 'else' expression of 'while' loop" {
+    try testContext(
+        \\var foo = while (bar) .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = while (bar) .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+    try testContext(
+        \\var foo = while (bar) |baz| .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = while (bar) |baz| .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+}
+
+test "enum literal in body of 'for' loop" {
+    try testContext(
+        \\var foo = for (bar) <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = for (bar) <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+    try testContext(
+        \\var foo = for (bar) |baz| <loc>.<cursor>foo</loc> else .bar;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = for (bar) |baz| <loc>.foo<cursor></loc> else .bar;
+    , .enum_literal, .{});
+}
+
+test "enum literal in 'else' expression of 'for' loop" {
+    try testContext(
+        \\var foo = for (bar) .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = for (bar) .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+    try testContext(
+        \\var foo = for (bar) |baz| .foo else <loc>.<cursor>bar</loc>;
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = for (bar) |baz| .foo else <loc>.bar<cursor></loc>;
+    , .enum_literal, .{});
+}
+
 test "label access" {
     try testContext(
         \\var foo = blk: { break :<loc><cursor>blk</loc> null };

@@ -4384,12 +4384,14 @@ pub const PositionContext = union(enum) {
 
 const StackState = struct {
     ctx: PositionContext,
-    stack_id: enum { Paren, Bracket, Global },
+    stack_id: StackId,
 };
+
+const StackId = enum { paren, bracket, global };
 
 fn peek(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(StackState)) !*StackState {
     if (arr.items.len == 0) {
-        try arr.append(allocator, .{ .ctx = .empty, .stack_id = .Global });
+        try arr.append(allocator, .{ .ctx = .empty, .stack_id = .global });
     }
     return &arr.items[arr.items.len - 1];
 }
@@ -4511,7 +4513,7 @@ pub fn getPositionContext(
 
                 if (source_index < content_loc.start or content_loc.end < source_index) break :string_lit_block;
 
-                if (curr_ctx.stack_id == .Paren and
+                if (curr_ctx.stack_id == .paren and
                     stack.items.len >= 2)
                 {
                     const perhaps_builtin = stack.items[stack.items.len - 2];
@@ -4567,18 +4569,28 @@ pub fn getPositionContext(
             },
             .l_paren => {
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
-                try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Paren });
+                const stack_id: StackId = switch (curr_ctx.ctx) {
+                    .keyword => |tag| switch (tag) {
+                        .keyword_for,
+                        .keyword_if,
+                        .keyword_while,
+                        => .global,
+                        else => .paren,
+                    },
+                    else => .paren,
+                };
+                try stack.append(allocator, .{ .ctx = .empty, .stack_id = stack_id });
             },
-            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Bracket }),
+            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
             .r_paren => {
                 _ = stack.pop();
-                if (curr_ctx.stack_id != .Paren) {
+                if (curr_ctx.stack_id != .paren) {
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
             .r_bracket => {
                 _ = stack.pop();
-                if (curr_ctx.stack_id != .Bracket) {
+                if (curr_ctx.stack_id != .bracket) {
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
@@ -4597,6 +4609,9 @@ pub fn getPositionContext(
             .keyword_continue,
             .keyword_callconv,
             .keyword_addrspace,
+            .keyword_for,
+            .keyword_if,
+            .keyword_while,
             => curr_ctx.ctx = .{ .keyword = tok.tag },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
             else => curr_ctx.ctx = .empty,
