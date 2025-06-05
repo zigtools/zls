@@ -3867,7 +3867,7 @@ pub const Type = struct {
                             return;
                         }
                         if (token >= 1 and tree.tokenTag(token - 1) == .keyword_return) blk: {
-                            const function_scope = innermostFunctionScopeAtIndex(doc_scope, tree.tokenStart(token - 1)).unwrap() orelse break :blk;
+                            const function_scope = innermostScopeAtIndexWithTag(doc_scope, tree.tokenStart(token - 1), .initOne(.function)).unwrap() orelse break :blk;
                             const function_node = doc_scope.getScopeAstNode(function_scope).?;
                             var buf: [1]Ast.Node.Index = undefined;
                             const func = tree.fullFnProto(&buf, function_node).?;
@@ -5293,34 +5293,26 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-pub fn innermostScopeAtIndex(document_scope: DocumentScope, source_index: usize) Scope.Index {
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
-    var scope_index: Scope.Index = scope_iterator.next().unwrap().?; // the DocumentScope's root scope must exist
-    while (scope_iterator.next().unwrap()) |inner_scope| {
-        scope_index = inner_scope;
-    }
-    return scope_index;
+pub fn innermostScopeAtIndex(
+    document_scope: DocumentScope,
+    source_index: usize,
+) Scope.Index {
+    return innermostScopeAtIndexWithTag(document_scope, source_index, .initFull()).unwrap().?;
 }
 
-pub fn innermostFunctionScopeAtIndex(document_scope: DocumentScope, source_index: usize) Scope.OptionalIndex {
+pub fn innermostScopeAtIndexWithTag(
+    document_scope: DocumentScope,
+    source_index: usize,
+    tag_filter: std.EnumSet(Scope.Tag),
+) Scope.OptionalIndex {
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     var scope_index: Scope.OptionalIndex = .none;
     while (scope_iterator.next().unwrap()) |inner_scope| {
-        if (document_scope.getScopeTag(inner_scope) != .function) continue;
+        const scope_tag = document_scope.getScopeTag(inner_scope);
+        if (!tag_filter.contains(scope_tag)) continue;
         scope_index = inner_scope.toOptional();
     }
     return scope_index;
-}
-
-pub fn innermostBlockScope(document_scope: DocumentScope, source_index: usize) Ast.Node.Index {
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
-    var ast_node: ?Ast.Node.Index = null;
-    while (scope_iterator.next().unwrap()) |inner_scope| {
-        if (document_scope.getScopeAstNode(inner_scope)) |node| {
-            ast_node = node;
-        }
-    }
-    return ast_node.?; // the DocumentScope's root scope is guaranteed to have an Ast Node
 }
 
 pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {

@@ -78,7 +78,14 @@ pub fn getSignatureInfo(
     markup_kind: types.MarkupKind,
 ) !?types.SignatureInformation {
     const document_scope = try handle.getDocumentScope();
-    const innermost_block = Analyser.innermostBlockScope(document_scope, absolute_index);
+    const innermost_block_scope = Analyser.innermostScopeAtIndexWithTag(document_scope, absolute_index, .init(.{
+        .block = true,
+        .container = true,
+        .container_usingnamespace = true,
+        .function = true,
+        .other = false,
+    })).unwrap().?;
+    const innermost_block = document_scope.getScopeAstNode(innermost_block_scope).?;
     const tree = handle.tree;
 
     // Use the innermost scope to determine the earliest token we would need
