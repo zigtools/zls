@@ -4323,13 +4323,13 @@ pub const PositionContext = union(enum) {
     char_literal: offsets.Loc,
     /// XXX: Internal use only, currently points to the loc of the first l_paren
     parens_expr: offsets.Loc,
-    keyword: std.zig.Token.Tag,
+    keyword: Ast.TokenIndex,
     global_error_set,
     comment,
     other,
     empty,
 
-    pub fn loc(self: PositionContext) ?offsets.Loc {
+    pub fn loc(self: PositionContext, tree: *const Ast) ?offsets.Loc {
         return switch (self) {
             .builtin,
             .import_string_literal,
@@ -4345,7 +4345,7 @@ pub const PositionContext = union(enum) {
             .char_literal,
             .parens_expr,
             => |l| return l,
-            .keyword,
+            .keyword => |token_index| return offsets.tokenToLoc(tree.*, token_index),
             .global_error_set,
             .comment,
             .other,
@@ -4452,6 +4452,7 @@ pub fn getPositionContext(
     var should_do_lookahead = lookahead;
 
     var current_token = offsets.sourceIndexToTokenIndex(tree, line_loc.start).preferLeft();
+    var previous_token_end = line_loc.start;
 
     while (true) : (current_token += 1) {
         var tok: std.zig.Token = .{
@@ -4459,29 +4460,33 @@ pub fn getPositionContext(
             .loc = offsets.tokenToLoc(tree, current_token),
         };
         tok.loc.end = @min(tok.loc.end, line_loc.end);
+        defer previous_token_end = tok.loc.end;
+
+        // Single '@' do not return a builtin token so we check this on our own.
+        if (tok.tag == .invalid and tree.source[tok.loc.start] == '@') {
+            tok.tag = .builtin;
+            tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
+        }
 
         if (source_index < tok.loc.start) break;
         if (source_index == tok.loc.start) {
             // Tie-breaking, the cursor is exactly between two tokens, and
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
+            should_do_lookahead = false;
             switch (tok.tag) {
                 .identifier,
                 .builtin,
                 .number_literal,
                 .string_literal,
                 .multiline_string_literal_line,
-                => should_do_lookahead = false,
-                else => break,
+                => {},
+                else => if (previous_token_end == tok.loc.start) break,
             }
         }
 
         switch (tok.tag) {
             .invalid => {
-                // Single '@' do not return a builtin token so we check this on our own.
-                if (tree.source[tok.loc.start] == '@') {
-                    return .{ .builtin = tok.loc };
-                }
                 const s = tree.source[tok.loc.start..tok.loc.end];
                 const q = std.mem.indexOf(u8, s, "\"") orelse return .other;
                 if (s[q -| 1] == '@') {
@@ -4534,8 +4539,8 @@ pub fn getPositionContext(
                 }
             },
             .identifier => switch (curr_ctx.ctx) {
-                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
-                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok) },
+                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc(&tree).?, tok) },
+                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(&tree).?, tok) },
                 .label_access => |loc| curr_ctx.ctx = if (loc.start == loc.end)
                     .{ .label_access = tok.loc }
                 else
@@ -4547,19 +4552,19 @@ pub fn getPositionContext(
                 // TODO: only set context to enum literal if token tag is "." (not ".*")
                 .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                 .enum_literal => curr_ctx.ctx = .empty,
-                .keyword => |tag| switch (tag) {
+                .keyword => |token_index| switch (tree.tokenTag(token_index)) {
                     .keyword_break => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                     else => curr_ctx.ctx = .other,
                 },
                 .comment, .other, .field_access, .global_error_set => {},
-                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc() orelse tok.loc, tok) },
+                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(&tree) orelse tok.loc, tok) },
             },
             .question_mark => switch (curr_ctx.ctx) {
                 .field_access => {},
                 else => curr_ctx.ctx = .empty,
             },
             .colon => switch (curr_ctx.ctx) {
-                .keyword => |tag| switch (tag) {
+                .keyword => |token_index| switch (tree.tokenTag(token_index)) {
                     .keyword_break,
                     .keyword_continue,
                     => curr_ctx.ctx = .{ .label_access = .{ .start = tok.loc.end, .end = tok.loc.end } },
@@ -4570,7 +4575,7 @@ pub fn getPositionContext(
             .l_paren => {
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
                 const stack_id: StackId = switch (curr_ctx.ctx) {
-                    .keyword => |tag| switch (tag) {
+                    .keyword => |token_index| switch (tree.tokenTag(token_index)) {
                         .keyword_for,
                         .keyword_if,
                         .keyword_while,
@@ -4613,7 +4618,10 @@ pub fn getPositionContext(
             .keyword_if,
             .keyword_switch,
             .keyword_while,
-            => curr_ctx.ctx = .{ .keyword = tok.tag },
+            => |tag| {
+                std.debug.assert(tree.tokenTag(current_token) == tag);
+                curr_ctx.ctx = .{ .keyword = current_token };
+            },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
             else => curr_ctx.ctx = .empty,
         }

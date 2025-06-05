@@ -1541,7 +1541,7 @@ fn collectContainerNodes(
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, nodes, &types_with_handles),
         .builtin => |loc| try collectBuiltinContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
-        .keyword => |tag| try collectKeywordFnContainerNodes(builder, tag, dot_context, &types_with_handles),
+        .keyword => |token| try collectKeywordFnContainerNodes(builder, token, dot_context, &types_with_handles),
         else => {},
     }
     return types_with_handles.toOwnedSlice(builder.arena);
@@ -1706,12 +1706,12 @@ fn collectEnumLiteralContainerNodes(
 
 fn collectKeywordFnContainerNodes(
     builder: *Builder,
-    tag: std.zig.Token.Tag,
+    token: Ast.TokenIndex,
     dot_context: EnumLiteralContext,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
 ) error{OutOfMemory}!void {
     const builtin_type_name: []const u8 = name: {
-        switch (tag) {
+        switch (builder.orig_handle.tree.tokenTag(token)) {
             .keyword_addrspace => switch (dot_context.fn_arg_index) {
                 0 => break :name "AddressSpace",
                 else => return,
