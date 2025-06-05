@@ -374,6 +374,7 @@ fn controlFlowReferences(
         .last_loop = kw_token,
         .nodes = nodes,
     };
+    defer builder.deinit();
 
     if (include_decl) {
         try builder.add(kw_token);
@@ -436,6 +437,8 @@ fn controlFlowReferences(
         },
         else => {},
     }
+
+    defer builder.locations = .empty;
     return builder.locations;
 }
 
