@@ -4571,7 +4571,9 @@ pub fn getPositionContext(
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
                 const stack_id: StackId = switch (curr_ctx.ctx) {
                     .keyword => |tag| switch (tag) {
-                        .keyword_if => .global,
+                        .keyword_if,
+                        .keyword_while,
+                        => .global,
                         else => .paren,
                     },
                     else => .paren,
@@ -4607,6 +4609,7 @@ pub fn getPositionContext(
             .keyword_callconv,
             .keyword_addrspace,
             .keyword_if,
+            .keyword_while,
             => curr_ctx.ctx = .{ .keyword = tok.tag },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
             else => curr_ctx.ctx = .empty,
