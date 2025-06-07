@@ -9,6 +9,12 @@ const offsets = zls.offsets;
 
 const allocator = std.testing.allocator;
 
+test "keyword" {
+    try testContext(
+        \\const foo = <cursor><loc>while</loc> (true) {};
+    , .keyword, .{ .lookahead = true });
+}
+
 test "var_access" {
     try testContext(
         \\const foo = <cursor><loc>identifier</loc>;
@@ -45,7 +51,7 @@ test "function.payload" {
     , .var_access, .{ .lookahead = true });
     try testContext(
         \\    fn foo() !<loc>Str</loc> <cursor>{
-    , .var_access, .{ .lookahead = true });
+    , .var_access, .{ .lookahead = false });
 }
 
 test "function.error_set" {
@@ -208,7 +214,10 @@ test "field access across multiple lines" {
 test "builtin" {
     try testContext(
         \\var foo = <cursor>@
-    , .empty, .{});
+    , .empty, .{ .lookahead = false });
+    try testContext(
+        \\var foo = <loc><cursor>@</loc>
+    , .builtin, .{ .lookahead = true });
 
     try testContext(
         \\var foo = <loc>@<cursor></loc>
@@ -235,7 +244,13 @@ test "builtin" {
 
     try testContext(
         \\var foo: <cursor>@
-    , .empty, .{});
+    , .empty, .{ .lookahead = false });
+    try testContext(
+        \\var foo: <loc><cursor>@</loc>
+    , .builtin, .{ .lookahead = true });
+    try testContext(
+        \\var foo: <loc><cursor>@</loc>();
+    , .builtin, .{ .lookahead = true });
     try testContext(
         \\var foo: <loc><cursor>@Thi</loc>();
     , .builtin, .{ .lookahead = true });
@@ -274,6 +289,13 @@ test "builtin" {
     try testContext(
         \\if (true) <loc>@setRuntime</loc><cursor>(false)
     , .builtin, .{});
+
+    try testContext(
+        \\const foo = (<loc><cursor>@</loc>())
+    , .builtin, .{ .lookahead = true });
+    try testContext(
+        \\const foo = (<loc><cursor>@trap</loc>())
+    , .builtin, .{ .lookahead = true });
 }
 
 test "comment" {
@@ -435,7 +457,10 @@ test "enum literal" {
     , .enum_literal, .{});
     try testContext(
         \\var foo = <cursor>.;
-    , .empty, .{});
+    , .empty, .{ .lookahead = false });
+    try testContext(
+        \\var foo = <loc><cursor>.</loc>;
+    , .enum_literal, .{ .lookahead = true });
     try testContext(
         \\var foo = <loc>.</loc><cursor>;
     , .enum_literal, .{});
@@ -648,8 +673,8 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
         return error.DifferentTag;
     }
 
-    if (!std.meta.eql(expected_loc, ctx.loc())) {
-        if (ctx.loc()) |actual_loc| {
+    if (!std.meta.eql(expected_loc, ctx.loc(&tree))) {
+        if (ctx.loc(&tree)) |actual_loc| {
             try error_builder.msgAtLoc("actual range here", "file.zig", actual_loc, .info, .{});
         }
 
@@ -658,7 +683,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
         }
 
         std.debug.print("expected_loc: {?}\n", .{expected_loc});
-        std.debug.print("actual_loc  : {?}\n", .{ctx.loc()});
+        std.debug.print("actual_loc  : {?}\n", .{ctx.loc(&tree)});
         return error.DifferentRange;
     }
 }
