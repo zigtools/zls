@@ -35,6 +35,8 @@ lsp_capabilities: struct {
     supports_semantic_tokens_refresh: bool = false,
     supports_inlay_hints_refresh: bool = false,
 } = .{},
+currently_loading_uris: std.StringArrayHashMapUnmanaged(void) = .empty,
+wait_for_currently_loading_uri: std.Thread.Condition = .{},
 
 pub const Uri = []const u8;
 
@@ -611,6 +613,9 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.trigram_stores.deinit(self.allocator);
 
+    std.debug.assert(self.currently_loading_uris.count() == 0);
+    self.currently_loading_uris.deinit(self.allocator);
+
     if (supports_build_system) {
         for (self.build_files.values()) |build_file| {
             build_file.deinit(self.allocator);
@@ -691,7 +696,34 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.getHandle(uri)) |handle| return handle;
+    {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        while (true) {
+            if (self.handles.get(uri)) |handle| return handle;
+
+            const gop = self.currently_loading_uris.getOrPutValue(
+                self.allocator,
+                uri,
+                {},
+            ) catch return null;
+
+            if (!gop.found_existing) {
+                break;
+            }
+
+            var mutex: std.Thread.Mutex = .{};
+
+            mutex.lock();
+            defer mutex.unlock();
+
+            self.lock.unlock();
+            self.wait_for_currently_loading_uri.wait(&mutex);
+            self.lock.lock();
+        }
+    }
+
     const file_contents = self.readFile(uri) orelse return null;
     return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri, err });
@@ -1378,17 +1410,12 @@ fn createAndStoreDocument(
     errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
 
     if (gop.found_existing) {
-        if (lsp_synced) {
-            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
-            gop.value_ptr.*.impl.associated_build_file = .init;
+        new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
+        gop.value_ptr.*.impl.associated_build_file = .init;
 
-            new_handle.uri = gop.key_ptr.*;
-            gop.value_ptr.*.deinit();
-            gop.value_ptr.*.* = new_handle;
-        } else {
-            // TODO prevent concurrent `createAndStoreDocument` invocations from racing each other
-            new_handle.deinit();
-        }
+        new_handle.uri = gop.key_ptr.*;
+        gop.value_ptr.*.deinit();
+        gop.value_ptr.*.* = new_handle;
     } else {
         gop.key_ptr.* = try self.allocator.dupe(u8, uri);
         errdefer self.allocator.free(gop.key_ptr.*);
