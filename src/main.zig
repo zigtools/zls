@@ -338,7 +338,11 @@ pub fn main() !u8 {
     }
 
     log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
-    log.info("Log File:         {?s} ({s})", .{ log_file_path, @tagName(log_level) });
+    if (log_file_path) |path| {
+        log.info("Log File:         {s} ({s})", .{ path, @tagName(log_level) });
+    } else {
+        log.info("Log File:         none", .{});
+    }
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();

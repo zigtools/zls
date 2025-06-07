@@ -504,10 +504,10 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     }
 
     if (request.clientInfo) |clientInfo| {
-        log.info("Client Info:      {s}-{s}", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+        log.info("Client Info:      {s} ({s})", .{ clientInfo.name, clientInfo.version orelse "unknown version" });
     }
-    log.info("Autofix Mode:     {s}", .{@tagName(server.getAutofixMode())});
-    log.debug("Offset Encoding:  {s}", .{@tagName(server.offset_encoding)});
+    log.info("Autofix Mode:     '{s}'", .{@tagName(server.getAutofixMode())});
+    log.debug("Offset Encoding:  '{s}'", .{@tagName(server.offset_encoding)});
 
     if (request.workspaceFolders) |workspace_folders| {
         for (workspace_folders) |src| {
@@ -900,7 +900,7 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
         }
     }
     if (updated_files != 0) {
-        log.info("updated {d} watched file(s)", .{updated_files});
+        log.debug("updated {d} watched file(s)", .{updated_files});
     }
 }
 
@@ -1176,7 +1176,7 @@ pub fn updateConfiguration(
     if (server.config.force_autofix and server.getAutofixMode() == .none) {
         log.warn("`force_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
     } else if (new_force_autofix) {
-        log.info("Autofix Mode: {s}", .{@tagName(server.getAutofixMode())});
+        log.info("Autofix Mode: '{s}'", .{@tagName(server.getAutofixMode())});
     }
 }
 
@@ -2204,17 +2204,6 @@ pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime metho
 fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    var timer = std.time.Timer.start() catch null;
-    defer if (timer) |*t| {
-        const total_time = @divFloor(t.read(), std.time.ns_per_ms);
-        if (zig_builtin.single_threaded) {
-            log.debug("Took {d}ms to process {}", .{ total_time, fmtMessage(message) });
-        } else {
-            const thread_id = std.Thread.getCurrentId();
-            log.debug("Took {d}ms to process {} on Thread {d}", .{ total_time, fmtMessage(message), thread_id });
-        }
-    };
 
     try server.validateMessage(message);
 
