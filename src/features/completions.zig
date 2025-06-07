@@ -56,7 +56,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                         .detail = try std.fmt.allocPrint(
                             builder.arena,
                             "{}",
-                            .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })},
+                            .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })},
                         ),
                     });
                     return;
@@ -272,7 +272,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 if (ty.is_type_val and ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
                     break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
                 } else {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmt(builder.analyser, .{ .truncate_container_decls = false })});
+                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })});
                 }
             } else null;
 
@@ -329,7 +329,7 @@ fn functionTypeCompletion(
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
         if (container_ty.isNamespace()) break :blk false;
-        break :blk Analyser.firstParamIs(func_ty, container_ty.typeOf(builder.analyser));
+        break :blk Analyser.firstParamIs(func_ty, try container_ty.typeOf(builder.analyser));
     } else false;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
@@ -403,7 +403,7 @@ fn functionTypeCompletion(
             .snippet_placeholders = false,
         })});
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{info.return_value.fmt(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try std.fmt.allocPrint(builder.arena, "{}", .{try info.return_value.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })});
 
         break :blk .{
             .detail = detail,
@@ -1432,7 +1432,7 @@ fn collectContainerFields(
                 };
 
                 const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
-                    const type_fmt = ty.fmt(builder.analyser, .{ .truncate_container_decls = false });
+                    const type_fmt = try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
                         break :detail try std.fmt.allocPrint(builder.arena, "{} = {s}", .{ type_fmt, value_str });
@@ -1460,7 +1460,8 @@ fn collectContainerFields(
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
                 var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
-                expected_ty = expected_ty.typeOf(builder.analyser).resolveDeclLiteralResultType();
+                expected_ty = try expected_ty.typeOf(builder.analyser);
+                expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);
@@ -1502,14 +1503,14 @@ fn collectContainerNodes(
 
     const gpa = builder.analyser.gpa;
 
-    var types_with_handles: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    var types_with_handles: Analyser.Type.ArraySet = .empty;
     const token_index = switch (dot_context.type_info) {
         .identifier_token_index => |token| token,
         .expr_node_index => |node| {
             if (try builder.analyser.resolveTypeOfNode(.of(node, handle))) |ty| {
-                try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
+                try ty.getAllTypesWithHandlesArraySet(builder.arena, &types_with_handles);
             }
-            return types_with_handles.toOwnedSlice(builder.arena);
+            return types_with_handles.keys();
         },
     };
     const source_index = offsets.tokenToLoc(handle.tree, token_index).end;
@@ -1527,8 +1528,8 @@ fn collectContainerNodes(
                 const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
                 if (nodes[0].toOptional() == var_decl.ast.type_node) {
                     if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
-                        try ty.getAllTypesWithHandlesArrayList(builder.arena, &types_with_handles);
-                        return types_with_handles.toOwnedSlice(builder.arena);
+                        try ty.getAllTypesWithHandlesArraySet(builder.arena, &types_with_handles);
+                        return types_with_handles.keys();
                     }
                 }
             },
@@ -1544,7 +1545,7 @@ fn collectContainerNodes(
         .keyword => |tag| try collectKeywordFnContainerNodes(builder, tag, dot_context, &types_with_handles),
         else => {},
     }
-    return types_with_handles.toOwnedSlice(builder.arena);
+    return types_with_handles.keys();
 }
 
 fn resolveBuiltinFnArg(
@@ -1565,7 +1566,7 @@ fn collectBuiltinContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *Analyser.Type.ArraySet,
 ) error{OutOfMemory}!void {
     if (dot_context.need_ret_type) return;
     if (try resolveBuiltinFnArg(
@@ -1573,7 +1574,7 @@ fn collectBuiltinContainerNodes(
         dot_context.fn_arg_index,
         handle.tree.source[loc.start..loc.end],
     )) |ty| {
-        try types_with_handles.append(builder.arena, ty);
+        try ty.getAllTypesWithHandlesArraySet(builder.arena, types_with_handles);
     }
 }
 
@@ -1582,7 +1583,7 @@ fn collectVarAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *Analyser.Type.ArraySet,
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1591,7 +1592,7 @@ fn collectVarAccessContainerNodes(
     const result = try symbol_decl.resolveType(analyser) orelse return;
     const type_expr = try analyser.resolveDerefType(result) orelse result;
     if (!type_expr.isFunc()) {
-        try type_expr.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try type_expr.getAllTypesWithHandlesArraySet(arena, types_with_handles);
         return;
     }
 
@@ -1600,13 +1601,13 @@ fn collectVarAccessContainerNodes(
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
         var node_type = try analyser.resolveReturnType(type_expr) orelse return;
         if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-        try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try node_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
         return;
     }
     const param_index = dot_context.fn_arg_index;
     if (param_index >= info.parameters.len) return;
     const param_type = info.parameters[param_index].type orelse return;
-    try types_with_handles.append(arena, param_type);
+    try param_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
 }
 
 fn collectFieldAccessContainerNodes(
@@ -1614,7 +1615,7 @@ fn collectFieldAccessContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *Analyser.Type.ArraySet,
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1628,12 +1629,12 @@ fn collectFieldAccessContainerNodes(
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
             if (unwrapped.isEnumType() or unwrapped.isUnionType()) {
-                try types_with_handles.append(arena, unwrapped);
+                try unwrapped.getAllTypesWithHandlesArraySet(arena, types_with_handles);
                 return;
             }
         }
         // if (dot_context.likely == .enum_literal and !(container.isEnumType() or container.isUnionType())) return;
-        try container.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try container.getAllTypesWithHandlesArraySet(arena, types_with_handles);
         return;
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -1645,7 +1646,7 @@ fn collectFieldAccessContainerNodes(
             if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (!node_type.isFunc()) {
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
             continue;
         }
 
@@ -1654,7 +1655,7 @@ fn collectFieldAccessContainerNodes(
         if (dot_context.need_ret_type) { // => we need f()'s return type
             node_type = try analyser.resolveReturnType(node_type) orelse continue;
             if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            try node_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+            try node_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
             continue;
         }
         // don't have the luxury of referencing an `Ast.full.Call`
@@ -1677,7 +1678,7 @@ fn collectFieldAccessContainerNodes(
         const param_index = dot_context.fn_arg_index + additional_index;
         if (param_index >= params.len) continue;
         const param_type = params[param_index].type orelse continue;
-        try param_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
+        try param_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
     }
 }
 
@@ -1686,7 +1687,7 @@ fn collectEnumLiteralContainerNodes(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     nodes: []const Ast.Node.Index,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *Analyser.Type.ArraySet,
 ) error{OutOfMemory}!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
@@ -1700,7 +1701,7 @@ fn collectEnumLiteralContainerNodes(
         var member_type = try member_decl.resolveType(analyser) orelse continue;
         // Unwrap `x{ .fld_w_opt_type =`
         if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
-        try types_with_handles.append(arena, member_type);
+        try member_type.getAllTypesWithHandlesArraySet(arena, types_with_handles);
     }
 }
 
@@ -1708,7 +1709,7 @@ fn collectKeywordFnContainerNodes(
     builder: *Builder,
     tag: std.zig.Token.Tag,
     dot_context: EnumLiteralContext,
-    types_with_handles: *std.ArrayListUnmanaged(Analyser.Type),
+    types_with_handles: *Analyser.Type.ArraySet,
 ) error{OutOfMemory}!void {
     const builtin_type_name: []const u8 = name: {
         switch (tag) {
@@ -1724,5 +1725,5 @@ fn collectKeywordFnContainerNodes(
         }
     };
     const ty = try builder.analyser.instanceStdBuiltinType(builtin_type_name) orelse return;
-    try types_with_handles.append(builder.arena, ty);
+    try ty.getAllTypesWithHandlesArraySet(builder.arena, types_with_handles);
 }

@@ -675,7 +675,7 @@ test "function" {
         \\bar: enum { fizz, buzz }
         \\```
         \\```zig
-        \\(enum { fizz, buzz })
+        \\(enum {...})
         \\```
     );
     try testHover(
@@ -814,6 +814,103 @@ test "either types" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "either type instances" {
+    try testHoverWithOptions(
+        \\const EitherType<cursor> = if (undefined) u32 else f64;
+    ,
+        \\const EitherType = if (undefined) u32 else f64
+        \\(type)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: EitherType = undefined;
+    ,
+        \\const either: EitherType = undefined
+        \\(u32)
+        \\(f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: *EitherType = undefined;
+    ,
+        \\const either: *EitherType = undefined
+        \\(*u32)
+        \\(*f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: [3]EitherType = undefined;
+    ,
+        \\const either: [3]EitherType = undefined
+        \\([3]u32)
+        \\([3]f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: struct { EitherType } = undefined;
+    ,
+        \\const either: struct { EitherType } = undefined
+        \\(struct { u32 })
+        \\(struct { f64 })
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: ?EitherType = undefined;
+    ,
+        \\const either: ?EitherType = undefined
+        \\(?u32)
+        \\(?f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherError = if (undefined) error{Foo} else error{Bar};
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: EitherError!EitherType = undefined;
+    ,
+        \\const either: EitherError!EitherType = undefined
+        \\(error{Foo}!u32)
+        \\(error{Foo}!f64)
+        \\(error{Bar}!u32)
+        \\(error{Bar}!f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\fn GenericStruct(T: type) type {
+        \\    return struct { field: T };
+        \\}
+        \\const EitherType = if (undefined) u32 else f64;
+        \\const either<cursor>: GenericStruct(EitherType) = undefined;
+    ,
+        \\const either: GenericStruct(EitherType) = undefined
+        \\(GenericStruct(u32))
+        \\(GenericStruct(f64))
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\fn function<cursor>() EitherType {}
+    ,
+        \\fn function() EitherType
+        \\(fn () u32)
+        \\(fn () f64)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\fn function<cursor>(_: EitherType) void {}
+    ,
+        \\fn function(_: EitherType) void
+        \\(fn (u32) void)
+        \\(fn (f64) void)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const EitherType = if (undefined) u32 else f64;
+        \\fn function<cursor>(_: EitherType) EitherType {}
+    ,
+        \\fn function(_: EitherType) EitherType
+        \\(fn (u32) u32)
+        \\(fn (u32) f64)
+        \\(fn (f64) u32)
+        \\(fn (f64) f64)
+    , .{ .markup_kind = .plaintext });
+}
+
 test "var decl comments" {
     try testHover(
         \\///this is a comment
@@ -941,7 +1038,7 @@ test "integer overflow on top level container" {
         \\baz
         \\```
         \\```zig
-        \\(enum {  foo.bar: baz,})
+        \\(enum {...})
         \\```
     );
 }
@@ -1011,7 +1108,7 @@ test "deprecated" {
         \\const foo = @compileError("some message")
         \\```
         \\```zig
-        \\(@compileError("some message"))
+        \\(@compileError(...))
         \\```
     );
 }
