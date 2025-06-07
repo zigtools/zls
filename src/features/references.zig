@@ -65,6 +65,8 @@ const Builder = struct {
     locations: std.ArrayListUnmanaged(types.Location) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
+    /// the decl is local to a function, block, etc
+    local_only_decl: bool,
     /// Whether the `decl_handle` has been added
     did_add_decl_handle: bool = false,
     analyser: *Analyser,
@@ -104,6 +106,10 @@ const Builder = struct {
     fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
+        const decl_name = offsets.identifierTokenToNameSlice(
+            builder.decl_handle.handle.tree,
+            builder.decl_handle.nameToken(),
+        );
 
         switch (tree.nodeTag(node)) {
             .identifier,
@@ -119,6 +125,7 @@ const Builder = struct {
                     else => unreachable,
                 };
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
 
                 const child = try builder.analyser.lookupSymbolGlobal(
                     handle,
@@ -131,15 +138,18 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                const lhs_node, const field_name = tree.nodeData(node).node_and_token;
+                if (builder.local_only_decl) return;
+                const lhs_node, const field_token = tree.nodeData(node).node_and_token;
+                const name = offsets.identifierTokenToNameSlice(tree, field_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
+
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
-                const child = try deref_lhs.lookupSymbol(builder.analyser, symbol) orelse return;
+                const child = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
-                    try builder.add(handle, field_name);
+                    try builder.add(handle, field_token);
                 }
             },
             .struct_init_one,
@@ -151,23 +161,28 @@ const Builder = struct {
             .struct_init_dot_two,
             .struct_init_dot_two_comma,
             => {
+                if (builder.local_only_decl) return;
                 var buffer: [2]Ast.Node.Index = undefined;
                 const struct_init = tree.fullStructInit(&buffer, node).?;
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                     const name_loc = offsets.tokenToLoc(tree, name_token);
                     const name = offsets.locToSlice(tree.source, name_loc);
+                    if (!std.mem.eql(u8, name, decl_name)) continue;
 
                     const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, node, &.{}) orelse continue;
 
                     if (builder.decl_handle.eql(lookup)) {
                         try builder.add(handle, name_token);
+                        return;
                     }
                 }
             },
             .enum_literal => {
+                if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+                if (!std.mem.eql(u8, name, decl_name)) return;
                 const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
 
                 if (builder.decl_handle.eql(lookup)) {
@@ -242,48 +257,61 @@ fn symbolReferences(
 
     std.debug.assert(decl_handle.decl != .label); // use `labelReferences` instead
 
-    var builder = Builder{
-        .allocator = allocator,
-        .analyser = analyser,
-        .decl_handle = decl_handle,
-        .encoding = encoding,
-    };
-    errdefer builder.deinit();
+    const doc_scope = try decl_handle.handle.getDocumentScope();
+    const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
+    const scope_index = Analyser.innermostScopeAtIndexWithTag(doc_scope, source_index, .init(.{
+        .block = true,
+        .container = true,
+        .container_usingnamespace = true,
+        .function = false,
+        .other = false,
+    })).unwrap().?;
+    const scope_node = doc_scope.getScopeAstNode(scope_index).?;
 
-    const curr_handle = decl_handle.handle;
-    if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
-
-    switch (decl_handle.decl) {
-        .ast_node => {
-            try builder.collectReferences(curr_handle, .root);
-
-            const source_index = decl_handle.handle.tree.tokenStart(decl_handle.nameToken());
-            // highlight requests only pertain to the current document, otherwise we can try to narrow things down
-            const workspace = if (request == .highlight) false else blk: {
-                const doc_scope = try curr_handle.getDocumentScope();
-                const scope_index = Analyser.innermostScopeAtIndex(doc_scope, source_index);
-                break :blk switch (doc_scope.getScopeTag(scope_index)) {
-                    .function, .block => false,
-                    .container, .container_usingnamespace => decl_handle.isPublic(),
-                    .other => true,
-                };
-            };
-            if (workspace) {
-                try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
-            }
+    // If `local_node != null`, references to the declaration can only be
+    // found inside of the given ast node.
+    const local_node: ?Ast.Node.Index = switch (decl_handle.decl) {
+        .ast_node => switch (doc_scope.getScopeTag(scope_index)) {
+            .block => scope_node,
+            .container, .container_usingnamespace => null,
+            .function, .other => unreachable,
         },
         .optional_payload,
         .error_union_payload,
         .error_union_error,
         .for_loop_payload,
         .assign_destructure,
-        .switch_payload,
-        => {
-            try builder.collectReferences(curr_handle, .root);
-        },
-        .function_parameter => |payload| try builder.collectReferences(curr_handle, payload.func),
+        => scope_node,
+        .switch_payload => |payload| payload.node,
+        .function_parameter => |payload| payload.func,
         .label => unreachable, // handled separately by labelReferences
-        .error_token => {},
+        .error_token => return .empty,
+    };
+
+    var builder: Builder = .{
+        .allocator = allocator,
+        .analyser = analyser,
+        .decl_handle = decl_handle,
+        .local_only_decl = local_node != null,
+        .encoding = encoding,
+    };
+    errdefer builder.deinit();
+
+    if (include_decl) try builder.add(decl_handle.handle, decl_handle.nameToken());
+
+    try builder.collectReferences(decl_handle.handle, local_node orelse .root);
+
+    const workspace = local_node == null and request != .highlight and decl_handle.isPublic();
+    if (workspace) {
+        try gatherReferences(
+            allocator,
+            analyser,
+            decl_handle.handle,
+            skip_std_references,
+            include_decl,
+            &builder,
+            .get,
+        );
     }
 
     return builder.locations;
