@@ -4740,7 +4740,13 @@ pub const DeclWithHandle = struct {
                     const type_expr = container_field.ast.type_expr.unwrap() orelse return null;
                     return .of(type_expr, self.handle);
                 },
-                else => return null,
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => return null,
+                else => unreachable,
             },
             .assign_destructure => |payload| {
                 const var_decl = payload.getFullVarDecl(tree);
@@ -4781,12 +4787,16 @@ pub const DeclWithHandle = struct {
                         else => unreachable,
                     }
                 },
-                // `.container_decl_*`
-                // `.tagged_union_*`
-                // `.container_field_*`
-                // `.fn_proto_*`
-                // `.fn_decl`
-                else => true,
+                .container_field,
+                .container_field_init,
+                .container_field_align,
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => true,
+                else => unreachable,
             },
             .assign_destructure => |payload| {
                 const mut_token = payload.getFullVarDecl(tree).ast.mut_token;
@@ -4857,7 +4867,11 @@ pub const DeclWithHandle = struct {
                 .fn_proto_simple,
                 .fn_decl,
                 => tree.fullFnProto(&buf, node).?.visib_token != null,
-                else => true,
+                .container_field,
+                .container_field_init,
+                .container_field_align,
+                => true,
+                else => unreachable,
             },
             else => true,
         };
@@ -4878,8 +4892,16 @@ pub const DeclWithHandle = struct {
                     const scope_index = Analyser.innermostScopeAtIndex(document_scope, source_index);
                     break :blk document_scope.getScopeTag(scope_index).isContainer();
                 },
-
-                else => false,
+                .container_field,
+                .container_field_init,
+                .container_field_align,
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => false,
+                else => unreachable,
             },
             else => false,
         };
@@ -5152,7 +5174,7 @@ pub fn collectDeclarationsOfContainer(
                         })) continue;
                     }
                 },
-                else => {},
+                else => unreachable,
             },
             .label => continue,
             else => {},
