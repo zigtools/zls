@@ -35,6 +35,8 @@ lsp_capabilities: struct {
     supports_semantic_tokens_refresh: bool = false,
     supports_inlay_hints_refresh: bool = false,
 } = .{},
+currently_loading_uris: std.StringArrayHashMapUnmanaged(void) = .empty,
+wait_for_currently_loading_uri: std.Thread.Condition = .{},
 
 pub const Uri = []const u8;
 
@@ -647,6 +649,9 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.trigram_stores.deinit(self.allocator);
 
+    std.debug.assert(self.currently_loading_uris.count() == 0);
+    self.currently_loading_uris.deinit(self.allocator);
+
     if (supports_build_system) {
         for (self.build_files.values()) |build_file| {
             build_file.deinit(self.allocator);
@@ -725,10 +730,35 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (store.getHandle(uri)) |handle| return handle;
+    {
+        store.lock.lock();
+        defer store.lock.unlock();
+
+        while (true) {
+            if (store.handles.get(uri)) |handle| return handle;
+
+            const gop = store.currently_loading_uris.getOrPutValue(
+                store.allocator,
+                uri,
+                {},
+            ) catch return null;
+
+            if (!gop.found_existing) {
+                break;
+            }
+
+            var mutex: std.Thread.Mutex = .{};
+
+            mutex.lock();
+            defer mutex.unlock();
+
+            store.lock.unlock();
+            store.wait_for_currently_loading_uri.wait(&mutex);
+            store.lock.lock();
+        }
+    }
 
     const file_contents = store.readUri(uri) orelse return null;
-
     return store.createAndStoreDocument(uri, file_contents) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
@@ -831,6 +861,8 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
     }
     gop.value_ptr.* = handle_ptr;
 
+    try self.loadDependencies(handle_ptr.import_uris.items);
+
     if (isBuildFile(uri)) {
         log.debug("Opened document '{s}' (build file)", .{uri});
     } else {
@@ -885,6 +917,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     try handle.setSource(new_text);
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
+    try self.loadDependencies(handle.import_uris.items);
 }
 
 /// Removes a document from the store, unless said document is currently open and
@@ -1551,13 +1584,17 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) er
     const gop = blk: {
         self.lock.lock();
         defer self.lock.unlock();
-        break :blk try self.handles.getOrPutValue(self.allocator, handle_ptr.uri, handle_ptr);
+
+        const gop = try self.handles.getOrPutValue(self.allocator, handle_ptr.uri, handle_ptr);
+        std.debug.assert(!gop.found_existing);
+
+        std.debug.assert(self.currently_loading_uris.swapRemove(uri));
+        self.wait_for_currently_loading_uri.broadcast();
+
+        break :blk gop;
     };
 
-    if (gop.found_existing) {
-        handle_ptr.deinit();
-        self.allocator.destroy(handle_ptr);
-    }
+    try self.loadDependencies(handle_ptr.import_uris.items);
 
     if (isBuildFile(gop.value_ptr.*.uri)) {
         log.debug("Opened document '{s}' (build file)", .{gop.value_ptr.*.uri});
@@ -1566,6 +1603,50 @@ fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) er
     }
 
     return gop.value_ptr.*;
+}
+
+fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !void {
+    var not_currently_loading_uris: std.ArrayListUnmanaged([]const u8) =
+        try .initCapacity(store.allocator, import_uris.len);
+    defer {
+        not_currently_loading_uris.deinit(store.allocator);
+    }
+    errdefer {
+        for (not_currently_loading_uris.items) |duped_import_uri| {
+            store.allocator.free(duped_import_uri);
+        }
+    }
+
+    {
+        store.lock.lockShared();
+        defer store.lock.unlockShared();
+
+        for (import_uris) |import_uri| {
+            if (!store.handles.contains(import_uri) and
+                !store.currently_loading_uris.contains(import_uri))
+            {
+                not_currently_loading_uris.appendAssumeCapacity(
+                    try store.allocator.dupe(u8, import_uri),
+                );
+            }
+        }
+    }
+
+    errdefer comptime unreachable;
+
+    const S = struct {
+        fn getOrLoadHandleVoid(s: *DocumentStore, duped_import_uri: Uri) void {
+            _ = s.getOrLoadHandle(duped_import_uri);
+            defer s.allocator.free(duped_import_uri);
+        }
+    };
+
+    for (not_currently_loading_uris.items) |duped_import_uri| {
+        store.thread_pool.spawn(S.getOrLoadHandleVoid, .{ store, duped_import_uri }) catch {
+            defer store.allocator.free(duped_import_uri);
+            _ = store.getOrLoadHandle(duped_import_uri);
+        };
+    }
 }
 
 /// Caller owns returned memory.
