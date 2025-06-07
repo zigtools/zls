@@ -145,15 +145,17 @@ test "struct decl access" {
 
 test "struct one field init" {
     try testSymbolReferences(
-        \\const S = struct {<0>: u32};
-        \\const s = S{.<0> = 0 };
+        \\const S = struct { <0>: u32 };
+        \\const s = S{ .<0> = 0 };
+        \\const s2: S = .{ .<0> = 0 };
     );
 }
 
 test "struct multi-field init" {
     try testSymbolReferences(
-        \\const S = struct {<0>: u32, a: bool};
-        \\const s = S{.<0> = 0, .a = true};
+        \\const S = struct { <0>: u32, a: bool };
+        \\const s = S{ .<0> = 0, .a = true };
+        \\const s2: S = .{ .<0> = 0, .a = true };
     );
 }
 
