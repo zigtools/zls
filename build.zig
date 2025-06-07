@@ -33,7 +33,6 @@ const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .windows },
     .{ .cpu_arch = .arm, .os_tag = .linux },
     .{ .cpu_arch = .loongarch64, .os_tag = .linux },
-    .{ .cpu_arch = .powerpc64le, .os_tag = .linux },
     .{ .cpu_arch = .riscv64, .os_tag = .linux },
     .{ .cpu_arch = .x86, .os_tag = .linux },
     .{ .cpu_arch = .x86, .os_tag = .windows },
@@ -41,6 +40,11 @@ const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .macos },
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
     .{ .cpu_arch = .wasm32, .os_tag = .wasi },
+};
+
+const additional_tagged_release_targets = [_]std.Target.Query{
+    .{ .cpu_arch = .powerpc64le, .os_tag = .linux },
+    .{ .cpu_arch = .s390x, .os_tag = .linux },
 };
 
 pub fn build(b: *Build) !void {
@@ -168,9 +172,11 @@ pub fn build(b: *Build) !void {
     });
 
     { // zig build release
-        var release_artifacts: [release_targets.len]*Build.Step.Compile = undefined;
+        const is_tagged_release = zls_version.pre == null and zls_version.build == null;
+        const targets = comptime if (is_tagged_release) release_targets ++ additional_tagged_release_targets else release_targets;
 
-        for (release_targets, &release_artifacts) |target_query, *artifact| {
+        var release_artifacts: [targets.len]*Build.Step.Compile = undefined;
+        for (targets, &release_artifacts) |target_query, *artifact| {
             artifact.* = b.addExecutable(.{
                 .name = "zls",
                 .root_module = b.createModule(.{
