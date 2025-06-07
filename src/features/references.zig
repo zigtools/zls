@@ -166,16 +166,41 @@ const Builder = struct {
                 const struct_init = tree.fullStructInit(&buffer, node).?;
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
-                    const name_loc = offsets.tokenToLoc(tree, name_token);
-                    const name = offsets.locToSlice(tree.source, name_loc);
+                    const name = offsets.identifierTokenToNameSlice(tree, name_token);
                     if (!std.mem.eql(u8, name, decl_name)) continue;
 
-                    const lookup = try builder.analyser.lookupSymbolFieldInit(handle, name, node, &.{}) orelse continue;
+                    const nodes = switch (tree.nodeTag(node)) {
+                        .struct_init_dot,
+                        .struct_init_dot_comma,
+                        .struct_init_dot_two,
+                        .struct_init_dot_two_comma,
+                        => try ast.nodesOverlappingIndex(
+                            builder.allocator,
+                            tree,
+                            tree.tokenStart(name_token),
+                        ),
+                        // if this isn't an anonymous struct the type can be determined from the `T{}` directly
+                        .struct_init_one,
+                        .struct_init_one_comma,
+                        .struct_init,
+                        .struct_init_comma,
+                        => &.{node},
+                        else => unreachable,
+                    };
+
+                    const lookup = try builder.analyser.lookupSymbolFieldInit(
+                        handle,
+                        name,
+                        nodes[0],
+                        nodes[1..],
+                    ) orelse return;
 
                     if (builder.decl_handle.eql(lookup)) {
                         try builder.add(handle, name_token);
-                        return;
                     }
+                    // if we get here then we know that the name of the field matched
+                    // and duplicate fields are invalid so just return early
+                    return;
                 }
             },
             .enum_literal => {
