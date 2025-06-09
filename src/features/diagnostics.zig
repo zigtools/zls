@@ -353,14 +353,21 @@ fn getErrorBundleFromAstCheck(
         if (term != .Exited) return .empty;
     }
 
-    return try getErrorBundleFromStderr(allocator, stderr_bytes, true, source);
+    return try getErrorBundleFromStderr(allocator, stderr_bytes, true, .{ .single_source_file = source });
 }
 
 pub fn getErrorBundleFromStderr(
     allocator: std.mem.Allocator,
     stderr_bytes: []const u8,
     ignore_src_path: bool,
-    single_file_source: ?[]const u8,
+    path_resolution: union(enum) {
+        single_source_file: [:0]const u8,
+        dynamic: struct {
+            document_store: *DocumentStore,
+            /// file paths in stderr may be relative so we need to figure out the base path
+            base_path: []const u8,
+        },
+    },
 ) !std.zig.ErrorBundle {
     if (stderr_bytes.len == 0) return .empty;
 
@@ -391,15 +398,23 @@ pub fn getErrorBundleFromStderr(
             .character = (std.fmt.parseInt(u32, column_string, 10) catch continue) -| 1,
         };
 
-        const src_loc = if (single_file_source) |source| src_loc: {
+        const maybe_source: ?[:0]const u8 = switch (path_resolution) {
+            .single_source_file => |source| source,
+            .dynamic => |dynamic| source: {
+                const file_path = try std.fs.path.resolve(allocator, &.{ dynamic.base_path, src_path });
+                defer allocator.free(file_path);
+                const file_uri = try URI.fromPath(allocator, file_path);
+                defer allocator.free(file_uri);
+                const handle = dynamic.document_store.getOrLoadHandle(file_uri) orelse break :source null;
+                break :source handle.tree.source;
+            },
+        };
+
+        const src_loc = if (maybe_source) |source| src_loc: {
             const source_index = offsets.positionToIndex(source, utf8_position, .@"utf-8");
             const source_line = offsets.lineSliceAtIndex(source, source_index);
 
-            var loc: offsets.Loc = .{ .start = source_index, .end = source_index };
-
-            while (loc.end < source.len and Analyser.isSymbolChar(source[loc.end])) {
-                loc.end += 1;
-            }
+            const loc = offsets.tokenIndexToLoc(source, source_index);
 
             break :src_loc try error_bundle.addSourceLocation(.{
                 .src_path = eb_src_path,
@@ -418,7 +433,7 @@ pub fn getErrorBundleFromStderr(
                 .span_start = 0,
                 .span_main = 0,
                 .span_end = 0,
-                .source_line = eb_empty_string,
+                .source_line = 0,
             });
         };
 
