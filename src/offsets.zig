@@ -222,9 +222,8 @@ pub fn identifierIndexToLoc(text: [:0]const u8, source_index: usize, range: Iden
         while (true) : (index += 1) {
             switch (text[index]) {
                 '\n' => break,
+                '\\' => index += 1,
                 '"' => {
-                    // continue on e.g. `@"\""` but not `@"\\"`
-                    if (text[index - 1] == '\\' and text[index - 2] != '\\') continue;
                     // include the closing quote
                     if (range == .full) index += 1;
                     break;
@@ -265,6 +264,11 @@ test identifierIndexToLoc {
 
     try std.testing.expectEqualStrings("@hello", identifierIndexToSlice("@hello", 0, .full));
     try std.testing.expectEqualStrings("@\"hello\"", identifierIndexToSlice("@\"hello\"", 0, .full));
+    try std.testing.expectEqualStrings(
+        \\@"\"\\\""
+    , identifierIndexToSlice(
+        \\@"\"\\\""
+    , 0, .full));
 }
 
 pub fn identifierIndexToSlice(text: [:0]const u8, source_index: usize, range: IdentifierIndexRange) []const u8 {
