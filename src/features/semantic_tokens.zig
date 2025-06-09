@@ -1202,6 +1202,9 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
             },
         );
         return;
+    } else if (try builder.analyser.resolvePropertyType(lhs_type, symbol_name)) |_| {
+        try writeTokenMod(builder, field_name_token, .property, .{});
+        return;
     }
 
     try writeTokenMod(
