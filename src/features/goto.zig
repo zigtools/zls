@@ -147,7 +147,7 @@ fn gotoDefinitionEnumLiteral(
 }
 
 fn gotoDefinitionBuiltin(
-    document_store: *DocumentStore,
+    analyser: *Analyser,
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     offset_encoding: offsets.Encoding,
@@ -155,19 +155,19 @@ fn gotoDefinitionBuiltin(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const tree = handle.tree;
+    const name_loc = offsets.tokenIndexToLoc(tree.source, loc.start);
+    const name = offsets.locToSlice(tree.source, name_loc);
     if (std.mem.eql(u8, name, "@cImport")) {
         if (!DocumentStore.supports_build_system) return null;
 
-        const tree = handle.tree;
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = tree.nodeMainToken(cimport_node);
             if (loc.start == tree.tokenStart(main_token)) break index;
         } else return null;
         const hash = handle.cimports.items(.hash)[index];
 
-        const result = document_store.cimports.get(hash) orelse return null;
+        const result = analyser.store.cimports.get(hash) orelse return null;
         const target_range: types.Range = .{
             .start = .{ .line = 0, .character = 0 },
             .end = .{ .line = 0, .character = 0 },
@@ -175,12 +175,23 @@ fn gotoDefinitionBuiltin(
         switch (result) {
             .failure => return null,
             .success => |uri| return .{
-                .originSelectionRange = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+                .originSelectionRange = offsets.locToRange(tree.source, name_loc, offset_encoding),
                 .targetUri = uri,
                 .targetRange = target_range,
                 .targetSelectionRange = target_range,
             },
         }
+    } else if (std.mem.eql(u8, name, "@This")) {
+        const ty = try analyser.innermostContainer(handle, name_loc.start);
+        const definition = try ty.typeDefinitionToken() orelse return null;
+        const token_loc = offsets.tokenToLoc(tree, definition.token);
+        const target_range = offsets.locToRange(tree.source, token_loc, offset_encoding);
+        return .{
+            .originSelectionRange = offsets.locToRange(tree.source, name_loc, offset_encoding),
+            .targetUri = handle.uri,
+            .targetRange = target_range,
+            .targetSelectionRange = target_range,
+        };
     }
 
     return null;
@@ -283,7 +294,7 @@ pub fn gotoHandler(
     const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, true);
 
     const response = switch (pos_context) {
-        .builtin => |loc| try gotoDefinitionBuiltin(&server.document_store, handle, loc, server.offset_encoding),
+        .builtin => |loc| try gotoDefinitionBuiltin(&analyser, handle, loc, server.offset_encoding),
         .var_access => try gotoDefinitionGlobal(&analyser, handle, source_index, kind, server.offset_encoding),
         .field_access => |loc| blk: {
             const links = try gotoDefinitionFieldAccess(&analyser, arena, handle, source_index, loc, kind, server.offset_encoding) orelse return null;
