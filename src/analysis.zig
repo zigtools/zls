@@ -2113,7 +2113,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
         .error_set_decl => {
             const lbrace, const rbrace = tree.nodeData(node).token_and_token;
-            var strings: std.ArrayList(InternPool.String) = .empty;
+            var strings: std.AutoArrayHashMapUnmanaged(InternPool.String, void) = .empty;
             defer strings.deinit(analyser.gpa);
             var i: usize = 0;
             for (lbrace + 1..rbrace) |tok_i| {
@@ -2122,9 +2122,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 defer i += 1;
                 const name = offsets.tokenToSlice(tree, identifier_token);
                 const index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
-                try strings.append(analyser.gpa, index);
+                try strings.put(analyser.gpa, index, {});
             }
-            const names = try analyser.ip.getStringSlice(analyser.gpa, strings.items);
+            const names = try analyser.ip.getStringSlice(analyser.gpa, strings.keys());
             const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },

@@ -6,3 +6,6 @@ const ErrorUnionType = Error!u32;
 const InvalidErrorUnionTypeUnwrap = ErrorUnionType catch |err| err;
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
 //                                                        ^^^ (unknown)()
+
+const DuplicateErrorName = error{ Foo, Foo } || error{Bar};
+//    ^^^^^^^^^^^^^^^^^^ (type)(error{Foo,Bar})
