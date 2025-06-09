@@ -117,7 +117,9 @@ pub fn getDocumentSymbols(
             .fn_proto_multi,
             .fn_proto_one,
             .fn_proto_simple,
-            => blk: {
+            .fn_decl,
+            => |tag| blk: {
+                if (tag != .fn_decl and tree.nodeTag(walker.parentNode()) == .fn_decl) continue;
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_info = tree.fullFnProto(&buffer, node).?;
                 const name_token = fn_info.name_token orelse continue;

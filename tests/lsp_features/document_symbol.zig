@@ -179,6 +179,26 @@ test "decl names that are empty or contain whitespace return non-empty document 
     );
 }
 
+test "nested function declarations" {
+    try testDocumentSymbol(
+        \\fn outer(_: struct {
+        \\    fn foo() void {}
+        \\}) void {
+        \\    _ = struct {
+        \\        fn inner() void {
+        \\            //
+        \\        }
+        \\    };
+        \\}
+    ,
+        \\Function outer (fn outer(_: struct {
+        \\    fn foo() void {}
+        \\}) void)
+        \\  Function foo (fn foo() void)
+        \\  Function inner (fn inner() void)
+    );
+}
+
 fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
