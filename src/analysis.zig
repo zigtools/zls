@@ -1277,7 +1277,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
     };
 }
 
-fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
+pub fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
     if (ty.is_type_val)
         return null;
 

@@ -438,6 +438,53 @@ test "field access" {
         .{ "S", .namespace, .{} },
         .{ "foo", .variable, .{ .mutable = true, .static = true } },
     });
+    try testSemanticTokens(
+        \\comptime {
+        \\    const slice: []const u8 = undefined;
+        \\    _ = slice.ptr;
+        \\    _ = slice.len;
+        \\   const array: [4]u8 = undefined;
+        \\   _ = array.len;
+        \\   const tuple: struct { u8, u8 } = undefined;
+        \\   _ = tuple.len;
+        \\}
+    , &.{
+        .{ "comptime", .keyword, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "slice", .variable, .{ .declaration = true } },
+        .{ "const", .keyword, .{} },
+        .{ "u8", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "=", .operator, .{} },
+        .{ "slice", .variable, .{} },
+        .{ "ptr", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "slice", .variable, .{} },
+        .{ "len", .property, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "array", .variable, .{ .declaration = true } },
+        .{ "4", .number, .{} },
+        .{ "u8", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "=", .operator, .{} },
+        .{ "array", .variable, .{} },
+        .{ "len", .property, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "tuple", .variable, .{ .declaration = true } },
+        .{ "struct", .keyword, .{} },
+        .{ "u8", .type, .{} },
+        .{ "u8", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "=", .operator, .{} },
+        .{ "tuple", .variable, .{} },
+        .{ "len", .property, .{} },
+    });
 }
 
 test "field access on unknown" {
