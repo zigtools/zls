@@ -234,7 +234,7 @@ pub const Handle = struct {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
         /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
-        open: bool = false,
+        lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
@@ -520,16 +520,16 @@ pub const Handle = struct {
         return @bitCast(self.impl.status.load(.acquire));
     }
 
-    pub fn isOpen(self: *const Handle) bool {
-        return self.getStatus().open;
+    pub fn isLspSynced(self: *const Handle) bool {
+        return self.getStatus().lsp_synced;
     }
 
     /// returns the previous value
-    fn setOpen(self: *Handle, open: bool) bool {
-        if (open) {
-            return self.impl.status.bitSet(@offsetOf(Handle.Status, "open"), .release) == 1;
+    fn setLspSynced(self: *Handle, lsp_synced: bool) bool {
+        if (lsp_synced) {
+            return self.impl.status.bitSet(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
         } else {
-            return self.impl.status.bitReset(@offsetOf(Handle.Status, "open"), .release) == 1;
+            return self.impl.status.bitReset(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
         }
     }
 
@@ -558,7 +558,7 @@ pub const Handle = struct {
         defer tracy_zone.end();
 
         const new_status: Handle.Status = .{
-            .open = self.getStatus().open,
+            .lsp_synced = self.isLspSynced(),
         };
 
         const new_tree = try parseTree(self.impl.allocator, new_text, self.tree.mode);
@@ -759,7 +759,7 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
     }
 
     const file_contents = store.readUri(uri) orelse return null;
-    return store.createAndStoreDocument(uri, file_contents) catch |err| {
+    return store.createAndStoreDocument(uri, file_contents, false) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
@@ -839,40 +839,17 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 
 /// **Not thread safe**
 /// Assumes that no other thread is currently accessing the given document
-pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
+pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle_ptr: *Handle = try self.allocator.create(Handle);
-    errdefer self.allocator.destroy(handle_ptr);
-
     const duped_text = try self.allocator.dupeZ(u8, text);
-    handle_ptr.* = try self.createDocument(uri, duped_text, true);
-    errdefer handle_ptr.deinit();
-
-    const gop = try self.handles.getOrPut(self.allocator, handle_ptr.uri);
-    if (gop.found_existing) {
-        if (gop.value_ptr.*.isOpen()) {
-            log.warn("Document already open: {s}", .{uri});
-        }
-        std.mem.swap([]const u8, &gop.value_ptr.*.uri, &handle_ptr.uri);
-        gop.value_ptr.*.deinit();
-        self.allocator.destroy(gop.value_ptr.*);
-    }
-    gop.value_ptr.* = handle_ptr;
-
-    try self.loadDependencies(handle_ptr.import_uris.items);
-
-    if (isBuildFile(uri)) {
-        log.debug("Opened document '{s}' (build file)", .{uri});
-    } else {
-        log.debug("Opened document '{s}'", .{uri});
-    }
+    _ = try self.createAndStoreDocument(uri, duped_text, true);
 }
 
 /// **Thread safe** takes a shared lock, takes an exclusive lock (with `tryLock`)
 /// Assumes that no other thread is currently accessing the given document
-pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
+pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -886,7 +863,7 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
         };
         // instead of destroying the handle here we just mark it not open
         // and let it be destroy by the garbage collection code
-        if (!handle.setOpen(false)) {
+        if (!handle.setLspSynced(false)) {
             log.warn("Document already closed: {s}", .{uri});
         }
     }
@@ -906,12 +883,12 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
 ///
 /// **Thread safe** takes a shared lock when called on different documents
 /// **Not thread safe** when called on the same document
-pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
+pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = self.getHandle(uri).?;
-    if (!handle.getStatus().open) {
+    if (!handle.isLspSynced()) {
         log.warn("Document modified without being opened: {s}", .{uri});
     }
     try handle.setSource(new_text);
@@ -920,26 +897,20 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     try self.loadDependencies(handle.import_uris.items);
 }
 
-/// Removes a document from the store, unless said document is currently open and
+/// Refreshes a document from the file system, unless said document is currently open and
 /// has been synchronized via `textDocument/didOpen`.
 /// **Thread safe** takes an exclusive lock when called on different documents
 /// **Not thread safe** when called on the same document
 pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
-    {
-        const handle = self.getHandle(uri) orelse return false;
-        if (handle.getStatus().open) return false;
+    if (self.getHandle(uri)) |handle| {
+        if (handle.isLspSynced()) {
+            return false;
+        }
     }
 
-    {
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        const kv = self.handles.fetchSwapRemove(uri) orelse return false;
-        log.debug("Closing document {s}", .{kv.key});
-        kv.value.deinit();
-        self.allocator.destroy(kv.value);
-        return true;
-    }
+    const file_contents = self.readUri(uri) orelse return false;
+    _ = try self.createAndStoreDocument(uri, file_contents, false);
+    return true;
 }
 
 /// Invalidates a build files.
@@ -1122,7 +1093,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     var queue: std.ArrayListUnmanaged(Uri) = .empty;
 
     for (self.handles.values(), 0..) |handle, handle_index| {
-        if (!handle.getStatus().open) continue;
+        if (!handle.getStatus().lsp_synced) continue;
         reachable.set(handle_index);
 
         try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
@@ -1536,14 +1507,14 @@ fn uriInImports(
 /// invalidates any pointers into `DocumentStore.build_files`
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
-fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!Handle {
+fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var handle: Handle = try .init(self.allocator, uri, text);
     errdefer handle.deinit();
 
-    _ = handle.setOpen(open);
+    _ = handle.setLspSynced(lsp_synced);
 
     if (!supports_build_system) {
         // nothing to do
@@ -1574,35 +1545,61 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
 /// takes ownership of the `text` passed in.
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
-fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{OutOfMemory}!*Handle {
-    const handle_ptr: *Handle = try self.allocator.create(Handle);
-    errdefer self.allocator.destroy(handle_ptr);
+fn createAndStoreDocument(
+    self: *DocumentStore,
+    uri: Uri,
+    text: [:0]const u8,
+    lsp_synced: bool,
+) error{OutOfMemory}!*Handle {
+    const handle = handle: {
+        errdefer self.allocator.free(text);
 
-    handle_ptr.* = try self.createDocument(uri, text, false);
-    errdefer handle_ptr.deinit();
+        const handle: *Handle = try self.allocator.create(Handle);
+        errdefer self.allocator.destroy(handle);
 
-    const gop = blk: {
+        handle.* = try self.createDocument(uri, text, lsp_synced);
+        break :handle handle;
+    };
+    errdefer {
+        handle.deinit();
+        self.allocator.destroy(handle);
+    }
+
+    const old_handle_optional = blk: {
         self.lock.lock();
         defer self.lock.unlock();
 
-        const gop = try self.handles.getOrPutValue(self.allocator, handle_ptr.uri, handle_ptr);
-        std.debug.assert(!gop.found_existing);
+        const gop = try self.handles.getOrPut(self.allocator, handle.uri);
+        const old_handle_optional = if (gop.found_existing) old_handle_optional: {
+            gop.key_ptr.* = handle.uri;
+            break :old_handle_optional gop.value_ptr.*;
+        } else null;
+        gop.value_ptr.* = handle;
 
-        std.debug.assert(self.currently_loading_uris.swapRemove(uri));
-        self.wait_for_currently_loading_uri.broadcast();
+        if (self.currently_loading_uris.swapRemove(uri)) {
+            self.wait_for_currently_loading_uri.broadcast();
+        }
 
-        break :blk gop;
+        break :blk old_handle_optional;
     };
 
-    try self.loadDependencies(handle_ptr.import_uris.items);
-
-    if (isBuildFile(gop.value_ptr.*.uri)) {
-        log.debug("Opened document '{s}' (build file)", .{gop.value_ptr.*.uri});
-    } else {
-        log.debug("Opened document '{s}'", .{gop.value_ptr.*.uri});
+    if (old_handle_optional) |old_handle| {
+        if (old_handle.isLspSynced()) {
+            log.warn("Document already open: {s}", .{uri});
+        }
+        old_handle.deinit();
+        self.allocator.destroy(old_handle);
     }
 
-    return gop.value_ptr.*;
+    try self.loadDependencies(handle.import_uris.items);
+
+    if (isBuildFile(handle.uri)) {
+        log.debug("Opened document '{s}' (build file)", .{handle.uri});
+    } else {
+        log.debug("Opened document '{s}'", .{handle.uri});
+    }
+
+    return handle;
 }
 
 fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !void {
