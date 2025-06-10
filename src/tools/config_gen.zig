@@ -89,7 +89,7 @@ const Config = struct {
 };
 
 const Schema = struct {
-    @"$schema": []const u8 = "http://json-schema.org/schema",
+    @"$schema": []const u8 = "http://json-schema.org/draft-04/schema",
     title: []const u8 = "ZLS Config",
     description: []const u8 = "Configuration file for ZLS",
     type: []const u8 = "object",
