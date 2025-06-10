@@ -4,7 +4,7 @@ const zls = @import("zls");
 const Context = @import("../context.zig").Context;
 const helper = @import("../helper.zig");
 
-const types = zls.types;
+const types = zls.lsp.types;
 const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;

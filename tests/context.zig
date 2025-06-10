@@ -5,7 +5,7 @@ const test_options = @import("test_options");
 
 const Config = zls.Config;
 const Server = zls.Server;
-const types = zls.types;
+const types = zls.lsp.types;
 
 const allocator = std.testing.allocator;
 

@@ -3,7 +3,7 @@ const zls = @import("zls");
 
 const Context = @import("../context.zig").Context;
 
-const types = zls.types;
+const types = zls.lsp.types;
 
 test "empty" {
     try testFoldingRange("", &.{});
