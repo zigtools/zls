@@ -2190,7 +2190,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 // Based on Sema.zirAbs
                 const operand_ty = payload.type;
                 const scalar_ty = analyser.ip.scalarType(operand_ty);
-                const result_ty = switch (analyser.ip.zigTypeTag(scalar_ty)) {
+                const scalar_tag = analyser.ip.zigTypeTag(scalar_ty) orelse return null;
+                const result_ty = switch (scalar_tag) {
                     .comptime_float, .float, .comptime_int => operand_ty,
                     .int => if (analyser.ip.isSignedInt(scalar_ty, builtin.target))
                         try analyser.ip.toUnsigned(analyser.gpa, operand_ty, builtin.target)
