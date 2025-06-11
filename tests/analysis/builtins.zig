@@ -88,6 +88,52 @@ const invalid_builtin_12 = @trunc(null);
 const invalid_builtin_13 = @round(null);
 //    ^^^^^^^^^^^^^^^^^^ (unknown)()
 
+const as = @as(bool, undefined);
+//    ^^ (bool)()
+const atomic_load = @atomicLoad(bool, undefined, .unordered);
+//    ^^^^^^^^^^^ (bool)()
+//                                               ^^^^^^^^^^ (AtomicOrder)()
+const atomic_rmw = @atomicRmw(bool, undefined, .Xchg, undefined, .unordered);
+//    ^^^^^^^^^^ (bool)()
+//                                             ^^^^^ (AtomicRmwOp)()
+//                                                               ^^^^^^^^^^ (AtomicOrder)()
+const atomic_store = @atomicStore(undefined, undefined, undefined, .unordered);
+//    ^^^^^^^^^^^^ (void)()
+//                                                                 ^^^^^^^^^^ (AtomicOrder)()
+const mul_add = @mulAdd(f32, undefined, undefined, undefined);
+//    ^^^^^^^ (f32)()
+const cmpxchg_strong = @cmpxchgStrong(u32, undefined, undefined, undefined, .unordered, .unordered);
+//    ^^^^^^^^^^^^^^ (unknown)() TODO this should be `?u32`
+//                                                                          ^^^^^^^^^^ (AtomicOrder)()
+//                                                                                      ^^^^^^^^^^ (AtomicOrder)()
+const cmpxchg_weak = @cmpxchgWeak(u32, undefined, undefined, undefined, .unordered, .unordered);
+//    ^^^^^^^^^^^^ (unknown)() TODO this should be `?u32`
+//                                                                      ^^^^^^^^^^ (AtomicOrder)()
+//                                                                                  ^^^^^^^^^^ (AtomicOrder)()
+const call = @call(.always_inline, undefined, undefined);
+//    ^^^^ (unknown)() TODO
+//                 ^^^^^^^^^^^^^^ (CallModifier)()
+const export_ = @export(undefined, .{ .name = undefined });
+//    ^^^^^^^ (void)()
+//                                    ^^^^^ ([]const u8)()
+const extern_ = @extern([*]u8, .{ .name = undefined });
+//    ^^^^^^^ ([*]u8)()
+//                                ^^^^^ ([]const u8)()
+const prefetch = @prefetch(undefined, .{ .locality = 3 });
+//    ^^^^^^^^ (void)()
+//                                       ^^^^^^^^^ (u2)()
+const reduce = @reduce(.And, undefined);
+//    ^^^^^^ (unknown)() TODO
+//                     ^^^^ (ReduceOp)()
+const set_float_mode = @setFloatMode(.strict);
+//    ^^^^^^^^^^^^^^ (void)()
+//                                   ^^^^^^^ (FloatMode)()
+const Type = @Type(.type);
+//    ^^^^ (type)()
+//                 ^^^^^ (void)()
+const union_init = @unionInit(union {}, undefined, undefined);
+//    ^^^^^^^^^^ (union {})()
+
 const abs_i32 = @abs(@as(i32, undefined));
 //    ^^^^^^^ (u32)()
 const abs_u32 = @abs(@as(u32, undefined));
@@ -146,33 +192,6 @@ comptime {
 fn builtin_calls() void {
     @branchHint(.none);
     //          ^^^^^ (BranchHint)()
-    @atomicLoad(undefined, undefined, .unordered);
-    //                                ^^^^^^^^^^ (AtomicOrder)()
-    @atomicRmw(undefined, undefined, .Xchg, undefined, .unordered);
-    //                               ^^^^^ (AtomicRmwOp)()
-    //                                                 ^^^^^^^^^^ (AtomicOrder)()
-    @atomicStore(undefined, undefined, undefined, .unordered);
-    //                                            ^^^^^^^^^^ (AtomicOrder)()
-    @cmpxchgStrong(undefined, undefined, undefined, undefined, .unordered, .unordered);
-    //                                                         ^^^^^^^^^^ (AtomicOrder)()
-    //                                                                     ^^^^^^^^^^ (AtomicOrder)()
-    @cmpxchgWeak(undefined, undefined, undefined, undefined, .unordered, .unordered);
-    //                                                       ^^^^^^^^^^ (AtomicOrder)()
-    //                                                                   ^^^^^^^^^^ (AtomicOrder)()
-    @call(.always_inline, undefined, undefined);
-    //    ^^^^^^^^^^^^^^ (CallModifier)()
-    @export(undefined, .{ .name = undefined });
-    //                    ^^^^^ ([]const u8)()
-    @extern(undefined, .{ .name = undefined });
-    //                    ^^^^^ ([]const u8)()
-    @prefetch(undefined, .{ .locality = 3 });
-    //                      ^^^^^^^^^ (u2)()
-    @reduce(.And, undefined);
-    //      ^^^^ (ReduceOp)()
-    @setFloatMode(.strict);
-    //            ^^^^^^^ (FloatMode)()
-    @Type(.type);
-    //    ^^^^^ (void)()
 
     const src = @src();
     //    ^^^ (SourceLocation)()
