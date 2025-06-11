@@ -197,3 +197,15 @@ fn builtin_calls() void {
     //    ^^^ (SourceLocation)()
     _ = src;
 }
+
+fn varargs(...) callconv(.c) void {
+    var ap = @cVaStart();
+    //  ^^ (either type)()
+    const copy = @cVaCopy(&ap);
+    //    ^^^^ (either type)()
+    const arg = @cVaArg(&ap, c_int);
+    //    ^^^ (c_int)()
+    const end = @cVaEnd(&ap);
+    //    ^^^ (void)()
+    _ = .{ copy, arg, end };
+}

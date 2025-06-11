@@ -2136,17 +2136,18 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
             }
 
-            const cast_map: std.StaticStringMap(void) = .initComptime(.{
-                .{"@as"},
-                .{"@atomicLoad"},
-                .{"@atomicRmw"},
-                .{"@extern"},
-                .{"@mulAdd"},
-                .{"@unionInit"},
+            const cast_map: std.StaticStringMap(usize) = .initComptime(.{
+                .{ "@as", 0 },
+                .{ "@atomicLoad", 0 },
+                .{ "@atomicRmw", 0 },
+                .{ "@cVaArg", 1 },
+                .{ "@extern", 0 },
+                .{ "@mulAdd", 0 },
+                .{ "@unionInit", 0 },
             });
-            if (cast_map.has(call_name)) {
-                if (params.len < 1) return null;
-                const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+            if (cast_map.get(call_name)) |idx| {
+                if (params.len <= idx) return null;
+                const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[idx], handle))) orelse return null;
                 return try ty.instanceTypeVal(analyser);
             }
 
