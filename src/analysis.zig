@@ -2140,7 +2140,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 .{"@as"},
                 .{"@atomicLoad"},
                 .{"@atomicRmw"},
-                .{"@atomicStore"},
                 .{"@extern"},
                 .{"@mulAdd"},
                 .{"@unionInit"},
