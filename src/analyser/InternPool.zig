@@ -1683,10 +1683,13 @@ pub fn coerce(
     if (inst_ty == .undefined_type) return try ip.getUndefined(gpa, dest_ty);
     if (inst_ty == .unknown_type) return try ip.getUnknown(gpa, dest_ty);
 
+    const dest_tag = ip.zigTypeTag(dest_ty) orelse return try ip.getUnknown(gpa, dest_ty);
+    const inst_tag = ip.zigTypeTag(inst_ty) orelse return try ip.getUnknown(gpa, dest_ty);
+
     var in_memory_result = try ip.coerceInMemoryAllowed(gpa, arena, dest_ty, inst_ty, false, builtin.target);
     if (in_memory_result == .ok) return try ip.getUnknown(gpa, dest_ty);
 
-    switch (ip.zigTypeTag(dest_ty)) {
+    switch (dest_tag) {
         .optional => optional: {
             // null to ?T
             if (inst_ty == .null_type) {
@@ -1713,7 +1716,7 @@ pub fn coerce(
             const dest_info = ip.indexToKey(dest_ty).pointer_type;
 
             // Function body to function pointer.
-            if (ip.zigTypeTag(inst_ty) == .@"fn") {
+            if (inst_tag == .@"fn") {
                 return try ip.getUnknown(gpa, dest_ty);
             }
 
@@ -1806,7 +1809,7 @@ pub fn coerce(
 
             return try ip.getUnknown(gpa, dest_ty);
         },
-        .int, .comptime_int => switch (ip.zigTypeTag(inst_ty)) {
+        .int, .comptime_int => switch (inst_tag) {
             .float, .comptime_float => return try ip.getUnknown(gpa, dest_ty),
             .int, .comptime_int => {
                 if (try ip.intFitsInType(inst, dest_ty, target)) {
@@ -1825,7 +1828,7 @@ pub fn coerce(
         .@"enum" => return try ip.getUnknown(gpa, dest_ty),
         .error_union => return try ip.getUnknown(gpa, dest_ty),
         .@"union" => return try ip.getUnknown(gpa, dest_ty),
-        .array => switch (ip.zigTypeTag(inst_ty)) {
+        .array => switch (inst_tag) {
             .vector => return try ip.getUnknown(gpa, dest_ty),
             .@"struct" => {
                 if (inst_ty == Index.empty_struct_type) {
@@ -2510,8 +2513,19 @@ fn coerceInMemoryAllowed(
     const dest_key = ip.indexToKey(dest_ty);
     const src_key = ip.indexToKey(src_ty);
 
-    const dest_tag = ip.zigTypeTag(dest_ty);
-    const src_tag = ip.zigTypeTag(src_ty);
+    const dest_tag = ip.zigTypeTag(dest_ty) orelse {
+        return .{ .no_match = .{
+            .actual = dest_ty,
+            .wanted = src_ty,
+        } };
+    };
+
+    const src_tag = ip.zigTypeTag(src_ty) orelse {
+        return .{ .no_match = .{
+            .actual = dest_ty,
+            .wanted = src_ty,
+        } };
+    };
 
     if (dest_tag != src_tag) {
         return .{ .no_match = .{
@@ -2937,8 +2951,7 @@ fn panicOrElse(comptime T: type, message: []const u8, value: T) T {
 //               HELPER FUNCTIONS
 // ---------------------------------------------
 
-/// TODO make the return type optional and return null on unknown type.
-pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
+pub fn zigTypeTag(ip: *InternPool, index: Index) ?std.builtin.TypeId {
     ip.lock.lockShared();
     defer ip.lock.unlockShared();
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
@@ -2991,8 +3004,8 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
             .extern_options => .@"struct",
             .type_info => .@"union",
 
-            .unknown => unreachable,
-            .generic_poison => unreachable,
+            .unknown => null,
+            .generic_poison => null,
         },
         .type_int_signed, .type_int_unsigned => .int,
         .type_pointer => .pointer,
@@ -3027,7 +3040,7 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) std.builtin.TypeId {
         .error_value,
         .undefined_value,
         .unknown_value,
-        => unreachable,
+        => null,
     };
 }
 
@@ -3332,7 +3345,8 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
 
 /// Asserts the type is an integer or vector of integers.
 pub fn toUnsigned(ip: *InternPool, gpa: Allocator, ty: Index, target: std.Target) Allocator.Error!Index {
-    return switch (ip.zigTypeTag(ty)) {
+    const tag = ip.zigTypeTag(ty) orelse unreachable;
+    return switch (tag) {
         .int => try ip.get(gpa, .{ .int_type = .{
             .signedness = .unsigned,
             .bits = ip.intInfo(ty, target).bits,
@@ -3495,7 +3509,8 @@ pub fn elemType(ip: *InternPool, ty: Index) Index {
 
 /// For vectors, returns the element type. Otherwise returns self.
 pub fn scalarType(ip: *InternPool, ty: Index) Index {
-    return switch (ip.zigTypeTag(ty)) {
+    const tag = ip.zigTypeTag(ty) orelse return ty;
+    return switch (tag) {
         .vector => ip.childType(ty),
         else => ty,
     };
