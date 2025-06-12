@@ -4002,28 +4002,6 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
     return try builtin_type.instanceTypeVal(analyser);
 }
 
-/// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var imports: std.ArrayListUnmanaged([]const u8) = .empty;
-    errdefer imports.deinit(allocator);
-
-    for (0..tree.tokens.len) |i| {
-        if (tree.tokenTag(@intCast(i)) != .builtin)
-            continue;
-        const name = offsets.identifierTokenToNameSlice(tree, @intCast(i));
-        if (!std.mem.eql(u8, name, "import")) continue;
-        if (!std.mem.startsWith(std.zig.Token.Tag, tree.tokens.items(.tag)[i + 1 ..], &.{ .l_paren, .string_literal, .r_paren })) continue;
-
-        const str = tree.tokenSlice(@intCast(i + 2));
-        try imports.append(allocator, str[1 .. str.len - 1]);
-    }
-
-    return imports;
-}
-
 /// Collects all `@cImport` nodes
 /// Caller owns returned memory.
 pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}![]Ast.Node.Index {

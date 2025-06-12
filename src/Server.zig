@@ -1566,6 +1566,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
             new_text.len,
             DocumentStore.max_document_size,
         });
+        server.allocator.free(new_text);
         return error.InternalError;
     }
 
@@ -1573,7 +1574,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{
-            .generate_diagnostics = try server.allocator.dupe(u8, handle.uri),
+            .generate_diagnostics = try server.allocator.dupe(u8, notification.textDocument.uri),
         });
     }
 }

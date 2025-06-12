@@ -186,17 +186,16 @@ pub const BuildFile = struct {
 /// Represents a Zig source file.
 pub const Handle = struct {
     uri: Uri,
-    version: u32 = 0,
     tree: Ast,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .empty,
     /// Contains one entry for every cimport in the document
-    cimports: std.MultiArrayList(CImportHandle) = .empty,
+    cimports: std.MultiArrayList(CImportHandle),
 
     /// private field
     impl: struct {
         /// @bitCast from/to `Status`
-        status: std.atomic.Value(u32) = .init(@bitCast(Status{})),
+        status: std.atomic.Value(u32),
         /// TODO can we avoid storing one allocator per Handle?
         allocator: std.mem.Allocator,
 
@@ -233,7 +232,7 @@ pub const Handle = struct {
     const Status = packed struct(u32) {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
-        /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
+        /// or has been closed with `textDocument/didClose`
         lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
@@ -245,39 +244,75 @@ pub const Handle = struct {
         /// all other threads will wait until the given thread has computed the `std.zig.Zir` before reading it.
         /// true if `handle.impl.zir` has been set
         has_zir: bool = false,
-        zir_outdated: bool = undefined,
         /// true if a thread has acquired the permission to compute the `std.zig.Zoir`
         has_zoir_lock: bool = false,
         /// all other threads will wait until the given thread has computed the `std.zig.Zoir` before reading it.
         /// true if `handle.impl.zoir` has been set
         has_zoir: bool = false,
-        zoir_outdated: bool = undefined,
-        _: u23 = undefined,
+        _: u25 = 0,
     };
 
-    pub const ZirOrZoirStatus = enum {
+    const ZirOrZoirStatus = enum {
         none,
         outdated,
         done,
     };
 
-    /// takes ownership of `text`
-    pub fn init(allocator: std.mem.Allocator, uri: Uri, text: [:0]const u8) error{OutOfMemory}!Handle {
-        const duped_uri = try allocator.dupe(u8, uri);
-        errdefer allocator.free(duped_uri);
-
+    /// takes ownership of `uri` and `text`
+    fn init(
+        allocator: std.mem.Allocator,
+        uri: Uri,
+        text: [:0]const u8,
+        lsp_synced: bool,
+    ) error{OutOfMemory}!Handle {
         const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(uri), ".zon")) .zon else .zig;
 
-        const tree = try parseTree(allocator, text, mode);
+        var tree = try parseTree(allocator, text, mode);
         errdefer tree.deinit(allocator);
 
+        const cimports = try collectCImports(allocator, tree);
+        errdefer cimports.deinit(allocator);
+
         return .{
-            .uri = duped_uri,
+            .uri = uri,
             .tree = tree,
+            .cimports = cimports,
             .impl = .{
+                .status = .init(@bitCast(Status{
+                    .lsp_synced = lsp_synced,
+                })),
                 .allocator = allocator,
             },
         };
+    }
+
+    /// caller must free Handle uri
+    fn deinit(self: *Handle) void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const status = self.getStatus();
+
+        const allocator = self.impl.allocator;
+
+        if (status.has_zir) self.impl.zir.deinit(allocator);
+        if (status.has_zoir) self.impl.zoir.deinit(allocator);
+        if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
+        allocator.free(self.tree.source);
+        self.tree.deinit(allocator);
+
+        for (self.import_uris.items) |uri| allocator.free(uri);
+        self.import_uris.deinit(allocator);
+
+        for (self.cimports.items(.source)) |source| allocator.free(source);
+        self.cimports.deinit(allocator);
+
+        switch (self.impl.associated_build_file) {
+            .none, .resolved => {},
+            .unresolved => |*payload| payload.deinit(allocator),
+        }
+
+        self.* = undefined;
     }
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
@@ -299,22 +334,10 @@ pub const Handle = struct {
         return try self.getZirOrZoirCold(.zir);
     }
 
-    pub fn getZirStatus(self: *const Handle) ZirOrZoirStatus {
-        const status = self.getStatus();
-        if (!status.has_zir) return .none;
-        return if (status.zir_outdated) .outdated else .done;
-    }
-
     pub fn getZoir(self: *Handle) error{OutOfMemory}!std.zig.Zoir {
         std.debug.assert(self.tree.mode == .zon);
         if (self.getStatus().has_zoir) return self.impl.zoir;
         return try self.getZirOrZoirCold(.zoir);
-    }
-
-    pub fn getZoirStatus(self: *const Handle) ZirOrZoirStatus {
-        const status = self.getStatus();
-        if (!status.has_zoir) return .none;
-        return if (status.zoir_outdated) .outdated else .done;
     }
 
     /// Returns the associated build file (build.zig) of the handle.
@@ -400,24 +423,6 @@ pub const Handle = struct {
         return .none;
     }
 
-    fn getAssociatedBuildFileUriDontResolve(self: *Handle) ?Uri {
-        self.impl.lock.lock();
-        defer self.impl.lock.unlock();
-
-        switch (self.impl.associated_build_file) {
-            .none, .unresolved => return null,
-            .resolved => |build_file| return build_file.uri,
-        }
-    }
-
-    fn getReferencedBuildFiles(self: *Handle) []const *BuildFile {
-        switch (self.impl.associated_build_file) {
-            .none => return &.{},
-            .unresolved => |unresolved| return unresolved.potential_build_files, // some of these could be removed because of `has_been_checked`
-            .resolved => |*build_file| return build_file[0..1],
-        }
-    }
-
     fn getDocumentScopeCold(self: *Handle) error{OutOfMemory}!DocumentScope {
         @branchHint(.cold);
         const tracy_zone = tracy.trace(@src());
@@ -464,7 +469,6 @@ pub const Handle = struct {
 
         const has_field = "has_" ++ @tagName(kind);
         const has_lock_field = "has_" ++ @tagName(kind) ++ "_lock";
-        const outdated_field = @tagName(kind) ++ "_outdated";
 
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
@@ -506,7 +510,6 @@ pub const Handle = struct {
                 },
             }
 
-            _ = self.impl.status.bitReset(@bitOffsetOf(Status, outdated_field), .release); // atomically set [zir|zoir]_outdated
             const old_has = self.impl.status.bitSet(@bitOffsetOf(Status, has_field), .release); // atomically set has_[zir|zoir]
             std.debug.assert(old_has == 0); // race condition: another thread set Zir or Zoir even though we hold the lock
         }
@@ -551,83 +554,6 @@ pub const Handle = struct {
         tree.tokens = tokens.slice();
         return tree;
     }
-
-    /// Takes ownership of `new_text`.
-    fn setSource(self: *Handle, new_text: [:0]const u8) error{OutOfMemory}!void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const new_status: Handle.Status = .{
-            .lsp_synced = self.isLspSynced(),
-        };
-
-        const new_tree = try parseTree(self.impl.allocator, new_text, self.tree.mode);
-
-        self.impl.lock.lock();
-        errdefer @compileError("");
-
-        const old_status: Handle.Status = @bitCast(self.impl.status.swap(@bitCast(new_status), .acq_rel));
-
-        var old_tree = self.tree;
-        var old_import_uris = self.import_uris;
-        var old_cimports = self.cimports;
-        var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
-        var old_zir = if (old_status.has_zir) self.impl.zir else null;
-        var old_zoir = if (old_status.has_zoir) self.impl.zoir else null;
-
-        self.tree = new_tree;
-        self.import_uris = .empty;
-        self.cimports = .empty;
-        self.impl.document_scope = undefined;
-        self.impl.zir = undefined;
-        self.impl.zoir = undefined;
-
-        self.version += 1;
-
-        self.impl.lock.unlock();
-
-        self.impl.allocator.free(old_tree.source);
-        old_tree.deinit(self.impl.allocator);
-
-        for (old_import_uris.items) |uri| self.impl.allocator.free(uri);
-        old_import_uris.deinit(self.impl.allocator);
-
-        for (old_cimports.items(.source)) |source| self.impl.allocator.free(source);
-        old_cimports.deinit(self.impl.allocator);
-
-        if (old_document_scope) |*document_scope| document_scope.deinit(self.impl.allocator);
-        if (old_zir) |*zir| zir.deinit(self.impl.allocator);
-        if (old_zoir) |*zoir| zoir.deinit(self.impl.allocator);
-    }
-
-    fn deinit(self: *Handle) void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const status = self.getStatus();
-
-        const allocator = self.impl.allocator;
-
-        if (status.has_zir) self.impl.zir.deinit(allocator);
-        if (status.has_zoir) self.impl.zoir.deinit(allocator);
-        if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
-        allocator.free(self.tree.source);
-        self.tree.deinit(allocator);
-        allocator.free(self.uri);
-
-        for (self.import_uris.items) |uri| allocator.free(uri);
-        self.import_uris.deinit(allocator);
-
-        for (self.cimports.items(.source)) |source| allocator.free(source);
-        self.cimports.deinit(allocator);
-
-        switch (self.impl.associated_build_file) {
-            .none, .resolved => {},
-            .unresolved => |*payload| payload.deinit(allocator),
-        }
-
-        self.* = undefined;
-    }
 };
 
 pub const ErrorMessage = struct {
@@ -638,6 +564,7 @@ pub const ErrorMessage = struct {
 
 pub fn deinit(self: *DocumentStore) void {
     for (self.handles.values()) |handle| {
+        self.allocator.free(handle.uri);
         handle.deinit();
         self.allocator.destroy(handle);
     }
@@ -843,6 +770,12 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (self.getHandle(uri)) |handle| {
+        if (handle.isLspSynced()) {
+            log.warn("Document already open: {s}", .{uri});
+        }
+    }
+
     const duped_text = try self.allocator.dupeZ(u8, text);
     _ = try self.createAndStoreDocument(uri, duped_text, true);
 }
@@ -853,28 +786,16 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
+    self.lock.lockShared();
+    defer self.lock.unlockShared();
 
-        const handle = self.handles.get(uri) orelse {
-            log.warn("Document not found: {s}", .{uri});
-            return;
-        };
-        // instead of destroying the handle here we just mark it not open
-        // and let it be destroy by the garbage collection code
-        if (!handle.setLspSynced(false)) {
-            log.warn("Document already closed: {s}", .{uri});
-        }
-    }
+    const handle = self.handles.get(uri) orelse {
+        log.warn("Document not found: {s}", .{uri});
+        return;
+    };
 
-    if (!self.lock.tryLock()) return;
-    defer self.lock.unlock();
-
-    self.garbageCollectionImports() catch {};
-    if (supports_build_system) {
-        self.garbageCollectionCImports() catch {};
-        self.garbageCollectionBuildFiles() catch {};
+    if (!handle.setLspSynced(false)) {
+        log.warn("Document already closed: {s}", .{uri});
     }
 }
 
@@ -891,10 +812,8 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
     if (!handle.isLspSynced()) {
         log.warn("Document modified without being opened: {s}", .{uri});
     }
-    try handle.setSource(new_text);
-    handle.import_uris = try self.collectImportUris(handle);
-    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
-    try self.loadDependencies(handle.import_uris.items);
+
+    _ = try self.createAndStoreDocument(uri, new_text, true);
 }
 
 /// Refreshes a document from the file system, unless said document is currently open and
@@ -1073,149 +992,6 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
 
     // Looks like a useless assignment, but alters deffered onEnd
     end_status = .success;
-}
-
-/// The `DocumentStore` represents a graph structure where every
-/// handle/document is a node and every `@import` and `@cImport` represent
-/// a directed edge.
-/// We can remove every document which cannot be reached from
-/// another document that is `open` (see `Handle.open`)
-/// **Not thread safe** requires access to `DocumentStore.handles`, `DocumentStore.cimports` and `DocumentStore.build_files`
-fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var arena: std.heap.ArenaAllocator = .init(self.allocator);
-    defer arena.deinit();
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(arena.allocator(), self.handles.count());
-
-    var queue: std.ArrayListUnmanaged(Uri) = .empty;
-
-    for (self.handles.values(), 0..) |handle, handle_index| {
-        if (!handle.getStatus().lsp_synced) continue;
-        reachable.set(handle_index);
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    while (queue.pop()) |uri| {
-        const handle_index = self.handles.getIndex(uri) orelse continue;
-        if (reachable.isSet(handle_index)) continue;
-        reachable.set(handle_index);
-
-        const handle = self.handles.values()[handle_index];
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |handle_index| {
-        const handle = self.handles.values()[handle_index];
-        log.debug("Closing document {s}", .{handle.uri});
-        self.handles.swapRemoveAt(handle_index);
-        handle.deinit();
-        self.allocator.destroy(handle);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.cimports`
-fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.cimports.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.cimports.count());
-    defer reachable.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.cimports.items(.hash)) |hash| {
-            const index = self.cimports.getIndex(hash) orelse continue;
-            reachable.set(index);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |cimport_index| {
-        var result = self.cimports.values()[cimport_index];
-        const message = switch (result) {
-            .failure => "",
-            .success => |uri| uri,
-        };
-        log.debug("Destroying cimport {s}", .{message});
-        self.cimports.swapRemoveAt(cimport_index);
-        result.deinit(self.allocator);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.build_files`
-fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.build_files.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.build_files.count());
-    defer reachable.deinit(self.allocator);
-
-    var queue: std.ArrayListUnmanaged(*BuildFile) = .empty;
-    defer queue.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.getReferencedBuildFiles()) |build_file| {
-            const build_file_index = self.build_files.getIndex(build_file.uri).?;
-            if (reachable.isSet(build_file_index)) continue;
-            try queue.append(self.allocator, build_file);
-        }
-
-        if (isBuildFile(handle.uri)) blk: {
-            const build_file_index = self.build_files.getIndex(handle.uri) orelse break :blk;
-            const build_file = self.build_files.values()[build_file_index];
-            if (reachable.isSet(build_file_index)) break :blk;
-            try queue.append(self.allocator, build_file);
-        }
-    }
-
-    while (queue.pop()) |build_file| {
-        const build_file_index = self.build_files.getIndex(build_file.uri).?;
-        if (reachable.isSet(build_file_index)) continue;
-        reachable.set(build_file_index);
-
-        const build_config = build_file.tryLockConfig() orelse continue;
-        defer build_file.unlockConfig();
-
-        try queue.ensureUnusedCapacity(self.allocator, build_config.deps_build_roots.len);
-        for (build_config.deps_build_roots) |dep_build_root| {
-            const dep_build_file_uri = try URI.fromPath(self.allocator, dep_build_root.path);
-            defer self.allocator.free(dep_build_file_uri);
-            const dep_build_file = self.build_files.get(dep_build_file_uri) orelse continue;
-            queue.appendAssumeCapacity(dep_build_file);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |build_file_index| {
-        const build_file = self.build_files.values()[build_file_index];
-        log.debug("Destroying build file {s}", .{build_file.uri});
-        self.build_files.swapRemoveAt(build_file_index);
-        build_file.deinit(self.allocator);
-        self.allocator.destroy(build_file);
-    }
 }
 
 pub fn isBuildFile(uri: Uri) bool {
@@ -1511,10 +1287,11 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var handle: Handle = try .init(self.allocator, uri, text);
-    errdefer handle.deinit();
+    const duped_uri = try self.allocator.dupe(u8, uri);
+    errdefer self.allocator.free(duped_uri);
 
-    _ = handle.setLspSynced(lsp_synced);
+    var handle: Handle = try .init(self.allocator, duped_uri, text, lsp_synced);
+    errdefer handle.deinit();
 
     if (!supports_build_system) {
         // nothing to do
@@ -1536,9 +1313,6 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced
         } };
     }
 
-    handle.import_uris = try self.collectImportUris(&handle);
-    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
-
     return handle;
 }
 
@@ -1551,6 +1325,7 @@ fn createAndStoreDocument(
     text: [:0]const u8,
     lsp_synced: bool,
 ) error{OutOfMemory}!*Handle {
+    // TODO: Move pointer creation out.
     const handle = handle: {
         errdefer self.allocator.free(text);
 
@@ -1561,10 +1336,12 @@ fn createAndStoreDocument(
         break :handle handle;
     };
     errdefer {
+        self.allocator.free(handle.uri);
         handle.deinit();
         self.allocator.destroy(handle);
     }
 
+    // TODO: Maybe split this out?
     const old_handle_optional = blk: {
         self.lock.lock();
         defer self.lock.unlock();
@@ -1584,9 +1361,7 @@ fn createAndStoreDocument(
     };
 
     if (old_handle_optional) |old_handle| {
-        if (old_handle.isLspSynced()) {
-            log.warn("Document already open: {s}", .{uri});
-        }
+        self.allocator.free(old_handle.uri);
         old_handle.deinit();
         self.allocator.destroy(old_handle);
     }
@@ -1646,37 +1421,6 @@ fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !voi
     }
 }
 
-/// Caller owns returned memory.
-/// **Thread safe** takes a shared lock
-fn collectImportUris(self: *DocumentStore, handle: *Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var imports = try analysis.collectImports(self.allocator, handle.tree);
-
-    var i: usize = 0;
-    errdefer {
-        // only free the uris
-        for (imports.items[0..i]) |uri| self.allocator.free(uri);
-        imports.deinit(self.allocator);
-    }
-
-    // Convert to URIs
-    while (i < imports.items.len) {
-        const maybe_uri = try self.uriFromImportStr(self.allocator, handle, imports.items[i]);
-
-        if (maybe_uri) |uri| {
-            // The raw import strings are owned by the document and do not need to be freed here.
-            imports.items[i] = uri;
-            i += 1;
-        } else {
-            _ = imports.swapRemove(i);
-        }
-    }
-
-    return imports;
-}
-
 pub const CImportHandle = struct {
     /// the `@cImport` node
     node: Ast.Node.Index,
@@ -1688,7 +1432,7 @@ pub const CImportHandle = struct {
 
 /// Collects all `@cImport` nodes and converts them into c source code if possible
 /// Caller owns returned memory.
-fn collectCIncludes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
+fn collectCImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1729,24 +1473,14 @@ pub fn collectDependencies(
     handle: *Handle,
     dependencies: *std.ArrayListUnmanaged(Uri),
 ) error{OutOfMemory}!void {
-    return store.collectDependenciesInternal(allocator, handle, dependencies, true);
-}
-
-fn collectDependenciesInternal(
-    store: *DocumentStore,
-    allocator: std.mem.Allocator,
-    handle: *Handle,
-    dependencies: *std.ArrayListUnmanaged(Uri),
-    lock: bool,
-) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (!supports_build_system) return;
 
     {
-        if (lock) store.lock.lockShared();
-        defer if (lock) store.lock.unlockShared();
+        store.lock.lockShared();
+        defer store.lock.unlockShared();
 
         try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len + handle.cimports.len);
         for (handle.import_uris.items) |uri| {
@@ -1763,16 +1497,8 @@ fn collectDependenciesInternal(
     }
 
     no_build_file: {
-        const build_file_uri = if (lock)
-            try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file
-        else
-            handle.getAssociatedBuildFileUriDontResolve() orelse break :no_build_file;
-
-        const build_file = if (lock)
-            store.getBuildFile(build_file_uri) orelse break :no_build_file
-        else
-            store.build_files.get(build_file_uri) orelse break :no_build_file;
-
+        const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
+        const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
         _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
     }
 }
