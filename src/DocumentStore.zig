@@ -725,6 +725,11 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         }
     }
 
+    defer {
+        std.debug.assert(self.currently_loading_uris.swapRemove(uri));
+        self.wait_for_currently_loading_uri.broadcast();
+    }
+
     const file_contents = self.readFile(uri) orelse return null;
     return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri, err });
@@ -1422,6 +1427,73 @@ fn createAndStoreDocument(
     }
 
     return gop.value_ptr.*;
+}
+
+pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const workspace_path = try URI.toFsPath(store.allocator, directory_uri);
+    defer store.allocator.free(workspace_path);
+
+    var workspace_dir = try std.fs.openDirAbsolute(workspace_path, .{ .iterate = true });
+    defer workspace_dir.close();
+
+    var walker = try workspace_dir.walk(store.allocator);
+    defer walker.deinit();
+
+    var not_currently_loading_uris: std.ArrayListUnmanaged(Uri) = .empty;
+    defer {
+        for (not_currently_loading_uris.items) |uri| store.allocator.free(uri);
+        not_currently_loading_uris.deinit(store.allocator);
+    }
+
+    var file_count: usize = 0;
+
+    {
+        while (try walker.next()) |entry| {
+            if (entry.kind == .directory) continue;
+            if (std.mem.indexOf(u8, entry.path, std.fs.path.sep_str ++ ".zig-cache" ++ std.fs.path.sep_str) != null) continue;
+            if (std.mem.startsWith(u8, entry.path, ".zig-cache" ++ std.fs.path.sep_str)) continue;
+            if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
+
+            file_count += 1;
+
+            const path = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+            defer store.allocator.free(path);
+
+            try not_currently_loading_uris.ensureUnusedCapacity(store.allocator, 1);
+
+            const uri = try URI.fromPath(store.allocator, path);
+            errdefer comptime unreachable;
+
+            store.lock.lockShared();
+            defer store.lock.unlockShared();
+
+            if (!store.handles.contains(uri) and
+                !store.currently_loading_uris.contains(uri))
+            {
+                not_currently_loading_uris.appendAssumeCapacity(uri);
+            }
+        }
+    }
+
+    errdefer comptime unreachable;
+
+    const S = struct {
+        fn getOrLoadHandleVoid(s: *DocumentStore, uri: Uri) void {
+            _ = s.getOrLoadHandle(uri);
+            s.allocator.free(uri);
+        }
+    };
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    while (not_currently_loading_uris.pop()) |uri| {
+        store.thread_pool.spawnWg(&wait_group, S.getOrLoadHandleVoid, .{ store, uri });
+    }
+    store.thread_pool.waitAndWork(&wait_group);
+
+    return file_count;
 }
 
 pub const CImportHandle = struct {

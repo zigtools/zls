@@ -868,6 +868,14 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
             .restart = false,
         });
     }
+
+    server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
+        error.UnsupportedScheme => return,
+        else => {
+            log.err("failed to load files in workspace '{s}': {}", .{ uri, err });
+            return;
+        },
+    };
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
