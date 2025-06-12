@@ -687,6 +687,11 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
 
     const file_contents = store.readUri(uri) orelse return null;
     return store.createAndStoreDocument(uri, file_contents, false) catch |err| {
+        store.lock.lock();
+        defer store.lock.unlock();
+
+        _ = store.currently_loading_uris.swapRemove(uri);
+
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
@@ -1366,8 +1371,6 @@ fn createAndStoreDocument(
         self.allocator.destroy(old_handle);
     }
 
-    try self.loadDependencies(handle.import_uris.items);
-
     if (isBuildFile(handle.uri)) {
         log.debug("Opened document '{s}' (build file)", .{handle.uri});
     } else {
@@ -1377,9 +1380,46 @@ fn createAndStoreDocument(
     return handle;
 }
 
-fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !void {
-    var not_currently_loading_uris: std.ArrayListUnmanaged([]const u8) =
-        try .initCapacity(store.allocator, import_uris.len);
+pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !void {
+    const workspace_path = try URI.parse(store.allocator, directory_uri);
+    defer store.allocator.free(workspace_path);
+
+    var workspace_dir = try std.fs.openDirAbsolute(workspace_path, .{ .iterate = true });
+    defer workspace_dir.close();
+
+    var walker = try workspace_dir.walk(store.allocator);
+    defer walker.deinit();
+
+    var uris: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer uris.deinit(store.allocator);
+
+    {
+        errdefer {
+            for (uris.items) |uri| {
+                store.allocator.free(uri);
+            }
+        }
+
+        while (try walker.next()) |entry| {
+            if (std.mem.indexOf(u8, entry.path, std.fs.path.sep_str ++ ".zig-cache" ++ std.fs.path.sep_str) != null) continue;
+            if (std.mem.startsWith(u8, entry.path, ".zig-cache" ++ std.fs.path.sep_str)) continue;
+            if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
+
+            const uri = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+            defer store.allocator.free(uri);
+
+            _ = try uris.append(store.allocator, try URI.fromPath(store.allocator, uri));
+        }
+    }
+
+    try store.loadManyUrisAtOnce(uris.items);
+}
+
+/// **Thread safe**
+/// Takes ownership of uris
+fn loadManyUrisAtOnce(store: *DocumentStore, uris: []const Uri) !void {
+    var not_currently_loading_uris: std.ArrayListUnmanaged(Uri) =
+        try .initCapacity(store.allocator, uris.len);
     defer {
         not_currently_loading_uris.deinit(store.allocator);
     }
@@ -1393,13 +1433,11 @@ fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !voi
         store.lock.lockShared();
         defer store.lock.unlockShared();
 
-        for (import_uris) |import_uri| {
-            if (!store.handles.contains(import_uri) and
-                !store.currently_loading_uris.contains(import_uri))
+        for (uris) |uri| {
+            if (!store.handles.contains(uri) and
+                !store.currently_loading_uris.contains(uri))
             {
-                not_currently_loading_uris.appendAssumeCapacity(
-                    try store.allocator.dupe(u8, import_uri),
-                );
+                not_currently_loading_uris.appendAssumeCapacity(uri);
             }
         }
     }
@@ -1407,16 +1445,16 @@ fn loadDependencies(store: *DocumentStore, import_uris: []const []const u8) !voi
     errdefer comptime unreachable;
 
     const S = struct {
-        fn getOrLoadHandleVoid(s: *DocumentStore, duped_import_uri: Uri) void {
-            _ = s.getOrLoadHandle(duped_import_uri);
-            defer s.allocator.free(duped_import_uri);
+        fn getOrLoadHandleVoid(s: *DocumentStore, uri: Uri) void {
+            _ = s.getOrLoadHandle(uri);
+            defer s.allocator.free(uri);
         }
     };
 
-    for (not_currently_loading_uris.items) |duped_import_uri| {
-        store.thread_pool.spawn(S.getOrLoadHandleVoid, .{ store, duped_import_uri }) catch {
-            defer store.allocator.free(duped_import_uri);
-            _ = store.getOrLoadHandle(duped_import_uri);
+    for (not_currently_loading_uris.items) |uri| {
+        store.thread_pool.spawn(S.getOrLoadHandleVoid, .{ store, uri }) catch {
+            defer store.allocator.free(uri);
+            _ = store.getOrLoadHandle(uri);
         };
     }
 }

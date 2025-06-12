@@ -861,6 +861,14 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
             .restart = false,
         });
     }
+
+    server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
+        error.UnsupportedScheme => return,
+        else => {
+            log.err("failed to load files in workspace '{s}': {}", .{ uri, err });
+            return;
+        },
+    };
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
@@ -893,7 +901,7 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
         const uri = try Uri.fromPath(arena, file_path);
 
         switch (change.type) {
-            .Created, .Changed, .Deleted => {
+            .Created, .Changed => {
                 const did_update_file = try server.document_store.refreshDocumentFromFileSystem(uri);
                 updated_files += @intFromBool(did_update_file);
             },
