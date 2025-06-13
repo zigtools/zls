@@ -1936,36 +1936,17 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
 fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!lsp.ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    for (server.workspaces.items) |workspace| {
-        const path = Uri.parse(arena, workspace.uri) catch return error.InternalError;
-        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return error.InternalError;
-        defer dir.close();
-
-        var walker = try dir.walk(arena);
-        defer walker.deinit();
-
-        while (walker.next() catch return error.InternalError) |entry| {
-            if (std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) {
-                const uri = Uri.fromPath(
-                    arena,
-                    std.fs.path.join(arena, &.{ path, entry.path }) catch return error.InternalError,
-                ) catch return error.InternalError;
-
-                server.document_store.trigramIndexUri(
-                    uri,
-                    server.offset_encoding,
-                ) catch return error.InternalError;
-            }
-        }
-    }
+    // TODO: take this and get copy of handle ptrs
+    server.document_store.lock.lock();
+    defer server.document_store.lock.unlock();
 
     var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
     var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
 
-    for (
-        server.document_store.trigram_stores.keys(),
-        server.document_store.trigram_stores.values(),
-    ) |uri, trigram_store| {
+    for (server.document_store.handles.keys(), server.document_store.handles.values()) |uri, handle| {
+        const trigram_store = &handle.trigram_store;
+
+        declaration_buffer.clearRetainingCapacity();
         try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
 
         const slice = trigram_store.declarations.slice();

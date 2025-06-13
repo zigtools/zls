@@ -187,6 +187,7 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
+    trigram_store: TrigramStore,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .empty,
     /// Contains one entry for every cimport in the document
@@ -270,13 +271,17 @@ pub const Handle = struct {
         var tree = try parseTree(allocator, text, mode);
         errdefer tree.deinit(allocator);
 
-        const cimports = try collectCImports(allocator, tree);
+        var cimports = try collectCImports(allocator, tree);
         errdefer cimports.deinit(allocator);
+
+        var trigram_store: TrigramStore = try .init(allocator, tree, .@"utf-16");
+        errdefer trigram_store.deinit();
 
         return .{
             .uri = uri,
             .tree = tree,
             .cimports = cimports,
+            .trigram_store = trigram_store,
             .impl = .{
                 .status = .init(@bitCast(Status{
                     .lsp_synced = lsp_synced,
@@ -306,6 +311,8 @@ pub const Handle = struct {
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
+
+        self.trigram_store.deinit(allocator);
 
         switch (self.impl.associated_build_file) {
             .none, .resolved => {},
@@ -695,31 +702,6 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
-}
-
-pub fn trigramIndexUri(
-    store: *DocumentStore,
-    uri: Uri,
-    encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
-    const gop = try store.trigram_stores.getOrPut(store.allocator, uri);
-
-    if (gop.found_existing) {
-        return;
-    }
-
-    errdefer {
-        store.allocator.free(gop.key_ptr.*);
-        store.trigram_stores.swapRemoveAt(gop.index);
-    }
-
-    gop.key_ptr.* = try store.allocator.dupe(u8, uri);
-    gop.value_ptr.* = .empty;
-
-    const file_contents = store.readUri(uri) orelse return;
-    defer store.allocator.free(file_contents);
-
-    try gop.value_ptr.fill(store.allocator, file_contents, encoding);
 }
 
 /// **Thread safe** takes a shared lock
