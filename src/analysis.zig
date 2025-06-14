@@ -1939,11 +1939,19 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const param_type = param.type;
                 if (!param_type.is_type_val) continue;
 
-                // TODO(anytype)
                 const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
-                if (!argument_type.is_type_val) continue;
 
-                try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
+                switch (param_type.data) {
+                    .ip_index => |info| {
+                        if (info.index != .type_type) continue;
+                        if (!argument_type.is_type_val) continue;
+                        try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
+                    },
+                    .anytype_parameter => |info| {
+                        try meta_params.put(analyser.arena, info.token_handle, argument_type.typeOf(analyser));
+                    },
+                    else => {},
+                }
             }
 
             return try analyser.resolveGenericType(return_value, meta_params);
@@ -3364,7 +3372,7 @@ pub const Type = struct {
         fn isGeneric(data: Data) bool {
             return switch (data) {
                 .type_parameter => true,
-                .anytype_parameter => false, // TODO(anytype)
+                .anytype_parameter => true,
                 .pointer => |info| info.elem_ty.data.isGeneric(),
                 .array => |info| info.elem_ty.data.isGeneric(),
                 .tuple => |types| {
@@ -3462,7 +3470,11 @@ pub const Type = struct {
                     std.debug.assert(t.is_type_val);
                     return t.data.resolveGeneric(analyser, bound_params, visiting);
                 },
-                .anytype_parameter => unreachable, // TODO(anytype)
+                .anytype_parameter => |info| {
+                    const t = bound_params.get(info.token_handle) orelse return data;
+                    std.debug.assert(t.is_type_val);
+                    return t.data.resolveGeneric(analyser, bound_params, visiting);
+                },
                 .pointer => |info| return .{
                     .pointer = .{
                         .size = info.size,
