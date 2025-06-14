@@ -33,7 +33,7 @@
             "default": []
         },
         "semantic_tokens": {
-            "description": "Set level of semantic tokens. `partial` only includes information that requires semantic analysis.",
+            "description": "Deprecated. The client should set the 'augmentsSyntaxTokens' capability.\n\nSet level of semantic tokens. `partial` only includes information that requires semantic analysis.",
             "type": "string",
             "enum": [
                 "none",
