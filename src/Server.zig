@@ -691,7 +691,7 @@ fn registerCapability(server: *Server, method: []const u8, registersOptions: ?ty
 }
 
 fn requestConfiguration(server: *Server) Error!void {
-    const configuration_items = comptime config: {
+    var configuration_items = comptime config: {
         var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
         for (std.meta.fields(Config), 0..) |field, index| {
             comp_config[index] = .{
@@ -701,6 +701,13 @@ fn requestConfiguration(server: *Server) Error!void {
 
         break :config comp_config;
     };
+
+    if (server.workspaces.items.len == 1) {
+        const workspace = server.workspaces.items[0];
+        for (&configuration_items) |*item| {
+            item.*.scopeUri = workspace.uri;
+        }
+    }
 
     const json_message = try server.sendToClientRequest(
         .{ .string = "i_haz_configuration" },
