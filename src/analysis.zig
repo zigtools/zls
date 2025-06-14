@@ -2462,7 +2462,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     if (param.anytype_ellipsis3) |token_index| {
                         switch (tree.tokenTag(token_index)) {
                             .keyword_anytype => {
-                                break :param_type .{ .data = .{ .anytype_parameter = null }, .is_type_val = true };
+                                break :param_type .{
+                                    .data = .{
+                                        .anytype_parameter = .{
+                                            .token_handle = .{ .token = token_index, .handle = handle },
+                                            .type_from_callsite_references = null,
+                                        },
+                                    },
+                                    .is_type_val = true,
+                                };
                             },
                             .ellipsis3 => {
                                 has_varargs = true;
@@ -3137,7 +3145,10 @@ pub const Type = struct {
         type_parameter: TokenWithHandle,
 
         /// `anytype` in `fn foo(bar: anytype) @TypeOf(bar)`
-        anytype_parameter: ?*Type,
+        anytype_parameter: struct {
+            token_handle: TokenWithHandle,
+            type_from_callsite_references: ?*Type, // TODO: come up with a shorter name...
+        },
 
         /// Branching types
         either: []const EitherEntry,
@@ -3239,7 +3250,12 @@ pub const Type = struct {
                     hasher.update(node_handle.handle.uri);
                 },
                 .type_parameter => |token_handle| token_handle.hashWithHasher(hasher),
-                .anytype_parameter => |ty| if (ty) |t| t.hashWithHasher(hasher),
+                .anytype_parameter => |info| {
+                    info.token_handle.hashWithHasher(hasher);
+                    if (info.type_from_callsite_references) |t| {
+                        t.hashWithHasher(hasher);
+                    }
+                },
                 .either => |entries| {
                     for (entries) |entry| {
                         hasher.update(entry.descriptor);
@@ -3313,8 +3329,11 @@ pub const Type = struct {
                 .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
                 .type_parameter => |a_token_handle| return a_token_handle.eql(b.type_parameter),
-                .anytype_parameter => |a_type_maybe| {
-                    const b_type_maybe = b.anytype_parameter;
+                .anytype_parameter => |a_info| {
+                    const b_info = b.anytype_parameter;
+                    if (!a_info.token_handle.eql(b_info.token_handle)) return false;
+                    const a_type_maybe = a_info.type_from_callsite_references;
+                    const b_type_maybe = b_info.type_from_callsite_references;
                     if (a_type_maybe) |a_type| {
                         const b_type = b_type_maybe orelse return false;
                         if (!a_type.eql(b_type.*)) return false;
@@ -4110,7 +4129,13 @@ pub const Type = struct {
                 try writer.writeAll(str);
                 if (referenced) |r| try r.put(arena, .of(str, handle, token), {});
             },
-            .anytype_parameter => try writer.writeAll("anytype"),
+            .anytype_parameter => |info| {
+                const token = info.token_handle.token;
+                const handle = info.token_handle.handle;
+                const str = handle.tree.tokenSlice(token);
+                std.debug.assert(std.mem.eql(u8, str, "anytype"));
+                try writer.writeAll("anytype");
+            },
         }
     }
 };
@@ -5089,7 +5114,12 @@ pub const DeclWithHandle = struct {
                     if (tree.tokenTag(anytype_token) != .keyword_anytype) return null;
                     const ty = try analyser.resolveCallsiteReferences(self);
                     break :blk Type{
-                        .data = .{ .anytype_parameter = if (ty) |t| try analyser.allocType(t) else null },
+                        .data = .{
+                            .anytype_parameter = .{
+                                .token_handle = .{ .token = anytype_token, .handle = self.handle },
+                                .type_from_callsite_references = if (ty) |t| try analyser.allocType(t) else null,
+                            },
+                        },
                         .is_type_val = false,
                     };
                 };
