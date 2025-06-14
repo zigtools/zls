@@ -1697,6 +1697,91 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
     return null;
 }
 
+fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !?Type {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const pay = switch (decl_handle.decl) {
+        .function_parameter => |pay| pay,
+        else => return null,
+    };
+
+    const tree = decl_handle.handle.tree;
+    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
+
+    if (is_cimport or !analyser.collect_callsite_references) return null;
+
+    // protection against recursive callsite resolution
+    const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
+    if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
+    gop_resolved.value_ptr.* = null;
+
+    const func_decl: Declaration = .{ .ast_node = pay.func };
+
+    var func_buf: [1]Ast.Node.Index = undefined;
+    const func = tree.fullFnProto(&func_buf, pay.func).?;
+
+    var func_params_len: usize = 0;
+
+    var it = func.iterate(&tree);
+    while (ast.nextFnParam(&it)) |_| {
+        func_params_len += 1;
+    }
+
+    const refs = try references.callsiteReferences(
+        analyser.arena,
+        analyser,
+        .{ .decl = func_decl, .handle = decl_handle.handle, .container_type = decl_handle.container_type },
+        false,
+        false,
+    );
+
+    // TODO: Set `workspace` to true; current problems
+    // - we gather dependencies, not dependents
+
+    var possible: std.ArrayListUnmanaged(Type.TypeWithDescriptor) = .empty;
+
+    for (refs.items) |ref| {
+        const handle = analyser.store.getOrLoadHandle(ref.uri).?;
+
+        var call_buf: [1]Ast.Node.Index = undefined;
+        const call = tree.fullCall(&call_buf, ref.call_node).?;
+
+        const real_param_idx = if (func_params_len != 0 and pay.param_index != 0 and call.ast.params.len == func_params_len - 1)
+            pay.param_index - 1
+        else
+            pay.param_index;
+
+        if (real_param_idx >= call.ast.params.len) continue;
+
+        const ty = resolve_ty: {
+            // don't resolve callsite references while resolving callsite references
+            const old_collect_callsite_references = analyser.collect_callsite_references;
+            defer analyser.collect_callsite_references = old_collect_callsite_references;
+            analyser.collect_callsite_references = false;
+
+            break :resolve_ty try analyser.resolveTypeOfNode(.of(
+                // TODO?: this is a """heuristic based approach"""
+                // perhaps it would be better to use proper self detection
+                // maybe it'd be a perf issue and this is fine?
+                // you figure it out future contributor <3
+                call.ast.params[real_param_idx],
+                handle,
+            )) orelse continue;
+        };
+
+        const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
+        try possible.append(analyser.arena, .{
+            .type = ty,
+            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
+        });
+    }
+
+    const maybe_type = try Type.fromEither(analyser, possible.items);
+    if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
+    return maybe_type;
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -3050,8 +3135,11 @@ pub const Type = struct {
         /// - `@compileError("")`
         compile_error: NodeWithHandle,
 
-        // `T` in `fn Foo(comptime T: type) type`
+        /// `T` in `fn Foo(comptime T: type) type`
         type_parameter: TokenWithHandle,
+
+        /// `anytype` in `fn foo(bar: anytype) @TypeOf(bar)`
+        anytype_parameter: ?*Type,
 
         /// Branching types
         either: []const EitherEntry,
@@ -3156,6 +3244,7 @@ pub const Type = struct {
                     hasher.update(node_handle.handle.uri);
                 },
                 .type_parameter => |token_handle| token_handle.hashWithHasher(hasher),
+                .anytype_parameter => |ty| if (ty) |t| t.hashWithHasher(hasher),
                 .either => |entries| {
                     for (entries) |entry| {
                         hasher.update(entry.descriptor);
@@ -3234,6 +3323,15 @@ pub const Type = struct {
                 .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
                 .type_parameter => |a_token_handle| return a_token_handle.eql(b.type_parameter),
+                .anytype_parameter => |a_type_maybe| {
+                    const b_type_maybe = b.anytype_parameter;
+                    if (a_type_maybe) |a_type| {
+                        const b_type = b_type_maybe orelse return false;
+                        if (!a_type.eql(b_type.*)) return false;
+                    } else {
+                        if (b_type_maybe != null) return false;
+                    }
+                },
                 .either => |a_entries| {
                     const b_entries = b.either;
 
@@ -3257,6 +3355,7 @@ pub const Type = struct {
         fn isGeneric(data: Data) bool {
             return switch (data) {
                 .type_parameter => true,
+                .anytype_parameter => false, // TODO(anytype)
                 .pointer => |info| info.elem_ty.data.isGeneric(),
                 .array => |info| info.elem_ty.data.isGeneric(),
                 .tuple => |types| {
@@ -3356,6 +3455,7 @@ pub const Type = struct {
                     std.debug.assert(t.is_type_val);
                     return t.data.resolveGeneric(analyser, bound_params, visiting);
                 },
+                .anytype_parameter => unreachable, // TODO(anytype)
                 .pointer => |info| return .{
                     .pointer = .{
                         .size = info.size,
@@ -4022,6 +4122,7 @@ pub const Type = struct {
                 try writer.writeAll(str);
                 if (referenced) |r| try r.put(arena, .of(str, handle, token), {});
             },
+            .anytype_parameter => try writer.writeAll("anytype"),
         }
     }
 };
@@ -4996,82 +5097,13 @@ pub const DeclWithHandle = struct {
 
                 // handle anytype
                 const type_expr = param.type_expr orelse {
-                    const tracy_zone_inner = tracy.traceNamed(@src(), "resolveCallsiteReferences");
-                    defer tracy_zone_inner.end();
-
-                    const is_cimport = std.mem.eql(u8, std.fs.path.basename(self.handle.uri), "cimport.zig");
-
-                    if (is_cimport or !analyser.collect_callsite_references) return null;
-
-                    // protection against recursive callsite resolution
-                    const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
-                    if (gop_resolved.found_existing) break :blk gop_resolved.value_ptr.*;
-                    gop_resolved.value_ptr.* = null;
-
-                    const func_decl: Declaration = .{ .ast_node = pay.func };
-
-                    var func_buf: [1]Ast.Node.Index = undefined;
-                    const func = tree.fullFnProto(&func_buf, pay.func).?;
-
-                    var func_params_len: usize = 0;
-
-                    var it = func.iterate(&tree);
-                    while (ast.nextFnParam(&it)) |_| {
-                        func_params_len += 1;
-                    }
-
-                    const refs = try references.callsiteReferences(
-                        analyser.arena,
-                        analyser,
-                        .{ .decl = func_decl, .handle = self.handle, .container_type = self.container_type },
-                        false,
-                        false,
-                    );
-
-                    // TODO: Set `workspace` to true; current problems
-                    // - we gather dependencies, not dependents
-
-                    var possible: std.ArrayListUnmanaged(Type.TypeWithDescriptor) = .empty;
-
-                    for (refs.items) |ref| {
-                        const handle = analyser.store.getOrLoadHandle(ref.uri).?;
-
-                        var call_buf: [1]Ast.Node.Index = undefined;
-                        const call = tree.fullCall(&call_buf, ref.call_node).?;
-
-                        const real_param_idx = if (func_params_len != 0 and pay.param_index != 0 and call.ast.params.len == func_params_len - 1)
-                            pay.param_index - 1
-                        else
-                            pay.param_index;
-
-                        if (real_param_idx >= call.ast.params.len) continue;
-
-                        const ty = resolve_ty: {
-                            // don't resolve callsite references while resolving callsite references
-                            const old_collect_callsite_references = analyser.collect_callsite_references;
-                            defer analyser.collect_callsite_references = old_collect_callsite_references;
-                            analyser.collect_callsite_references = false;
-
-                            break :resolve_ty try analyser.resolveTypeOfNode(.of(
-                                // TODO?: this is a """heuristic based approach"""
-                                // perhaps it would be better to use proper self detection
-                                // maybe it'd be a perf issue and this is fine?
-                                // you figure it out future contributor <3
-                                call.ast.params[real_param_idx],
-                                handle,
-                            )) orelse continue;
-                        };
-
-                        const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
-                        try possible.append(analyser.arena, .{
-                            .type = ty,
-                            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
-                        });
-                    }
-
-                    const maybe_type = try Type.fromEither(analyser, possible.items);
-                    if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
-                    break :blk maybe_type;
+                    const anytype_token = param.anytype_ellipsis3 orelse return null;
+                    if (tree.tokenTag(anytype_token) != .keyword_anytype) return null;
+                    const ty = try analyser.resolveCallsiteReferences(self);
+                    break :blk Type{
+                        .data = .{ .anytype_parameter = if (ty) |t| try analyser.allocType(t) else null },
+                        .is_type_val = false,
+                    };
                 };
 
                 const param_type = try analyser.resolveTypeOfNodeInternal(.of(type_expr, self.handle)) orelse return null;

@@ -148,6 +148,11 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 try typeToCompletion(builder, entry_ty);
             }
         },
+        .anytype_parameter => |child_ty| {
+            if (child_ty) |t| {
+                try typeToCompletion(builder, t.*);
+            }
+        },
         .function,
         .for_range,
         .error_union,
