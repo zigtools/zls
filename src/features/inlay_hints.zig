@@ -266,10 +266,7 @@ fn writeCallHint(
         const no_alias = if (param.modifier) |m| m == .noalias_param else false;
         const comp_time = if (param.modifier) |m| m == .comptime_param else false;
 
-        const tooltip = if (param.type) |param_ty|
-            try std.fmt.allocPrint(builder.arena, "{}", .{param_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })})
-        else
-            "anytype";
+        const tooltip = try std.fmt.allocPrint(builder.arena, "{}", .{param.type.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })});
 
         try builder.appendParameterHint(
             handle.tree.nodeTag(arg),

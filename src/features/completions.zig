@@ -1610,7 +1610,7 @@ fn collectVarAccessContainerNodes(
     }
     const param_index = dot_context.fn_arg_index;
     if (param_index >= info.parameters.len) return;
-    const param_type = info.parameters[param_index].type orelse return;
+    const param_type = info.parameters[param_index].type;
     try types_with_handles.append(arena, param_type);
 }
 
@@ -1681,7 +1681,7 @@ fn collectFieldAccessContainerNodes(
         const params = info.parameters;
         const param_index = dot_context.fn_arg_index + additional_index;
         if (param_index >= params.len) continue;
-        const param_type = params[param_index].type orelse continue;
+        const param_type = params[param_index].type;
         try param_type.getAllTypesWithHandlesArrayList(arena, types_with_handles);
     }
 }

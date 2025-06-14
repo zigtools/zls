@@ -247,14 +247,10 @@ pub fn formatParameter(
         const has_parameter_name = data.include_name and info.name != null;
         if (has_parameter_name) try writer.writeAll(": ");
 
-        if (info.type) |ty| {
-            try writer.print("{}", .{ty.fmtTypeVal(analyser, .{
-                .referenced = referenced,
-                .truncate_container_decls = true,
-            })});
-        } else {
-            try writer.writeAll("anytype");
-        }
+        try writer.print("{}", .{info.type.fmtTypeVal(analyser, .{
+            .referenced = referenced,
+            .truncate_container_decls = true,
+        })});
     }
 
     if (data.snippet_placeholders) {
@@ -418,8 +414,9 @@ pub fn firstParamIs(
     std.debug.assert(func_type.isFunc());
     const func_info = func_type.data.function;
     if (func_info.parameters.len == 0) return false;
-    const resolved_type = func_info.parameters[0].type orelse return true;
+    const resolved_type = func_info.parameters[0].type;
     if (!resolved_type.is_type_val) return false;
+    if (resolved_type.data == .anytype_parameter) return true;
 
     const deref_type = switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
@@ -1939,9 +1936,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const min_len = @min(parameters.len, arguments.len);
             for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
                 const param_name_token = param.name_token orelse continue;
-                const param_type = param.type orelse continue;
+                const param_type = param.type;
                 if (!param_type.is_type_val) continue;
 
+                // TODO(anytype)
                 const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
                 if (!argument_type.is_type_val) continue;
 
@@ -2451,7 +2449,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     param_name = tree.tokenSlice(name_token);
                 }
 
-                const param_type = param_type: {
+                const param_type: Type = param_type: {
                     if (param.type_expr) |type_expr| blk: {
                         const ty = try analyser.resolveTypeOfNode(.of(type_expr, handle)) orelse {
                             break :blk;
@@ -2464,7 +2462,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     if (param.anytype_ellipsis3) |token_index| {
                         switch (tree.tokenTag(token_index)) {
                             .keyword_anytype => {
-                                break :param_type null;
+                                break :param_type .{ .data = .{ .anytype_parameter = null }, .is_type_val = true };
                             },
                             .ellipsis3 => {
                                 has_varargs = true;
@@ -3180,8 +3178,7 @@ pub const Type = struct {
             modifier: ?Modifier,
             name: ?[]const u8,
             name_token: ?Ast.TokenIndex,
-            /// null if anytype
-            type: ?Type,
+            type: Type,
 
             pub const Modifier = enum {
                 comptime_param,
@@ -3233,9 +3230,7 @@ pub const Type = struct {
                     hasher.update(info.handle.uri);
                     info.container_type.hashWithHasher(hasher);
                     for (info.parameters) |param| {
-                        if (param.type) |param_ty| {
-                            param_ty.hashWithHasher(hasher);
-                        }
+                        param.type.hashWithHasher(hasher);
                     }
                     info.return_value.hashWithHasher(hasher);
                 },
@@ -3311,12 +3306,7 @@ pub const Type = struct {
                     if (!a_info.container_type.eql(b_info.container_type.*)) return false;
                     if (a_info.parameters.len != b_info.parameters.len) return false;
                     for (a_info.parameters, b_info.parameters) |a_param, b_param| {
-                        const a_param_type = a_param.type orelse {
-                            if (b_param.type) |_| return false;
-                            continue;
-                        };
-                        const b_param_type = b_param.type orelse return false;
-                        if (!a_param_type.eql(b_param_type)) return false;
+                        if (!a_param.type.eql(b_param.type)) return false;
                     }
                     if (!a_info.return_value.eql(b_info.return_value.*)) return false;
                 },
@@ -3388,10 +3378,8 @@ pub const Type = struct {
                         return true;
                     }
                     for (info.parameters) |param| {
-                        if (param.type) |t| {
-                            if (t.data.isGeneric()) {
-                                return true;
-                            }
+                        if (param.type.data.isGeneric()) {
+                            return true;
                         }
                     }
                     return false;
@@ -3521,7 +3509,7 @@ pub const Type = struct {
                                     .modifier = old.modifier,
                                     .name = old.name,
                                     .name_token = old.name_token,
-                                    .type = if (old.type) |t| try analyser.resolveGenericTypeInternal(t, bound_params, visiting) else null,
+                                    .type = try analyser.resolveGenericTypeInternal(old.type, bound_params, visiting),
                                 };
                             }
                             break :blk parameters;
@@ -3805,7 +3793,7 @@ pub const Type = struct {
         return switch (self.data) {
             .function => |info| {
                 for (info.parameters) |param| {
-                    if (param.type == null or param.modifier == .comptime_param) {
+                    if (param.type.data == .anytype_parameter or param.modifier == .comptime_param) {
                         return true;
                     }
                 }
@@ -5858,7 +5846,7 @@ pub fn resolveExpressionTypeFromAncestors(
             const param_index = arg_index + @intFromBool(analyser.hasSelfParam(fn_type));
             if (param_index >= fn_info.parameters.len) return null;
             const param = fn_info.parameters[param_index];
-            const param_ty = param.type orelse return null;
+            const param_ty = param.type;
             return try param_ty.instanceTypeVal(analyser);
         },
         .assign => {
