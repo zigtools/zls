@@ -60,6 +60,26 @@ pub fn dotCompletions(
                     else => {},
                 }
             },
+            .f32 => |it| {
+                // @intFromFloat
+                {
+                    const text = try std.fmt.allocPrint(arena, "@intFromFloat({})", .{ ty.fmt(ip) }); // TODO: get variable's name?? before the .
+                    // const edit = types.TextEdit {
+                    //     .newText = text,
+                    //     .range = .{ 
+                    //          // TODO: how to get the ranges?????
+                    //         .start = .{.character = 0, .line = 0},
+                    //         .end = .{.character = 0,.line = 0}
+                    //     }
+                    // };
+                    completions.appendAssumeCapacity(.{
+                        .label = try std.fmt.allocPrint(arena, "intFromFloat", .{}),
+                        .kind = .Function,
+                        .detail = try std.fmt.allocPrint(arena, "debug:{str}", .{text}),
+                        // .textEdit = edit // TODO: why this doesn't work?????
+                    });
+                }
+            },
             else => {},
         },
         .pointer_type => |pointer_info| {
