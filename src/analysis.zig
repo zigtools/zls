@@ -3684,18 +3684,19 @@ pub const Type = struct {
 
     /// Resolves possible types of a type (single for all except either)
     /// Drops duplicates
-    pub fn getAllTypesWithHandles(ty: Type, arena: std.mem.Allocator) ![]const Type {
+    pub fn getAllTypesWithHandles(ty: Type, analyser: *Analyser) ![]const Type {
         var all_types: ArraySet = .empty;
-        try ty.getAllTypesWithHandlesArraySet(arena, &all_types);
+        try ty.getAllTypesWithHandlesArraySet(analyser, &all_types);
         return all_types.keys();
     }
 
-    pub fn getAllTypesWithHandlesArraySet(ty: Type, arena: std.mem.Allocator, all_types: *ArraySet) !void {
+    pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) !void {
+        const arena = analyser.arena;
         switch (ty.data) {
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                    try entry_ty.getAllTypesWithHandlesArraySet(arena, all_types);
+                    try entry_ty.getAllTypesWithHandlesArraySet(analyser, all_types);
                 }
             },
             else => try all_types.put(arena, ty, {}),
@@ -6108,7 +6109,7 @@ pub fn getSymbolFieldAccesses(
     if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
         const container_handle = try analyser.resolveDerefType(ty) orelse ty;
 
-        const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
+        const container_handle_nodes = try container_handle.getAllTypesWithHandles(analyser);
 
         for (container_handle_nodes) |t| {
             try decls_with_handles.append(arena, (try t.lookupSymbol(analyser, name)) orelse continue);
