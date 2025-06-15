@@ -1412,7 +1412,14 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .tuple => {
+        .tuple => |info| {
+            if (std.mem.eql(u8, "len", name)) {
+                const index = try analyser.ip.get(
+                    analyser.gpa,
+                    .{ .int_u64_value = .{ .ty = .usize_type, .int = info.len } },
+                );
+                return Type.fromIP(analyser, .usize_type, index);
+            }
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
             return try analyser.resolveBracketAccessType(ty, .{ .single = index });

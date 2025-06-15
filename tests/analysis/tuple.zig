@@ -16,6 +16,16 @@ const some_tuple_array_access_1 = some_tuple[1];
 const some_tuple_array_access_2 = some_tuple[2];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
 
+const some_tuple_field_access_0 = some_tuple.@"0";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (i64)()
+const some_tuple_field_access_1 = some_tuple.@"1";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (f32)()
+const some_tuple_field_access_2 = some_tuple.@"2";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
+const some_tuple_len = some_tuple.len;
+//    ^^^^^^^^^^^^^^ (usize)(2)
+
 const either_tuple = if (true) .{undefined} else .{ undefined, undefined };
 //    ^^^^^^^^^^^^ (either type)()
 
@@ -38,6 +48,16 @@ const inferred_tuple_array_access_1 = inferred_tuple[1];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (f32)()
 const inferred_tuple_array_access_2 = inferred_tuple[2];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
+const inferred_tuple_field_access_0 = inferred_tuple.@"0";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (i64)()
+const inferred_tuple_field_access_1 = inferred_tuple.@"1";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (f32)()
+const inferred_tuple_field_access_2 = inferred_tuple.@"2";
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
+const inferred_tuple_len = inferred_tuple.len;
+//    ^^^^^^^^^^^^^^^^^^ (usize)(2)
 
 comptime {
     const inferred_tuple_0, const inferred_tuple_1 = inferred_tuple;

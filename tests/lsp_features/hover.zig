@@ -1196,14 +1196,13 @@ test "array properties" {
 }
 
 test "tuple properties" {
-    // TODO tuple len
-    // try testHoverWithOptions(
-    //     \\const foo: struct { i32, bool } = undefined;
-    //     \\const bar = foo.len<cursor>;
-    // ,
-    //     \\len
-    //     \\(usize)
-    // , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
         \\const foo: struct { i32, bool } = undefined;
         \\const bar = foo.@"0"<cursor>;
