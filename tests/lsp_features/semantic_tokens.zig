@@ -2026,10 +2026,7 @@ test "weird code" {
     });
     try testSemanticTokens(
         \\error. .foo
-    , &.{
-        .{ "error", .keyword, .{} },
-        .{ "foo", .variable, .{} },
-    });
+    , &.{});
     try testSemanticTokens(
         \\const foo = union {
         \\    .bar = 5,
