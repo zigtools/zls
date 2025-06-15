@@ -1003,8 +1003,11 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
     };
 }
 
-fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     if (!ty.is_type_val)
+        return null;
+
+    if (!ty.isTaggedUnion())
         return null;
 
     const scope_handle = switch (ty.data) {
@@ -1014,20 +1017,8 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) erro
     const node = scope_handle.toNode();
     const handle = scope_handle.handle;
 
-    if (node == .root)
-        return null;
-
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = handle.tree.fullContainerDecl(&buf, node) orelse
-        return null;
-
-    if (handle.tree.tokenTag(container_decl.ast.main_token) != .keyword_union)
-        return null;
-
-    const child = try ty.lookupSymbol(analyser, symbol) orelse
-        return null;
-
-    if (child.decl != .ast_node or !child.handle.tree.nodeTag(child.decl.ast_node).isContainerField())
         return null;
 
     if (container_decl.ast.enum_token != null)
@@ -1039,6 +1030,22 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) erro
     }
 
     return null;
+}
+
+fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+    if (!ty.is_type_val)
+        return null;
+
+    if (!ty.isTaggedUnion())
+        return null;
+
+    const child = try ty.lookupSymbol(analyser, symbol) orelse
+        return null;
+
+    if (child.decl != .ast_node or !child.handle.tree.nodeTag(child.decl.ast_node).isContainerField())
+        return null;
+
+    return try analyser.resolveUnionTag(ty);
 }
 
 pub fn resolveFuncProtoOfCallable(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
@@ -5502,6 +5509,11 @@ pub const DeclWithHandle = struct {
                 const case = payload.getCase(tree);
 
                 const switch_expr_type: Type = (try analyser.resolveTypeOfNodeInternal(.of(cond, self.handle))) orelse return null;
+
+                if (self.decl == .switch_inline_tag_payload) {
+                    return try analyser.resolveUnionTag(try switch_expr_type.typeOf(analyser));
+                }
+
                 if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
                 if (!switch_expr_type.isUnionType()) return null;
 
