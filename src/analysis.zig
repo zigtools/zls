@@ -1750,7 +1750,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
 
         if (real_param_idx >= call.ast.params.len) continue;
 
-        const ty = resolve_ty: {
+        var ty = resolve_ty: {
             // don't resolve callsite references while resolving callsite references
             const old_collect_callsite_references = analyser.collect_callsite_references;
             defer analyser.collect_callsite_references = old_collect_callsite_references;
@@ -1765,6 +1765,9 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
                 handle,
             )) orelse continue;
         };
+
+        ty = try ty.typeOf(analyser);
+        std.debug.assert(ty.is_type_val);
 
         const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
         try possible.append(analyser.arena, .{
@@ -3682,26 +3685,208 @@ pub const Type = struct {
         };
     }
 
-    /// Resolves possible types of a type (single for all except either)
+    /// Resolves all possible types by recursively expanding any conditional types.
     /// Drops duplicates
-    pub fn getAllTypesWithHandles(ty: Type, analyser: *Analyser) ![]const Type {
+    pub fn getAllTypesWithHandles(ty: Type, analyser: *Analyser) error{OutOfMemory}![]const Type {
         var all_types: ArraySet = .empty;
         try ty.getAllTypesWithHandlesArraySet(analyser, &all_types);
         return all_types.keys();
     }
 
+    fn isConditional(ty: Type) bool {
+        return switch (ty.data) {
+            .either => true,
+            .anytype_parameter => true,
+            .optional => |child_ty| child_ty.isConditional(),
+            .pointer => |info| info.elem_ty.isConditional(),
+            .array => |info| info.elem_ty.isConditional(),
+            .tuple => |types| {
+                for (types) |t|
+                    if (t.isConditional()) return true;
+                return false;
+            },
+            .container => |info| {
+                for (info.bound_params.values()) |t|
+                    if (t.isConditional()) return true;
+                return false;
+            },
+            .error_union => |info| {
+                if (info.payload.isConditional()) return true;
+                if (info.error_set) |e|
+                    if (e.isConditional()) return true;
+                return false;
+            },
+            .function => |info| {
+                if (info.container_type.isConditional()) return true;
+                if (info.return_value.isConditional()) return true;
+                for (info.parameters) |param|
+                    if (param.type.isConditional()) return true;
+                return false;
+            },
+            .union_tag,
+            .compile_error,
+            .type_parameter,
+            .ip_index,
+            => false,
+        };
+    }
+
+    // is infinite recursion possible here?
     pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) !void {
         const arena = analyser.arena;
+        if (!ty.isConditional()) {
+            try all_types.put(arena, ty, {});
+            return;
+        }
         switch (ty.data) {
+            .union_tag,
+            .compile_error,
+            .type_parameter,
+            .ip_index,
+            => unreachable,
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
                     try entry_ty.getAllTypesWithHandlesArraySet(analyser, all_types);
                 }
             },
-            else => try all_types.put(arena, ty, {}),
+            .anytype_parameter => |info| {
+                if (info.type_from_callsite_references) |t| {
+                    try t.getAllTypesWithHandlesArraySet(analyser, all_types);
+                } else {
+                    try all_types.put(arena, ty, {});
+                }
+            },
+            .optional => |child_ty| {
+                for (try child_ty.getAllTypesWithHandles(analyser)) |t| {
+                    const new_child_ty = try analyser.allocType(t);
+                    try all_types.put(arena, .{ .data = .{ .optional = new_child_ty }, .is_type_val = ty.is_type_val }, {});
+                }
+            },
+            inline .pointer, .array => |info, tag| {
+                for (try info.elem_ty.getAllTypesWithHandles(analyser)) |t| {
+                    var new_info = info;
+                    new_info.elem_ty = try analyser.allocType(t);
+                    const data = @unionInit(Type.Data, @tagName(tag), new_info);
+                    try all_types.put(arena, .{ .data = data, .is_type_val = ty.is_type_val }, {});
+                }
+            },
+            .tuple => |types| {
+                var possible_types: ArrayMap([]const Type) = .empty;
+                for (types) |t| {
+                    try possible_types.put(arena, t, try t.getAllTypesWithHandles(analyser));
+                }
+                var iter: ComboIterator = try .init(arena, &possible_types);
+                while (iter.next()) |combo| {
+                    const new_types = try arena.alloc(Type, types.len);
+                    for (new_types, types) |*new, old| new.* = combo.get(old).?;
+                    try all_types.put(arena, .{ .data = .{ .tuple = new_types }, .is_type_val = ty.is_type_val }, {});
+                }
+            },
+            .container => |info| {
+                var possible_types: ArrayMap([]const Type) = .empty;
+                const types = info.bound_params.values();
+                for (types) |t| {
+                    try possible_types.put(arena, t, try t.getAllTypesWithHandles(analyser));
+                }
+                var iter: ComboIterator = try .init(arena, &possible_types);
+                while (iter.next()) |combo| {
+                    const new_types = try arena.alloc(Type, types.len);
+                    for (new_types, types) |*new, old| new.* = combo.get(old).?;
+                    var new_info = info;
+                    new_info.bound_params = try .init(arena, info.bound_params.keys(), new_types);
+                    try all_types.put(arena, .{ .data = .{ .container = new_info }, .is_type_val = ty.is_type_val }, {});
+                }
+            },
+            .error_union => |info| {
+                var possible_types: ArrayMap([]const Type) = .empty;
+                try possible_types.put(arena, info.payload.*, try info.payload.getAllTypesWithHandles(analyser));
+                if (info.error_set) |t| {
+                    try possible_types.put(arena, t.*, try t.getAllTypesWithHandles(analyser));
+                }
+                var iter: ComboIterator = try .init(arena, &possible_types);
+                while (iter.next()) |combo| {
+                    var new_info = info;
+                    new_info.payload = try analyser.allocType(combo.get(info.payload.*).?);
+                    if (info.error_set) |t| {
+                        new_info.error_set = try analyser.allocType(combo.get(t.*).?);
+                    }
+                    try all_types.put(arena, .{ .data = .{ .error_union = new_info }, .is_type_val = ty.is_type_val }, {});
+                }
+            },
+            .function => |info| {
+                var possible_types: ArrayMap([]const Type) = .empty;
+                try possible_types.put(arena, info.container_type.*, try info.container_type.getAllTypesWithHandles(analyser));
+                for (info.parameters) |param| {
+                    try possible_types.put(arena, param.type, try param.type.getAllTypesWithHandles(analyser));
+                }
+                if (info.return_value.is_type_val) {
+                    try possible_types.put(arena, info.return_value.*, try info.return_value.getAllTypesWithHandles(analyser));
+                } else {
+                    const return_type = try info.return_value.typeOf(analyser);
+                    try possible_types.put(arena, return_type, try return_type.getAllTypesWithHandles(analyser));
+                }
+                var iter: ComboIterator = try .init(arena, &possible_types);
+                while (iter.next()) |combo| {
+                    var new_info = info;
+                    new_info.container_type = try analyser.allocType(combo.get(info.container_type.*).?);
+                    new_info.parameters = try arena.alloc(Data.Parameter, info.parameters.len);
+                    @memcpy(new_info.parameters, info.parameters);
+                    for (new_info.parameters, info.parameters) |*new, old| {
+                        new.type = combo.get(old.type).?;
+                    }
+                    if (info.return_value.is_type_val) {
+                        new_info.return_value = try analyser.allocType(combo.get(info.return_value.*).?);
+                    } else {
+                        const return_type = try info.return_value.typeOf(analyser);
+                        const return_value = try combo.get(return_type).?.instanceTypeVal(analyser);
+                        new_info.return_value = try analyser.allocType(return_value.?);
+                    }
+                    try all_types.put(arena, .{ .data = .{ .function = new_info }, .is_type_val = ty.is_type_val }, {});
+                }
+            },
         }
     }
+
+    const ComboIterator = struct {
+        possible_types: *const ArrayMap([]const Type),
+        current_combo: ArrayMap(Type),
+        total_combos: usize,
+        counter: usize,
+
+        fn init(
+            arena: std.mem.Allocator,
+            possible_types: *const ArrayMap([]const Type),
+        ) !ComboIterator {
+            var current_combo: ArrayMap(Type) = .empty;
+            try current_combo.entries.resize(arena, possible_types.count());
+            @memcpy(current_combo.keys(), possible_types.keys());
+            try current_combo.reIndex(arena);
+
+            var total_combos: usize = 1;
+            for (possible_types.values()) |types| {
+                total_combos *= types.len;
+            }
+
+            return .{
+                .possible_types = possible_types,
+                .current_combo = current_combo,
+                .total_combos = total_combos,
+                .counter = 0,
+            };
+        }
+
+        fn next(iter: *ComboIterator) ?*const ArrayMap(Type) {
+            if (iter.counter == iter.total_combos) return null;
+            var x = iter.counter;
+            for (iter.current_combo.values(), iter.possible_types.values()) |*t, types| {
+                t.* = types[x % types.len];
+                x /= types.len;
+            }
+            iter.counter += 1;
+            return &iter.current_combo;
+        }
+    };
 
     pub fn instanceTypeVal(self: Type, analyser: *Analyser) error{OutOfMemory}!?Type {
         if (!self.is_type_val) return null;
@@ -4185,7 +4370,13 @@ pub const Type = struct {
                 });
             },
             .either => try writer.writeAll("either type"), // TODO
-            .compile_error => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
+            .compile_error => |node_handle| {
+                if (options.truncate_container_decls) {
+                    try writer.writeAll("@compileError(...)");
+                } else {
+                    try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node));
+                }
+            },
             .type_parameter => |token_handle| {
                 const token = token_handle.token;
                 const handle = token_handle.handle;
