@@ -1427,7 +1427,7 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
-                return child_ty.*;
+                return child_ty.instanceTypeVal(analyser);
             }
         },
 
@@ -4613,6 +4613,10 @@ pub fn getFieldAccessType(
                         current_type = try analyser.resolveFieldAccess(current_type orelse return null, symbol) orelse return null;
                     },
                     .question_mark => {
+                        if (after_period.loc.end == tokenizer.buffer.len) {
+                            return current_type;
+                        }
+
                         current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;
                     },
                     else => {
@@ -6377,6 +6381,34 @@ pub fn getSymbolFieldAccessesArrayList(
                 try property_types.append(arena, p);
         }
     }
+}
+
+pub fn getSymbolFieldAccessesHighlight(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    loc: offsets.Loc,
+    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
+    property_types: *std.ArrayListUnmanaged(Type),
+) !?offsets.Loc {
+    const name_loc, const highlight_loc = blk: {
+        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+            const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.question_mark}, &handle.tree) orelse return null;
+            switch (handle.tree.tokenTag(token)) {
+                .question_mark => {
+                    const token_loc = offsets.tokenToLoc(handle.tree, token);
+                    break :blk .{ token_loc, token_loc };
+                },
+                else => return null,
+            }
+        };
+        break :blk .{ name_loc, offsets.tokenToLoc(handle.tree, name_token) };
+    };
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const held_loc = offsets.locMerge(loc, name_loc);
+    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, decls_with_handles, property_types);
+    return highlight_loc;
 }
 
 pub const ReferencedType = struct {

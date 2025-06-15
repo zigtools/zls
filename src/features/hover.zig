@@ -370,13 +370,9 @@ fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
-    const highlight_loc = offsets.tokenToLoc(handle.tree, name_token);
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const held_loc = offsets.locMerge(loc, name_loc);
     var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
     var tys: std.ArrayListUnmanaged(Analyser.Type) = .empty;
-    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls, &tys);
+    const highlight_loc = try analyser.getSymbolFieldAccessesHighlight(arena, handle, source_index, loc, &decls, &tys) orelse return null;
 
     var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.items.len + tys.items.len);
 
