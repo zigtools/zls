@@ -50,11 +50,6 @@ const fizz_fn = fizz;
 const fizz_call = fizz(u8);
 //    ^^^^^^^^^ (?fn () error{}!struct { ??u8 })()
 
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(foo);
-}
-
 fn Point1(comptime T: type) type {
     return struct {
         x: T,
@@ -193,9 +188,8 @@ fn Map(Context: type) type {
             return .{ .unmanaged = unmanaged, .ctx = self.ctx };
         }
         fn clone2(self: Self) Self {
-            // TODO this should be `MapUnmanaged(*Context)`
             const unmanaged = self.unmanaged.cloneContext2(self.ctx);
-            //    ^^^^^^^^^ (MapUnmanaged(Context))()
+            //    ^^^^^^^^^ (MapUnmanaged(*Context))()
             return .{ .unmanaged = unmanaged, .ctx = self.ctx };
         }
     };
@@ -214,9 +208,8 @@ fn MapUnmanaged(Context: type) type {
             _ = self;
         }
         fn clone2(self: Self) Self {
-            // TODO this should be `MapUnmanaged(*Context)`
             const cloned = self.cloneContext2(@as(Context, undefined));
-            //    ^^^^^^ (MapUnmanaged(Context))()
+            //    ^^^^^^ (MapUnmanaged(*Context))()
             return cloned;
         }
         fn cloneContext2(self: Self, new_ctx: anytype) MapUnmanaged(*@TypeOf(new_ctx)) {
@@ -239,3 +232,24 @@ fn Identity(comptime T: type) T {}
 
 const identity_of_unknown_type = Identity(@as(type, undefined));
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ ((unknown type))()
+
+fn anytypeFn1(a: anytype) @TypeOf(a) {
+    return a;
+}
+const anytype_1_int = anytypeFn1(42);
+//    ^^^^^^^^^^^^^ (comptime_int)()
+const anytype_1_bool = anytypeFn1(true);
+//    ^^^^^^^^^^^^^^ (bool)()
+
+fn anytypeFn2(a: anytype, b: anytype) @TypeOf(a, b) {
+    return a + b;
+}
+const anytype_2_u8_u16 = anytypeFn2(@as(u8, 42), @as(u16, 42));
+//    ^^^^^^^^^^^^^^^^ (u8)() TODO this should be `u16`
+const anytype_2_i8_i16 = anytypeFn2(@as(i8, 42), @as(i16, 42));
+//    ^^^^^^^^^^^^^^^^ (i8)() TODO this should be `i16`
+
+comptime {
+    // Use @compileLog to verify the expected type with the compiler:
+    // @compileLog(anytype_2_i8_i16);
+}
