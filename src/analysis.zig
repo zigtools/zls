@@ -1376,7 +1376,12 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .one => {}, // One level of indirection is handled by resolveDerefType
+            .one => {
+                if (std.mem.eql(u8, "*", name)) {
+                    return info.elem_ty.instanceTypeVal(analyser);
+                }
+                // One level of indirection is handled by resolveDerefType
+            },
             .slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return Type.fromIP(analyser, .usize_type, null);
@@ -4626,6 +4631,10 @@ pub fn getFieldAccessType(
                 }
             },
             .period_asterisk => {
+                if (tok.loc.end == tokenizer.buffer.len) {
+                    return current_type;
+                }
+
                 current_type = (try analyser.resolveDerefType(current_type orelse return null)) orelse return null;
             },
             .l_paren => {
@@ -6394,11 +6403,16 @@ pub fn getSymbolFieldAccessesHighlight(
 ) !?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
         const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
-            const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.question_mark}, &handle.tree) orelse return null;
+            const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
             switch (handle.tree.tokenTag(token)) {
                 .question_mark => {
                     const token_loc = offsets.tokenToLoc(handle.tree, token);
                     break :blk .{ token_loc, token_loc };
+                },
+                .period_asterisk => {
+                    var name_loc = offsets.tokenToLoc(handle.tree, token);
+                    name_loc.start += 1; // trim the period
+                    break :blk .{ name_loc, name_loc };
                 },
                 else => return null,
             }

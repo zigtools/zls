@@ -1248,6 +1248,29 @@ test "optional unwrap" {
     });
 }
 
+test "pointer dereference" {
+    try testHoverWithOptions(
+        \\const foo: *f64 = undefined;
+        \\const bar = foo.*<cursor>;
+    ,
+        \\*
+        \\(f64)
+    , .{
+        .highlight = "*",
+        .markup_kind = .plaintext,
+    });
+    try testHoverWithOptions(
+        \\const foo: *f64 = undefined;
+        \\const bar = foo.<cursor>*;
+    ,
+        \\*
+        \\(f64)
+    , .{
+        .highlight = "*",
+        .markup_kind = .plaintext,
+    });
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }
