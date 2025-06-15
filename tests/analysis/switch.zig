@@ -47,7 +47,7 @@ const switch_tagged_union = switch (some_tagged_union) {
     .bar => |a| a,
     //       ^ (bool)()
     else => |a| a,
-    //       ^ (unknown)() TODO this should be `TaggedUnion`
+    //       ^ (TaggedUnion)()
 };
 
 const switch_non_exhaustive_enum = switch (some_non_exhaustive_enum) {

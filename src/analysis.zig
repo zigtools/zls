@@ -5517,6 +5517,14 @@ pub const DeclWithHandle = struct {
                 if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
                 if (!switch_expr_type.isUnionType()) return switch_expr_type;
 
+                if (case.ast.values.len == 0) {
+                    if (case.inline_token == null) {
+                        return switch_expr_type;
+                    }
+                    // TODO either type
+                    return null;
+                }
+
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {
                     if (tree.nodeTag(case_value) != .enum_literal) continue;
