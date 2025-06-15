@@ -1168,6 +1168,60 @@ test "deprecated" {
     );
 }
 
+test "slice properties" {
+    try testHoverWithOptions(
+        \\const foo: []const u8 = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: []const u8 = undefined;
+        \\const bar = foo.ptr<cursor>;
+    ,
+        \\ptr
+        \\([*]const u8)
+    , .{ .markup_kind = .plaintext });
+}
+
+test "array properties" {
+    try testHoverWithOptions(
+        \\const foo: [3]u8 = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
+}
+
+test "tuple properties" {
+    // TODO tuple len
+    // try testHoverWithOptions(
+    //     \\const foo: struct { i32, bool } = undefined;
+    //     \\const bar = foo.len<cursor>;
+    // ,
+    //     \\len
+    //     \\(usize)
+    // , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.@"0"<cursor>;
+    ,
+        // TODO this should be @"0"
+        \\0
+        \\(i32)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.@"1"<cursor>;
+    ,
+        // TODO this should be @"1"
+        \\1
+        \\(bool)
+    , .{ .markup_kind = .plaintext });
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }

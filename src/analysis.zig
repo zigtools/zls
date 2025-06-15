@@ -1424,8 +1424,6 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .container => {},
-
         else => {},
     }
 
@@ -6341,10 +6339,24 @@ pub fn getSymbolFieldAccesses(
     held_loc: offsets.Loc,
     name: []const u8,
 ) error{OutOfMemory}!?[]const DeclWithHandle {
+    var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
+    var property_types: std.ArrayListUnmanaged(Type) = .empty;
+    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls_with_handles, &property_types);
+    return try decls_with_handles.toOwnedSlice(arena);
+}
+
+pub fn getSymbolFieldAccessesArrayList(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    held_loc: offsets.Loc,
+    name: []const u8,
+    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
+    property_types: *std.ArrayListUnmanaged(Type),
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
 
     if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
         const container_handle = try analyser.resolveDerefType(ty) orelse ty;
@@ -6352,11 +6364,12 @@ pub fn getSymbolFieldAccesses(
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(analyser);
 
         for (container_handle_nodes) |t| {
-            try decls_with_handles.append(arena, (try t.lookupSymbol(analyser, name)) orelse continue);
+            if (try t.lookupSymbol(analyser, name)) |decl_handle|
+                try decls_with_handles.append(arena, decl_handle);
+            if (try analyser.resolvePropertyType(ty, name)) |p|
+                try property_types.append(arena, p);
         }
     }
-
-    return try decls_with_handles.toOwnedSlice(arena);
 }
 
 pub const ReferencedType = struct {

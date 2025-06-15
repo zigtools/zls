@@ -99,10 +99,28 @@ fn hoverSymbolRecursive(
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
+    return try hoverSymbolResolvedType(
+        analyser,
+        arena,
+        def_str,
+        markup_kind,
+        doc_strings,
+        try decl_handle.resolveType(analyser),
+    );
+}
+
+fn hoverSymbolResolvedType(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    def_str: []const u8,
+    markup_kind: types.MarkupKind,
+    doc_strings: *std.ArrayListUnmanaged([]const u8),
+    resolved_type_maybe: ?Analyser.Type,
+) error{OutOfMemory}!?[]const u8 {
     var referenced: Analyser.ReferencedType.Set = .empty;
     var resolved_type_strings: std.ArrayListUnmanaged([]const u8) = .empty;
     var has_more = false;
-    if (try decl_handle.resolveType(analyser)) |resolved_type| {
+    if (resolved_type_maybe) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
         const typeof = try resolved_type.typeOf(analyser);
@@ -355,12 +373,18 @@ fn hoverDefinitionFieldAccess(
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
-    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
+    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
+    var tys: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls, &tys);
 
-    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.len);
+    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.items.len + tys.items.len);
 
-    for (decls) |decl| {
+    for (decls.items) |decl| {
         content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);
+    }
+    for (tys.items) |ty| {
+        var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+        content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, name, markup_kind, &doc_strings, ty) orelse continue);
     }
 
     return .{
