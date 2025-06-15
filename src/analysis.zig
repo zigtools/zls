@@ -1126,7 +1126,6 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
     if (lhs.is_type_val) return null;
 
     switch (lhs.data) {
-        .for_range => return Type.fromIP(analyser, .usize_type, null),
         .tuple => |fields| switch (rhs) {
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
@@ -2638,7 +2637,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             }
         },
 
-        .for_range => return .{ .data = .{ .for_range = node_handle }, .is_type_val = false },
+        .for_range => {},
 
         .equal_equal,
         .bang_equal,
@@ -3143,9 +3142,6 @@ pub const Type = struct {
         /// - Function: `fn () Foo`, `fn foo() Foo`
         function: Function,
 
-        /// - `start..end`
-        for_range: NodeWithHandle,
-
         /// - `@compileError("")`
         compile_error: NodeWithHandle,
 
@@ -3253,7 +3249,7 @@ pub const Type = struct {
                     }
                     info.return_value.hashWithHasher(hasher);
                 },
-                .for_range, .compile_error => |node_handle| {
+                .compile_error => |node_handle| {
                     std.hash.autoHash(hasher, node_handle.node);
                     hasher.update(node_handle.handle.uri);
                 },
@@ -3334,7 +3330,6 @@ pub const Type = struct {
                     }
                     if (!a_info.return_value.eql(b_info.return_value.*)) return false;
                 },
-                .for_range => |a_node_handle| return a_node_handle.eql(b.for_range),
                 .compile_error => |a_node_handle| return a_node_handle.eql(b.compile_error),
                 .type_parameter => |a_token_handle| return a_token_handle.eql(b.type_parameter),
                 .anytype_parameter => |a_info| {
@@ -3419,7 +3414,6 @@ pub const Type = struct {
                     }
                     return false;
                 },
-                .for_range,
                 .compile_error,
                 .ip_index,
                 => false,
@@ -3461,7 +3455,6 @@ pub const Type = struct {
             if (gop.found_existing) return data;
             defer std.debug.assert(visiting.removeContext(data, ctx));
             switch (data) {
-                .for_range,
                 .compile_error,
                 .ip_index,
                 => unreachable,
@@ -4125,7 +4118,6 @@ pub const Type = struct {
                     .snippet_placeholders = false,
                 })});
             },
-            .for_range => |node_handle| try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node)),
             .ip_index => |payload| {
                 const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
                 try analyser.ip.print(ip_index, writer, .{
@@ -5163,10 +5155,15 @@ pub const DeclWithHandle = struct {
                 ))) orelse return null,
                 .error_set,
             ),
-            .for_loop_payload => |pay| try analyser.resolveBracketAccessType(
-                (try analyser.resolveTypeOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
-                .{ .single = null },
-            ),
+            .for_loop_payload => |pay| blk: {
+                if (tree.nodeTag(pay.condition) == .for_range) {
+                    break :blk Type.fromIP(analyser, .usize_type, null);
+                }
+                break :blk try analyser.resolveBracketAccessType(
+                    (try analyser.resolveTypeOfNodeInternal(.of(pay.condition, self.handle))) orelse return null,
+                    .{ .single = null },
+                );
+            },
             .assign_destructure => |pay| blk: {
                 const var_decl = pay.getFullVarDecl(tree);
                 if (var_decl.ast.type_node.unwrap()) |type_node| {
