@@ -25,11 +25,11 @@ const some_non_exhaustive_enum: NonExhaustiveEnum = @enumFromInt(42);
 
 const switch_u8 = switch (some_u8) {
     'x' => |a| a,
-    //      ^ (unknown)() TODO this should be `u8`
+    //      ^ (u8)()
     'y' => |a| a,
-    //      ^ (unknown)() TODO this should be `u8`
+    //      ^ (u8)()
     else => |a| a,
-    //       ^ (unknown)() TODO this should be `u8`
+    //       ^ (u8)()
 };
 
 const switch_enum = switch (some_enum) {
@@ -59,15 +59,24 @@ const switch_non_exhaustive_enum = switch (some_non_exhaustive_enum) {
     //    ^ (NonExhaustiveEnum)()
 };
 
+const switch_null = switch (null) {
+    .foo => |a| a,
+    //       ^ (@TypeOf(null))() TODO this should be `unknown`
+    .bar => |a| a,
+    //       ^ (@TypeOf(null))() TODO this should be `unknown`
+    else => |a| a,
+    //       ^ (@TypeOf(null))() TODO this should be `unknown`
+};
+
 const switch_u8_inline = switch (some_u8) {
     inline 'x' => |a, b| .{ a, b },
-    //             ^ (unknown)() TODO this should be `u8`
+    //             ^ (u8)()
     //                ^ (unknown)()
     inline 'y' => |a, b| .{ a, b },
-    //             ^ (unknown)() TODO this should be `u8`
+    //             ^ (u8)()
     //                ^ (unknown)()
     inline else => |a, b| .{ a, b },
-    //              ^ (unknown)() TODO this should be `u8`
+    //              ^ (u8)()
     //                 ^ (unknown)()
 };
 
@@ -93,4 +102,16 @@ const switch_tagged_union_inline = switch (some_tagged_union) {
     inline else => |a, b| .{ a, b },
     //              ^ (unknown)() TODO this should be `either type`
     //                 ^ (Enum)()
+};
+
+const switch_null_inline = switch (null) {
+    inline .foo => |a, b| .{ a, b },
+    //              ^ (@TypeOf(null))() TODO this should be `unknown`
+    //                 ^ (unknown)()
+    inline .bar => |a, b| .{ a, b },
+    //              ^ (@TypeOf(null))() TODO this should be `unknown`
+    //                 ^ (unknown)()
+    inline else => |a, b| .{ a, b },
+    //              ^ (@TypeOf(null))() TODO this should be `unknown`
+    //                 ^ (unknown)()
 };

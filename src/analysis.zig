@@ -5515,7 +5515,7 @@ pub const DeclWithHandle = struct {
                 }
 
                 if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
-                if (!switch_expr_type.isUnionType()) return null;
+                if (!switch_expr_type.isUnionType()) return switch_expr_type;
 
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {
