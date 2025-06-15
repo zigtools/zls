@@ -5265,6 +5265,7 @@ pub const DeclWithHandle = struct {
             .error_union_error,
             .for_loop_payload,
             .switch_payload,
+            .switch_inline_tag_payload,
             => return null, // the payloads can't have a type specifier
 
             .label,
@@ -5315,6 +5316,7 @@ pub const DeclWithHandle = struct {
             .error_union_payload,
             .error_union_error,
             .switch_payload,
+            .switch_inline_tag_payload,
             .label,
             .error_token,
             => true,
@@ -5330,6 +5332,7 @@ pub const DeclWithHandle = struct {
             .assign_destructure,
             .label,
             .error_token,
+            .switch_inline_tag_payload,
             => false,
             inline .optional_payload,
             .for_loop_payload,
@@ -5492,7 +5495,9 @@ pub const DeclWithHandle = struct {
                 };
             },
             .label => |decl| try analyser.resolveTypeOfNodeInternal(.of(decl.block, self.handle)),
-            .switch_payload => |payload| blk: {
+            .switch_payload,
+            .switch_inline_tag_payload,
+            => |payload| blk: {
                 const cond = tree.nodeData(payload.node).node_and_extra[0];
                 const case = payload.getCase(tree);
 

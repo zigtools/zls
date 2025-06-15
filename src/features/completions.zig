@@ -232,6 +232,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         .for_loop_payload,
         .assign_destructure,
         .switch_payload,
+        .switch_inline_tag_payload,
         => {
             var kind: types.CompletionItemKind = blk: {
                 const parent_is_type_val = if (decl_handle.container_type) |container_ty| container_ty.is_type_val else null;

@@ -114,8 +114,11 @@ pub const Declaration = union(enum) {
         condition: Ast.Node.OptionalIndex,
     },
     assign_destructure: AssignDestructure,
-    // a switch case capture
+    /// - `switch (condition) { .case => |value| {} }`
     switch_payload: Switch,
+    /// - `switch (condition) { inline .case => |_, tag| {} }`
+    /// - `switch (condition) { inline else => |_, tag| {} }`
+    switch_inline_tag_payload: Switch,
     label: struct {
         identifier: Ast.TokenIndex,
         block: Ast.Node.Index,
@@ -233,10 +236,12 @@ pub const Declaration = union(enum) {
                 const varDecl = tree.fullVarDecl(var_decl_node).?;
                 return varDecl.ast.mut_token + 1;
             },
-            .switch_payload => |payload| {
+            .switch_payload,
+            .switch_inline_tag_payload,
+            => |payload| {
                 const case = payload.getCase(tree);
                 const payload_token = case.payload_token.?;
-                return payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
+                return payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk) + @as(Ast.TokenIndex, 2) * @intFromBool(decl == .switch_inline_tag_payload);
             },
         };
     }
@@ -1279,6 +1284,16 @@ noinline fn walkSwitchNode(
                 .{ .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) } },
                 .other,
             );
+            if (name_token + 2 < tree.tokens.len and
+                tree.tokenTag(name_token + 1) == .comma and
+                tree.tokenTag(name_token + 2) == .identifier)
+            {
+                try expr_scope.pushDeclaration(
+                    name_token + 2,
+                    .{ .switch_inline_tag_payload = .{ .node = node_idx, .case_index = @intCast(case_index) } },
+                    .other,
+                );
+            }
             try expr_scope.finalize();
         } else {
             try walkNode(context, tree, switch_case.ast.target_expr);
