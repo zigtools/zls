@@ -3579,6 +3579,25 @@ pub const Type = struct {
         return true;
     }
 
+    pub const ArraySet = ArrayMap(void);
+
+    pub fn ArrayMap(comptime V: type) type {
+        return std.ArrayHashMapUnmanaged(Type, V, ArrayMapContext, true);
+    }
+
+    pub const ArrayMapContext = struct {
+        pub fn hash(self: ArrayMapContext, ty: Type) u32 {
+            _ = self;
+            return ty.hash32();
+        }
+
+        pub fn eql(self: ArrayMapContext, a: Type, b: Type, b_index: usize) bool {
+            _ = self;
+            _ = b_index;
+            return a.eql(b);
+        }
+    };
+
     pub fn fromIP(analyser: *Analyser, ty: InternPool.Index, index: ?InternPool.Index) Type {
         std.debug.assert(analyser.ip.isType(ty));
         if (index) |idx| std.debug.assert(analyser.ip.typeOf(idx) == ty);
@@ -3666,20 +3685,20 @@ pub const Type = struct {
     /// Resolves possible types of a type (single for all except either)
     /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: Type, arena: std.mem.Allocator) ![]const Type {
-        var all_types: std.ArrayListUnmanaged(Type) = .empty;
-        try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
-        return try all_types.toOwnedSlice(arena);
+        var all_types: ArraySet = .empty;
+        try ty.getAllTypesWithHandlesArraySet(arena, &all_types);
+        return all_types.keys();
     }
 
-    pub fn getAllTypesWithHandlesArrayList(ty: Type, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(Type)) !void {
+    pub fn getAllTypesWithHandlesArraySet(ty: Type, arena: std.mem.Allocator, all_types: *ArraySet) !void {
         switch (ty.data) {
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                    try entry_ty.getAllTypesWithHandlesArrayList(arena, all_types);
+                    try entry_ty.getAllTypesWithHandlesArraySet(arena, all_types);
                 }
             },
-            else => try all_types.append(arena, ty),
+            else => try all_types.put(arena, ty, {}),
         }
     }
 
