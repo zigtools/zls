@@ -6062,16 +6062,6 @@ pub fn resolveExpressionTypeFromAncestors(
             const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
                 return null;
 
-            if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
-                if (try analyser.resolveExpressionType(
-                    handle,
-                    ancestors[1],
-                    ancestors[2..],
-                )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
-                }
-            }
-
             if (try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
@@ -6326,12 +6316,39 @@ pub fn resolveExpressionTypeFromAncestors(
 
         .address_of => {
             std.debug.assert(node == tree.nodeData(ancestors[0]).node);
-            const ty = try analyser.resolveExpressionType(
+
+            const expr_ty = try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
             ) orelse return null;
-            return try analyser.resolveDerefType(ty);
+
+            if (try analyser.resolveDerefType(expr_ty)) |ty| {
+                return ty;
+            }
+
+            switch (expr_ty.data) {
+                .pointer => |info| switch (info.size) {
+                    .slice => {
+                        var buffer: [2]Ast.Node.Index = undefined;
+                        const array_init = tree.fullArrayInit(&buffer, node) orelse return null;
+                        return .{
+                            .data = .{
+                                .array = .{
+                                    .elem_count = array_init.ast.elements.len,
+                                    .sentinel = info.sentinel,
+                                    .elem_ty = info.elem_ty,
+                                },
+                            },
+                            .is_type_val = false,
+                        };
+                    },
+                    else => {},
+                },
+                else => {},
+            }
+
+            return null;
         },
 
         else => {}, // TODO: Implement more expressions; better safe than sorry

@@ -122,7 +122,7 @@ const some_tuple = TupleType{
 };
 
 const some_slice: []StructType = &.{
-    // TODO                           ^ ([2]StructType)()
+    //                            ^ ([2]StructType)()
     .{ .foo = 1 },
     // ^^^^ (u32)()
     .{ .foo = 2 },
@@ -143,7 +143,7 @@ const some_enum_array: [2]EnumType = .{ .bar, .baz };
 //                                            ^^^^ (EnumType)()
 
 const some_enum_slice: []const EnumType = &.{ .bar, .baz };
-//                                         ^ (struct { @Type(.enum_literal), @Type(.enum_literal) })() TODO this should be `[2]EnumType`
+//                                         ^ ([2]EnumType)()
 //                                            ^^^^ (EnumType)()
 //                                                  ^^^^ (EnumType)()
 
