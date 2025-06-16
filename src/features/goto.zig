@@ -95,10 +95,10 @@ fn gotoDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionEnumLiteral(
@@ -111,10 +111,10 @@ fn gotoDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionBuiltin(
@@ -169,14 +169,14 @@ fn gotoDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
     var locs: std.ArrayListUnmanaged(types.DefinitionLink) = .empty;
 
     for (accesses) |access| {
-        if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), access, kind, offset_encoding)) |l|
+        if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
             try locs.append(arena, l);
     }
 
