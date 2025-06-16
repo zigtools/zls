@@ -332,6 +332,45 @@ fn hoverDefinitionGlobal(
     };
 }
 
+fn hoverDefinitionStructInit(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    markup_kind: types.MarkupKind,
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!?types.Hover {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
+    if (token + 1 >= handle.tree.tokens.len) return null;
+    if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
+
+    const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
+
+    var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    if (try resolved_type.docComments(arena)) |doc|
+        try doc_strings.append(arena, doc);
+
+    var referenced: Analyser.ReferencedType.Set = .empty;
+    const def_str = try std.fmt.allocPrint(arena, "{}", .{try resolved_type.fmtTypeOf(analyser, .{
+        .referenced = &referenced,
+        .truncate_container_decls = false,
+    })});
+    const referenced_types: []const Analyser.ReferencedType = referenced.keys();
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
+            },
+        },
+        .range = offsets.tokenToRange(handle.tree, token, offset_encoding),
+    };
+}
+
 fn hoverDefinitionEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,
@@ -343,7 +382,9 @@ fn hoverDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+        return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
+    };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 

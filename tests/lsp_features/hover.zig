@@ -341,6 +341,36 @@ test "root struct" {
     );
 }
 
+test "inferred struct init" {
+    try testHover(
+        \\const S = struct { foo: u32 };
+        \\const foo: S = .<cursor>{ .foo = 0 };
+    ,
+        \\```zig
+        \\S
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+    try testHover(
+        \\const S = struct { foo: u32 };
+        \\fn f(_: S) void {}
+        \\const foo = f(<cursor>.{ .foo = 0 });
+    ,
+        \\```zig
+        \\S
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+}
+
 test "decl literal" {
     try testHover(
         \\const S = struct {
