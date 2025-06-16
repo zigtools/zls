@@ -1207,18 +1207,22 @@ test "tuple properties" {
         \\const foo: struct { i32, bool } = undefined;
         \\const bar = foo.@"0"<cursor>;
     ,
-        // TODO this should be @"0"
-        \\0
+        \\@"0"
         \\(i32)
-    , .{ .markup_kind = .plaintext });
+    , .{
+        .highlight = "@\"0\"",
+        .markup_kind = .plaintext,
+    });
     try testHoverWithOptions(
         \\const foo: struct { i32, bool } = undefined;
         \\const bar = foo.@"1"<cursor>;
     ,
-        // TODO this should be @"1"
-        \\1
+        \\@"1"
         \\(bool)
-    , .{ .markup_kind = .plaintext });
+    , .{
+        .highlight = "@\"1\"",
+        .markup_kind = .plaintext,
+    });
 }
 
 fn testHover(source: []const u8, expected: []const u8) !void {
@@ -1231,6 +1235,7 @@ fn testHoverWithOptions(
     options: struct {
         markup_kind: types.MarkupKind,
         max_conditional_combos: usize = 3,
+        highlight: ?[]const u8 = null,
     },
 ) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
@@ -1271,4 +1276,8 @@ fn testHoverWithOptions(
 
     try std.testing.expectEqual(options.markup_kind, markup_context.kind);
     try zls.testing.expectEqualStrings(expected, markup_context.value);
+    if (options.highlight) |expected_higlight| {
+        const actual_highlight = offsets.rangeToSlice(text, response.range.?, ctx.server.offset_encoding);
+        try std.testing.expectEqualStrings(expected_higlight, actual_highlight);
+    }
 }

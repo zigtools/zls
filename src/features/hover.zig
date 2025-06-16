@@ -370,7 +370,8 @@ fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
+    const highlight_loc = offsets.tokenToLoc(handle.tree, name_token);
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
@@ -383,8 +384,9 @@ fn hoverDefinitionFieldAccess(
         content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);
     }
     for (tys.items) |ty| {
+        const def_str = offsets.locToSlice(handle.tree.source, highlight_loc);
         var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
-        content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, name, markup_kind, &doc_strings, ty) orelse continue);
+        content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, def_str, markup_kind, &doc_strings, ty) orelse continue);
     }
 
     return .{
@@ -396,7 +398,7 @@ fn hoverDefinitionFieldAccess(
                 else => try std.mem.join(arena, "\n\n", content.items),
             },
         } },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, highlight_loc, offset_encoding),
     };
 }
 
