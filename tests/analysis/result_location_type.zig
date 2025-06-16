@@ -93,10 +93,6 @@ const some_tuple = TupleType{
     // ^^^^ (u16)()
 };
 
-//
-// address_of
-//
-
 const some_slice: []StructType = &.{
     .{ .foo = 1 },
     // ^^^^ (u32)()
@@ -285,3 +281,20 @@ const @"orelse" = some_optional orelse .{ .foo = 1 };
 
 const @"catch" = some_error_union catch .{ .foo = 1 };
 //                                         ^^^^ (u32)()
+
+//
+// address_of
+//
+
+const address_of_struct: *const StructType = &.{ .foo = 1 };
+//                                               ^^^^ (u32)()
+
+const address_of_nested_struct: *const NestedStructType = &.{ .bar = .{ .foo = 1 } };
+//                                                            ^^^^ (StructType)()
+//                                                                      ^^^^ (u32)()
+
+const address_of_enum: *const EnumType = &.bar;
+//                                        ^^^^ (EnumType)()
+
+const address_of_tagged_union: *const TaggedUnionType = &.{ .bar = 1 };
+//                                                          ^^^^ (u16)()

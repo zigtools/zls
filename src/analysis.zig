@@ -6289,6 +6289,16 @@ pub fn resolveExpressionTypeFromAncestors(
             }
         },
 
+        .address_of => {
+            std.debug.assert(node == tree.nodeData(ancestors[0]).node);
+            const ty = try analyser.resolveExpressionType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            ) orelse return null;
+            return try analyser.resolveDerefType(ty);
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
