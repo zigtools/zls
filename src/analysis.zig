@@ -1782,6 +1782,53 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
     return maybe_type;
 }
 
+fn resolveFunctionTypeFromCall(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    call: Ast.full.Call,
+    func_ty: Type,
+) !Type {
+    if (!func_ty.isGenericType()) {
+        return func_ty;
+    }
+
+    const func_info = func_ty.data.function;
+
+    var meta_params: TokenToTypeMap = switch (func_info.container_type.data) {
+        .container => |info| try info.bound_params.clone(analyser.arena),
+        else => .empty,
+    };
+    errdefer meta_params.deinit(analyser.arena);
+
+    const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
+        try analyser.isInstanceCall(handle, call, func_ty);
+
+    const parameters = func_info.parameters[@intFromBool(has_self_param)..];
+    const arguments = call.ast.params;
+    const min_len = @min(parameters.len, arguments.len);
+    for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
+        const param_name_token = param.name_token orelse continue;
+        const param_type = param.type;
+        if (!param_type.is_type_val) continue;
+
+        const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
+
+        switch (param_type.data) {
+            .ip_index => |info| {
+                if (info.index != .type_type) continue;
+                if (!argument_type.is_type_val) continue;
+                try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
+            },
+            .anytype_parameter => |info| {
+                try meta_params.put(analyser.arena, info.token_handle, try argument_type.typeOf(analyser));
+            },
+            else => {},
+        }
+    }
+
+    return try analyser.resolveGenericType(func_ty, meta_params);
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -1916,48 +1963,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const call = tree.fullCall(&buffer, node).?;
 
             const ty = try analyser.resolveTypeOfNodeInternal(.of(call.ast.fn_expr, handle)) orelse return null;
-            const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            var func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
 
+            func_ty = try analyser.resolveFunctionTypeFromCall(handle, call, func_ty);
             const func_info = func_ty.data.function;
-            const return_value = func_info.return_value.*;
-            if (!return_value.isGenericType()) {
-                return return_value;
-            }
-
-            var meta_params: TokenToTypeMap = switch (func_info.container_type.data) {
-                .container => |info| try info.bound_params.clone(analyser.arena),
-                else => .empty,
-            };
-            errdefer meta_params.deinit(analyser.arena);
-
-            const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
-                try analyser.isInstanceCall(handle, call, func_ty);
-
-            const parameters = func_info.parameters[@intFromBool(has_self_param)..];
-            const arguments = call.ast.params;
-            const min_len = @min(parameters.len, arguments.len);
-            for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
-                const param_name_token = param.name_token orelse continue;
-                const param_type = param.type;
-                if (!param_type.is_type_val) continue;
-
-                const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
-
-                switch (param_type.data) {
-                    .ip_index => |info| {
-                        if (info.index != .type_type) continue;
-                        if (!argument_type.is_type_val) continue;
-                        try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
-                    },
-                    .anytype_parameter => |info| {
-                        try meta_params.put(analyser.arena, info.token_handle, try argument_type.typeOf(analyser));
-                    },
-                    else => {},
-                }
-            }
-
-            return try analyser.resolveGenericType(return_value, meta_params);
+            return func_info.return_value.*;
         },
         .container_field,
         .container_field_init,
@@ -6148,7 +6159,7 @@ pub fn resolveExpressionTypeFromAncestors(
 
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
-            const fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
+            var fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
                 const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
                 const ty = try decl.resolveType(analyser) orelse return null;
@@ -6159,11 +6170,11 @@ pub fn resolveExpressionTypeFromAncestors(
             };
             if (fn_type.is_type_val) return null;
 
-            const fn_info = fn_type.data.function;
-            const param_index = arg_index + @intFromBool(try analyser.hasSelfParam(fn_type));
-            if (param_index >= fn_info.parameters.len) return null;
-            const param = fn_info.parameters[param_index];
-            const param_ty = param.type;
+            fn_type = try analyser.resolveFunctionTypeFromCall(handle, call, fn_type);
+            const has_self_param = try analyser.isInstanceCall(handle, call, fn_type);
+            const parameters = fn_type.data.function.parameters[@intFromBool(has_self_param)..];
+            if (arg_index >= parameters.len) return null;
+            const param_ty = parameters[arg_index].type;
             return try param_ty.instanceTypeVal(analyser);
         },
         .assign => {

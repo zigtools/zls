@@ -73,13 +73,21 @@ const struct_decl_literal_call: StructType = .init();
 const nested_struct_decl_literal_call: NestedStructType = .init(.{ .foo = 1 });
 //                                                                 ^^^^ (u32)()
 
-fn call(_: StructType, _: StructType) void {}
+fn func(_: StructType, _: StructType) void {}
+fn generic_func(T: type, _: T) void {}
 
-test "call" {
-    call(.{ .foo = 1 }, .{ .foo = 2 });
-    //      ^^^^ (u32)()
-    //                     ^^^^ (u32)()
-}
+const call = func(.{ .foo = 1 }, .{ .foo = 2 });
+//                   ^^^^ (u32)()
+//                                  ^^^^ (u32)()
+
+const generic_call_struct = generic_func(StructType, .{ .foo = 1 });
+//                                                      ^^^^ (u32)()
+
+const generic_call_enum = generic_func(EnumType, .bar);
+//                                               ^^^^ (EnumType)()
+
+const generic_call_tagged_union = generic_func(TaggedUnionType, .{ .bar = 1 });
+//                                                                 ^^^^ (u16)()
 
 //
 // array_init
