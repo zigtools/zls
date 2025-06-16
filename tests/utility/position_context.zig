@@ -599,6 +599,15 @@ test "empty" {
     , .empty, .{});
 }
 
+test "inferred struct init as call argument" {
+    try testContext(
+        \\var foo = bar(<loc><cursor>.</loc>{});
+    , .enum_literal, .{ .lookahead = true });
+    try testContext(
+        \\var foo = bar(<loc>.<cursor></loc>{});
+    , .enum_literal, .{});
+}
+
 const Options = struct {
     /// `null` means both
     lookahead: ?bool = null,

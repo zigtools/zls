@@ -4963,6 +4963,7 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             should_do_lookahead = false;
+            const curr_ctx = try peek(allocator, &stack);
             switch (tok.tag) {
                 .identifier,
                 .builtin,
@@ -4970,6 +4971,10 @@ pub fn getPositionContext(
                 .string_literal,
                 .multiline_string_literal_line,
                 => {},
+                .period => switch (curr_ctx.ctx) {
+                    .empty => {},
+                    else => if (previous_token_end == tok.loc.start) break,
+                },
                 else => if (previous_token_end == tok.loc.start) break,
             }
         }
