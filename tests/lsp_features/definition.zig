@@ -90,6 +90,18 @@ test "function parameter" {
     );
 }
 
+test "inferred struct init" {
+    try testDefinition(
+        \\const S = <def>struct</def> { alpha: u32 };
+        \\const foo: S = .<>{ .alpha = 5 };
+    );
+    try testDefinition(
+        \\const S = <def>struct</def> { alpha: u32 };
+        \\fn f(_: S) void {}
+        \\const foo = f(<>.{ .alpha = 5 });
+    );
+}
+
 test "field access" {
     try testDefinition(
         \\const S = struct { <def><decl>alpha</decl></def>: <tdef>u32</tdef> };
