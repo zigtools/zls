@@ -6240,6 +6240,7 @@ pub fn resolveExpressionTypeFromAncestors(
 
         .grouped_expression,
         .@"try",
+        .@"comptime",
         => {
             return try analyser.resolveExpressionType(
                 handle,

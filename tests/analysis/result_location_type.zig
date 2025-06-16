@@ -1,15 +1,21 @@
 const Error = error{ Foo, Bar };
 
 const StructType = struct {
-    foo: u32,
-    fn init() StructType {}
-    fn initChecked() !StructType {}
+    foo: u32 = 0,
+    fn init() StructType {
+        return .{};
+    }
+    fn initChecked() !StructType {
+        return .{};
+    }
 };
 
 const NestedStructType = struct {
     bar: StructType = .{ .foo = 1 },
     //                   ^^^^ (u32)()
-    fn init(_: StructType) NestedStructType {}
+    fn init(bar: StructType) NestedStructType {
+        return .{ .bar = bar };
+    }
 };
 
 const EnumType = enum { bar, baz };
@@ -266,6 +272,16 @@ const grouped_expression: StructType = (.{ .foo = 1 });
 test "try" {
     const s: StructType = try .initChecked();
     //                        ^^^^^^^^^^^^ (fn () !StructType)()
+    _ = s;
+}
+
+//
+// comptime
+//
+
+test "comptime" {
+    const s: StructType = comptime .init();
+    //                             ^^^^^ (fn () StructType)()
     _ = s;
 }
 
