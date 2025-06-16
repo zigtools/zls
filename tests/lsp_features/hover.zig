@@ -1078,6 +1078,25 @@ test "escaped identifier with same name as primitive" {
     });
 }
 
+test "escaped identifier in enum literal" {
+    try testHoverWithOptions(
+        \\const E = enum { @"hello world" };
+        \\const e: E = .@"hello world"<cursor>;
+    ,
+        \\```zig
+        \\@"hello world"
+        \\```
+        \\```zig
+        \\(E)
+        \\```
+        \\
+        \\Go to [E](file:///test.zig#L1)
+    , .{
+        .highlight = "@\"hello world\"",
+        .markup_kind = .markdown,
+    });
+}
+
 // https://github.com/zigtools/zls/issues/1378
 test "type reference cycle" {
     try testHover(

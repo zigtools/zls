@@ -343,7 +343,7 @@ fn hoverDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 
@@ -354,7 +354,7 @@ fn hoverDefinitionEnumLiteral(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
     };
 }
 
