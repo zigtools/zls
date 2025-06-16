@@ -12,6 +12,7 @@ const StructType = struct {
 
 const NestedStructType = struct {
     bar: StructType = .{ .foo = 1 },
+    //                ^ (StructType)()
     //                   ^^^^ (u32)()
     fn init(bar: StructType) NestedStructType {
         return .{ .bar = bar };
@@ -25,18 +26,23 @@ const TaggedUnionType = union(EnumType) { bar: u16, baz: u8 };
 const TupleType = struct { StructType, TaggedUnionType };
 
 const some_optional: ?StructType = .{ .foo = 1 };
+//                                 ^ (StructType)()
 //                                    ^^^^ (u32)()
 
 const some_error_union: error{}!StructType = .{ .foo = 1 };
+//                                           ^ (StructType)()
 //                                              ^^^^ (u32)()
 
 const some_error_union_optional: error{}!?StructType = .{ .foo = 1 };
+//                                                     ^ (StructType)()
 //                                                        ^^^^ (u32)()
 
 const some_optional_error_union: ?error{}!StructType = .{ .foo = 1 };
+//                                                     ^ (StructType)()
 //                                                        ^^^^ (u32)()
 
 const some_optional_optional: ??StructType = .{ .foo = 1 };
+//                                           ^ (StructType)()
 //                                              ^^^^ (u32)()
 
 //
@@ -44,12 +50,14 @@ const some_optional_optional: ??StructType = .{ .foo = 1 };
 //
 
 const some_struct: StructType = .{ .foo = 1 };
+//                              ^ (StructType)()
 //                                 ^^^^ (u32)()
 
 const some_enum: EnumType = .bar;
 //                          ^^^^ (EnumType)()
 
 const some_tagged_union: TaggedUnionType = .{ .bar = 1 };
+//                                         ^ (TaggedUnionType)()
 //                                            ^^^^ (u16)()
 
 //
@@ -61,6 +69,7 @@ const struct_init = StructType{ .foo = 1 };
 
 const nested_struct_init = NestedStructType{ .bar = .{ .foo = 1 } };
 //                                           ^^^^ (StructType)()
+//                                                  ^ (StructType)()
 //                                                     ^^^^ (u32)()
 
 //
@@ -71,22 +80,27 @@ const struct_decl_literal_call: StructType = .init();
 //                                           ^^^^^ (fn () StructType)()
 
 const nested_struct_decl_literal_call: NestedStructType = .init(.{ .foo = 1 });
+//                                                              ^ (StructType)()
 //                                                                 ^^^^ (u32)()
 
 fn func(_: StructType, _: StructType) void {}
 fn generic_func(T: type, _: T) void {}
 
 const call = func(.{ .foo = 1 }, .{ .foo = 2 });
+//                ^ (StructType)()
 //                   ^^^^ (u32)()
+//                               ^ (StructType)()
 //                                  ^^^^ (u32)()
 
 const generic_call_struct = generic_func(StructType, .{ .foo = 1 });
+//                                                   ^ (StructType)()
 //                                                      ^^^^ (u32)()
 
 const generic_call_enum = generic_func(EnumType, .bar);
 //                                               ^^^^ (EnumType)()
 
 const generic_call_tagged_union = generic_func(TaggedUnionType, .{ .bar = 1 });
+//                                                              ^ (TaggedUnionType)()
 //                                                                 ^^^^ (u16)()
 
 //
@@ -108,6 +122,7 @@ const some_tuple = TupleType{
 };
 
 const some_slice: []StructType = &.{
+    // TODO                           ^ ([2]StructType)()
     .{ .foo = 1 },
     // ^^^^ (u32)()
     .{ .foo = 2 },
@@ -115,6 +130,7 @@ const some_slice: []StructType = &.{
 };
 
 const some_tuple_pointer: *const TupleType = &.{
+    //                                        ^ (struct { StructType, TaggedUnionType })()
     .{ .foo = 1 },
     // ^^^^ (u32)()
     .{ .bar = 2 },
@@ -122,10 +138,12 @@ const some_tuple_pointer: *const TupleType = &.{
 };
 
 const some_enum_array: [2]EnumType = .{ .bar, .baz };
+//                                   ^ ([2]EnumType)()
 //                                      ^^^^ (EnumType)()
 //                                            ^^^^ (EnumType)()
 
 const some_enum_slice: []const EnumType = &.{ .bar, .baz };
+//                                         ^ (struct { @Type(.enum_literal), @Type(.enum_literal) })() TODO this should be `[2]EnumType`
 //                                            ^^^^ (EnumType)()
 //                                                  ^^^^ (EnumType)()
 
@@ -135,7 +153,9 @@ const some_enum_slice: []const EnumType = &.{ .bar, .baz };
 
 const conditional: StructType =
     if (undefined) .{ .foo = 1 } else .{ .foo = 2 };
+//                 ^ (StructType)()
 //                    ^^^^ (u32)()
+//                                    ^ (StructType)()
 //                                       ^^^^ (u32)()
 
 //
@@ -144,6 +164,7 @@ const conditional: StructType =
 
 const for_loop: StructType =
     for (some_slice) |_| {} else .{ .foo = 1 };
+//                               ^ (StructType)()
 //                                  ^^^^ (u32)()
 
 //
@@ -152,6 +173,7 @@ const for_loop: StructType =
 
 const while_loop: StructType =
     while (some_optional) |_| {} else .{ .foo = 1 };
+//                                    ^ (StructType)()
 //                                       ^^^^ (u32)()
 
 //
@@ -162,9 +184,11 @@ const while_loop: StructType =
 const switch_cases: StructType = switch (some_tagged_union) {
     .bar => |bar| .{ .foo = bar },
   //^^^^ (u16)()
+  //              ^ (StructType)()
   //                 ^^^^ (u32)()
     .baz => |baz| .{ .foo = baz },
   //^^^^ (u8)()
+  //              ^ (StructType)()
   //                 ^^^^ (u32)()
 };
 // zig fmt: on
@@ -176,6 +200,7 @@ const switch_cases: StructType = switch (some_tagged_union) {
 test "assign" {
     var mutable_struct: StructType = undefined;
     mutable_struct = .{ .foo = 1 };
+    //               ^ (StructType)()
     //                  ^^^^ (u32)()
 }
 
@@ -201,16 +226,19 @@ const not_equal_1 = some_enum != .bar;
 
 fn return_0() StructType {
     return .{ .foo = 1 };
+    //     ^ (StructType)()
     //        ^^^^ (u32)()
 }
 
 fn return_1() ?StructType {
     return .{ .foo = 1 };
+    //     ^ (StructType)()
     //        ^^^^ (u32)()
 }
 
 fn return_2() Error!?StructType {
     return .{ .foo = 1 };
+    //     ^ (StructType)()
     //        ^^^^ (u32)()
 }
 
@@ -220,8 +248,10 @@ fn return_2() Error!?StructType {
 
 const continue_switch: StructType = blk: switch (some_tagged_union) {
     .bar => |bar| continue :blk .{ .baz = @truncate(bar) },
+    //                          ^ (TaggedUnionType)()
     //                             ^^^^ (u8)()
     .baz => |baz| .{ .foo = baz },
+    //            ^ (StructType)()
     //               ^^^^ (u32)()
 };
 
@@ -232,37 +262,44 @@ const continue_switch: StructType = blk: switch (some_tagged_union) {
 const break_for_0: StructType =
     for (some_slice) |_| {
         break .{ .foo = 1 };
+        //    ^ (StructType)()
         //       ^^^^ (u32)()
     };
 
 const break_for_1: StructType =
     blk: for (some_slice) |_| {
         break :blk .{ .foo = 1 };
+        //         ^ (StructType)()
         //            ^^^^ (u32)()
     };
 
 const break_while_0: StructType =
     while (some_optional) |_| {
         break .{ .foo = 1 };
+        //    ^ (StructType)()
         //       ^^^^ (u32)()
     };
 
 const break_while_1: StructType =
     blk: while (some_optional) |_| {
         break :blk .{ .foo = 1 };
+        //         ^ (StructType)()
         //            ^^^^ (u32)()
     };
 
 const break_switch: StructType = blk: switch (some_tagged_union) {
     .bar => |bar| break :blk .{ .foo = bar },
+    //                       ^ (StructType)()
     //                          ^^^^ (u32)()
     .baz => |baz| .{ .foo = baz },
+    //            ^ (StructType)()
     //               ^^^^ (u32)()
 };
 
 const break_block: StructType =
     blk: {
         break :blk .{ .foo = 1 };
+        //         ^ (StructType)()
         //            ^^^^ (u32)()
     };
 
@@ -271,6 +308,7 @@ const break_block: StructType =
 //
 
 const grouped_expression: StructType = (.{ .foo = 1 });
+//                                      ^ (StructType)()
 //                                         ^^^^ (u32)()
 
 //
@@ -298,6 +336,7 @@ test "comptime" {
 //
 
 const builtin_as = @as(StructType, .{ .foo = 1 });
+//                                 ^ (StructType)()
 //                                    ^^^^ (u32)()
 
 //
@@ -305,6 +344,7 @@ const builtin_as = @as(StructType, .{ .foo = 1 });
 //
 
 const @"orelse" = some_optional orelse .{ .foo = 1 };
+//                                     ^ (StructType)()
 //                                        ^^^^ (u32)()
 
 //
@@ -312,6 +352,7 @@ const @"orelse" = some_optional orelse .{ .foo = 1 };
 //
 
 const @"catch" = some_error_union catch .{ .foo = 1 };
+//                                      ^ (StructType)()
 //                                         ^^^^ (u32)()
 
 //
@@ -319,14 +360,18 @@ const @"catch" = some_error_union catch .{ .foo = 1 };
 //
 
 const address_of_struct: *const StructType = &.{ .foo = 1 };
+//                                            ^ (StructType)()
 //                                               ^^^^ (u32)()
 
 const address_of_nested_struct: *const NestedStructType = &.{ .bar = .{ .foo = 1 } };
+//                                                         ^ (NestedStructType)()
 //                                                            ^^^^ (StructType)()
+//                                                                   ^ (StructType)()
 //                                                                      ^^^^ (u32)()
 
 const address_of_enum: *const EnumType = &.bar;
 //                                        ^^^^ (EnumType)()
 
 const address_of_tagged_union: *const TaggedUnionType = &.{ .bar = 1 };
+//                                                       ^ (TaggedUnionType)()
 //                                                          ^^^^ (u16)()

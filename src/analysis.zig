@@ -6366,7 +6366,15 @@ pub fn resolveStructInitType(
     const tree = handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
     if (nodes.len == 0) return null;
-    return try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]);
+    var ty = try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]) orelse return null;
+    while (true) {
+        const unwrapped =
+            try analyser.resolveUnwrapErrorUnionType(ty, .payload) orelse
+            try analyser.resolveOptionalUnwrap(ty) orelse
+            break;
+        ty = unwrapped;
+    }
+    return ty;
 }
 
 /// Multiple when using branched types
