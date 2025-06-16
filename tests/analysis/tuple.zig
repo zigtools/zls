@@ -41,6 +41,7 @@ const int: i64 = undefined;
 const float: f32 = undefined;
 const inferred_tuple = .{ int, float };
 //    ^^^^^^^^^^^^^^ (struct { i64, f32 })()
+//                     ^ (struct { i64, f32 })()
 
 const inferred_tuple_array_access_0 = inferred_tuple[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (i64)()

@@ -160,11 +160,18 @@ pub fn main() Error!void {
     defer analyser.deinit();
 
     for (annotations) |annotation| {
+        var ctx: enum {
+            global,
+            enum_literal,
+            struct_init,
+        } = .global;
         var identifier_loc = annotation.loc;
         var identifier = offsets.locToSlice(handle.tree.source, annotation.loc);
 
-        const is_enum_literal = identifier[0] == '.';
-        if (is_enum_literal) {
+        if (std.mem.eql(u8, identifier, ".")) {
+            ctx = .struct_init;
+        } else if (identifier[0] == '.') {
+            ctx = .enum_literal;
             identifier_loc.start += 1;
             identifier = identifier[1..];
         }
@@ -176,23 +183,26 @@ pub fn main() Error!void {
             return err;
         };
 
-        const decl_maybe = if (is_enum_literal)
-            try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier)
-        else
-            try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start);
-
-        const decl = decl_maybe orelse {
-            try error_builder.msgAtLoc("failed to find identifier '{s}' here", file_path, annotation.loc, .err, .{
-                annotation.content,
-            });
-            continue;
-        };
-
         const expect_unknown = (if (test_item.expected_type) |expected_type| std.mem.eql(u8, expected_type, "unknown") else false) and
             (if (test_item.expected_value) |expected_value| std.mem.eql(u8, expected_value, "unknown") else true) and
             test_item.expected_error == null;
 
-        const ty = try decl.resolveType(&analyser) orelse {
+        const ty = blk: {
+            const decl_maybe = switch (ctx) {
+                .global => try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start),
+                .enum_literal => try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier),
+                .struct_init => break :blk try analyser.resolveStructInitType(handle, identifier_loc.start),
+            };
+
+            const decl = decl_maybe orelse {
+                try error_builder.msgAtLoc("failed to find identifier '{s}' here", file_path, annotation.loc, .err, .{
+                    annotation.content,
+                });
+                continue;
+            };
+
+            break :blk try decl.resolveType(&analyser);
+        } orelse {
             if (expect_unknown) continue;
             try error_builder.msgAtLoc("failed to resolve type of '{s}'", file_path, annotation.loc, .err, .{
                 identifier,

@@ -6355,6 +6355,20 @@ pub fn getSymbolEnumLiteral(
     return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
 }
 
+pub fn resolveStructInitType(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+) error{OutOfMemory}!?Type {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = handle.tree;
+    const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
+    if (nodes.len == 0) return null;
+    return try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]);
+}
+
 /// Multiple when using branched types
 pub fn getSymbolFieldAccesses(
     analyser: *Analyser,
