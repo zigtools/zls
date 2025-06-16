@@ -6028,14 +6028,6 @@ pub fn resolveExpressionTypeFromAncestors(
             const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
                 return null;
 
-            if (try analyser.resolveExpressionType(
-                handle,
-                ancestors[0],
-                ancestors[1..],
-            )) |array_type| {
-                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
-            }
-
             if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
                 if (try analyser.resolveExpressionType(
                     handle,
@@ -6044,6 +6036,14 @@ pub fn resolveExpressionTypeFromAncestors(
                 )) |slice_type| {
                     return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
                 }
+            }
+
+            if (try analyser.resolveExpressionType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            )) |array_type| {
+                return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
             }
         },
         .container_field_init,

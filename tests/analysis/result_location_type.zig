@@ -107,6 +107,14 @@ const some_tuple_pointer: *const TupleType = &.{
     // ^^^^ (u16)()
 };
 
+const some_enum_array: [2]EnumType = .{ .bar, .baz };
+//                                      ^^^^ (EnumType)()
+//                                            ^^^^ (EnumType)()
+
+const some_enum_slice: []const EnumType = &.{ .bar, .baz };
+//                                            ^^^^ (EnumType)()
+//                                                  ^^^^ (EnumType)()
+
 //
 // if
 //
