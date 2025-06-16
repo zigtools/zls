@@ -328,7 +328,7 @@ fn hoverDefinitionGlobal(
                 .value = hover_text,
             },
         },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
     };
 }
 

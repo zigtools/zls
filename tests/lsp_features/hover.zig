@@ -1008,7 +1008,7 @@ test "var decl alias" {
 }
 
 test "escaped identifier" {
-    try testHover(
+    try testHoverWithOptions(
         \\const @"f<cursor>oo" = 42;
     ,
         \\```zig
@@ -1017,8 +1017,11 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"foo\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @"hello <cursor> world" = 42;
     ,
         \\```zig
@@ -1027,8 +1030,11 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"hello  world\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @<cursor>"hello  world" = 42;
     ,
         \\```zig
@@ -1037,11 +1043,14 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
+    , .{
+        .highlight = "@\"hello  world\"",
+        .markup_kind = .markdown,
+    });
 }
 
 test "escaped identifier with same name as primitive" {
-    try testHover(
+    try testHoverWithOptions(
         \\const @"true"<cursor> = 42;
     ,
         \\```zig
@@ -1050,8 +1059,11 @@ test "escaped identifier with same name as primitive" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"true\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @"f32"<cursor> = 42;
     ,
         \\```zig
@@ -1060,7 +1072,10 @@ test "escaped identifier with same name as primitive" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
+    , .{
+        .highlight = "@\"f32\"",
+        .markup_kind = .markdown,
+    });
 }
 
 // https://github.com/zigtools/zls/issues/1378
