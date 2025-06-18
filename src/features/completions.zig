@@ -154,7 +154,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             }
         },
         .function,
-        .for_range,
         .error_union,
         .union_tag,
         .compile_error,
