@@ -28,6 +28,7 @@ pub const dependencies = @import("@dependencies");
 // ----------- List of Zig versions that introduced breaking changes -----------
 
 const add_embed_path_version = std.SemanticVersion.parse("0.15.0-dev.141+b5a526054") catch unreachable;
+const config_header_generated_dir_version = std.SemanticVersion.parse("0.15.0-dev.847+850655f0") catch unreachable;
 
 // -----------------------------------------------------------------------------
 
@@ -1075,7 +1076,7 @@ fn extractBuildInformation(
                     if (has_embed_path and include_dir == .embed_path) {
                         // This only affects C source files
                     } else if (include_dir == .config_header_step) {
-                        try set.put(allocator, include_dir.config_header_step.output_file.step, {});
+                        try set.put(allocator, &include_dir.config_header_step.step, {});
                     } else unreachable;
                 },
             }
@@ -1146,12 +1147,17 @@ fn extractBuildInformation(
                     },
                     else => {
                         const has_embed_path = comptime builtin.zig_version.order(add_embed_path_version) != .lt;
+                        const config_header_has_generated_dir = comptime builtin.zig_version.order(config_header_generated_dir_version) != .lt;
                         comptime assert(@typeInfo(std.Build.Module.IncludeDir).@"union".fields.len == @as(usize, 7) + @intFromBool(has_embed_path));
                         if (has_embed_path and include_dir == .embed_path) {
                             // This only affects C source files
                         } else if (include_dir == .config_header_step) {
-                            const full_file_path = include_dir.config_header_step.output_file.getPath();
-                            const header_dir_path = full_file_path[0 .. full_file_path.len - include_dir.config_header_step.include_path.len];
+                            const header_dir_path = if (config_header_has_generated_dir)
+                                include_dir.config_header_step.generated_dir.getPath()
+                            else blk: {
+                                const full_file_path = include_dir.config_header_step.output_file.getPath();
+                                break :blk full_file_path[0 .. full_file_path.len - include_dir.config_header_step.include_path.len];
+                            };
                             try include_dirs.put(
                                 allocator,
                                 header_dir_path,
