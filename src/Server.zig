@@ -691,7 +691,7 @@ fn registerCapability(server: *Server, method: []const u8, registersOptions: ?ty
 }
 
 fn requestConfiguration(server: *Server) Error!void {
-    const configuration_items = comptime config: {
+    var configuration_items = comptime config: {
         var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
         for (std.meta.fields(Config), 0..) |field, index| {
             comp_config[index] = .{
@@ -701,6 +701,13 @@ fn requestConfiguration(server: *Server) Error!void {
 
         break :config comp_config;
     };
+
+    if (server.workspaces.items.len == 1) {
+        const workspace = server.workspaces.items[0];
+        for (&configuration_items) |*item| {
+            item.*.scopeUri = workspace.uri;
+        }
+    }
 
     const json_message = try server.sendToClientRequest(
         .{ .string = "i_haz_configuration" },
@@ -744,6 +751,41 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         };
         if (maybe_new_value) |new_value| {
             @field(new_config, field.name) = new_value;
+        }
+    }
+
+    const maybe_root_dir: ?[]const u8 = if (server.workspaces.items.len == 1) dir: {
+        const uri = std.Uri.parse(server.workspaces.items[0].uri) catch |err| {
+            log.err("failed to parse root uri for workspace {s}: {!}", .{
+                server.workspaces.items[0].uri, err,
+            });
+            break :dir null;
+        };
+        break :dir try uri.path.toRawMaybeAlloc(arena);
+    } else null;
+
+    check_relative: inline for (&.{
+        "zig_exe_path",
+        "builtin_path",
+        "build_runner_path",
+        "zig_lib_path",
+        "global_cache_path",
+    }) |fieldName| {
+        const field: *?[]const u8 = &@field(new_config, fieldName);
+        if (field.*) |maybe_relative| resolve: {
+            if (maybe_relative.len == 0) break :resolve;
+            if (std.fs.path.isAbsolute(maybe_relative)) break :resolve;
+
+            const root_dir = maybe_root_dir orelse {
+                log.err("relative path only supported for {s} with exactly one workspace", .{fieldName});
+                break :check_relative;
+            };
+
+            const absolute = try std.fs.path.join(arena, &.{
+                root_dir, maybe_relative,
+            });
+
+            field.* = absolute;
         }
     }
 
@@ -973,8 +1015,8 @@ pub fn updateConfiguration(
     const config_arena = config_arena_allocator.allocator();
 
     var new_config: configuration.Configuration = param_new_config;
-    server.validateConfiguration(&new_config);
 
+    server.validateConfiguration(&new_config);
     inline for (std.meta.fields(Config)) |field| {
         @field(new_config, field.name) = if (@field(new_config, field.name)) |new_value|
             new_value
