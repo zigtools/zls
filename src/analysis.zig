@@ -40,6 +40,7 @@ collect_callsite_references: bool,
 resolve_number_literal_values: bool,
 /// handle of the doc where the request originated
 root_handle: ?*DocumentStore.Handle,
+max_conditional_combos: usize = 200,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
@@ -3689,7 +3690,7 @@ pub const Type = struct {
     /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: Type, analyser: *Analyser) error{OutOfMemory}![]const Type {
         var all_types: ArraySet = .empty;
-        try ty.getAllTypesWithHandlesArraySet(analyser, &all_types);
+        _ = try ty.getAllTypesWithHandlesArraySet(analyser, &all_types);
         return all_types.keys();
     }
 
@@ -3731,12 +3732,15 @@ pub const Type = struct {
         };
     }
 
-    // is infinite recursion possible here?
-    pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) !void {
+    /// Returns true if we have reached the limit for analyzing combinations
+    pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) !bool {
+        if (all_types.count() >= analyser.max_conditional_combos) {
+            return true;
+        }
         const arena = analyser.arena;
         if (!ty.isConditional()) {
             try all_types.put(arena, ty, {});
-            return;
+            return false;
         }
         switch (ty.data) {
             .union_tag,
@@ -3747,24 +3751,34 @@ pub const Type = struct {
             .either => |entries| {
                 for (entries) |entry| {
                     const entry_ty: Type = .{ .data = entry.type_data, .is_type_val = ty.is_type_val };
-                    try entry_ty.getAllTypesWithHandlesArraySet(analyser, all_types);
+                    if (try entry_ty.getAllTypesWithHandlesArraySet(analyser, all_types)) {
+                        return true;
+                    }
                 }
             },
             .anytype_parameter => |info| {
                 if (info.type_from_callsite_references) |t| {
-                    try t.getAllTypesWithHandlesArraySet(analyser, all_types);
+                    if (try t.getAllTypesWithHandlesArraySet(analyser, all_types)) {
+                        return true;
+                    }
                 } else {
                     try all_types.put(arena, ty, {});
                 }
             },
             .optional => |child_ty| {
                 for (try child_ty.getAllTypesWithHandles(analyser)) |t| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     const new_child_ty = try analyser.allocType(t);
                     try all_types.put(arena, .{ .data = .{ .optional = new_child_ty }, .is_type_val = ty.is_type_val }, {});
                 }
             },
             inline .pointer, .array => |info, tag| {
                 for (try info.elem_ty.getAllTypesWithHandles(analyser)) |t| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     var new_info = info;
                     new_info.elem_ty = try analyser.allocType(t);
                     const data = @unionInit(Type.Data, @tagName(tag), new_info);
@@ -3778,6 +3792,9 @@ pub const Type = struct {
                 }
                 var iter: ComboIterator = try .init(arena, &possible_types);
                 while (iter.next()) |combo| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     const new_types = try arena.alloc(Type, types.len);
                     for (new_types, types) |*new, old| new.* = combo.get(old).?;
                     try all_types.put(arena, .{ .data = .{ .tuple = new_types }, .is_type_val = ty.is_type_val }, {});
@@ -3791,6 +3808,9 @@ pub const Type = struct {
                 }
                 var iter: ComboIterator = try .init(arena, &possible_types);
                 while (iter.next()) |combo| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     const new_types = try arena.alloc(Type, types.len);
                     for (new_types, types) |*new, old| new.* = combo.get(old).?;
                     var new_info = info;
@@ -3806,6 +3826,9 @@ pub const Type = struct {
                 }
                 var iter: ComboIterator = try .init(arena, &possible_types);
                 while (iter.next()) |combo| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     var new_info = info;
                     new_info.payload = try analyser.allocType(combo.get(info.payload.*).?);
                     if (info.error_set) |t| {
@@ -3828,6 +3851,9 @@ pub const Type = struct {
                 }
                 var iter: ComboIterator = try .init(arena, &possible_types);
                 while (iter.next()) |combo| {
+                    if (all_types.count() >= analyser.max_conditional_combos) {
+                        return true;
+                    }
                     var new_info = info;
                     new_info.container_type = try analyser.allocType(combo.get(info.container_type.*).?);
                     new_info.parameters = try arena.alloc(Data.Parameter, info.parameters.len);
@@ -3846,6 +3872,7 @@ pub const Type = struct {
                 }
             },
         }
+        return false;
     }
 
     const ComboIterator = struct {

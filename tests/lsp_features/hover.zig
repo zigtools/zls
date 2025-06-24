@@ -871,7 +871,10 @@ test "either type instances" {
         \\(error{Foo}!f64)
         \\(error{Bar}!u32)
         \\(error{Bar}!f64)
-    , .{ .markup_kind = .plaintext });
+    , .{
+        .markup_kind = .plaintext,
+        .max_conditional_combos = 4,
+    });
     try testHoverWithOptions(
         \\fn GenericStruct(T: type) type {
         \\    return struct { field: T };
@@ -907,6 +910,27 @@ test "either type instances" {
         \\(fn (u32) u32)
         \\(fn (f64) f64)
     , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo<cursor> = switch (undefined) {
+        \\    .a => 42,
+        \\    .b => true,
+        \\    .c => 3.14,
+        \\    .d => {},
+        \\    .e => error.Foo,
+        \\};
+    ,
+        \\const foo = switch (undefined) {
+        \\    .a => 42,
+        \\    .b => true,
+        \\    .c => 3.14,
+        \\    .d => {},
+        \\    .e => error.Foo,
+        \\}
+        \\(comptime_int)
+        \\(bool)
+        \\(comptime_float)
+        \\(...)
+    , .{ .markup_kind = .plaintext });
 }
 
 test "either type instances - big" {
@@ -923,6 +947,22 @@ test "either type instances - big" {
         \\    .{ foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo, foo }
         \\(struct { comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int, comptime_int })
         \\(struct { bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool })
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const a = if (true) 1 else true;
+        \\const b = if (true) false else 0;
+        \\const c = if (true) .{ a, b } else .{ b, a };
+        \\const d = if (true) .{ a, c } else .{ b, c };
+        \\const e = if (true) .{ c, d } else .{ d, c };
+        \\const f = if (true) .{ d, e } else .{ e, d };
+        \\const g = if (true) .{ e, f } else .{ f, e };
+        \\const h<cursor> = if (true) .{ f, g } else .{ g, f };
+    ,
+        \\const h = if (true) .{ f, g } else .{ g, f }
+        \\(struct { struct { struct { comptime_int, struct { comptime_int, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } }, struct { struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } }, struct { struct { comptime_int, struct { comptime_int, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } } } })
+        \\(struct { struct { struct { bool, struct { comptime_int, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } }, struct { struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } }, struct { struct { comptime_int, struct { comptime_int, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } } } })
+        \\(struct { struct { struct { comptime_int, struct { bool, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } }, struct { struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } }, struct { struct { comptime_int, struct { comptime_int, bool } }, struct { struct { comptime_int, bool }, struct { comptime_int, struct { comptime_int, bool } } } } } })
+        \\(...)
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1135,7 +1175,10 @@ fn testHover(source: []const u8, expected: []const u8) !void {
 fn testHoverWithOptions(
     source: []const u8,
     expected: []const u8,
-    options: struct { markup_kind: types.MarkupKind },
+    options: struct {
+        markup_kind: types.MarkupKind,
+        max_conditional_combos: usize = 3,
+    },
 ) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
@@ -1144,19 +1187,28 @@ fn testHoverWithOptions(
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    ctx.server.client_capabilities.hover_supports_md = options.markup_kind == .markdown;
+    const server = ctx.server;
+    const arena = ctx.arena.allocator();
 
     const uri = try ctx.addDocument(.{
         .uri = "file:///test.zig",
         .source = text,
     });
+    const handle = server.document_store.getHandle(uri).?;
 
-    const params: types.HoverParams = .{
-        .textDocument = .{ .uri = uri },
-        .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
-    };
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
 
-    const response: types.Hover = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/hover", params) orelse {
+    analyser.max_conditional_combos = options.max_conditional_combos;
+
+    const response = try zls.hover.hover(
+        &analyser,
+        arena,
+        handle,
+        cursor_idx,
+        options.markup_kind,
+        server.offset_encoding,
+    ) orelse {
         if (expected.len == 0) return;
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
