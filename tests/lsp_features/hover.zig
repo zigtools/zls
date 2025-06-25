@@ -341,6 +341,36 @@ test "root struct" {
     );
 }
 
+test "inferred struct init" {
+    try testHover(
+        \\const S = struct { foo: u32 };
+        \\const foo: S = .<cursor>{ .foo = 0 };
+    ,
+        \\```zig
+        \\S
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+    try testHover(
+        \\const S = struct { foo: u32 };
+        \\fn f(_: S) void {}
+        \\const foo = f(<cursor>.{ .foo = 0 });
+    ,
+        \\```zig
+        \\S
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Go to [S](file:///test.zig#L1)
+    );
+}
+
 test "decl literal" {
     try testHover(
         \\const S = struct {
@@ -1008,7 +1038,7 @@ test "var decl alias" {
 }
 
 test "escaped identifier" {
-    try testHover(
+    try testHoverWithOptions(
         \\const @"f<cursor>oo" = 42;
     ,
         \\```zig
@@ -1017,8 +1047,11 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"foo\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @"hello <cursor> world" = 42;
     ,
         \\```zig
@@ -1027,8 +1060,11 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"hello  world\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @<cursor>"hello  world" = 42;
     ,
         \\```zig
@@ -1037,11 +1073,14 @@ test "escaped identifier" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
+    , .{
+        .highlight = "@\"hello  world\"",
+        .markup_kind = .markdown,
+    });
 }
 
 test "escaped identifier with same name as primitive" {
-    try testHover(
+    try testHoverWithOptions(
         \\const @"true"<cursor> = 42;
     ,
         \\```zig
@@ -1050,8 +1089,11 @@ test "escaped identifier with same name as primitive" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
-    try testHover(
+    , .{
+        .highlight = "@\"true\"",
+        .markup_kind = .markdown,
+    });
+    try testHoverWithOptions(
         \\const @"f32"<cursor> = 42;
     ,
         \\```zig
@@ -1060,7 +1102,29 @@ test "escaped identifier with same name as primitive" {
         \\```zig
         \\(comptime_int)
         \\```
-    );
+    , .{
+        .highlight = "@\"f32\"",
+        .markup_kind = .markdown,
+    });
+}
+
+test "escaped identifier in enum literal" {
+    try testHoverWithOptions(
+        \\const E = enum { @"hello world" };
+        \\const e: E = .@"hello world"<cursor>;
+    ,
+        \\```zig
+        \\@"hello world"
+        \\```
+        \\```zig
+        \\(E)
+        \\```
+        \\
+        \\Go to [E](file:///test.zig#L1)
+    , .{
+        .highlight = "@\"hello world\"",
+        .markup_kind = .markdown,
+    });
 }
 
 // https://github.com/zigtools/zls/issues/1378
@@ -1168,6 +1232,109 @@ test "deprecated" {
     );
 }
 
+test "slice properties" {
+    try testHoverWithOptions(
+        \\const foo: []const u8 = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: []const u8 = undefined;
+        \\const bar = foo.ptr<cursor>;
+    ,
+        \\ptr
+        \\([*]const u8)
+    , .{ .markup_kind = .plaintext });
+}
+
+test "array properties" {
+    try testHoverWithOptions(
+        \\const foo: [3]u8 = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
+}
+
+test "tuple properties" {
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.len<cursor>;
+    ,
+        \\len
+        \\(usize)
+    , .{ .markup_kind = .plaintext });
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.@"0"<cursor>;
+    ,
+        \\@"0"
+        \\(i32)
+    , .{
+        .highlight = "@\"0\"",
+        .markup_kind = .plaintext,
+    });
+    try testHoverWithOptions(
+        \\const foo: struct { i32, bool } = undefined;
+        \\const bar = foo.@"1"<cursor>;
+    ,
+        \\@"1"
+        \\(bool)
+    , .{
+        .highlight = "@\"1\"",
+        .markup_kind = .plaintext,
+    });
+}
+
+test "optional unwrap" {
+    try testHoverWithOptions(
+        \\const foo: ?f64 = undefined;
+        \\const bar = foo.?<cursor>;
+    ,
+        \\?
+        \\(f64)
+    , .{
+        .highlight = "?",
+        .markup_kind = .plaintext,
+    });
+    try testHoverWithOptions(
+        \\const foo: ?f64 = undefined;
+        \\const bar = foo.<cursor>?;
+    ,
+        \\?
+        \\(f64)
+    , .{
+        .highlight = "?",
+        .markup_kind = .plaintext,
+    });
+}
+
+test "pointer dereference" {
+    try testHoverWithOptions(
+        \\const foo: *f64 = undefined;
+        \\const bar = foo.*<cursor>;
+    ,
+        \\*
+        \\(f64)
+    , .{
+        .highlight = "*",
+        .markup_kind = .plaintext,
+    });
+    try testHoverWithOptions(
+        \\const foo: *f64 = undefined;
+        \\const bar = foo.<cursor>*;
+    ,
+        \\*
+        \\(f64)
+    , .{
+        .highlight = "*",
+        .markup_kind = .plaintext,
+    });
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }
@@ -1178,6 +1345,7 @@ fn testHoverWithOptions(
     options: struct {
         markup_kind: types.MarkupKind,
         max_conditional_combos: usize = 3,
+        highlight: ?[]const u8 = null,
     },
 ) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
@@ -1218,4 +1386,8 @@ fn testHoverWithOptions(
 
     try std.testing.expectEqual(options.markup_kind, markup_context.kind);
     try zls.testing.expectEqualStrings(expected, markup_context.value);
+    if (options.highlight) |expected_higlight| {
+        const actual_highlight = offsets.rangeToSlice(text, response.range.?, ctx.server.offset_encoding);
+        try std.testing.expectEqualStrings(expected_higlight, actual_highlight);
+    }
 }

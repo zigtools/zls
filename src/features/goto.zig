@@ -95,10 +95,37 @@ fn gotoDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
+}
+
+fn gotoDefinitionStructInit(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    kind: GotoKind,
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!?types.DefinitionLink {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (kind == .declaration) return null;
+
+    const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
+    if (token + 1 >= handle.tree.tokens.len) return null;
+    if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
+
+    const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
+    const token_handle = try resolved_type.typeDefinitionToken() orelse return null;
+    const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);
+    return .{
+        .originSelectionRange = offsets.tokenToRange(handle.tree, token, offset_encoding),
+        .targetUri = token_handle.handle.uri,
+        .targetRange = target_range,
+        .targetSelectionRange = target_range,
+    };
 }
 
 fn gotoDefinitionEnumLiteral(
@@ -111,10 +138,12 @@ fn gotoDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+        return gotoDefinitionStructInit(analyser, handle, source_index, kind, offset_encoding);
+    };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionBuiltin(
@@ -169,14 +198,14 @@ fn gotoDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
     var locs: std.ArrayListUnmanaged(types.DefinitionLink) = .empty;
 
     for (accesses) |access| {
-        if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), access, kind, offset_encoding)) |l|
+        if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
             try locs.append(arena, l);
     }
 

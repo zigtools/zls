@@ -1376,7 +1376,12 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
     switch (ty.data) {
         .pointer => |info| switch (info.size) {
-            .one => {}, // One level of indirection is handled by resolveDerefType
+            .one => {
+                if (std.mem.eql(u8, "*", name)) {
+                    return info.elem_ty.instanceTypeVal(analyser);
+                }
+                // One level of indirection is handled by resolveDerefType
+            },
             .slice => {
                 if (std.mem.eql(u8, "len", name)) {
                     return Type.fromIP(analyser, .usize_type, null);
@@ -1412,7 +1417,14 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
             }
         },
 
-        .tuple => {
+        .tuple => |info| {
+            if (std.mem.eql(u8, "len", name)) {
+                const index = try analyser.ip.get(
+                    analyser.gpa,
+                    .{ .int_u64_value = .{ .ty = .usize_type, .int = info.len } },
+                );
+                return Type.fromIP(analyser, .usize_type, index);
+            }
             if (!allDigits(name)) return null;
             const index = std.fmt.parseInt(u16, name, 10) catch return null;
             return try analyser.resolveBracketAccessType(ty, .{ .single = index });
@@ -1420,11 +1432,9 @@ fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{Ou
 
         .optional => |child_ty| {
             if (std.mem.eql(u8, "?", name)) {
-                return child_ty.*;
+                return child_ty.instanceTypeVal(analyser);
             }
         },
-
-        .container => {},
 
         else => {},
     }
@@ -1782,6 +1792,53 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
     return maybe_type;
 }
 
+fn resolveFunctionTypeFromCall(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    call: Ast.full.Call,
+    func_ty: Type,
+) !Type {
+    if (!func_ty.isGenericType()) {
+        return func_ty;
+    }
+
+    const func_info = func_ty.data.function;
+
+    var meta_params: TokenToTypeMap = switch (func_info.container_type.data) {
+        .container => |info| try info.bound_params.clone(analyser.arena),
+        else => .empty,
+    };
+    errdefer meta_params.deinit(analyser.arena);
+
+    const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
+        try analyser.isInstanceCall(handle, call, func_ty);
+
+    const parameters = func_info.parameters[@intFromBool(has_self_param)..];
+    const arguments = call.ast.params;
+    const min_len = @min(parameters.len, arguments.len);
+    for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
+        const param_name_token = param.name_token orelse continue;
+        const param_type = param.type;
+        if (!param_type.is_type_val) continue;
+
+        const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
+
+        switch (param_type.data) {
+            .ip_index => |info| {
+                if (info.index != .type_type) continue;
+                if (!argument_type.is_type_val) continue;
+                try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
+            },
+            .anytype_parameter => |info| {
+                try meta_params.put(analyser.arena, info.token_handle, try argument_type.typeOf(analyser));
+            },
+            else => {},
+        }
+    }
+
+    return try analyser.resolveGenericType(func_ty, meta_params);
+}
+
 const FindBreaks = struct {
     const Error = error{OutOfMemory};
 
@@ -1916,48 +1973,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const call = tree.fullCall(&buffer, node).?;
 
             const ty = try analyser.resolveTypeOfNodeInternal(.of(call.ast.fn_expr, handle)) orelse return null;
-            const func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
+            var func_ty = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             if (func_ty.is_type_val) return null;
 
+            func_ty = try analyser.resolveFunctionTypeFromCall(handle, call, func_ty);
             const func_info = func_ty.data.function;
-            const return_value = func_info.return_value.*;
-            if (!return_value.isGenericType()) {
-                return return_value;
-            }
-
-            var meta_params: TokenToTypeMap = switch (func_info.container_type.data) {
-                .container => |info| try info.bound_params.clone(analyser.arena),
-                else => .empty,
-            };
-            errdefer meta_params.deinit(analyser.arena);
-
-            const has_self_param = call.ast.params.len + 1 == func_info.parameters.len and
-                try analyser.isInstanceCall(handle, call, func_ty);
-
-            const parameters = func_info.parameters[@intFromBool(has_self_param)..];
-            const arguments = call.ast.params;
-            const min_len = @min(parameters.len, arguments.len);
-            for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
-                const param_name_token = param.name_token orelse continue;
-                const param_type = param.type;
-                if (!param_type.is_type_val) continue;
-
-                const argument_type = (try analyser.resolveTypeOfNodeInternal(.of(arg, handle))) orelse continue;
-
-                switch (param_type.data) {
-                    .ip_index => |info| {
-                        if (info.index != .type_type) continue;
-                        if (!argument_type.is_type_val) continue;
-                        try meta_params.put(analyser.arena, .{ .token = param_name_token, .handle = func_info.handle }, argument_type);
-                    },
-                    .anytype_parameter => |info| {
-                        try meta_params.put(analyser.arena, info.token_handle, try argument_type.typeOf(analyser));
-                    },
-                    else => {},
-                }
-            }
-
-            return try analyser.resolveGenericType(return_value, meta_params);
+            return func_info.return_value.*;
         },
         .container_field,
         .container_field_init,
@@ -4597,6 +4618,10 @@ pub fn getFieldAccessType(
                         current_type = try analyser.resolveFieldAccess(current_type orelse return null, symbol) orelse return null;
                     },
                     .question_mark => {
+                        if (after_period.loc.end == tokenizer.buffer.len) {
+                            return current_type;
+                        }
+
                         current_type = (try analyser.resolveOptionalUnwrap(current_type orelse return null)) orelse return null;
                     },
                     else => {
@@ -4606,6 +4631,10 @@ pub fn getFieldAccessType(
                 }
             },
             .period_asterisk => {
+                if (tok.loc.end == tokenizer.buffer.len) {
+                    return current_type;
+                }
+
                 current_type = (try analyser.resolveDerefType(current_type orelse return null)) orelse return null;
             },
             .l_paren => {
@@ -4934,6 +4963,7 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             should_do_lookahead = false;
+            const curr_ctx = try peek(allocator, &stack);
             switch (tok.tag) {
                 .identifier,
                 .builtin,
@@ -4941,6 +4971,10 @@ pub fn getPositionContext(
                 .string_literal,
                 .multiline_string_literal_line,
                 => {},
+                .period => switch (curr_ctx.ctx) {
+                    .empty => {},
+                    else => if (previous_token_end == tok.loc.start) break,
+                },
                 else => if (previous_token_end == tok.loc.start) break,
             }
         }
@@ -6035,16 +6069,6 @@ pub fn resolveExpressionTypeFromAncestors(
             )) |array_type| {
                 return (try analyser.resolveBracketAccessType(array_type, .{ .single = element_index }));
             }
-
-            if (ancestors.len != 1 and tree.nodeTag(ancestors[1]) == .address_of) {
-                if (try analyser.resolveExpressionType(
-                    handle,
-                    ancestors[1],
-                    ancestors[2..],
-                )) |slice_type| {
-                    return try analyser.resolveBracketAccessType(slice_type, .{ .single = element_index });
-                }
-            }
         },
         .container_field_init,
         .container_field_align,
@@ -6148,7 +6172,7 @@ pub fn resolveExpressionTypeFromAncestors(
 
             const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
-            const fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
+            var fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
                 const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
                 const ty = try decl.resolveType(analyser) orelse return null;
@@ -6159,11 +6183,11 @@ pub fn resolveExpressionTypeFromAncestors(
             };
             if (fn_type.is_type_val) return null;
 
-            const fn_info = fn_type.data.function;
-            const param_index = arg_index + @intFromBool(try analyser.hasSelfParam(fn_type));
-            if (param_index >= fn_info.parameters.len) return null;
-            const param = fn_info.parameters[param_index];
-            const param_ty = param.type;
+            fn_type = try analyser.resolveFunctionTypeFromCall(handle, call, fn_type);
+            const has_self_param = try analyser.isInstanceCall(handle, call, fn_type);
+            const parameters = fn_type.data.function.parameters[@intFromBool(has_self_param)..];
+            if (arg_index >= parameters.len) return null;
+            const param_ty = parameters[arg_index].type;
             return try param_ty.instanceTypeVal(analyser);
         },
         .assign => {
@@ -6240,6 +6264,7 @@ pub fn resolveExpressionTypeFromAncestors(
 
         .grouped_expression,
         .@"try",
+        .@"comptime",
         => {
             return try analyser.resolveExpressionType(
                 handle,
@@ -6289,6 +6314,43 @@ pub fn resolveExpressionTypeFromAncestors(
             }
         },
 
+        .address_of => {
+            std.debug.assert(node == tree.nodeData(ancestors[0]).node);
+
+            const expr_ty = try analyser.resolveExpressionType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            ) orelse return null;
+
+            if (try analyser.resolveDerefType(expr_ty)) |ty| {
+                return ty;
+            }
+
+            switch (expr_ty.data) {
+                .pointer => |info| switch (info.size) {
+                    .slice => {
+                        var buffer: [2]Ast.Node.Index = undefined;
+                        const array_init = tree.fullArrayInit(&buffer, node) orelse return null;
+                        return .{
+                            .data = .{
+                                .array = .{
+                                    .elem_count = array_init.ast.elements.len,
+                                    .sentinel = info.sentinel,
+                                    .elem_ty = info.elem_ty,
+                                },
+                            },
+                            .is_type_val = false,
+                        };
+                    },
+                    else => {},
+                },
+                else => {},
+            }
+
+            return null;
+        },
+
         else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
@@ -6310,6 +6372,28 @@ pub fn getSymbolEnumLiteral(
     return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
 }
 
+pub fn resolveStructInitType(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+) error{OutOfMemory}!?Type {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = handle.tree;
+    const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
+    if (nodes.len == 0) return null;
+    var ty = try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]) orelse return null;
+    while (true) {
+        const unwrapped =
+            try analyser.resolveUnwrapErrorUnionType(ty, .payload) orelse
+            try analyser.resolveOptionalUnwrap(ty) orelse
+            break;
+        ty = unwrapped;
+    }
+    return ty;
+}
+
 /// Multiple when using branched types
 pub fn getSymbolFieldAccesses(
     analyser: *Analyser,
@@ -6319,10 +6403,24 @@ pub fn getSymbolFieldAccesses(
     held_loc: offsets.Loc,
     name: []const u8,
 ) error{OutOfMemory}!?[]const DeclWithHandle {
+    var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
+    var property_types: std.ArrayListUnmanaged(Type) = .empty;
+    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls_with_handles, &property_types);
+    return try decls_with_handles.toOwnedSlice(arena);
+}
+
+pub fn getSymbolFieldAccessesArrayList(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    held_loc: offsets.Loc,
+    name: []const u8,
+    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
+    property_types: *std.ArrayListUnmanaged(Type),
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
 
     if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |ty| {
         const container_handle = try analyser.resolveDerefType(ty) orelse ty;
@@ -6330,11 +6428,45 @@ pub fn getSymbolFieldAccesses(
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(analyser);
 
         for (container_handle_nodes) |t| {
-            try decls_with_handles.append(arena, (try t.lookupSymbol(analyser, name)) orelse continue);
+            if (try t.lookupSymbol(analyser, name)) |decl_handle|
+                try decls_with_handles.append(arena, decl_handle);
+            if (try analyser.resolvePropertyType(ty, name)) |p|
+                try property_types.append(arena, p);
         }
     }
+}
 
-    return try decls_with_handles.toOwnedSlice(arena);
+pub fn getSymbolFieldAccessesHighlight(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    loc: offsets.Loc,
+    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
+    property_types: *std.ArrayListUnmanaged(Type),
+) !?offsets.Loc {
+    const name_loc, const highlight_loc = blk: {
+        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+            const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
+            switch (handle.tree.tokenTag(token)) {
+                .question_mark => {
+                    const token_loc = offsets.tokenToLoc(handle.tree, token);
+                    break :blk .{ token_loc, token_loc };
+                },
+                .period_asterisk => {
+                    var name_loc = offsets.tokenToLoc(handle.tree, token);
+                    name_loc.start += 1; // trim the period
+                    break :blk .{ name_loc, name_loc };
+                },
+                else => return null,
+            }
+        };
+        break :blk .{ name_loc, offsets.tokenToLoc(handle.tree, name_token) };
+    };
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const held_loc = offsets.locMerge(loc, name_loc);
+    try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, decls_with_handles, property_types);
+    return highlight_loc;
 }
 
 pub const ReferencedType = struct {

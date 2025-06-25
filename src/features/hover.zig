@@ -99,10 +99,28 @@ fn hoverSymbolRecursive(
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
+    return try hoverSymbolResolvedType(
+        analyser,
+        arena,
+        def_str,
+        markup_kind,
+        doc_strings,
+        try decl_handle.resolveType(analyser),
+    );
+}
+
+fn hoverSymbolResolvedType(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    def_str: []const u8,
+    markup_kind: types.MarkupKind,
+    doc_strings: *std.ArrayListUnmanaged([]const u8),
+    resolved_type_maybe: ?Analyser.Type,
+) error{OutOfMemory}!?[]const u8 {
     var referenced: Analyser.ReferencedType.Set = .empty;
     var resolved_type_strings: std.ArrayListUnmanaged([]const u8) = .empty;
     var has_more = false;
-    if (try decl_handle.resolveType(analyser)) |resolved_type| {
+    if (resolved_type_maybe) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
         const typeof = try resolved_type.typeOf(analyser);
@@ -310,7 +328,46 @@ fn hoverDefinitionGlobal(
                 .value = hover_text,
             },
         },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
+    };
+}
+
+fn hoverDefinitionStructInit(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    markup_kind: types.MarkupKind,
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}!?types.Hover {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
+    if (token + 1 >= handle.tree.tokens.len) return null;
+    if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
+
+    const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
+
+    var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    if (try resolved_type.docComments(arena)) |doc|
+        try doc_strings.append(arena, doc);
+
+    var referenced: Analyser.ReferencedType.Set = .empty;
+    const def_str = try std.fmt.allocPrint(arena, "{}", .{try resolved_type.fmtTypeOf(analyser, .{
+        .referenced = &referenced,
+        .truncate_container_decls = false,
+    })});
+    const referenced_types: []const Analyser.ReferencedType = referenced.keys();
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
+            },
+        },
+        .range = offsets.tokenToRange(handle.tree, token, offset_encoding),
     };
 }
 
@@ -325,7 +382,9 @@ fn hoverDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+        return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
+    };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 
@@ -336,7 +395,7 @@ fn hoverDefinitionEnumLiteral(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
     };
 }
 
@@ -352,15 +411,19 @@ fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const held_loc = offsets.locMerge(loc, name_loc);
-    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
+    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
+    var tys: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    const highlight_loc = try analyser.getSymbolFieldAccessesHighlight(arena, handle, source_index, loc, &decls, &tys) orelse return null;
 
-    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.len);
+    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.items.len + tys.items.len);
 
-    for (decls) |decl| {
+    for (decls.items) |decl| {
         content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);
+    }
+    for (tys.items) |ty| {
+        const def_str = offsets.locToSlice(handle.tree.source, highlight_loc);
+        var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+        content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, def_str, markup_kind, &doc_strings, ty) orelse continue);
     }
 
     return .{
@@ -372,7 +435,7 @@ fn hoverDefinitionFieldAccess(
                 else => try std.mem.join(arena, "\n\n", content.items),
             },
         } },
-        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, highlight_loc, offset_encoding),
     };
 }
 

@@ -6,6 +6,7 @@ const Foo = struct {
 };
 
 const foo: Foo = .{};
+//               ^ (Foo)()
 
 const static_access_field = Foo.foo;
 //    ^^^^^^^^^^^^^^^^^^^ (unknown)()
