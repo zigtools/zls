@@ -145,6 +145,19 @@ test "struct field access" {
     );
 }
 
+test "struct init result location from function return type" {
+    try testSymbolReferences(
+        \\fn foo() struct { <0>: i32 } {
+        \\    return .{ .<0> = 1 };
+        \\}
+        \\
+        \\test {
+        \\    var x = foo();
+        \\    x.<0> = 2;
+        \\}
+    );
+}
+
 test "struct decl access" {
     try testSymbolReferences(
         \\const S = struct {
