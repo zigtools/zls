@@ -118,6 +118,23 @@ test "enum field access" {
     );
 }
 
+test "switch case with enum literal" {
+    try testSymbolReferences(
+        \\const E = enum {
+        \\    <0>,
+        \\    bar,
+        \\};
+        \\
+        \\test {
+        \\    const e = E.<0>;
+        \\    switch (e) {
+        \\        .<0> => {},
+        \\        .bar => {},
+        \\    }
+        \\}
+    );
+}
+
 test "struct field access" {
     try testSymbolReferences(
         \\const S = struct {<0>: u32 = 3};
