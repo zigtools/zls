@@ -100,14 +100,20 @@ fn hoverSymbolRecursive(
     };
 
     var referenced: Analyser.ReferencedType.Set = .empty;
-    var resolved_type_str: []const u8 = "unknown";
+    var resolved_type_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    var has_more = false;
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
-        resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{resolved_type.fmt(analyser, .{
-            .referenced = &referenced,
-            .truncate_container_decls = false,
-        })});
+        const typeof = try resolved_type.typeOf(analyser);
+        var possible_types: Analyser.Type.ArraySet = .empty;
+        has_more = try typeof.getAllTypesWithHandlesArraySet(analyser, &possible_types);
+        for (possible_types.keys()) |ty| {
+            try resolved_type_strings.append(arena, try std.fmt.allocPrint(arena, "{}", .{ty.fmtTypeVal(analyser, .{
+                .referenced = &referenced,
+                .truncate_container_decls = possible_types.count() > 1,
+            })}));
+        }
     }
     const referenced_types: []const Analyser.ReferencedType = referenced.keys();
     return try hoverSymbolResolved(
@@ -115,7 +121,8 @@ fn hoverSymbolRecursive(
         markup_kind,
         doc_strings.items,
         def_str,
-        resolved_type_str,
+        resolved_type_strings.items,
+        has_more,
         referenced_types,
     );
 }
@@ -125,13 +132,20 @@ fn hoverSymbolResolved(
     markup_kind: types.MarkupKind,
     doc_strings: []const []const u8,
     def_str: []const u8,
-    resolved_type_str: []const u8,
+    resolved_type_strings: []const []const u8,
+    has_more: bool,
     referenced_types: []const Analyser.ReferencedType,
 ) error{OutOfMemory}![]const u8 {
     var hover_text: std.ArrayListUnmanaged(u8) = .empty;
     const writer = hover_text.writer(arena);
     if (markup_kind == .markdown) {
-        try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+        try writer.print("```zig\n{s}\n```", .{def_str});
+        for (resolved_type_strings) |resolved_type_str|
+            try writer.print("\n```zig\n({s})\n```", .{resolved_type_str});
+        if (resolved_type_strings.len == 0)
+            try writer.writeAll("\n```zig\n(unknown)\n```");
+        if (has_more)
+            try writer.print("\n```txt\n(...)\n```", .{});
         if (referenced_types.len > 0)
             try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -142,7 +156,13 @@ fn hoverSymbolResolved(
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
-        try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+        try writer.print("{s}", .{def_str});
+        for (resolved_type_strings) |resolved_type_str|
+            try writer.print("\n({s})", .{resolved_type_str});
+        if (resolved_type_strings.len == 0)
+            try writer.writeAll("\n(unknown)");
+        if (has_more)
+            try writer.print("\n(...)", .{});
     }
 
     if (doc_strings.len > 0) {
@@ -276,7 +296,7 @@ fn hoverDefinitionGlobal(
             if (std.mem.eql(u8, name, "_")) return null;
             if (try analyser.resolvePrimitive(name)) |ip_index| {
                 const resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
-                break :blk try hoverSymbolResolved(arena, markup_kind, &.{}, name, resolved_type_str, &.{});
+                break :blk try hoverSymbolResolved(arena, markup_kind, &.{}, name, &.{resolved_type_str}, false, &.{});
             }
         }
         const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
