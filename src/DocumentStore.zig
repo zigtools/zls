@@ -381,7 +381,7 @@ pub const Handle = struct {
         if (self.getStatus().has_trigram_store) return self.impl.trigram_store;
         return try self.getLazy(TrigramStore, "trigram_store", struct {
             fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!TrigramStore {
-                return try .init(allocator, handle.tree, .@"utf-16"); // TODO
+                return try .init(allocator, handle.tree);
             }
         });
     }
