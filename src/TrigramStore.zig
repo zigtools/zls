@@ -14,12 +14,13 @@ pub const TrigramStore = @This();
 pub const Trigram = [3]u8;
 
 pub const NameSlice = struct { start: u32, end: u32 };
+pub const Loc = struct { start: u32, end: u32 };
 
 pub const Declaration = struct {
     pub const Index = enum(u32) { _ };
 
     name: NameSlice,
-    range: offsets.Range,
+    loc: Loc,
 };
 
 has_filter: bool,
@@ -31,7 +32,6 @@ names: std.ArrayListUnmanaged(u8),
 pub fn init(
     allocator: std.mem.Allocator,
     tree: Ast,
-    encoding: offsets.Encoding,
 ) error{OutOfMemory}!TrigramStore {
     var store: TrigramStore = .{
         .has_filter = false,
@@ -46,7 +46,6 @@ pub fn init(
         allocator: std.mem.Allocator,
         store: *TrigramStore,
         in_function: bool,
-        encoding: offsets.Encoding,
 
         const Error = error{OutOfMemory};
         fn callback(context: *@This(), cb_tree: Ast, node: Ast.Node.Index) Error!void {
@@ -84,10 +83,12 @@ pub fn init(
                         const name = cb_tree.tokenSlice(token);
 
                         if (name.len >= 3) {
+                            const loc = offsets.tokenToLoc(cb_tree, token);
+
                             try context.store.appendDeclaration(
                                 context.allocator,
                                 name,
-                                offsets.tokenToRange(cb_tree, token, context.encoding),
+                                .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
                             );
                         }
                     }
@@ -104,7 +105,6 @@ pub fn init(
         .allocator = allocator,
         .store = &store,
         .in_function = false,
-        .encoding = encoding,
     };
     try ast.iterateChildren(tree, .root, &context, Context.Error, Context.callback);
 
@@ -162,7 +162,7 @@ fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
     name: []const u8,
-    range: offsets.Range,
+    loc: Loc,
 ) error{OutOfMemory}!void {
     assert(name.len >= 3);
 
@@ -177,7 +177,7 @@ fn appendDeclaration(
 
     try store.declarations.append(allocator, .{
         .name = name_slice,
-        .range = range,
+        .loc = loc,
     });
 
     for (0..name.len - 2) |index| {
