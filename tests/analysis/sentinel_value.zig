@@ -16,10 +16,8 @@ const slice3 = array[1..];
 const hw = "Hello, World!";
 //    ^^ (*const [13:0]u8)()
 
-// TODO this should be `*const [5]u8`
 const h = hw[0..5];
-//    ^ (unknown)()
+//    ^ (*const [5]u8)()
 
-// TODO this should be `*const [6:0]u8`
 const w = hw[7..];
-//    ^ (unknown)()
+//    ^ (*const [6:0]u8)()
