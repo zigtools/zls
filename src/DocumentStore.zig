@@ -182,7 +182,6 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
-    trigram_store: TrigramStore,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .empty,
     /// Contains one entry for every cimport in the document
@@ -198,6 +197,7 @@ pub const Handle = struct {
         lock: std.Thread.Mutex = .{},
         condition: std.Thread.Condition = .{},
 
+        trigram_store: TrigramStore = undefined,
         document_scope: DocumentScope = undefined,
         zir: std.zig.Zir = undefined,
         zoir: std.zig.Zoir = undefined,
@@ -230,6 +230,11 @@ pub const Handle = struct {
         /// `false` indicates the document only exists because it is a dependency of another document
         /// or has been closed with `textDocument/didClose`
         lsp_synced: bool = false,
+        /// true if a thread has acquired the permission to compute the `TrigramStore`
+        /// all other threads will wait until the given thread has computed the `TrigramStore` before reading it.
+        has_trigram_store_lock: bool = false,
+        /// true if `handle.impl.trigram_store` has been set
+        has_trigram_store: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
@@ -245,7 +250,7 @@ pub const Handle = struct {
         /// all other threads will wait until the given thread has computed the `std.zig.Zoir` before reading it.
         /// true if `handle.impl.zoir` has been set
         has_zoir: bool = false,
-        _: u25 = 0,
+        _: u23 = 0,
     };
 
     const ZirOrZoirStatus = enum {
@@ -269,14 +274,10 @@ pub const Handle = struct {
         var cimports = try collectCImports(allocator, tree);
         errdefer cimports.deinit(allocator);
 
-        var trigram_store: TrigramStore = try .init(allocator, tree, .@"utf-16");
-        errdefer trigram_store.deinit();
-
         return .{
             .uri = uri,
             .tree = tree,
             .cimports = cimports,
-            .trigram_store = trigram_store,
             .impl = .{
                 .status = .init(@bitCast(Status{
                     .lsp_synced = lsp_synced,
@@ -298,6 +299,7 @@ pub const Handle = struct {
         if (status.has_zir) self.impl.zir.deinit(allocator);
         if (status.has_zoir) self.impl.zoir.deinit(allocator);
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
+        if (status.has_trigram_store) self.impl.trigram_store.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
@@ -306,8 +308,6 @@ pub const Handle = struct {
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
-
-        self.trigram_store.deinit(allocator);
 
         switch (self.impl.associated_build_file) {
             .none, .resolved => {},
@@ -319,7 +319,19 @@ pub const Handle = struct {
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
         if (self.getStatus().has_document_scope) return self.impl.document_scope;
-        return try self.getDocumentScopeCold();
+        return try self.getLazy(DocumentScope, "document_scope", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
+                var document_scope: DocumentScope = try .init(allocator, handle.tree);
+                errdefer document_scope.deinit(allocator);
+
+                // remove unused capacity
+                document_scope.extra.shrinkAndFree(allocator, document_scope.extra.items.len);
+                try document_scope.declarations.setCapacity(allocator, document_scope.declarations.len);
+                try document_scope.scopes.setCapacity(allocator, document_scope.scopes.len);
+
+                return document_scope;
+            }
+        });
     }
 
     /// Asserts that `getDocumentScope` has been previously called on `handle`.
@@ -330,16 +342,55 @@ pub const Handle = struct {
         return self.impl.document_scope;
     }
 
+    pub fn getTrigramStore(self: *Handle) error{OutOfMemory}!TrigramStore {
+        if (self.getStatus().has_trigram_store) return self.impl.trigram_store;
+        return try self.getLazy(TrigramStore, "trigram_store", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!TrigramStore {
+                return try .init(allocator, handle.tree, .@"utf-16"); // TODO
+            }
+        });
+    }
+
+    /// Asserts that `getTrigramStore` has been previously called on `handle`.
+    pub fn getTrigramStoreCached(self: *Handle) TrigramStore {
+        if (builtin.mode == .Debug) {
+            std.debug.assert(self.getStatus().has_trigram_store);
+        }
+        return self.impl.trigram_store;
+    }
+
     pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
         std.debug.assert(self.tree.mode == .zig);
         if (self.getStatus().has_zir) return self.impl.zir;
-        return try self.getZirOrZoirCold(.zir);
+        return try self.getLazy(std.zig.Zir, "zir", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!std.zig.Zir {
+                const tracy_zone = tracy.traceNamed(@src(), "AstGen.generate");
+                defer tracy_zone.end();
+
+                var zir = try std.zig.AstGen.generate(allocator, handle.tree);
+                errdefer zir.deinit(allocator);
+
+                // remove unused capacity
+                var instructions = zir.instructions.toMultiArrayList();
+                try instructions.setCapacity(allocator, instructions.len);
+                zir.instructions = instructions.slice();
+
+                return zir;
+            }
+        });
     }
 
     pub fn getZoir(self: *Handle) error{OutOfMemory}!std.zig.Zoir {
         std.debug.assert(self.tree.mode == .zon);
         if (self.getStatus().has_zoir) return self.impl.zoir;
-        return try self.getZirOrZoirCold(.zoir);
+        return try self.getLazy(std.zig.Zoir, "zoir", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!std.zig.Zoir {
+                const tracy_zone = tracy.traceNamed(@src(), "ZonGen.generate");
+                defer tracy_zone.end();
+
+                return try std.zig.ZonGen.generate(allocator, handle.tree, .{});
+            }
+        });
     }
 
     /// Returns the associated build file (build.zig) of the handle.
@@ -425,103 +476,43 @@ pub const Handle = struct {
         return .none;
     }
 
-    fn getDocumentScopeCold(self: *Handle) error{OutOfMemory}!DocumentScope {
+    fn getLazy(
+        self: *Handle,
+        comptime T: type,
+        comptime name: []const u8,
+        comptime Context: type,
+    ) error{OutOfMemory}!T {
         @branchHint(.cold);
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
+
+        const has_data_field_name = "has_" ++ name;
+        const has_lock_field_name = "has_" ++ name ++ "_lock";
 
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
         while (true) {
             const status = self.getStatus();
-            if (status.has_document_scope) break;
-            if (status.has_document_scope_lock or
-                self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0)
+            if (@field(status, has_data_field_name)) break;
+            if (@field(status, has_lock_field_name) or
+                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field_name), .release) != 0)
             {
-                // another thread is currently computing the document scope
+                // another thread is currently computing the data
                 self.impl.condition.wait(&self.impl.lock);
                 continue;
             }
             defer self.impl.condition.broadcast();
 
-            self.impl.document_scope = blk: {
-                var document_scope: DocumentScope = try .init(self.impl.allocator, self.tree);
-                errdefer document_scope.deinit(self.impl.allocator);
+            @field(self.impl, name) = try Context.create(self, self.impl.allocator);
+            errdefer comptime unreachable;
 
-                // remove unused capacity
-                document_scope.extra.shrinkAndFree(self.impl.allocator, document_scope.extra.items.len);
-                try document_scope.declarations.setCapacity(self.impl.allocator, document_scope.declarations.len);
-                try document_scope.scopes.setCapacity(self.impl.allocator, document_scope.scopes.len);
-
-                break :blk document_scope;
-            };
-            const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .release); // atomically set has_document_scope
-            std.debug.assert(old_has_document_scope == 0); // race condition: another thread set `has_document_scope` even though we hold the lock
+            const old_has_data = self.impl.status.bitSet(@bitOffsetOf(Status, has_data_field_name), .release);
+            std.debug.assert(old_has_data == 0); // race condition
         }
-        return self.impl.document_scope;
+        return @field(self.impl, name);
     }
 
-    fn getZirOrZoirCold(self: *Handle, comptime kind: enum { zir, zoir }) error{OutOfMemory}!switch (kind) {
-        .zir => std.zig.Zir,
-        .zoir => std.zig.Zoir,
-    } {
-        @branchHint(.cold);
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const has_field = "has_" ++ @tagName(kind);
-        const has_lock_field = "has_" ++ @tagName(kind) ++ "_lock";
-
-        self.impl.lock.lock();
-        defer self.impl.lock.unlock();
-        while (true) {
-            const status = self.getStatus();
-            if (@field(status, has_field)) break;
-            if (@field(status, has_lock_field) or
-                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field), .release) != 0)
-            {
-                // another thread is currently computing the ZIR
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            }
-            defer self.impl.condition.broadcast();
-
-            switch (kind) {
-                .zir => {
-                    const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
-                    defer tracy_zone_inner.end();
-
-                    var zir = try std.zig.AstGen.generate(self.impl.allocator, self.tree);
-                    errdefer zir.deinit(self.impl.allocator);
-
-                    // remove unused capacity
-                    var instructions = zir.instructions.toMultiArrayList();
-                    try instructions.setCapacity(self.impl.allocator, instructions.len);
-                    zir.instructions = instructions.slice();
-
-                    self.impl.zir = zir;
-                },
-                .zoir => {
-                    const tracy_zone_inner = tracy.traceNamed(@src(), "ZonGen.generate");
-                    defer tracy_zone_inner.end();
-
-                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree, .{});
-                    errdefer zoir.deinit(self.impl.allocator);
-
-                    self.impl.zoir = zoir;
-                },
-            }
-
-            const old_has = self.impl.status.bitSet(@bitOffsetOf(Status, has_field), .release); // atomically set has_[zir|zoir]
-            std.debug.assert(old_has == 0); // race condition: another thread set Zir or Zoir even though we hold the lock
-        }
-        return switch (kind) {
-            .zir => self.impl.zir,
-            .zoir => self.impl.zoir,
-        };
-    }
-
-    fn getStatus(self: *const Handle) Status {
+    pub fn getStatus(self: *const Handle) Status {
         return @bitCast(self.impl.status.load(.acquire));
     }
 
@@ -1004,6 +995,47 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
             ) catch {};
         }
     }
+}
+
+pub fn loadTrigramStores(self: *DocumentStore) error{OutOfMemory}![]*DocumentStore.Handle {
+    if (builtin.single_threaded) {
+        for (self.handles.values()) |handle| {
+            _ = try handle.getTrigramStore();
+        }
+        return;
+    }
+
+    const handles = handles: {
+        self.lock.lock();
+        defer self.lock.unlock();
+        break :handles try self.allocator.dupe(*DocumentStore.Handle, self.handles.values());
+    };
+    errdefer self.allocator.free(handles);
+
+    const loadTrigramStore = struct {
+        fn loadTrigramStore(
+            handle: *Handle,
+            did_out_of_memory: *std.atomic.Value(bool),
+        ) void {
+            _ = handle.getTrigramStore() catch {
+                did_out_of_memory.store(true, .release);
+            };
+        }
+    }.loadTrigramStore;
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    var did_out_of_memory: std.atomic.Value(bool) = .init(false);
+
+    for (handles) |handle| {
+        const status = handle.getStatus();
+        if (status.has_trigram_store) continue;
+        self.thread_pool.spawnWg(&wait_group, loadTrigramStore, .{ handle, &did_out_of_memory });
+    }
+    self.thread_pool.waitAndWork(&wait_group);
+
+    if (did_out_of_memory.load(.acquire)) return error.OutOfMemory;
+
+    return handles;
 }
 
 pub fn isBuildFile(uri: Uri) bool {
