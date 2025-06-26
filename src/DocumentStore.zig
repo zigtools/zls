@@ -76,12 +76,20 @@ pub const BuildFile = struct {
     build_associated_config: ?std.json.Parsed(BuildAssociatedConfig) = null,
     impl: struct {
         mutex: std.Thread.Mutex = .{},
+        build_runner_state: if (builtin.single_threaded) void else BuildRunnerState = if (builtin.single_threaded) {} else .idle,
+        version: u32 = 0,
         /// contains information extracted from running build.zig with a custom build runner
         /// e.g. include paths & packages
         /// TODO this field should not be nullable, callsites should await the build config to be resolved
         /// and then continue instead of dealing with missing information.
         config: ?std.json.Parsed(BuildConfig) = null,
     } = .{},
+
+    const BuildRunnerState = enum {
+        idle,
+        running,
+        running_but_already_invalidated,
+    };
 
     pub fn tryLockConfig(self: *BuildFile) ?BuildConfig {
         self.impl.mutex.lock();
@@ -156,19 +164,6 @@ pub const BuildFile = struct {
             include_paths.appendAssumeCapacity(absolute_path);
         }
         return true;
-    }
-
-    fn setBuildConfig(self: *BuildFile, new_build_config: std.json.Parsed(BuildConfig)) void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        self.impl.mutex.lock();
-        defer self.impl.mutex.unlock();
-
-        if (self.impl.config) |*old_config| {
-            old_config.deinit();
-        }
-        self.impl.config = new_build_config;
     }
 
     fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
@@ -882,19 +877,15 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     if (self.config.global_cache_dir == null) return;
     if (self.config.zig_lib_dir == null) return;
 
+    const build_file = self.getBuildFile(build_file_uri) orelse return;
+
     if (builtin.single_threaded) {
-        self.invalidateBuildFileWorker(build_file_uri, false);
+        self.invalidateBuildFileWorker(build_file);
         return;
     }
 
-    const duped_uri = self.allocator.dupe(u8, build_file_uri) catch {
-        self.invalidateBuildFileWorker(build_file_uri, false);
-        return;
-    };
-
-    self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, duped_uri, true }) catch {
-        self.allocator.free(duped_uri);
-        self.invalidateBuildFileWorker(build_file_uri, false);
+    self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, build_file }) catch {
+        self.invalidateBuildFileWorker(build_file);
         return;
     };
 }
@@ -915,13 +906,13 @@ fn sendMessageToClient(allocator: std.mem.Allocator, transport: lsp.AnyTransport
 fn notifyBuildStart(self: *DocumentStore) void {
     if (!self.lsp_capabilities.supports_work_done_progress) return;
 
+    const transport = self.transport orelse return;
+
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
     // we aren't double entering/exiting
     const prev = self.builds_in_progress.fetchAdd(1, .monotonic);
     if (prev != 0) return;
-
-    const transport = self.transport orelse return;
 
     sendMessageToClient(
         self.allocator,
@@ -959,13 +950,13 @@ const EndStatus = enum { success, failed };
 fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
     if (!self.lsp_capabilities.supports_work_done_progress) return;
 
+    const transport = self.transport orelse return;
+
     // Atomicity note: We do not actually care about memory surrounding the
     // counter, we only care about the counter itself. We only need to ensure
     // we aren't double entering/exiting
     const prev = self.builds_in_progress.fetchSub(1, .monotonic);
     if (prev != 1) return;
-
-    const transport = self.transport orelse return;
 
     const message = switch (status) {
         .failed => "Failed",
@@ -987,23 +978,59 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
     };
 }
 
-fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build_file_uri_owned: bool) void {
-    defer if (is_build_file_uri_owned) self.allocator.free(build_file_uri);
+fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void {
+    {
+        build_file.impl.mutex.lock();
+        defer build_file.impl.mutex.unlock();
 
-    var end_status: EndStatus = .failed;
+        switch (build_file.impl.build_runner_state) {
+            .idle => build_file.impl.build_runner_state = .running,
+            .running => {
+                build_file.impl.build_runner_state = .running_but_already_invalidated;
+                return;
+            },
+            .running_but_already_invalidated => return,
+        }
+    }
+
     self.notifyBuildStart();
-    defer self.notifyBuildEnd(end_status);
 
-    const build_config = loadBuildConfiguration(self, build_file_uri) catch |err| {
-        log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
-        return;
-    };
+    while (true) {
+        build_file.impl.version += 1;
+        const new_version = build_file.impl.version;
 
-    const build_file = self.getBuildFile(build_file_uri) orelse {
-        build_config.deinit();
-        return;
-    };
-    build_file.setBuildConfig(build_config);
+        const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| {
+            if (err != error.RunFailed) { // already logged
+                log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
+            }
+            self.notifyBuildEnd(.failed);
+            build_file.impl.mutex.lock();
+            defer build_file.impl.mutex.unlock();
+            build_file.impl.build_runner_state = .idle;
+            return;
+        };
+
+        build_file.impl.mutex.lock();
+        switch (build_file.impl.build_runner_state) {
+            .idle => unreachable,
+            .running => {
+                build_file.impl.build_runner_state = .idle;
+                build_file.impl.config = build_config;
+                build_file.impl.mutex.unlock();
+
+                if (build_file.impl.config) |*old_config| old_config.deinit();
+                self.notifyBuildEnd(.success);
+                break;
+            },
+            .running_but_already_invalidated => {
+                build_file.impl.build_runner_state = .running;
+                build_file.impl.mutex.unlock();
+
+                build_config.deinit();
+                continue;
+            },
+        }
+    }
 
     if (self.transport) |transport| {
         if (self.lsp_capabilities.supports_semantic_tokens_refresh) {
@@ -1029,9 +1056,6 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file_uri: Uri, is_build
             ) catch {};
         }
     }
-
-    // Looks like a useless assignment, but alters deffered onEnd
-    end_status = .success;
 }
 
 /// The `DocumentStore` represents a graph structure where every
@@ -1252,7 +1276,7 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
 }
 
 /// Runs the build.zig and extracts include directories and packages
-fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.Parsed(BuildConfig) {
+fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_version: u32) !std.json.Parsed(BuildConfig) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1263,6 +1287,8 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
 
     const build_file_path = try URI.parse(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
+
+    const cwd = std.fs.path.dirname(build_file_path).?;
 
     const args = try self.prepareBuildRunnerArgs(build_file_uri);
     defer {
@@ -1276,26 +1302,42 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.json.P
         break :blk try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = args,
-            .cwd = std.fs.path.dirname(build_file_path).?,
+            .cwd = cwd,
             .max_output_bytes = 16 * 1024 * 1024,
         });
     };
     defer self.allocator.free(zig_run_result.stdout);
     defer self.allocator.free(zig_run_result.stderr);
 
-    errdefer blk: {
-        const joined = std.mem.join(self.allocator, " ", args) catch break :blk;
+    const is_ok = switch (zig_run_result.term) {
+        .Exited => |exit_code| exit_code == 0,
+        else => false,
+    };
+
+    const diagnostic_tag: DiagnosticsCollection.Tag = tag: {
+        var hasher: std.hash.Wyhash = .init(47); // Chosen by the following prompt: Pwease give a wandom nyumbew
+        hasher.update(build_file_uri);
+        break :tag @enumFromInt(@as(u32, @truncate(hasher.final())));
+    };
+
+    if (!is_ok) {
+        const joined = try std.mem.join(self.allocator, " ", args);
         defer self.allocator.free(joined);
 
         log.err(
             "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
             .{ joined, zig_run_result.stderr },
         );
-    }
 
-    switch (zig_run_result.term) {
-        .Exited => |exit_code| if (exit_code != 0) return error.RunFailed,
-        else => return error.RunFailed,
+        var error_bundle = try @import("features/diagnostics.zig").getErrorBundleFromStderr(self.allocator, zig_run_result.stderr, false, null);
+        defer error_bundle.deinit(self.allocator);
+
+        try self.diagnostics_collection.pushErrorBundle(diagnostic_tag, build_file_version, cwd, error_bundle);
+        try self.diagnostics_collection.publishDiagnostics();
+        return error.RunFailed;
+    } else {
+        try self.diagnostics_collection.pushErrorBundle(diagnostic_tag, build_file_version, null, .empty);
+        try self.diagnostics_collection.publishDiagnostics();
     }
 
     const parse_options: std.json.ParseOptions = .{
