@@ -1987,6 +1987,8 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
     var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
     var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
+    var loc_buffer: std.ArrayListUnmanaged(offsets.Loc) = .empty;
+    var range_buffer: std.ArrayListUnmanaged(offsets.Range) = .empty;
 
     for (handles) |handle| {
         const trigram_store = handle.getTrigramStoreCached();
@@ -1996,12 +1998,25 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
         const slice = trigram_store.declarations.slice();
         const names = slice.items(.name);
-        const ranges = slice.items(.range);
+        const locs = slice.items(.loc);
+
+        {
+            // Convert `offsets.Loc` to `offsets.Range`
+
+            try loc_buffer.resize(arena, declaration_buffer.items.len);
+            try range_buffer.resize(arena, declaration_buffer.items.len);
+
+            for (declaration_buffer.items, loc_buffer.items) |declaration, *loc| {
+                const small_loc = locs[@intFromEnum(declaration)];
+                loc.* = .{ .start = small_loc.start, .end = small_loc.end };
+            }
+
+            try offsets.multiple.locToRange(arena, handle.tree.source, loc_buffer.items, range_buffer.items, server.offset_encoding);
+        }
 
         try symbols.ensureUnusedCapacity(arena, declaration_buffer.items.len);
-        for (declaration_buffer.items) |declaration| {
+        for (declaration_buffer.items, range_buffer.items) |declaration, range| {
             const name = names[@intFromEnum(declaration)];
-            const range = ranges[@intFromEnum(declaration)];
             symbols.appendAssumeCapacity(.{
                 .name = trigram_store.names.items[name.start..name.end],
                 .kind = .Variable,
