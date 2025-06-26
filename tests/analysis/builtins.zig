@@ -1,6 +1,20 @@
 const some_float: f32 = undefined;
 const some_vector: @Vector(4, f32) = undefined;
 
+const vector_indexing = some_vector[0];
+//    ^^^^^^^^^^^^^^^ (f32)()
+
+const vector_slice_open_1 = some_vector[1..];
+//    ^^^^^^^^^^^^^^^^^^^ (*const [3]f32)() TODO this should be `unknown`
+
+const vector_slice_0_2 = some_vector[0..2];
+//    ^^^^^^^^^^^^^^^^ (*const [2]f32)() TODO this should be `unknown`
+
+const vector_loop = for (some_vector) |elem| {
+    _ = elem;
+    //  ^^^^ (f32)() TODO this should be `unknown`
+};
+
 const float_builtin_00 = @sqrt(some_float);
 //    ^^^^^^^^^^^^^^^^ (f32)()
 const float_builtin_01 = @sin(some_float);

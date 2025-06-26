@@ -1128,6 +1128,45 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
     return analyser.resolveBracketAccessTypeFromBinding(.{ .type = lhs, .is_const = false }, rhs);
 }
 
+// TODO: copy indexing logic from Zig compiler to InternPool, and then delete bracketAccessTypeFromIPIndex
+fn bracketAccessTypeFromIPIndex(analyser: *Analyser, ip_index: InternPool.Index) !Type {
+    std.debug.assert(analyser.ip.typeOf(ip_index) == .type_type);
+    return switch (analyser.ip.indexToKey(ip_index)) {
+        .vector_type => |info| .{
+            .data = .{
+                .array = .{
+                    .elem_count = info.len,
+                    .sentinel = .none,
+                    .elem_ty = try analyser.allocType(try analyser.bracketAccessTypeFromIPIndex(info.child)),
+                },
+            },
+            .is_type_val = true,
+        },
+        .array_type => |info| .{
+            .data = .{
+                .array = .{
+                    .elem_count = info.len,
+                    .sentinel = info.sentinel,
+                    .elem_ty = try analyser.allocType(try analyser.bracketAccessTypeFromIPIndex(info.child)),
+                },
+            },
+            .is_type_val = true,
+        },
+        .pointer_type => |info| .{
+            .data = .{
+                .pointer = .{
+                    .size = info.flags.size,
+                    .sentinel = info.sentinel,
+                    .is_const = info.flags.is_const,
+                    .elem_ty = try analyser.allocType(try analyser.bracketAccessTypeFromIPIndex(info.elem_type)),
+                },
+            },
+            .is_type_val = true,
+        },
+        else => Type.fromIP(analyser, .type_type, ip_index),
+    };
+}
+
 pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Binding, rhs: BracketAccess) error{OutOfMemory}!?Type {
     const lhs = lhs_binding.type;
     const is_const = lhs_binding.is_const;
@@ -1372,6 +1411,13 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                     .is_type_val = false,
                 },
             },
+        },
+        .ip_index => |payload| {
+            const ty = try analyser.bracketAccessTypeFromIPIndex(payload.type);
+            const instance = try ty.instanceTypeVal(analyser);
+            const binding: Binding = .{ .type = instance.?, .is_const = is_const };
+            if (lhs.eql(binding.type)) return null;
+            return analyser.resolveBracketAccessTypeFromBinding(binding, rhs);
         },
         else => return null,
     }
