@@ -182,7 +182,6 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
-    trigram_store: TrigramStore,
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle),
 
@@ -198,6 +197,7 @@ pub const Handle = struct {
         lazy_condition: std.Thread.Condition = .{},
 
         import_uris: ?[]Uri = null,
+        trigram_store: TrigramStore = undefined,
         document_scope: DocumentScope = undefined,
         zzoiir: ZirOrZoir = undefined,
 
@@ -236,6 +236,11 @@ pub const Handle = struct {
         /// `false` indicates the document only exists because it is a dependency of another document
         /// or has been closed with `textDocument/didClose`.
         lsp_synced: bool = false,
+        /// true if a thread has acquired the permission to compute the `TrigramStore`
+        /// all other threads will wait until the given thread has computed the `TrigramStore` before reading it.
+        has_trigram_store_lock: bool = false,
+        /// true if `handle.impl.trigram_store` has been set
+        has_trigram_store: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
@@ -246,7 +251,7 @@ pub const Handle = struct {
         /// all other threads will wait until the given thread has computed the `std.zig.Zir` or `std.zig.Zoir` before reading it.
         /// true if `handle.impl.zir` has been set
         has_zzoiir: bool = false,
-        _: u27 = 0,
+        _: u25 = 0,
     };
 
     /// Takes ownership of `text` on success.
@@ -264,14 +269,10 @@ pub const Handle = struct {
         var cimports = try collectCIncludes(allocator, tree);
         errdefer cimports.deinit(allocator);
 
-        var trigram_store: TrigramStore = try .init(allocator, tree, .@"utf-16");
-        errdefer trigram_store.deinit();
-
         return .{
             .uri = uri,
             .tree = tree,
             .cimports = cimports,
-            .trigram_store = trigram_store,
             .impl = .{
                 .status = .init(@bitCast(Status{
                     .lsp_synced = lsp_synced,
@@ -295,6 +296,7 @@ pub const Handle = struct {
             .zon => self.impl.zzoiir.zon.deinit(allocator),
         };
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
+        if (status.has_trigram_store) self.impl.trigram_store.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
@@ -305,8 +307,6 @@ pub const Handle = struct {
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
-
-        self.trigram_store.deinit(allocator);
 
         switch (self.impl.associated_build_file) {
             .init, .none, .resolved => {},
@@ -375,6 +375,23 @@ pub const Handle = struct {
             std.debug.assert(self.getStatus().has_document_scope);
         }
         return self.impl.document_scope;
+    }
+
+    pub fn getTrigramStore(self: *Handle) error{OutOfMemory}!TrigramStore {
+        if (self.getStatus().has_trigram_store) return self.impl.trigram_store;
+        return try self.getLazy(TrigramStore, "trigram_store", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!TrigramStore {
+                return try .init(allocator, handle.tree, .@"utf-16"); // TODO
+            }
+        });
+    }
+
+    /// Asserts that `getTrigramStore` has been previously called on `handle`.
+    pub fn getTrigramStoreCached(self: *Handle) TrigramStore {
+        if (builtin.mode == .Debug) {
+            std.debug.assert(self.getStatus().has_trigram_store);
+        }
+        return self.impl.trigram_store;
     }
 
     pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
@@ -977,6 +994,9 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
 }
 
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     {
         build_file.impl.mutex.lock();
         defer build_file.impl.mutex.unlock();
@@ -1055,6 +1075,52 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
             ) catch {};
         }
     }
+}
+
+pub fn loadTrigramStores(store: *DocumentStore) error{OutOfMemory}![]*DocumentStore.Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var handles: std.ArrayListUnmanaged(*DocumentStore.Handle) = try .initCapacity(store.allocator, store.handles.count());
+    errdefer handles.deinit(store.allocator);
+
+    for (store.handles.values()) |handle| {
+        // TODO check if the handle is in a workspace folder instead
+        if (isInStd(handle.uri)) continue;
+        handles.appendAssumeCapacity(handle);
+    }
+
+    if (builtin.single_threaded) {
+        for (handles.items) |handle| {
+            _ = try handle.getTrigramStore();
+        }
+        return try handles.toOwnedSlice(store.allocator);
+    }
+
+    const loadTrigramStore = struct {
+        fn loadTrigramStore(
+            handle: *Handle,
+            did_out_of_memory: *std.atomic.Value(bool),
+        ) void {
+            _ = handle.getTrigramStore() catch {
+                did_out_of_memory.store(true, .release);
+            };
+        }
+    }.loadTrigramStore;
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    var did_out_of_memory: std.atomic.Value(bool) = .init(false);
+
+    for (handles.items) |handle| {
+        const status = handle.getStatus();
+        if (status.has_trigram_store) continue;
+        store.thread_pool.spawnWg(&wait_group, loadTrigramStore, .{ handle, &did_out_of_memory });
+    }
+    store.thread_pool.waitAndWork(&wait_group);
+
+    if (did_out_of_memory.load(.acquire)) return error.OutOfMemory;
+
+    return try handles.toOwnedSlice(store.allocator);
 }
 
 pub fn isBuildFile(uri: Uri) bool {
@@ -1239,6 +1305,9 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (isInStd(uri)) return &.{};
 
     var potential_build_files: std.ArrayList(*BuildFile) = .empty;
