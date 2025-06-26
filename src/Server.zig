@@ -1531,15 +1531,14 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
 fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!lsp.ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    // TODO: take this and get copy of handle ptrs
-    server.document_store.lock.lock();
-    defer server.document_store.lock.unlock();
+    const handles = try server.document_store.loadTrigramStores();
+    defer server.document_store.allocator.free(handles);
 
     var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
     var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
 
-    for (server.document_store.handles.keys(), server.document_store.handles.values()) |uri, handle| {
-        const trigram_store = &handle.trigram_store;
+    for (handles) |handle| {
+        const trigram_store = handle.getTrigramStoreCached();
 
         declaration_buffer.clearRetainingCapacity();
         try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
@@ -1548,15 +1547,16 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         const names = slice.items(.name);
         const ranges = slice.items(.range);
 
+        try symbols.ensureUnusedCapacity(arena, declaration_buffer.items.len);
         for (declaration_buffer.items) |declaration| {
             const name = names[@intFromEnum(declaration)];
             const range = ranges[@intFromEnum(declaration)];
-            try symbols.append(arena, .{
+            symbols.appendAssumeCapacity(.{
                 .name = trigram_store.names.items[name.start..name.end],
                 .kind = .Variable,
                 .location = .{
                     .Location = .{
-                        .uri = uri,
+                        .uri = handle.uri,
                         .range = range,
                     },
                 },
