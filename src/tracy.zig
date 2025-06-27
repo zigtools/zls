@@ -172,14 +172,12 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         fn resizeFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
             const self: *Self = @ptrCast(@alignCast(ptr));
             if (!self.parent_allocator.rawResize(memory, alignment, new_len, ret_addr)) return false;
-            if (new_len != 0) {
-                if (name) |n| {
-                    freeNamed(memory.ptr, n);
-                    allocNamed(memory.ptr, new_len, n);
-                } else {
-                    free(memory.ptr);
-                    alloc(memory.ptr, new_len);
-                }
+            if (name) |n| {
+                if (memory.len != 0) freeNamed(memory.ptr, n);
+                if (new_len != 0) allocNamed(memory.ptr, new_len, n);
+            } else {
+                if (memory.len != 0) free(memory.ptr);
+                if (new_len != 0) alloc(memory.ptr, new_len);
             }
             return true;
         }
@@ -187,14 +185,12 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         fn remapFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             const new_memory = self.parent_allocator.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
-            if (new_len != 0) {
-                if (name) |n| {
-                    freeNamed(memory.ptr, n);
-                    allocNamed(memory.ptr, new_len, n);
-                } else {
-                    free(memory.ptr);
-                    alloc(memory.ptr, new_len);
-                }
+            if (name) |n| {
+                if (memory.len != 0) freeNamed(memory.ptr, n);
+                if (new_len != 0) allocNamed(new_memory, new_len, n);
+            } else {
+                if (memory.len != 0) free(memory.ptr);
+                if (new_len != 0) alloc(new_memory, new_len);
             }
             return new_memory;
         }
