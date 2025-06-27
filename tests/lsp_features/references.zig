@@ -270,6 +270,37 @@ test "function header" {
     );
 }
 
+test "switch case capture - union field" {
+    try testSymbolReferences(
+        \\const foo = switch (undefined) {
+        \\    .foo => |<0>| <0>,
+        \\};
+    );
+    try testSymbolReferences(
+        \\const foo = switch (undefined) {
+        \\    .foo => |<0>, _| <0>,
+        \\};
+    );
+    try testSymbolReferences(
+        \\const foo = switch (undefined) {
+        \\    inline .foo => |<0>, _| <0>,
+        \\};
+    );
+}
+
+test "switch case capture - union tag" {
+    try testSymbolReferences(
+        \\const foo = switch (undefined) {
+        \\    .foo => |_, <0>| <0>,
+        \\};
+    );
+    try testSymbolReferences(
+        \\const foo = switch (undefined) {
+        \\    inline .foo => |_, <0>| <0>,
+        \\};
+    );
+}
+
 test "cross-file reference" {
     if (true) return error.SkipZigTest; // https://github.com/zigtools/zls/issues/1071
     try testMultiFileSymbolReferences(&.{

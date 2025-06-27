@@ -1003,8 +1003,11 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
     };
 }
 
-fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     if (!ty.is_type_val)
+        return null;
+
+    if (!ty.isTaggedUnion())
         return null;
 
     const scope_handle = switch (ty.data) {
@@ -1014,20 +1017,8 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) erro
     const node = scope_handle.toNode();
     const handle = scope_handle.handle;
 
-    if (node == .root)
-        return null;
-
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = handle.tree.fullContainerDecl(&buf, node) orelse
-        return null;
-
-    if (handle.tree.tokenTag(container_decl.ast.main_token) != .keyword_union)
-        return null;
-
-    const child = try ty.lookupSymbol(analyser, symbol) orelse
-        return null;
-
-    if (child.decl != .ast_node or !child.handle.tree.nodeTag(child.decl.ast_node).isContainerField())
         return null;
 
     if (container_decl.ast.enum_token != null)
@@ -1039,6 +1030,22 @@ fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) erro
     }
 
     return null;
+}
+
+fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+    if (!ty.is_type_val)
+        return null;
+
+    if (!ty.isTaggedUnion())
+        return null;
+
+    const child = try ty.lookupSymbol(analyser, symbol) orelse
+        return null;
+
+    if (child.decl != .ast_node or !child.handle.tree.nodeTag(child.decl.ast_node).isContainerField())
+        return null;
+
+    return try analyser.resolveUnionTag(ty);
 }
 
 pub fn resolveFuncProtoOfCallable(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
@@ -5265,6 +5272,7 @@ pub const DeclWithHandle = struct {
             .error_union_error,
             .for_loop_payload,
             .switch_payload,
+            .switch_inline_tag_payload,
             => return null, // the payloads can't have a type specifier
 
             .label,
@@ -5315,6 +5323,7 @@ pub const DeclWithHandle = struct {
             .error_union_payload,
             .error_union_error,
             .switch_payload,
+            .switch_inline_tag_payload,
             .label,
             .error_token,
             => true,
@@ -5330,6 +5339,7 @@ pub const DeclWithHandle = struct {
             .assign_destructure,
             .label,
             .error_token,
+            .switch_inline_tag_payload,
             => false,
             inline .optional_payload,
             .for_loop_payload,
@@ -5492,13 +5502,28 @@ pub const DeclWithHandle = struct {
                 };
             },
             .label => |decl| try analyser.resolveTypeOfNodeInternal(.of(decl.block, self.handle)),
-            .switch_payload => |payload| blk: {
+            .switch_payload,
+            .switch_inline_tag_payload,
+            => |payload| blk: {
                 const cond = tree.nodeData(payload.node).node_and_extra[0];
                 const case = payload.getCase(tree);
 
                 const switch_expr_type: Type = (try analyser.resolveTypeOfNodeInternal(.of(cond, self.handle))) orelse return null;
+
+                if (self.decl == .switch_inline_tag_payload) {
+                    return try analyser.resolveUnionTag(try switch_expr_type.typeOf(analyser));
+                }
+
                 if (switch_expr_type.isEnumType()) break :blk switch_expr_type;
-                if (!switch_expr_type.isUnionType()) return null;
+                if (!switch_expr_type.isUnionType()) return switch_expr_type;
+
+                if (case.ast.values.len == 0) {
+                    if (case.inline_token == null) {
+                        return switch_expr_type;
+                    }
+                    // TODO either type
+                    return null;
+                }
 
                 // TODO Peer type resolution, we just use the first resolvable item for now.
                 for (case.ast.values) |case_value| {

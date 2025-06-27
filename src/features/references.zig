@@ -307,7 +307,9 @@ fn symbolReferences(
         .for_loop_payload,
         .assign_destructure,
         => scope_node,
-        .switch_payload => |payload| payload.node,
+        .switch_payload,
+        .switch_inline_tag_payload,
+        => |payload| payload.node,
         .function_parameter => |payload| payload.func,
         .label => unreachable, // handled separately by labelReferences
         .error_token => return .empty,

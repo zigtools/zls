@@ -94,6 +94,7 @@ fn hoverSymbolRecursive(
         .for_loop_payload,
         .assign_destructure,
         .switch_payload,
+        .switch_inline_tag_payload,
         .label,
         .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
