@@ -23,16 +23,18 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 
 const DiagnosticsCollection = @This();
 
-/// Diangostics with different tags are treated independently.
+/// Diagnostics with different tags are treated independently.
 /// This enables the DiagnosticsCollection to differentiate syntax level errors from build-on-save errors.
 /// Build on Save diagnostics have an tag that is the hash of the build step and the path to the `build.zig`
 pub const Tag = enum(u32) {
-    /// * `std.zig.Ast.parse`
-    /// * ast-check
-    /// * warn_style
+    /// - `std.zig.Ast.parse`
+    /// - ast-check
+    /// - warn_style
     parse,
     /// errors from `@cImport`
     cimport,
+    /// - Build On Save
+    /// - Build Runner
     _,
 };
 
@@ -135,13 +137,18 @@ pub fn pushErrorBundle(
 
     if (error_bundle.errorMessageCount() == 0 and gop.value_ptr.error_bundle.errorMessageCount() == 0) return;
 
-    try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
     if (error_bundle.errorMessageCount() != 0) {
+        try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
         try new_error_bundle.addBundleAsRoots(error_bundle);
     }
 
     if (version_order == .gt) {
-        try collectUrisFromErrorBundle(collection.allocator, gop.value_ptr.error_bundle, src_base_path, &collection.outdated_files);
+        try collectUrisFromErrorBundle(
+            collection.allocator,
+            gop.value_ptr.error_bundle,
+            gop.value_ptr.error_bundle_src_base_path,
+            &collection.outdated_files,
+        );
     } else {
         if (gop.value_ptr.error_bundle.errorMessageCount() != 0) {
             try new_error_bundle.addBundleAsRoots(gop.value_ptr.error_bundle);
