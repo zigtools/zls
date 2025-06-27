@@ -230,6 +230,12 @@ const std = @import("std");
 fn Identity(comptime T: type) T {}
 // ^^^^^^^^ (fn (comptime type) T)()
 
+const identity_of_i32 = Identity(i32);
+//    ^^^^^^^^^^^^^^^ (i32)()
+
+const identity_of_f64 = Identity(f64);
+//    ^^^^^^^^^^^^^^^ (f64)()
+
 const identity_of_unknown_type = Identity(@as(type, undefined));
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ ((unknown type))()
 
