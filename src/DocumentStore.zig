@@ -997,7 +997,7 @@ pub fn loadTrigramStores(self: *DocumentStore) error{OutOfMemory}![]*DocumentSto
         for (self.handles.values()) |handle| {
             _ = try handle.getTrigramStore();
         }
-        return;
+        return try self.allocator.dupe(*DocumentStore.Handle, self.handles.values());
     }
 
     const handles = handles: {
