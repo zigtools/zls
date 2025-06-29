@@ -1687,7 +1687,7 @@ pub fn collectIncludeDirs(
         .ofmt = comptime std.Target.ObjectFormat.default(builtin.os.tag, builtin.cpu.arch),
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
-    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), &target_info);
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), target_info);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {
