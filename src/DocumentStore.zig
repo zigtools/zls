@@ -259,7 +259,7 @@ pub const Handle = struct {
         done,
     };
 
-    /// takes ownership of `uri` and `text`
+    /// Takes ownership of `text` on success.
     fn init(
         allocator: std.mem.Allocator,
         uri: Uri,
@@ -680,11 +680,6 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
 
     const file_contents = store.readUri(uri) orelse return null;
     return store.createAndStoreDocument(uri, file_contents, false) catch |err| {
-        store.lock.lock();
-        defer store.lock.unlock();
-
-        _ = store.currently_loading_uris.swapRemove(uri);
-
         log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
@@ -1345,21 +1340,59 @@ fn uriInImports(
 /// invalidates any pointers into `DocumentStore.build_files`
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
-fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced: bool) error{OutOfMemory}!Handle {
+fn createAndStoreDocument(
+    self: *DocumentStore,
+    uri: Uri,
+    text: [:0]const u8,
+    lsp_synced: bool,
+) error{OutOfMemory}!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const duped_uri = try self.allocator.dupe(u8, uri);
-    errdefer self.allocator.free(duped_uri);
+    const gop = gop: {
+        var new_handle: Handle = try .init(self.allocator, uri, text, lsp_synced);
 
-    var handle: Handle = try .init(self.allocator, duped_uri, text, lsp_synced);
-    errdefer handle.deinit();
+        self.lock.lock();
+        defer self.lock.unlock();
 
-    if (!supports_build_system) {
+        errdefer self.allocator.free(text);
+
+        const gop = try self.handles.getOrPut(self.allocator, uri);
+        errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
+
+        if (gop.found_existing) {
+            new_handle.uri = gop.key_ptr.*;
+            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
+            gop.value_ptr.*.impl.associated_build_file = .none;
+
+            gop.value_ptr.*.deinit();
+            gop.value_ptr.*.* = new_handle;
+        } else {
+            gop.value_ptr.* = try self.allocator.create(Handle);
+            errdefer self.allocator.destroy(gop.value_ptr.*);
+
+            gop.key_ptr.* = try self.allocator.dupe(u8, uri);
+            errdefer self.allocator.free(gop.key_ptr.*);
+
+            new_handle.uri = gop.key_ptr.*;
+            gop.value_ptr.*.* = new_handle;
+            // The `associated_build_file` field is not yet set.
+        }
+        errdefer comptime unreachable; // would double free `text` on error
+
+        if (self.currently_loading_uris.swapRemove(uri)) {
+            self.wait_for_currently_loading_uri.broadcast();
+        }
+
+        break :gop gop;
+    };
+    const handle = gop.value_ptr.*;
+
+    if (gop.found_existing or !supports_build_system or isInStd(uri)) {
         // nothing to do
-    } else if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
-        _ = self.getOrLoadBuildFile(handle.uri);
-    } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
+    } else if (isBuildFile(uri)) {
+        _ = self.getOrLoadBuildFile(uri);
+    } else blk: {
         const potential_build_files = self.collectPotentialBuildFiles(uri) catch {
             log.err("failed to collect potential build files of '{s}'", .{handle.uri});
             break :blk;
@@ -1368,6 +1401,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced
 
         var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, potential_build_files.len);
         errdefer has_been_checked.deinit(self.allocator);
+
+        handle.impl.lock.lock();
+        defer handle.impl.lock.unlock();
 
         handle.impl.associated_build_file = .{ .unresolved = .{
             .has_been_checked = has_been_checked,
@@ -1378,66 +1414,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced
     return handle;
 }
 
-/// takes ownership of the `text` passed in.
-/// invalidates any pointers into `DocumentStore.build_files`
-/// **Thread safe** takes an exclusive lock
-fn createAndStoreDocument(
-    self: *DocumentStore,
-    uri: Uri,
-    text: [:0]const u8,
-    lsp_synced: bool,
-) error{OutOfMemory}!*Handle {
-    // TODO: Move pointer creation out.
-    const handle = handle: {
-        errdefer self.allocator.free(text);
-
-        const handle: *Handle = try self.allocator.create(Handle);
-        errdefer self.allocator.destroy(handle);
-
-        handle.* = try self.createDocument(uri, text, lsp_synced);
-        break :handle handle;
-    };
-    errdefer {
-        self.allocator.free(handle.uri);
-        handle.deinit();
-        self.allocator.destroy(handle);
-    }
-
-    // TODO: Maybe split this out?
-    const old_handle_optional = blk: {
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        const gop = try self.handles.getOrPut(self.allocator, handle.uri);
-        const old_handle_optional = if (gop.found_existing) old_handle_optional: {
-            gop.key_ptr.* = handle.uri;
-            break :old_handle_optional gop.value_ptr.*;
-        } else null;
-        gop.value_ptr.* = handle;
-
-        if (self.currently_loading_uris.swapRemove(uri)) {
-            self.wait_for_currently_loading_uri.broadcast();
-        }
-
-        break :blk old_handle_optional;
-    };
-
-    if (old_handle_optional) |old_handle| {
-        self.allocator.free(old_handle.uri);
-        old_handle.deinit();
-        self.allocator.destroy(old_handle);
-    }
-
-    if (isBuildFile(handle.uri)) {
-        log.debug("Opened document '{s}' (build file)", .{handle.uri});
-    } else {
-        log.debug("Opened document '{s}'", .{handle.uri});
-    }
-
-    return handle;
-}
-
-pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !void {
+pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize {
     const workspace_path = try URI.toFsPath(store.allocator, directory_uri);
     defer store.allocator.free(workspace_path);
 
@@ -1447,50 +1424,33 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !void {
     var walker = try workspace_dir.walk(store.allocator);
     defer walker.deinit();
 
-    var uris: std.ArrayListUnmanaged([]const u8) = .empty;
-    defer uris.deinit(store.allocator);
+    var not_currently_loading_uris: std.ArrayListUnmanaged(Uri) = .empty;
+    defer {
+        for (not_currently_loading_uris.items) |uri| store.allocator.free(uri);
+        not_currently_loading_uris.deinit(store.allocator);
+    }
+
+    var file_count: usize = 0;
 
     {
-        errdefer {
-            for (uris.items) |uri| {
-                store.allocator.free(uri);
-            }
-        }
-
         while (try walker.next()) |entry| {
             if (std.mem.indexOf(u8, entry.path, std.fs.path.sep_str ++ ".zig-cache" ++ std.fs.path.sep_str) != null) continue;
             if (std.mem.startsWith(u8, entry.path, ".zig-cache" ++ std.fs.path.sep_str)) continue;
             if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
 
-            const uri = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
-            defer store.allocator.free(uri);
+            file_count += 1;
 
-            _ = try uris.append(store.allocator, try URI.fromPath(store.allocator, uri));
-        }
-    }
+            const path = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+            defer store.allocator.free(path);
 
-    try store.loadManyUrisAtOnce(uris.items);
-}
+            try not_currently_loading_uris.ensureUnusedCapacity(store.allocator, 1);
 
-/// **Thread safe**
-/// Takes ownership of uris
-fn loadManyUrisAtOnce(store: *DocumentStore, uris: []const Uri) !void {
-    var not_currently_loading_uris: std.ArrayListUnmanaged(Uri) =
-        try .initCapacity(store.allocator, uris.len);
-    defer {
-        not_currently_loading_uris.deinit(store.allocator);
-    }
-    errdefer {
-        for (not_currently_loading_uris.items) |duped_import_uri| {
-            store.allocator.free(duped_import_uri);
-        }
-    }
+            const uri = try URI.fromPath(store.allocator, path);
+            errdefer comptime unreachable;
 
-    {
-        store.lock.lockShared();
-        defer store.lock.unlockShared();
+            store.lock.lockShared();
+            defer store.lock.unlockShared();
 
-        for (uris) |uri| {
             if (!store.handles.contains(uri) and
                 !store.currently_loading_uris.contains(uri))
             {
@@ -1504,16 +1464,23 @@ fn loadManyUrisAtOnce(store: *DocumentStore, uris: []const Uri) !void {
     const S = struct {
         fn getOrLoadHandleVoid(s: *DocumentStore, uri: Uri) void {
             _ = s.getOrLoadHandle(uri);
-            defer s.allocator.free(uri);
+            s.allocator.free(uri);
         }
     };
 
-    for (not_currently_loading_uris.items) |uri| {
-        store.thread_pool.spawn(S.getOrLoadHandleVoid, .{ store, uri }) catch {
-            defer store.allocator.free(uri);
-            _ = store.getOrLoadHandle(uri);
-        };
+    if (builtin.single_threaded) {
+        while (not_currently_loading_uris.pop()) |uri| {
+            S.getOrLoadHandleVoid(store, uri);
+        }
+    } else {
+        var wait_group: std.Thread.WaitGroup = .{};
+        while (not_currently_loading_uris.pop()) |uri| {
+            store.thread_pool.spawnWg(&wait_group, S.getOrLoadHandleVoid, .{ store, uri });
+        }
+        store.thread_pool.waitAndWork(&wait_group);
     }
+
+    return file_count;
 }
 
 pub const CImportHandle = struct {
