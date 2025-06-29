@@ -483,7 +483,7 @@ pub const Handle = struct {
         comptime Context: type,
     ) error{OutOfMemory}!T {
         @branchHint(.cold);
-        const tracy_zone = tracy.trace(@src());
+        const tracy_zone = tracy.traceNamed(@src(), "getLazy(" ++ name ++ ")");
         defer tracy_zone.end();
 
         const has_data_field_name = "has_" ++ name;
@@ -598,6 +598,9 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 }
 
 pub fn readUri(store: *DocumentStore, uri: Uri) ?[:0]const u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const file_path = URI.parse(store.allocator, uri) catch |err| {
         log.err("failed to parse URI '{s}': {}", .{ uri, err });
         return null;
@@ -912,6 +915,9 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
 }
 
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     {
         build_file.impl.mutex.lock();
         defer build_file.impl.mutex.unlock();
@@ -993,6 +999,9 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
 }
 
 pub fn loadTrigramStores(self: *DocumentStore) error{OutOfMemory}![]*DocumentStore.Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (builtin.single_threaded) {
         for (self.handles.values()) |handle| {
             _ = try handle.getTrigramStore();
@@ -1209,6 +1218,9 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
     errdefer potential_build_files.deinit(self.allocator);
 
@@ -1415,6 +1427,9 @@ fn createAndStoreDocument(
 }
 
 pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const workspace_path = try URI.parse(store.allocator, directory_uri);
     defer store.allocator.free(workspace_path);
 
