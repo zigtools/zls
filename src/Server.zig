@@ -851,7 +851,6 @@ const Workspace = struct {
 fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
-    log.info("added Workspace Folder: {s}", .{uri});
 
     if (BuildOnSaveSupport.isSupportedComptime() and
         // Don't initialize build on save until initialization finished.
@@ -865,13 +864,15 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
         });
     }
 
-    server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
+    const file_count = server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
         error.UnsupportedScheme => return,
         else => {
             log.err("failed to load files in workspace '{s}': {}", .{ uri, err });
             return;
         },
     };
+
+    log.info("added Workspace Folder: {s} ({d} files)", .{ uri, file_count });
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
