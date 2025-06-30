@@ -1014,11 +1014,12 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
         switch (build_file.impl.build_runner_state) {
             .idle => unreachable,
             .running => {
-                build_file.impl.build_runner_state = .idle;
+                var old_config = build_file.impl.config;
                 build_file.impl.config = build_config;
+                build_file.impl.build_runner_state = .idle;
                 build_file.impl.mutex.unlock();
 
-                if (build_file.impl.config) |*old_config| old_config.deinit();
+                if (old_config) |*config| config.deinit();
                 self.notifyBuildEnd(.success);
                 break;
             },
