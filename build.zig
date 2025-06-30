@@ -193,14 +193,13 @@ pub fn build(b: *Build) !void {
                         .{ .name = "zls", .module = zls_module },
                     },
                 }),
-                .version = resolved_zls_version,
                 .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_800_000_000,
                 .use_llvm = use_llvm,
                 .use_lld = use_llvm,
             });
         }
 
-        release(b, &release_artifacts);
+        release(b, &release_artifacts, resolved_zls_version);
     }
 
     const exe_module = b.createModule(.{
@@ -453,12 +452,16 @@ fn getTracyModule(
 /// - compress them (.tar.xz or .zip)
 /// - optionally sign them with minisign (https://github.com/jedisct1/minisign)
 /// - install artifacts and a `release.json` metadata file to `./zig-out`
-fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
+fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_zls_version: std.SemanticVersion) void {
     std.debug.assert(release_artifacts.len > 0);
-    for (release_artifacts) |compile| std.debug.assert(compile.version != null);
 
     const release_step = b.step("release", "Build all release artifacts. (requires tar and 7z)");
     const release_minisign = b.option(bool, "release-minisign", "Sign release artifacts with Minisign") orelse false;
+
+    if (released_zls_version.pre != null and released_zls_version.build == null) {
+        release_step.addError("Cannot build release because the ZLS version could not be resolved", .{}) catch @panic("OOM");
+        return;
+    }
 
     const FileExtension = enum {
         zip,
@@ -483,7 +486,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
             const file_name = b.fmt("zls-{s}-{s}-{}.{s}", .{
                 @tagName(resolved_target.os.tag),
                 cpu_arch_name,
-                exe.version.?,
+                released_zls_version,
                 @tagName(extension),
             });
 
@@ -547,13 +550,6 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile) void {
             release_step.dependOn(&install_minising.step);
         }
     }
-
-    // It is possible for the version to be something like `0.12.0-dev` when `git describe` failed.
-    // Ideally we would want to report a failure about this when running one of the release/publish steps.
-    // The problem is during the configure phase, it is not possible to know which top level steps gets run.
-    // So instead we use rely on the release-worker to reject this version string during the make phase.
-    // One possible alternative would be to use a configuration option (i.e. -Dpublish) to conditionally run an assertion.
-    const released_zls_version = release_artifacts[0].version.?;
 
     const source = b.fmt(
         \\{{
