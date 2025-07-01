@@ -42,8 +42,26 @@ test "ast-check" {
                 .end = .{ .line = 1, .character = 13 },
             },
             .severity = .Error,
+            .tags = &.{.Unnecessary},
             .source = "zls",
             .message = "unused local constant",
+        },
+    }, .{});
+
+    try testDiagnostics(
+        \\test {
+        \\    var foo = undefined;
+        \\}
+    , &.{
+        .{
+            .range = .{
+                .start = .{ .line = 1, .character = 8 },
+                .end = .{ .line = 1, .character = 11 },
+            },
+            .severity = .Error,
+            .tags = &.{.Unnecessary},
+            .source = "zls",
+            .message = "unused local variable",
         },
     }, .{});
 }
