@@ -32,6 +32,9 @@ const one_u32_slice_len_1_1 = one_u32[1..1];
 const one_u32_slice_open = one_u32[1..];
 //    ^^^^^^^^^^^^^^^^^^ (unknown)()
 
+const one_u32_slice_sentinel = one_u32[0..1 :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
+
 const one_u32_orelse = one_u32 orelse unreachable;
 //    ^^^^^^^^^^^^^^ (unknown)()
 
@@ -84,6 +87,9 @@ const many_u32_slice_len_runtime = many_u32[0..runtime_index];
 const many_u32_slice_open = many_u32[1..];
 //    ^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
 
+const many_u32_slice_sentinel = many_u32[0..1 :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (*const [1:2]u32)()
+
 const many_u32_orelse = many_u32 orelse unreachable;
 //    ^^^^^^^^^^^^^^^ (unknown)()
 
@@ -135,9 +141,11 @@ const slice_u32_slice_len_comptime = slice_u32[0..2];
 const slice_u32_slice_len_runtime = slice_u32[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
 
-// TODO this should be `*const [1]u32`
 const slice_u32_slice_open = slice_u32[1..];
 //    ^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_slice_sentinel = slice_u32[0..1 :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [1:2]u32)()
 
 const slice_u32_orelse = slice_u32 orelse unreachable;
 //    ^^^^^^^^^^^^^^^^ (unknown)()
@@ -190,6 +198,9 @@ const c_u32_slice_len_runtime = c_u32[0..runtime_index];
 
 const c_u32_slice_open = c_u32[1..];
 //    ^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_slice_sentinel = c_u32[0..1 :2];
+//    ^^^^^^^^^^^^^^^^^^^^ (*const [1:2]u32)()
 
 const c_u32_orelse = c_u32 orelse unreachable;
 //    ^^^^^^^^^^^^ ([*c]const u32)()

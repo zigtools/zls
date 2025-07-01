@@ -53,9 +53,8 @@ const array_slice_open_runtime = some_array[runtime_index..];
 const array_slice_0_2 = some_array[0..2];
 //    ^^^^^^^^^^^^^^^ (*const [2]u8)()
 
-// TODO this should be `*const [2 :0]u8`
 const array_slice_0_2_sentinel = some_array[0..2 :0];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2:0]u8)()
 
 const array_slice_0_5 = some_array[0..5];
 //    ^^^^^^^^^^^^^^^ (*const [?]u8)()
@@ -66,9 +65,8 @@ const array_slice_3_2 = some_array[3..2];
 const array_slice_0_runtime = some_array[0..runtime_index];
 //    ^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
 
-// TODO this should be `[:0]const u8`
 const array_slice_with_sentinel = some_array[0..runtime_index :0];
-//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([:0]const u8)()
 
 //
 // Array init
