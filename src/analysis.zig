@@ -1092,21 +1092,32 @@ pub fn resolveDerefBinding(analyser: *Analyser, pointer: Type) error{OutOfMemory
 pub const BracketAccess = union(enum) {
     /// `lhs[index]`
     single: ?u64,
-    /// `lhs[start..]`
-    open: ?u64,
-    /// `lhs[start..end]`
-    range: ?struct { u64, u64 },
+    /// `lhs[start.. :sentinel]`
+    open: struct {
+        start: ?u64,
+        sentinel: ?InternPool.Index,
+    },
+    /// `lhs[start..end :sentinel]`
+    range: struct {
+        bounds: ?struct { u64, u64 },
+        sentinel: ?InternPool.Index,
+    },
 
     pub fn fromSlice(
         analyser: *Analyser,
         handle: *DocumentStore.Handle,
-        start_node: Ast.Node.Index,
-        end_node_maybe: ?Ast.Node.Index,
+        slice: Ast.full.Slice,
     ) error{OutOfMemory}!BracketAccess {
-        const end_node = end_node_maybe orelse
-            return .{ .open = try analyser.resolveIntegerLiteral(u64, .of(start_node, handle)) };
+        const start_node = slice.ast.start;
+        const end_node = slice.ast.end.unwrap() orelse
+            return .{
+                .open = .{
+                    .start = try analyser.resolveIntegerLiteral(u64, .of(start_node, handle)),
+                    .sentinel = try analyser.resolveOptionalIPValue(slice.ast.sentinel, handle),
+                },
+            };
 
-        const range = blk: {
+        const bounds = blk: {
             const start = try analyser.resolveIntegerLiteral(u64, .of(start_node, handle)) orelse
                 break :blk null;
 
@@ -1116,7 +1127,12 @@ pub const BracketAccess = union(enum) {
             break :blk .{ start, end };
         };
 
-        return .{ .range = range };
+        return .{
+            .range = .{
+                .bounds = bounds,
+                .sentinel = try analyser.resolveOptionalIPValue(slice.ast.sentinel, handle),
+            },
+        };
     }
 };
 
@@ -1185,8 +1201,8 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
         },
         .array => |info| switch (rhs) {
             .single => return try info.elem_ty.instanceTypeVal(analyser),
-            .open => |start_maybe| {
-                if (start_maybe) |start| {
+            .open => |access| {
+                if (access.start) |start| {
                     result = .{ .array = null };
                     if (info.elem_count) |elem_count| {
                         if (start <= elem_count) {
@@ -1197,16 +1213,17 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                 sentinel = info.sentinel;
                 break :elem info.elem_ty;
             },
-            .range => |range_maybe| {
-                if (range_maybe) |range| {
+            .range => |access| {
+                if (access.bounds) |bounds| {
                     result = .{ .array = null };
                     if (info.elem_count) |elem_count| {
-                        const start, const end = range;
+                        const start, const end = bounds;
                         if (start <= end and start <= elem_count and end <= elem_count) {
                             result = .{ .array = end - start };
                         }
                     }
                 }
+                sentinel = access.sentinel orelse .none;
                 break :elem info.elem_ty;
             },
         },
@@ -1215,8 +1232,9 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                 .tuple, .array => continue :elem info.elem_ty.data,
                 else => switch (rhs) {
                     .single, .open => return null,
-                    .range => |range_maybe| {
-                        const start, const end = range_maybe orelse return null;
+                    .range => |access| {
+                        if (access.sentinel != null) return null;
+                        const start, const end = access.bounds orelse return null;
                         if (start > end or start > 1 or end > 1) return null;
                         result = .{ .array = end - start };
                         break :elem info.elem_ty;
@@ -1226,11 +1244,12 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
             .many, .slice, .c => switch (rhs) {
                 .single => try info.elem_ty.instanceTypeVal(analyser),
                 .open => lhs,
-                .range => |range_maybe| {
-                    if (range_maybe) |range| {
-                        const start, const end = range;
+                .range => |access| {
+                    if (access.bounds) |bounds| {
+                        const start, const end = bounds;
                         result = .{ .array = if (start <= end) end - start else null };
                     }
+                    sentinel = access.sentinel orelse .none;
                     break :elem info.elem_ty;
                 },
             },
@@ -1357,6 +1376,15 @@ fn allDigits(str: []const u8) bool {
         if (!std.ascii.isDigit(c)) return false;
     }
     return true;
+}
+
+fn resolveOptionalIPValue(
+    analyser: *Analyser,
+    optional_node: Ast.Node.OptionalIndex,
+    handle: *DocumentStore.Handle,
+) error{OutOfMemory}!?InternPool.Index {
+    const node = optional_node.unwrap() orelse return null;
+    return try analyser.resolveInternPoolValue(.of(node, handle));
 }
 
 fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
@@ -1978,10 +2006,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {
             const ptr_info = ast.fullPtrType(tree, node).?;
 
-            const sentinel = if (ptr_info.ast.sentinel.unwrap()) |sentinel|
-                try analyser.resolveInternPoolValue(.of(sentinel, handle)) orelse .none
-            else
-                .none;
+            const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle) orelse .none;
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(ptr_info.ast.child_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -2004,10 +2029,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const array_info = tree.fullArrayType(node).?;
 
             const elem_count = try analyser.resolveIntegerLiteral(u64, .of(array_info.ast.elem_count, handle));
-            const sentinel = if (array_info.ast.sentinel.unwrap()) |sentinel|
-                try analyser.resolveInternPoolValue(.of(sentinel, handle)) orelse .none
-            else
-                .none;
+            const sentinel = try analyser.resolveOptionalIPValue(array_info.ast.sentinel, handle) orelse .none;
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(array_info.ast.elem_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -2966,7 +2988,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) er
 
             const sliced = try analyser.resolveBindingOfNodeInternal(.of(slice.ast.sliced, handle)) orelse return null;
 
-            const kind: BracketAccess = try .fromSlice(analyser, handle, slice.ast.start, slice.ast.end.unwrap());
+            const kind: BracketAccess = try .fromSlice(analyser, handle, slice);
 
             return .{
                 .type = try analyser.resolveBracketAccessTypeFromBinding(sliced, kind) orelse return null,
@@ -4617,12 +4639,12 @@ pub fn getFieldAccessType(
                         },
                         .ellipsis2 => {
                             if (bracket_count == 1) {
-                                kind = .{ .open = null };
+                                kind = .{ .open = .{ .start = null, .sentinel = .none } };
                             }
                         },
                         else => {
                             if (bracket_count == 1 and kind == .open) {
-                                kind = .{ .range = null };
+                                kind = .{ .range = .{ .bounds = null, .sentinel = .none } };
                             }
                         },
                     }
