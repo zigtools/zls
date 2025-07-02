@@ -3,11 +3,8 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const offsets = @import("offsets.zig");
-const URI = @import("uri.zig");
-const log = std.log.scoped(.store);
 
 pub const TrigramStore = @This();
 
@@ -239,7 +236,7 @@ fn mergeIntersection(
     b: []const Declaration.Index,
     out: []Declaration.Index,
 ) u32 {
-    std.debug.assert(@min(a.len, b.len) <= out.len);
+    assert(@min(a.len, b.len) <= out.len);
 
     var out_idx: u32 = 0;
 
@@ -438,17 +435,17 @@ test CuckooFilter {
     try entries.ensureTotalCapacity(allocator, element_count);
 
     var buckets: [filter_size]CuckooFilter.Bucket = undefined;
-    var filter = CuckooFilter{ .buckets = &buckets };
-    var filter_prng = std.Random.DefaultPrng.init(42);
+    var filter: CuckooFilter = .{ .buckets = &buckets };
+    var filter_prng: std.Random.DefaultPrng = .init(42);
 
     for (0..2_500) |gen_prng_seed| {
         entries.clearRetainingCapacity();
         filter.reset();
 
-        var gen_prng = std.Random.DefaultPrng.init(gen_prng_seed);
+        var gen_prng: std.Random.DefaultPrng = .init(gen_prng_seed);
         for (0..element_count) |_| {
             const trigram: Trigram = @bitCast(gen_prng.random().int(u24));
-            try entries.put(allocator, trigram, {});
+            entries.putAssumeCapacity(allocator, trigram, {});
             try filter.append(filter_prng.random(), trigram);
         }
 
@@ -460,7 +457,7 @@ test CuckooFilter {
         // Reasonable false positive rate
         const fpr_count = 2_500;
         var false_positives: usize = 0;
-        var negative_prng = std.Random.DefaultPrng.init(~gen_prng_seed);
+        var negative_prng: std.Random.DefaultPrng = .init(~gen_prng_seed);
         for (0..fpr_count) |_| {
             var trigram: Trigram = @bitCast(negative_prng.random().int(u24));
             while (entries.contains(trigram)) {
@@ -471,9 +468,8 @@ test CuckooFilter {
         }
 
         const fpr = @as(f32, @floatFromInt(false_positives)) / fpr_count;
-        std.testing.expect(fpr < 0.035) catch |err| {
-            std.log.err("fpr: {d}%", .{fpr * 100});
-            return err;
-        };
+
+        errdefer std.log.err("fpr: {d}%", .{fpr * 100});
+        try std.testing.expect(fpr < 0.035);
     }
 }
