@@ -1519,9 +1519,18 @@ fn collectContainerNodes(
         },
     };
     const source_index = offsets.tokenToLoc(handle.tree, token_index).end;
-    const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, handle.tree, source_index);
     defer gpa.free(nodes);
+
+    switch (handle.tree.nodeTag(nodes[0])) {
+        .field_access => {
+            if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+                try collectFieldAccessTypes(builder, dot_context, ty, &types_with_handles);
+                return types_with_handles.keys();
+            }
+        },
+        else => {},
+    }
 
     if (nodes.len > 1) {
         switch (handle.tree.nodeTag(nodes[1])) {
@@ -1542,6 +1551,7 @@ fn collectContainerNodes(
         }
     }
 
+    const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
@@ -1614,6 +1624,40 @@ fn collectVarAccessContainerNodes(
     _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
 }
 
+fn collectFieldAccessTypes(
+    builder: *Builder,
+    dot_context: EnumLiteralContext,
+    ty: Analyser.Type,
+    types_with_handles: *Analyser.Type.ArraySet,
+) !void {
+    const analyser = builder.analyser;
+
+    var node_type = ty;
+    // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
+    if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
+        if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
+    }
+    if (!node_type.isFunc()) {
+        _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        return;
+    }
+
+    const info = node_type.data.function;
+
+    if (dot_context.need_ret_type) { // => we need f()'s return type
+        node_type = info.return_value.*;
+        if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+        _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        return;
+    }
+    const has_self_param = try analyser.hasSelfParam(node_type);
+    const params = info.parameters;
+    const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
+    if (param_index >= params.len) return;
+    const param_type = params[param_index].type;
+    _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+}
+
 fn collectFieldAccessContainerNodes(
     builder: *Builder,
     handle: *DocumentStore.Handle,
@@ -1644,30 +1688,8 @@ fn collectFieldAccessContainerNodes(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, loc, name) orelse return;
     for (decls) |decl| {
-        var node_type = try decl.resolveType(analyser) orelse continue;
-        // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
-        if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
-        }
-        if (!node_type.isFunc()) {
-            _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
-            continue;
-        }
-
-        const info = node_type.data.function;
-
-        if (dot_context.need_ret_type) { // => we need f()'s return type
-            node_type = info.return_value.*;
-            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
-            continue;
-        }
-        const has_self_param = try analyser.hasSelfParam(node_type);
-        const params = info.parameters;
-        const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
-        if (param_index >= params.len) continue;
-        const param_type = params[param_index].type;
-        _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        const ty = try decl.resolveType(analyser) orelse continue;
+        try collectFieldAccessTypes(builder, dot_context, ty, types_with_handles);
     }
 }
 
