@@ -1603,7 +1603,7 @@ fn collectVarAccessContainerNodes(
     const info = type_expr.data.function;
 
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
-        var node_type = try analyser.resolveReturnType(type_expr) orelse return;
+        var node_type = info.return_value.*;
         if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
         _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
         return;
@@ -1657,29 +1657,14 @@ fn collectFieldAccessContainerNodes(
         const info = node_type.data.function;
 
         if (dot_context.need_ret_type) { // => we need f()'s return type
-            node_type = try analyser.resolveReturnType(node_type) orelse continue;
+            node_type = info.return_value.*;
             if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
             _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
             continue;
         }
-        // don't have the luxury of referencing an `Ast.full.Call`
-        // check if the first symbol is a `T` or an instance_of_T
-        const additional_index: usize = blk: {
-            // `loc` points to offsets within `handle`, not `node_type.decl.handle`
-            const field_access_slice = handle.tree.source[loc.start..loc.end];
-            if (field_access_slice[0] == '@') break :blk 0; // assume `@import("..").some.Other{.}`
-            var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
-            const first_symbol = symbol_iter.next() orelse continue;
-            const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-            const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
-            if (!symbol_type.is_type_val) { // then => instance_of_T
-                const container_type = try analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
-                if (Analyser.firstParamIs(node_type, container_type)) break :blk 1;
-            }
-            break :blk 0; // is `T`, no SelfParam
-        };
+        const has_self_param = try analyser.hasSelfParam(node_type);
         const params = info.parameters;
-        const param_index = dot_context.fn_arg_index + additional_index;
+        const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
         if (param_index >= params.len) continue;
         const param_type = params[param_index].type;
         _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
