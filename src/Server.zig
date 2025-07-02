@@ -56,8 +56,7 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
 // private fields
-thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
-wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
+thread_pool: std.Thread.Pool,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = undefined,
@@ -2126,43 +2125,35 @@ fn isBlockingMessage(msg: Message) bool {
 /// make sure to also set the `transport` field
 pub fn create(allocator: std.mem.Allocator) !*Server {
     const server = try allocator.create(Server);
-    errdefer server.destroy();
+    errdefer allocator.destroy(server);
     server.* = .{
         .allocator = allocator,
         .config = .{},
         .document_store = .{
             .allocator = allocator,
             .config = .init,
-            .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
+            .thread_pool = &server.thread_pool,
             .diagnostics_collection = &server.diagnostics_collection,
         },
         .job_queue = .init(allocator),
         .thread_pool = undefined, // set below
-        .wait_group = if (zig_builtin.single_threaded) {} else .{},
         .diagnostics_collection = .{ .allocator = allocator },
     };
 
-    if (zig_builtin.single_threaded) {
-        server.thread_pool = {};
-    } else {
-        try server.thread_pool.init(.{
-            .allocator = allocator,
-            .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
-        });
-        server.document_store.thread_pool = &server.thread_pool;
-    }
+    try server.thread_pool.init(.{
+        .allocator = allocator,
+        .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
+    });
+    errdefer server.thread_pool.deinit();
 
     server.ip = try InternPool.init(allocator);
+    errdefer server.ip.deinit(allocator);
 
     return server;
 }
 
 pub fn destroy(server: *Server) void {
-    if (!zig_builtin.single_threaded) {
-        server.wait_group.wait();
-        server.thread_pool.deinit();
-    }
-
+    server.thread_pool.deinit();
     while (server.job_queue.readItem()) |job| job.deinit(server.allocator);
     server.job_queue.deinit();
     server.document_store.deinit();
@@ -2189,15 +2180,10 @@ pub fn keepRunning(server: Server) bool {
     }
 }
 
-pub fn waitAndWork(server: *Server) void {
-    if (zig_builtin.single_threaded) return;
-    server.thread_pool.waitAndWork(&server.wait_group);
-    server.wait_group.reset();
-}
-
 /// The main loop of ZLS
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
+    var wait_group: std.Thread.WaitGroup = .{};
     while (server.keepRunning()) {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
@@ -2205,18 +2191,16 @@ pub fn loop(server: *Server) !void {
         try server.sendJsonMessage(json_message);
 
         while (server.job_queue.readItem()) |job| {
-            if (zig_builtin.single_threaded) {
-                server.processJob(job);
-                continue;
-            }
-
             switch (job.syncMode()) {
                 .exclusive => {
-                    server.waitAndWork();
+                    if (!zig_builtin.single_threaded) {
+                        server.thread_pool.waitAndWork(&wait_group);
+                        wait_group.reset();
+                    }
                     server.processJob(job);
                 },
                 .shared => {
-                    server.thread_pool.spawnWg(&server.wait_group, processJob, .{ server, job });
+                    server.thread_pool.spawnWg(&wait_group, processJob, .{ server, job });
                 },
             }
         }
