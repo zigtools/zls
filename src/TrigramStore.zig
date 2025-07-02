@@ -49,11 +49,20 @@ pub fn init(
             const old_in_function = context.in_function;
             defer context.in_function = old_in_function;
 
+            var name_token_maybe: ?Ast.TokenIndex = null;
             switch (cb_tree.nodeTag(node)) {
-                .fn_decl => {
-                    if (!context.in_function) {}
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => |tag| skip: {
+                    context.in_function = tag == .fn_decl;
 
-                    context.in_function = true;
+                    const fn_token = cb_tree.nodeMainToken(node);
+                    if (cb_tree.tokenTag(fn_token + 1) != .identifier) break :skip;
+
+                    name_token_maybe = fn_token + 1;
                 },
                 .root => unreachable,
                 .container_decl,
@@ -74,24 +83,23 @@ pub fn init(
                 .local_var_decl,
                 .simple_var_decl,
                 .aligned_var_decl,
-                => {
-                    if (!context.in_function) {
-                        const token = cb_tree.fullVarDecl(node).?.ast.mut_token + 1;
-                        const name = cb_tree.tokenSlice(token);
-
-                        if (name.len >= 3) {
-                            const loc = offsets.tokenToLoc(cb_tree, token);
-
-                            try context.store.appendDeclaration(
-                                context.allocator,
-                                name,
-                                .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
-                            );
-                        }
-                    }
+                => skip: {
+                    if (context.in_function) break :skip;
+                    name_token_maybe = cb_tree.nodeMainToken(node) + 1;
                 },
-
                 else => {},
+            }
+
+            if (name_token_maybe) |name_token| skip: {
+                const loc = offsets.tokenToLoc(cb_tree, name_token);
+                const name = offsets.locToSlice(cb_tree.source, loc);
+                if (name.len < 3) break :skip;
+
+                try context.store.appendDeclaration(
+                    context.allocator,
+                    name,
+                    .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
+                );
             }
 
             try ast.iterateChildren(cb_tree, node, context, Error, callback);
