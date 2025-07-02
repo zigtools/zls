@@ -203,11 +203,11 @@ pub const Handle = struct {
         zoir: std.zig.Zoir = undefined,
 
         associated_build_file: union(enum) {
-            /// The Handle has no associated build file (build.zig).
-            none,
-            /// The associated build file (build.zig) has not been resolved yet.
-            /// Uris that come first have higher priority.
+            /// The initial state. The associated build file (build.zig) is resolved lazily.
+            init,
+            /// The associated build file (build.zig) has been requested but has not yet been resolved.
             unresolved: struct {
+                /// The build files are ordered in decreasing priority.
                 potential_build_files: []const *BuildFile,
                 /// to avoid checking build files multiple times, a bitset stores whether or
                 /// not the build file should be skipped because it has previously been
@@ -220,9 +220,11 @@ pub const Handle = struct {
                     self.* = undefined;
                 }
             },
+            /// The Handle has no associated build file (build.zig).
+            none,
             /// The associated build file (build.zig) has been successfully resolved.
             resolved: *BuildFile,
-        } = .none,
+        } = .init,
     },
 
     const Status = packed struct(u32) {
@@ -310,7 +312,7 @@ pub const Handle = struct {
         self.cimports.deinit(allocator);
 
         switch (self.impl.associated_build_file) {
-            .none, .resolved => {},
+            .init, .none, .resolved => {},
             .unresolved => |*payload| payload.deinit(allocator),
         }
 
@@ -425,8 +427,26 @@ pub const Handle = struct {
         defer self.impl.lock.unlock();
 
         const unresolved = switch (self.impl.associated_build_file) {
-            .none => return .none,
+            .init => blk: {
+                const potential_build_files = document_store.collectPotentialBuildFiles(self.uri) catch {
+                    log.err("failed to collect potential build files of '{s}'", .{self.uri});
+                    self.impl.associated_build_file = .none;
+                    return .none;
+                };
+                errdefer document_store.allocator.free(potential_build_files);
+
+                var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(document_store.allocator, potential_build_files.len);
+                errdefer has_been_checked.deinit(document_store.allocator);
+
+                self.impl.associated_build_file = .{ .unresolved = .{
+                    .has_been_checked = has_been_checked,
+                    .potential_build_files = potential_build_files,
+                } };
+
+                break :blk &self.impl.associated_build_file.unresolved;
+            },
             .unresolved => |*unresolved| unresolved,
+            .none => return .none,
             .resolved => |build_file| return .{ .resolved = build_file },
         };
 
@@ -1361,69 +1381,40 @@ fn createAndStoreDocument(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const gop = gop: {
-        var new_handle: Handle = try .init(self.allocator, uri, text, lsp_synced);
+    var new_handle: Handle = try .init(self.allocator, uri, text, lsp_synced);
 
-        self.lock.lock();
-        defer self.lock.unlock();
+    self.lock.lock();
+    defer self.lock.unlock();
 
-        errdefer self.allocator.free(text);
+    errdefer self.allocator.free(text);
 
-        const gop = try self.handles.getOrPut(self.allocator, uri);
-        errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
+    const gop = try self.handles.getOrPut(self.allocator, uri);
+    errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
 
-        if (gop.found_existing) {
-            new_handle.uri = gop.key_ptr.*;
-            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
-            gop.value_ptr.*.impl.associated_build_file = .none;
+    if (gop.found_existing) {
+        new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
+        gop.value_ptr.*.impl.associated_build_file = .init;
 
-            gop.value_ptr.*.deinit();
-            gop.value_ptr.*.* = new_handle;
-        } else {
-            gop.value_ptr.* = try self.allocator.create(Handle);
-            errdefer self.allocator.destroy(gop.value_ptr.*);
+        new_handle.uri = gop.key_ptr.*;
+        gop.value_ptr.*.deinit();
+        gop.value_ptr.*.* = new_handle;
+    } else {
+        gop.value_ptr.* = try self.allocator.create(Handle);
+        errdefer self.allocator.destroy(gop.value_ptr.*);
 
-            gop.key_ptr.* = try self.allocator.dupe(u8, uri);
-            errdefer self.allocator.free(gop.key_ptr.*);
+        gop.key_ptr.* = try self.allocator.dupe(u8, uri);
+        errdefer self.allocator.free(gop.key_ptr.*);
 
-            new_handle.uri = gop.key_ptr.*;
-            gop.value_ptr.*.* = new_handle;
-            // The `associated_build_file` field is not yet set.
-        }
-        errdefer comptime unreachable; // would double free `text` on error
+        new_handle.uri = gop.key_ptr.*;
+        gop.value_ptr.*.* = new_handle;
+    }
+    errdefer comptime unreachable; // would double free `text` on error
 
-        if (self.currently_loading_uris.swapRemove(uri)) {
-            self.wait_for_currently_loading_uri.broadcast();
-        }
-
-        break :gop gop;
-    };
-    const handle = gop.value_ptr.*;
-
-    if (gop.found_existing or !supports_build_system or isInStd(uri)) {
-        // nothing to do
-    } else if (isBuildFile(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
-    } else blk: {
-        const potential_build_files = self.collectPotentialBuildFiles(uri) catch {
-            log.err("failed to collect potential build files of '{s}'", .{handle.uri});
-            break :blk;
-        };
-        errdefer self.allocator.free(potential_build_files);
-
-        var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, potential_build_files.len);
-        errdefer has_been_checked.deinit(self.allocator);
-
-        handle.impl.lock.lock();
-        defer handle.impl.lock.unlock();
-
-        handle.impl.associated_build_file = .{ .unresolved = .{
-            .has_been_checked = has_been_checked,
-            .potential_build_files = potential_build_files,
-        } };
+    if (self.currently_loading_uris.swapRemove(uri)) {
+        self.wait_for_currently_loading_uri.broadcast();
     }
 
-    return handle;
+    return gop.value_ptr.*;
 }
 
 pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize {
