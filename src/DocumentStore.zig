@@ -22,7 +22,7 @@ allocator: std.mem.Allocator,
 /// the DocumentStore assumes that `config` is not modified while calling one of its functions.
 config: Config,
 lock: std.Thread.RwLock = .{},
-thread_pool: if (builtin.single_threaded) void else *std.Thread.Pool,
+thread_pool: *std.Thread.Pool,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .empty,
 build_files: if (supports_build_system) std.StringArrayHashMapUnmanaged(*BuildFile) else void = if (supports_build_system) .empty else {},
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
@@ -80,7 +80,7 @@ pub const BuildFile = struct {
     build_associated_config: ?std.json.Parsed(BuildAssociatedConfig) = null,
     impl: struct {
         mutex: std.Thread.Mutex = .{},
-        build_runner_state: if (builtin.single_threaded) void else BuildRunnerState = if (builtin.single_threaded) {} else .idle,
+        build_runner_state: BuildRunnerState = .idle,
         version: u32 = 0,
         /// contains information extracted from running build.zig with a custom build runner
         /// e.g. include paths & packages
@@ -835,11 +835,6 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 
     const build_file = self.getBuildFile(build_file_uri) orelse return;
 
-    if (builtin.single_threaded) {
-        self.invalidateBuildFileWorker(build_file);
-        return;
-    }
-
     self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, build_file }) catch {
         self.invalidateBuildFileWorker(build_file);
         return;
@@ -1474,17 +1469,11 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize 
         }
     };
 
-    if (builtin.single_threaded) {
-        while (not_currently_loading_uris.pop()) |uri| {
-            S.getOrLoadHandleVoid(store, uri);
-        }
-    } else {
-        var wait_group: std.Thread.WaitGroup = .{};
-        while (not_currently_loading_uris.pop()) |uri| {
-            store.thread_pool.spawnWg(&wait_group, S.getOrLoadHandleVoid, .{ store, uri });
-        }
-        store.thread_pool.waitAndWork(&wait_group);
+    var wait_group: std.Thread.WaitGroup = .{};
+    while (not_currently_loading_uris.pop()) |uri| {
+        store.thread_pool.spawnWg(&wait_group, S.getOrLoadHandleVoid, .{ store, uri });
     }
+    store.thread_pool.waitAndWork(&wait_group);
 
     return file_count;
 }
