@@ -303,6 +303,16 @@ fn collectLspDiagnosticsForDocument(
 
 pub const collectLspDiagnosticsForDocumentTesting = if (@import("builtin").is_test) collectLspDiagnosticsForDocument else {};
 
+fn diagnosticIsUnnecessary(message: []const u8) bool {
+    if (std.mem.eql(u8, message, "unused local constant")) {
+        return true;
+    }
+    if (std.mem.eql(u8, message, "unused local variable")) {
+        return true;
+    }
+    return false;
+}
+
 fn convertErrorBundleToLSPDiangostics(
     eb: std.zig.ErrorBundle,
     error_bundle_src_base_path: ?[]const u8,
@@ -354,11 +364,17 @@ fn convertErrorBundleToLSPDiangostics(
             break :blk lsp_notes;
         };
 
+        var tags: std.ArrayListUnmanaged(lsp.types.DiagnosticTag) = .empty;
+        if (diagnosticIsUnnecessary(eb.nullTerminatedString(err.msg))) {
+            try tags.append(arena, lsp.types.DiagnosticTag.Unnecessary);
+        }
+
         try diagnostics.append(arena, .{
             .range = src_range,
             .severity = .Error,
             .source = "zls",
             .message = eb.nullTerminatedString(err.msg),
+            .tags = if (tags.items.len != 0) tags.items else null,
             .relatedInformation = relatedInformation,
         });
     }
