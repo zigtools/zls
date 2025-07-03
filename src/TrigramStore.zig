@@ -453,7 +453,7 @@ test CuckooFilter {
         var gen_prng: std.Random.DefaultPrng = .init(gen_prng_seed);
         for (0..element_count) |_| {
             const trigram: Trigram = @bitCast(gen_prng.random().int(u24));
-            entries.putAssumeCapacity(allocator, trigram, {});
+            entries.putAssumeCapacity(trigram, {});
             try filter.append(filter_prng.random(), trigram);
         }
 
