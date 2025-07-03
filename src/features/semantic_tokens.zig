@@ -733,7 +733,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .char_literal,
         => {
             try writeToken(builder, main_token, .string);
-            if (builder.overlappingTokenSupport) {
+            if (!builder.limited and builder.overlappingTokenSupport) {
                 const string_start = tree.tokenStart(main_token);
                 const string = offsets.nodeToSlice(tree, node);
                 var offset: usize = 0;
