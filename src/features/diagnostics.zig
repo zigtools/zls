@@ -585,11 +585,11 @@ pub const BuildOnSave = struct {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
                 error.EndOfStream => {
                     log.debug("zig build runner process has exited", .{});
-                    return;
+                    break;
                 },
                 else => {
                     log.err("failed to receive message from zig build runner: {}", .{err});
-                    return;
+                    break;
                 },
             };
 
@@ -603,7 +603,7 @@ pub const BuildOnSave = struct {
                         &diagnostic_tags,
                     ) catch |err| {
                         log.err("failed to handle error bundle message from zig build runner: {}", .{err});
-                        return;
+                        break;
                     };
                 },
                 else => |tag| {
@@ -611,6 +611,14 @@ pub const BuildOnSave = struct {
                 },
             }
         }
+
+        const stderr = if (child_process.stderr) |stderr|
+            stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+        else
+            "";
+        defer allocator.free(stderr);
+
+        log.debug("build on save stderr:\n{s}", .{stderr});
     }
 
     fn handleWatchErrorBundle(
@@ -673,9 +681,9 @@ fn terminateChildProcessReportError(
         },
         else => {
             if (stderr.len != 0) {
-                log.warn("{s} exitied abnormally: {s}\nstderr:\n{s}", .{ name, @tagName(term), stderr });
+                log.warn("{s} exited abnormally: {s}\nstderr:\n{s}", .{ name, @tagName(term), stderr });
             } else {
-                log.warn("{s} exitied abnormally: {s}", .{ name, @tagName(term) });
+                log.warn("{s} exited abnormally: {s}", .{ name, @tagName(term) });
             }
         },
     }
