@@ -565,6 +565,22 @@ test "function call" {
     });
 }
 
+test "chained function call" {
+    try testCompletion(
+        \\const S1 = struct {
+        \\    alpha: u32,
+        \\    fn init() S1 {}
+        \\    fn foo(_: S1, _: S2) void {}
+        \\};
+        \\const S2 = struct {
+        \\    beta: []const u8,
+        \\};
+        \\const bar = S1.init().foo(.{.<cursor>});
+    , &.{
+        .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
+    });
+}
+
 test "resolve return type of function with invalid parameter" {
     try testCompletion(
         \\fn Foo(foo: unknown) type {

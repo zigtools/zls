@@ -1519,9 +1519,18 @@ fn collectContainerNodes(
         },
     };
     const source_index = offsets.tokenToLoc(handle.tree, token_index).end;
-    const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, handle.tree, source_index);
     defer gpa.free(nodes);
+
+    switch (handle.tree.nodeTag(nodes[0])) {
+        .field_access => {
+            if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+                try collectFieldAccessTypes(builder, dot_context, ty, &types_with_handles);
+                return types_with_handles.keys();
+            }
+        },
+        else => {},
+    }
 
     if (nodes.len > 1) {
         switch (handle.tree.nodeTag(nodes[1])) {
@@ -1542,6 +1551,7 @@ fn collectContainerNodes(
         }
     }
 
+    const position_context = try Analyser.getPositionContext(builder.arena, handle.tree, source_index, false);
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
@@ -1603,7 +1613,7 @@ fn collectVarAccessContainerNodes(
     const info = type_expr.data.function;
 
     if (dot_context.likely == .enum_comparison or dot_context.need_ret_type) { // => we need f()'s return type
-        var node_type = try analyser.resolveReturnType(type_expr) orelse return;
+        var node_type = info.return_value.*;
         if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
         _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
         return;
@@ -1611,6 +1621,40 @@ fn collectVarAccessContainerNodes(
     const param_index = dot_context.fn_arg_index;
     if (param_index >= info.parameters.len) return;
     const param_type = info.parameters[param_index].type;
+    _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+}
+
+fn collectFieldAccessTypes(
+    builder: *Builder,
+    dot_context: EnumLiteralContext,
+    ty: Analyser.Type,
+    types_with_handles: *Analyser.Type.ArraySet,
+) !void {
+    const analyser = builder.analyser;
+
+    var node_type = ty;
+    // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
+    if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
+        if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
+    }
+    if (!node_type.isFunc()) {
+        _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        return;
+    }
+
+    const info = node_type.data.function;
+
+    if (dot_context.need_ret_type) { // => we need f()'s return type
+        node_type = info.return_value.*;
+        if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
+        _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        return;
+    }
+    const has_self_param = try analyser.hasSelfParam(node_type);
+    const params = info.parameters;
+    const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
+    if (param_index >= params.len) return;
+    const param_type = params[param_index].type;
     _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
 }
 
@@ -1644,45 +1688,8 @@ fn collectFieldAccessContainerNodes(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, loc, name) orelse return;
     for (decls) |decl| {
-        var node_type = try decl.resolveType(analyser) orelse continue;
-        // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
-        if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (try analyser.resolveOptionalUnwrap(node_type)) |unwrapped| node_type = unwrapped;
-        }
-        if (!node_type.isFunc()) {
-            _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
-            continue;
-        }
-
-        const info = node_type.data.function;
-
-        if (dot_context.need_ret_type) { // => we need f()'s return type
-            node_type = try analyser.resolveReturnType(node_type) orelse continue;
-            if (try analyser.resolveUnwrapErrorUnionType(node_type, .payload)) |unwrapped| node_type = unwrapped;
-            _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
-            continue;
-        }
-        // don't have the luxury of referencing an `Ast.full.Call`
-        // check if the first symbol is a `T` or an instance_of_T
-        const additional_index: usize = blk: {
-            // `loc` points to offsets within `handle`, not `node_type.decl.handle`
-            const field_access_slice = handle.tree.source[loc.start..loc.end];
-            if (field_access_slice[0] == '@') break :blk 0; // assume `@import("..").some.Other{.}`
-            var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
-            const first_symbol = symbol_iter.next() orelse continue;
-            const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-            const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
-            if (!symbol_type.is_type_val) { // then => instance_of_T
-                const container_type = try analyser.innermostContainer(info.handle, info.handle.tree.tokenStart(info.fn_token));
-                if (Analyser.firstParamIs(node_type, container_type)) break :blk 1;
-            }
-            break :blk 0; // is `T`, no SelfParam
-        };
-        const params = info.parameters;
-        const param_index = dot_context.fn_arg_index + additional_index;
-        if (param_index >= params.len) continue;
-        const param_type = params[param_index].type;
-        _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
+        const ty = try decl.resolveType(analyser) orelse continue;
+        try collectFieldAccessTypes(builder, dot_context, ty, types_with_handles);
     }
 }
 
