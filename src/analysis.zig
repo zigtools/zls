@@ -1545,6 +1545,7 @@ fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.In
 
 fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
     switch (a.data) {
+        .compile_error => return b,
         .optional => |a_type| {
             if (a_type.eql(try b.typeOf(analyser))) {
                 return a;

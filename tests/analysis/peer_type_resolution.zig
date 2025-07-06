@@ -148,3 +148,9 @@ const comptime_bool: bool = true;
 
 const comptime_int_and_void = if (comptime_bool) 0 else {};
 //    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const compile_error_0 = if (comptime_bool) s else @compileError("Foo");
+//    ^^^^^^^^^^^^^^^ (S)()
+
+const compile_error_1 = if (comptime_bool) @compileError("Foo") else s;
+//    ^^^^^^^^^^^^^^^ (S)()
