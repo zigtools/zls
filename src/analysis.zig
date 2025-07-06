@@ -1609,6 +1609,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
             }
         },
         .ip_index => |a_payload| switch (a_payload.type) {
+            .noreturn_type => return b,
             .null_type => switch (b.data) {
                 .optional => return b,
                 .error_union => |b_info| {
