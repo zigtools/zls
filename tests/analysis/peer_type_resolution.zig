@@ -130,6 +130,14 @@ pub fn main() !void {
     _ = try try error_union_15;
     //          ^^^^^^^^^^^^^^ (error{A,B}!error{B,A}!?S)()
 
+    const noreturn_0 = if (runtime_bool) s else return;
+    _ = noreturn_0;
+    //  ^^^^^^^^^^ (S)()
+
+    const noreturn_1 = if (runtime_bool) return else s;
+    _ = noreturn_1;
+    //  ^^^^^^^^^^ (S)()
+
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(error_union_0);
 
