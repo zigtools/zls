@@ -345,6 +345,7 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
         .only_kinds = .init(.{
             .@"source.fixAll" = true,
         }),
+        .config = &server.config,
     };
 
     try builder.generateCodeAction(error_bundle);
@@ -1942,6 +1943,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         .handle = handle,
         .offset_encoding = server.offset_encoding,
         .only_kinds = only_kinds,
+        .config = &server.config,
     };
 
     try builder.generateCodeAction(error_bundle);

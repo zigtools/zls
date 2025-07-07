@@ -4,6 +4,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 
+const Config = @import("../Config.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const Analyser = @import("../analysis.zig");
@@ -15,6 +16,7 @@ const tracy = @import("tracy");
 pub const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
+    config: *const Config,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
     only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
@@ -587,6 +589,52 @@ fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
     });
 }
 
+const ImportPlacement = enum {
+    top,
+    bottom,
+};
+
+fn analyzeImportPlacement(tree: Ast, imports: []const ImportDecl) ImportPlacement {
+    const root_decls = tree.rootDecls();
+
+    // If there are no declarations or imports, just return a default value
+    if (root_decls.len == 0 or imports.len == 0) return .top;
+
+    // Imports are not in source order, so we need to find the first and last import indices
+    var first_import: u32 = std.math.maxInt(u32);
+    var last_import: u32 = std.math.minInt(u32);
+    for (imports) |import| {
+        first_import = @min(first_import, @intFromEnum(import.var_decl));
+        last_import = @max(last_import, @intFromEnum(import.var_decl));
+    }
+    const first_decl: u32 = @intFromEnum(root_decls[0]);
+    const last_decl: u32 = @intFromEnum(root_decls[root_decls.len - 1]);
+
+    const starts_with_import = first_decl == first_import;
+    const has_gaps = root_decls.len != imports.len;
+    const ends_with_import = last_decl == last_import;
+
+    // These are the clear-cut cases.
+    if (starts_with_import and !ends_with_import) {
+        return .top;
+    } else if (ends_with_import and !starts_with_import) {
+        return .bottom;
+    } else if (!starts_with_import and !ends_with_import) {
+        return .top;
+    }
+
+    // In the ambiguous case, there is an import at both the top and bottom. The deciding factor is if there are other
+    // non-import declarations between them.
+    //
+    // If there aren't, the file is only imports, so we can choose "top" to avoid unnecessary newlines.
+    // If there are; there being an import at the bottom is a strong signal that that is what they want.
+    if (!has_gaps) {
+        return .top;
+    } else {
+        return .bottom;
+    }
+}
+
 fn handleUnorganizedImport(builder: *Builder) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -606,11 +654,21 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
+    const placement = switch (builder.config.import_organization) {
+        .auto => analyzeImportPlacement(tree, imports),
+        .top => .top,
+        .bottom => .bottom,
+    };
+
     var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
 
     // add sorted imports
     {
         var new_text: std.ArrayListUnmanaged(u8) = .empty;
+
+        if (placement == .bottom) {
+            try new_text.append(builder.arena, '\n');
+        }
 
         for (sorted_imports, 0..) |import_decl, i| {
             if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
@@ -619,13 +677,24 @@ fn handleUnorganizedImport(builder: *Builder) !void {
 
             try new_text.print(builder.arena, "{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
         }
+
         try new_text.append(builder.arena, '\n');
 
-        const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
-        const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+        const range: offsets.Range = switch (placement) {
+            .top => blk: {
+                // Current behavior: insert at top after doc comments
+                const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
+                const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+                break :blk .{ .start = insert_pos, .end = insert_pos };
+            },
+            .bottom => blk: {
+                // Current behavior: insert at eof
+                break :blk offsets.tokenToRange(tree, @intCast(tree.tokens.len - 1), builder.offset_encoding);
+            },
+        };
 
         try edits.append(builder.arena, .{
-            .range = .{ .start = insert_pos, .end = insert_pos },
+            .range = range,
             .newText = new_text.items,
         });
     }
