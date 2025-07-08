@@ -1520,15 +1520,37 @@ pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node
         children: *std.ArrayListUnmanaged(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
-            if (child_node == 0) return;
             try self.children.append(self.allocator, child_node);
         }
     };
 
     var children: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
-    errdefer children.deinit();
+    errdefer children.deinit(allocator);
     try iterateChildren(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
-    return children.toOwnedSlice();
+    return children.toOwnedSlice(allocator);
+}
+
+test nodeChildrenAlloc {
+    const allocator = std.testing.allocator;
+
+    var tree = try std.zig.Ast.parse(
+        allocator,
+        "const namespace = struct { field_a: u32 };",
+        .zig,
+    );
+    defer tree.deinit(allocator);
+
+    const namespace = tree.rootDecls()[0];
+
+    const children = try nodeChildrenAlloc(
+        allocator,
+        tree,
+        namespace,
+    );
+    defer allocator.free(children);
+
+    try std.testing.expectEqual(1, children.len);
+    try std.testing.expectEqualStrings("struct { field_a: u32 }", tree.getNodeSource(children[0]));
 }
 
 /// returns the children of the given node.
@@ -1540,15 +1562,39 @@ pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node:
         children: *std.ArrayListUnmanaged(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
-            if (child_node == 0) return;
             try self.children.append(self.allocator, child_node);
         }
     };
 
     var children: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
-    errdefer children.deinit();
-    try iterateChildrenRecursive(tree, node, .{ .allocator = allocator, .children = &children }, Context.callback);
+    errdefer children.deinit(allocator);
+    try iterateChildrenRecursive(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
     return children.toOwnedSlice(allocator);
+}
+
+test nodeChildrenRecursiveAlloc {
+    const allocator = std.testing.allocator;
+
+    var tree = try std.zig.Ast.parse(
+        allocator,
+        "const namespace = struct { field_a: u32 };",
+        .zig,
+    );
+    defer tree.deinit(allocator);
+
+    const namespace = tree.rootDecls()[0];
+
+    const children = try nodeChildrenRecursiveAlloc(
+        allocator,
+        tree,
+        namespace,
+    );
+    defer allocator.free(children);
+
+    try std.testing.expectEqual(3, children.len);
+    try std.testing.expectEqualStrings("struct { field_a: u32 }", tree.getNodeSource(children[0]));
+    try std.testing.expectEqualStrings("field_a: u32", tree.getNodeSource(children[1]));
+    try std.testing.expectEqualStrings("u32", tree.getNodeSource(children[2]));
 }
 
 /// returns a list of nodes that overlap with the given source code index.
