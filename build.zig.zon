@@ -13,8 +13,8 @@
     // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/aa24df42183ad415d10bc0a33e6238c437fc0f59.tar.gz",
-            .hash = "known_folders-0.0.0-Fy-PJtLDAADGDOwYwMkVydMSTp_aN-nfjCZw6qPQ2ECL",
+            .url = "https://github.com/ziglibs/known-folders/archive/e97515b48d9d3eee636c186d31bd1761fae82791.tar.gz",
+            .hash = "known_folders-0.0.0-Fy-PJnDCAACNyr_dWSI3vev-jU3ZqZv8f3quddcfuug0",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/a20dd1f11b10819a6f570f98b42e1c91e3704357.tar.gz",
