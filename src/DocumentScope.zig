@@ -651,7 +651,6 @@ fn walkNode(
         => walkSwitchNode(context, tree, node_idx),
         .@"errdefer" => walkErrdeferNode(context, tree, node_idx),
 
-        .@"usingnamespace",
         .@"defer",
         .bool_not,
         .negation,
@@ -659,7 +658,6 @@ fn walkNode(
         .negation_wrap,
         .address_of,
         .@"try",
-        .@"await",
         .optional_type,
         .deref,
         .@"suspend",
@@ -736,8 +734,6 @@ fn walkNode(
         .struct_init_one_comma,
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .switch_case_one,
         .switch_case_inline_one,
         .container_field_init,
@@ -767,8 +763,6 @@ fn walkNode(
         .struct_init_comma,
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         .switch_case,
         .switch_case_inline,
         .builtin_call,
@@ -841,9 +835,6 @@ noinline fn walkContainerDecl(
         try walkNode(context, tree, decl);
 
         switch (tree.nodeTag(decl)) {
-            .@"usingnamespace" => {
-                try uses.append(allocator, decl);
-            },
             .test_decl,
             .@"comptime",
             => continue,
@@ -1366,21 +1357,6 @@ pub fn getScopeParent(
     scope: Scope.Index,
 ) Scope.OptionalIndex {
     return doc_scope.scopes.items(.parent_scope)[@intFromEnum(scope)];
-}
-
-pub fn getScopeUsingnamespaceNodesConst(
-    doc_scope: DocumentScope,
-    scope: Scope.Index,
-) []const Ast.Node.Index {
-    const data = doc_scope.scopes.items(.data)[@intFromEnum(scope)];
-    switch (data.tag) {
-        .container_usingnamespace => {
-            const start = data.data.container_usingnamespace;
-            const len = doc_scope.extra.items[start + 1];
-            return @ptrCast(doc_scope.extra.items[start + 2 .. start + 2 + len]);
-        },
-        else => return &.{},
-    }
 }
 
 pub fn getScopeAstNode(

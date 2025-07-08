@@ -44,7 +44,6 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
             \\  ast node: {?}
             \\  parent: {}
             \\  child scopes: {any}
-            \\  usingnamespaces: {any}
             \\  decls:
             \\
         , .{
@@ -54,7 +53,6 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
             doc_scope.getScopeAstNode(scope_index),
             doc_scope.getScopeParent(scope_index),
             doc_scope.getScopeChildScopesConst(scope_index),
-            doc_scope.getScopeUsingnamespaceNodesConst(scope_index),
         });
 
         for (doc_scope.getScopeDeclarationsConst(scope_index)) |decl| {

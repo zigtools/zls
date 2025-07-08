@@ -539,12 +539,8 @@ const CallBuilder = struct {
         switch (tree.nodeTag(node)) {
             .call,
             .call_comma,
-            .async_call,
-            .async_call_comma,
             .call_one,
             .call_one_comma,
-            .async_call_one,
-            .async_call_one_comma,
             => {
                 var buf: [1]Ast.Node.Index = undefined;
                 const call = tree.fullCall(&buf, node).?;

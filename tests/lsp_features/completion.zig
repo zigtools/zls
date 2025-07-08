@@ -2887,101 +2887,6 @@ test "function taking a generic struct arg" {
     });
 }
 
-test "usingnamespace" {
-    try testCompletion(
-        \\const S1 = struct {
-        \\    member: u32,
-        \\    pub fn public() S1 {}
-        \\    fn private() !void {}
-        \\};
-        \\const S2 = struct {
-        \\    usingnamespace S1;
-        \\};
-        \\const foo = S2.<cursor>
-    , &.{
-        .{ .label = "public", .kind = .Function, .detail = "fn () S1" },
-        .{ .label = "private", .kind = .Function, .detail = "fn () !void" },
-    });
-    try testCompletion(
-        \\const S1 = struct {
-        \\    usingnamespace struct {
-        \\        pub fn inner() void {}
-        \\    };
-        \\};
-        \\const foo = S1.<cursor>
-    , &.{
-        .{ .label = "inner", .kind = .Function, .detail = "fn () void" },
-    });
-}
-
-test "usingnamespace - generics" {
-    try testCompletion(
-        \\fn Bar(comptime Self: type) type {
-        \\    return struct {
-        \\        fn inner(self: Self) void { _ = self; }
-        \\    };
-        \\}
-        \\const Foo = struct {
-        \\    alpha: u32,
-        \\    pub usingnamespace Bar(Foo);
-        \\    fn deinit(self: Foo) void { _ = self; }
-        \\};
-        \\const foo: Foo = undefined;
-        \\const bar = foo.<cursor>
-    , &.{
-        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
-        // should be Method, but usingnamespace will be removed anyways https://github.com/ziglang/zig/issues/20663
-        .{ .label = "inner", .kind = .Function, .detail = "fn (self: Foo) void" },
-        .{ .label = "deinit", .kind = .Method, .detail = "fn (self: Foo) void" },
-    });
-}
-
-test "usingnamespace - comptime" {
-    try testCompletion(
-        \\const Alpha = struct {
-        \\    fn alpha() void {}
-        \\};
-        \\const Beta = struct {
-        \\    fn beta() void {}
-        \\};
-        \\const Gamma = struct {
-        \\    usingnamespace if (undefined) Alpha else Beta;
-        \\};
-        \\const gamma: Gamma = undefined;
-        \\const g = gamma.<cursor>
-    , &.{
-        .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "beta", .kind = .Function, .detail = "fn () void" },
-    });
-    try testCompletion(
-        \\pub const chip_mod = struct {
-        \\    pub const devices = struct {
-        \\        pub const chip1 = struct {
-        \\            canary: bool,
-        \\            pub const peripherals = struct {};
-        \\            pub fn chip1fn1() void {}
-        \\            pub fn chip1fn2(_: u32) void {}
-        \\        };
-        \\        pub const chip2 = struct {
-        \\            pub fn chip2fn1() void {}
-        \\        };
-        \\    };
-        \\};
-        \\const chip = struct {
-        \\    const inner = chip_mod; //@import("chip");
-        \\    pub usingnamespace @field(inner.devices, "chip1");
-        \\};
-        \\test {
-        \\    _ = chip.<cursor>;
-        \\}
-    , &.{
-        .{ .label = "inner", .kind = .Struct, .detail = "type" },
-        .{ .label = "peripherals", .kind = .Struct, .detail = "type" },
-        .{ .label = "chip1fn1", .kind = .Function, .detail = "fn () void" },
-        .{ .label = "chip1fn2", .kind = .Function, .detail = "fn (_: u32) void" },
-    });
-}
-
 test "anytype resolution based on callsite-references" {
     try testCompletion(
         \\const Writer1 = struct {
@@ -3290,13 +3195,12 @@ test "builtin fns taking an enum arg" {
         \\}
     , &.{
         .{ .label = "auto", .kind = .EnumMember },
-        .{ .label = "async_kw", .kind = .EnumMember },
         .{ .label = "never_tail", .kind = .EnumMember },
         .{ .label = "never_inline", .kind = .EnumMember },
-        .{ .label = "no_async", .kind = .EnumMember },
         .{ .label = "always_tail", .kind = .EnumMember },
         .{ .label = "always_inline", .kind = .EnumMember },
         .{ .label = "compile_time", .kind = .EnumMember },
+        .{ .label = "no_suspend", .kind = .EnumMember },
     });
     try testCompletionTextEdit(.{
         .source = "var a: u16 addrspace(.<cursor>",

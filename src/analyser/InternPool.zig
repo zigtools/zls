@@ -4060,7 +4060,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
                     }
                 }
                 switch (cc) {
-                    .auto, .@"async", .naked, .@"inline" => try writer.print("callconv(.{}) ", .{std.zig.fmtId(@tagName(cc))}),
+                    .auto, .naked, .@"inline" => try writer.print("callconv(.{}) ", .{std.zig.fmtId(@tagName(cc))}),
                     else => try writer.print("callconv({any}) ", .{cc}),
                 }
             }

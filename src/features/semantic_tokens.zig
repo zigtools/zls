@@ -51,14 +51,13 @@ pub const TokenModifiers = packed struct(u16) {
     static: bool = false,
     deprecated: bool = false,
     abstract: bool = false,
-    @"async": bool = false,
     modification: bool = false,
     documentation: bool = false,
     defaultLibrary: bool = false,
     // non standard token modifiers
     generic: bool = false,
     mutable: bool = false,
-    _: u4 = 0,
+    _: u5 = 0,
 
     pub fn format(
         modifiers: TokenModifiers,
@@ -335,14 +334,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         => {
             const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
             try writeVarDecl(builder, node, resolved_type);
-        },
-        .@"usingnamespace" => {
-            const first_token = tree.firstToken(node);
-            if (tree.tokenTag(first_token) == .keyword_pub) {
-                try writeToken(builder, first_token, .keyword);
-            }
-            try writeToken(builder, main_token, .keyword);
-            try writeNodeTokens(builder, tree.nodeData(node).node);
         },
         .container_decl,
         .container_decl_trailing,
@@ -644,17 +635,12 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         },
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&params, node).?;
 
-            try writeToken(builder, call.async_token, .keyword);
             if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) {
                 // TODO actually try to resolve the decl literal
                 try writeToken(builder, tree.nodeMainToken(call.ast.fn_expr), .function);
@@ -984,7 +970,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         },
         .@"try",
         .@"resume",
-        .@"await",
         => {
             try writeToken(builder, main_token, .keyword);
             try writeNodeTokens(builder, tree.nodeData(node).node);

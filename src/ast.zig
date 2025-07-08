@@ -445,14 +445,12 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
     const last_token = while (true) switch (tree.nodeTag(n)) {
         .root => return @intCast(tree.tokens.len - 1),
 
-        .@"usingnamespace",
         .bool_not,
         .negation,
         .bit_not,
         .negation_wrap,
         .address_of,
         .@"try",
-        .@"await",
         .optional_type,
         .@"suspend",
         .@"resume",
@@ -712,12 +710,8 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
 
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         => |tag| {
             var buffer: [1]Node.Index = undefined;
             const call = tree.fullCall(&buffer, n).?;
@@ -726,8 +720,12 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
                 break tree.nodeMainToken(n);
             } else {
                 const has_comma = switch (tag) {
-                    .call_one, .async_call_one, .call, .async_call => false,
-                    .call_one_comma, .async_call_one_comma, .call_comma, .async_call_comma => true,
+                    .call_one,
+                    .call,
+                    => false,
+                    .call_one_comma,
+                    .call_comma,
+                    => true,
                     else => unreachable,
                 };
                 end_offset += @intFromBool(has_comma);
@@ -1097,14 +1095,12 @@ fn iterateChildrenTypeErased(
     callback: *const fn (*const anyopaque, Ast, Ast.Node.Index) anyerror!void,
 ) anyerror!void {
     switch (tree.nodeTag(node)) {
-        .@"usingnamespace",
         .bool_not,
         .negation,
         .bit_not,
         .negation_wrap,
         .address_of,
         .@"try",
-        .@"await",
         .optional_type,
         .deref,
         .@"suspend",
@@ -1185,8 +1181,6 @@ fn iterateChildrenTypeErased(
 
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .struct_init_one,
         .struct_init_one_comma,
         .container_field_init,
@@ -1337,8 +1331,6 @@ fn iterateChildrenTypeErased(
 
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         => {
             const call = tree.callFull(node).ast;
             try callback(context, tree, call.fn_expr);

@@ -209,9 +209,7 @@ const PrintAst = struct {
             .negation_wrap,
             .address_of,
             .@"try",
-            .@"await",
             .deref,
-            .@"usingnamespace",
             .@"suspend",
             .@"resume",
             .@"comptime",
@@ -357,16 +355,11 @@ const PrintAst = struct {
             },
             .call_one,
             .call_one_comma,
-            .async_call_one,
-            .async_call_one_comma,
             .call,
             .call_comma,
-            .async_call,
-            .async_call_comma,
             => {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const call = tree.fullCall(&buffer, node).?;
-                try p.renderOptTokenField(call.async_token, "async_token", .hide_if_none);
                 try p.renderField(call.ast.fn_expr, "fn_expr");
                 try p.renderNodeSliceField(call.ast.params, "params");
             },
@@ -699,12 +692,8 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         => "StructInit",
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         => "Call",
         .@"switch",
         .switch_comma,
@@ -762,7 +751,6 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         => "Asm",
 
         .root => "Root",
-        .@"usingnamespace" => "Usingnamespace",
         .test_decl => "TestDecl",
         .@"errdefer" => "Errdefer",
         .@"defer" => "Defer",
@@ -823,7 +811,6 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         .negation_wrap => "NegationWrap",
         .address_of => "AddressOf",
         .@"try" => "Try",
-        .@"await" => "Await",
         .optional_type => "OptionalType",
         .deref => "Deref",
         .array_access => "ArrayAccess",
