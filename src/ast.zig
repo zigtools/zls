@@ -1520,7 +1520,6 @@ pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node
         children: *std.ArrayListUnmanaged(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
-            if (child_node == .root) return;
             try self.children.append(self.allocator, child_node);
         }
     };
@@ -1563,7 +1562,6 @@ pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node:
         children: *std.ArrayListUnmanaged(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
-            if (child_node == .root) return;
             try self.children.append(self.allocator, child_node);
         }
     };
