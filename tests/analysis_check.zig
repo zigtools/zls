@@ -103,15 +103,9 @@ pub fn main() Error!void {
         config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
     }
 
-    var thread_pool: if (builtin.single_threaded) void else std.Thread.Pool = undefined;
-    if (builtin.single_threaded) {
-        thread_pool = {};
-    } else {
-        thread_pool.init(.{
-            .allocator = gpa,
-        }) catch std.debug.panic("failed to initalize thread pool", .{});
-    }
-    defer if (!builtin.single_threaded) thread_pool.deinit();
+    var thread_pool: std.Thread.Pool = undefined;
+    thread_pool.init(.{ .allocator = gpa }) catch std.debug.panic("failed to initalize thread pool", .{});
+    defer thread_pool.deinit();
 
     var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
@@ -122,7 +116,7 @@ pub fn main() Error!void {
     var document_store: zls.DocumentStore = .{
         .allocator = gpa,
         .config = config,
-        .thread_pool = if (builtin.single_threaded) {} else &thread_pool,
+        .thread_pool = &thread_pool,
         .diagnostics_collection = &diagnostics_collection,
     };
     defer document_store.deinit();
