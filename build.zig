@@ -172,6 +172,10 @@ pub fn build(b: *Build) !void {
         },
     });
 
+    if (target.result.os.tag == .windows) {
+        zls_module.linkSystemLibrary("advapi32", .{});
+    }
+
     { // zig build release
         const is_tagged_release = zls_version.pre == null and zls_version.build == null;
         const targets = comptime if (is_tagged_release) release_targets ++ additional_tagged_release_targets else release_targets;
@@ -197,6 +201,10 @@ pub fn build(b: *Build) !void {
                 .use_llvm = use_llvm,
                 .use_lld = use_llvm,
             });
+
+            if (target_query.os_tag == .windows) {
+                artifact.*.root_module.linkSystemLibrary("advapi32", .{});
+            }
         }
 
         release(b, &release_artifacts, resolved_zls_version);
