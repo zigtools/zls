@@ -51,13 +51,14 @@ pub const TokenModifiers = packed struct(u16) {
     static: bool = false,
     deprecated: bool = false,
     abstract: bool = false,
+    async: bool = false,
     modification: bool = false,
     documentation: bool = false,
     defaultLibrary: bool = false,
     // non standard token modifiers
     generic: bool = false,
     mutable: bool = false,
-    _: u5 = 0,
+    _: u4 = 0,
 
     pub fn format(
         modifiers: TokenModifiers,
