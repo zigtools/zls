@@ -798,8 +798,6 @@ noinline fn walkContainerDecl(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = context.allocator;
-
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
 
@@ -819,9 +817,6 @@ noinline fn walkContainerDecl(
         .{ .ast_node = node_idx },
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
-
-    var uses: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
-    defer uses.deinit(allocator);
 
     for (container_decl.ast.members) |decl| {
         try walkNode(context, tree, decl);
@@ -885,13 +880,6 @@ noinline fn walkContainerDecl(
     }
 
     try scope.finalize();
-
-    if (uses.items.len != 0) {
-        try context.doc_scope.extra.ensureUnusedCapacity(allocator, uses.items.len + 2);
-        context.doc_scope.extra.appendAssumeCapacity(@intFromEnum(node_idx));
-        context.doc_scope.extra.appendAssumeCapacity(@intCast(uses.items.len));
-        context.doc_scope.extra.appendSliceAssumeCapacity(@ptrCast(uses.items));
-    }
 }
 
 noinline fn walkErrorSetNode(
