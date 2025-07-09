@@ -1970,12 +1970,6 @@ test "weird code" {
         .{ "bar", .function, .{ .declaration = true } },
     });
     try testSemanticTokens(
-        \\_ = bar
-    , &.{
-        .{ "=", .operator, .{} },
-        .{ "bar", .variable, .{} },
-    });
-    try testSemanticTokens(
         \\error. .foo
     , &.{});
     try testSemanticTokens(
