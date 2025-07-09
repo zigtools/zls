@@ -720,12 +720,8 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
                 break tree.nodeMainToken(n);
             } else {
                 const has_comma = switch (tag) {
-                    .call_one,
-                    .call,
-                    => false,
-                    .call_one_comma,
-                    .call_comma,
-                    => true,
+                    .call_one, .call => false,
+                    .call_one_comma, .call_comma => true,
                     else => unreachable,
                 };
                 end_offset += @intFromBool(has_comma);
