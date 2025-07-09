@@ -81,7 +81,6 @@ pub fn getSignatureInfo(
     const innermost_block_scope = Analyser.innermostScopeAtIndexWithTag(document_scope, absolute_index, .init(.{
         .block = true,
         .container = true,
-        .container_usingnamespace = true,
         .function = true,
         .other = false,
     })).unwrap().?;

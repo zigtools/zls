@@ -251,13 +251,6 @@ pub const Scope = struct {
     pub const Tag = enum(u3) {
         /// `tree.nodeTag(ast_node)` is ContainerDecl or Root or ErrorSetDecl
         container,
-        /// index into `DocumentScope.extra`
-        /// Body:
-        ///     ast_node: Ast.Node.Index,
-        ///     usingnamespace_count: u32,
-        ///     usingnamespaces: [usingnamespace_count]u32,
-        /// `tree.nodeTag(ast_node)` is ContainerDecl or Root
-        container_usingnamespace,
         /// `tree.nodeTag(ast_node)` is FnProto
         function,
         /// `tree.nodeTag(ast_node)` is Block
@@ -266,7 +259,7 @@ pub const Scope = struct {
 
         pub fn isContainer(self: @This()) bool {
             return switch (self) {
-                .container, .container_usingnamespace => true,
+                .container => true,
                 .block, .function, .other => false,
             };
         }
@@ -274,7 +267,6 @@ pub const Scope = struct {
 
     pub const Data = packed union {
         ast_node: Ast.Node.Index,
-        container_usingnamespace: u32,
     };
 
     pub const SmallLoc = packed struct {
@@ -895,10 +887,6 @@ noinline fn walkContainerDecl(
     try scope.finalize();
 
     if (uses.items.len != 0) {
-        const scope_data = &context.doc_scope.scopes.items(.data)[@intFromEnum(scope.scope)];
-        scope_data.tag = .container_usingnamespace;
-        scope_data.data = .{ .container_usingnamespace = @intCast(context.doc_scope.extra.items.len) };
-
         try context.doc_scope.extra.ensureUnusedCapacity(allocator, uses.items.len + 2);
         context.doc_scope.extra.appendAssumeCapacity(@intFromEnum(node_idx));
         context.doc_scope.extra.appendAssumeCapacity(@intCast(uses.items.len));
@@ -1368,7 +1356,6 @@ pub fn getScopeAstNode(
     const data = slice.items(.data)[@intFromEnum(scope)];
 
     return switch (data.tag) {
-        .container_usingnamespace => @as(Ast.Node.Index, @enumFromInt(doc_scope.extra.items[data.data.container_usingnamespace])),
         .container, .function, .block => data.data.ast_node,
         .other => null,
     };

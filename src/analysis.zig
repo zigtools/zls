@@ -33,8 +33,6 @@ store: *DocumentStore,
 ip: *InternPool,
 resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?Type) = .empty,
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Binding, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .empty,
-/// used to detect recursion
-use_trail: NodeSet = .empty,
 collect_callsite_references: bool,
 /// avoid unnecessarily parsing number literals
 resolve_number_literal_values: bool,
@@ -65,8 +63,6 @@ pub fn init(
 pub fn deinit(self: *Analyser) void {
     self.resolved_callsites.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
-    std.debug.assert(self.use_trail.count() == 0);
-    self.use_trail.deinit(self.gpa);
 }
 
 fn allocType(analyser: *Analyser, ty: Type) error{OutOfMemory}!*Type {
@@ -5571,39 +5567,6 @@ pub fn collectDeclarationsOfContainer(
     }
 }
 
-fn collectUsingnamespaceDeclarationsOfContainer(
-    analyser: *Analyser,
-    usingnamespace_node: NodeWithHandle,
-    original_handle: *DocumentStore.Handle,
-    instance_access: bool,
-    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
-) !void {
-    const key: NodeWithUri = .{
-        .node = usingnamespace_node.node,
-        .uri = usingnamespace_node.handle.uri,
-    };
-    const gop = try analyser.use_trail.getOrPut(analyser.gpa, key);
-    if (gop.found_existing) return;
-    defer std.debug.assert(analyser.use_trail.remove(key));
-
-    const handle = usingnamespace_node.handle;
-    const tree = handle.tree;
-
-    const use_token = tree.nodeMainToken(usingnamespace_node.node);
-    const is_pub = use_token > 0 and tree.tokenTag(use_token - 1) == .keyword_pub;
-    if (handle != original_handle and !is_pub) return;
-
-    const expr = tree.nodeData(usingnamespace_node.node).node;
-    const use_expr = try analyser.resolveTypeOfNode(.of(expr, handle)) orelse return;
-
-    try analyser.collectDeclarationsOfContainer(
-        use_expr,
-        original_handle,
-        instance_access,
-        decl_collection,
-    );
-}
-
 /// Collects all symbols/declarations that are accessible at the given source index.
 pub fn collectAllSymbolsAtSourceIndex(
     analyser: *Analyser,
@@ -5615,7 +5578,6 @@ pub fn collectAllSymbolsAtSourceIndex(
     decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
 ) error{OutOfMemory}!void {
     std.debug.assert(source_index <= handle.tree.source.len);
-    analyser.use_trail.clearRetainingCapacity();
 
     const document_scope = try handle.getDocumentScope();
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
@@ -5719,7 +5681,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
-            .container, .container_usingnamespace => current = scope_index,
+            .container => current = scope_index,
             .function => {
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
@@ -5749,33 +5711,6 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
         },
         .is_type_val = true,
     };
-}
-
-fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
-    for (uses) |index| {
-        const key: NodeWithUri = .{
-            .node = index,
-            .uri = handle.uri,
-        };
-        const gop = try analyser.use_trail.getOrPut(analyser.gpa, key);
-        if (gop.found_existing) continue;
-        defer std.debug.assert(analyser.use_trail.remove(key));
-
-        const tree = handle.tree;
-
-        const expr = tree.nodeData(index).node;
-        const expr_type = (try analyser.resolveTypeOfNodeUncached(.of(expr, handle))) orelse
-            continue;
-
-        if (!expr_type.is_type_val) continue;
-
-        if (try expr_type.lookupSymbol(analyser, symbol)) |candidate| {
-            if (candidate.handle == handle or candidate.isPublic()) {
-                return candidate;
-            }
-        }
-    }
-    return null;
 }
 
 pub fn lookupLabel(
