@@ -154,6 +154,12 @@ pub fn StringPool(comptime config: Config) type {
 
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage
+        ///
+        /// only callable when thread safety is disabled.
+        pub const stringToSlice = if (config.thread_safe) {} else stringToSliceUnsafe;
+
+        /// returns the underlying slice from an interned string
+        /// equal strings are guaranteed to share the same storage
         pub fn stringToSliceUnsafe(pool: *Pool, index: String) [:0]const u8 {
             assert(@intFromEnum(index) < pool.bytes.items.len);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
@@ -246,7 +252,7 @@ test "StringPool - check interning" {
     const index1 = try pool.getOrPutString(gpa, str);
     const index2 = try pool.getOrPutString(gpa, str);
     const index3 = pool.getString(str).?;
-    const storage1 = pool.stringToSliceUnsafe(index1);
+    const storage1 = pool.stringToSlice(index1);
     const storage2 = pool.stringToSliceUnsafe(index2);
 
     try std.testing.expectEqual(index1, index2);
