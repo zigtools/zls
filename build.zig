@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Sema: Stop adding Windows implib link inputs for `extern "..."` syntax.
+/// remove `async` and `await` keywords; remove `usingnamespace`
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.920+b461d07a5";
+const minimum_build_zig_version = "0.15.0-dev.936+fc2c1883b";
 
 /// Specify the minimum Zig version that is required to run ZLS:
 /// Release 0.14.0
