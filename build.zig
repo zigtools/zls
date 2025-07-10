@@ -17,15 +17,11 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
 const minimum_build_zig_version = "0.15.0-dev.936+fc2c1883b";
 
-/// Specify the minimum Zig version that is required to run ZLS:
-/// Release 0.14.0
-///
-/// Examples of reasons that would cause the minimum runtime version to be bumped are:
-///   - breaking change to the Zig Syntax
-///   - breaking change to AstGen (i.e `zig ast-check`)
+/// Specify the minimum Zig version that is usable with ZLS:
+/// remove `async` and `await` keywords; remove `usingnamespace`
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.14.0";
+const minimum_runtime_zig_version = "0.15.0-dev.936+fc2c1883b";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
