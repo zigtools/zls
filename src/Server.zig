@@ -1176,19 +1176,19 @@ pub fn updateConfiguration(
         if (zig_version_is_tagged) {
             server.showMessage(
                 .Warning,
-                "ZLS {} does not support Zig {}. A ZLS {}.{} release should be used instead.",
+                "ZLS '{}' does not support Zig '{}'. A ZLS '{}.{}' release should be used instead.",
                 .{ zls_version, zig_version, zig_version.major, zig_version.minor },
             );
         } else if (zls_version_is_tagged) {
             server.showMessage(
                 .Warning,
-                "ZLS {} should be used with a Zig {}.{} release but found Zig {}.",
+                "ZLS '{}' should be used with a Zig '{}.{}' release but found Zig '{}'.",
                 .{ zls_version, zls_version.major, zls_version.minor, zig_version },
             );
         } else {
             server.showMessage(
                 .Warning,
-                "ZLS {} requires at least Zig {s} but got Zig {}. Update Zig to avoid unexpected behavior.",
+                "ZLS '{}' requires at least Zig '{s}' but got Zig '{}'. Update Zig to avoid unexpected behavior.",
                 .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
             );
         }
