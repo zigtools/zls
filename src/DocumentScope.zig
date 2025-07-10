@@ -1242,6 +1242,10 @@ noinline fn walkSwitchNode(
     for (full.ast.cases, 0..) |case, case_index| {
         const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
 
+        for (switch_case.ast.values) |case_value| {
+            try walkNode(context, tree, case_value);
+        }
+
         if (switch_case.payload_token) |payload_token| {
             const name_token = payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
 

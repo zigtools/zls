@@ -3296,6 +3296,24 @@ test "either" {
     });
 }
 
+test "container type inside switch case value" {
+    try testCompletion(
+        \\test {
+        \\    switch (undefined) {
+        \\        struct {
+        \\            const This = @This();
+        \\            fn func() void {
+        \\                This.<cursor>
+        \\            }
+        \\        } => {},
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "This", .kind = .Struct, .detail = "type" },
+        .{ .label = "func", .kind = .Function, .detail = "fn () void" },
+    });
+}
+
 // https://github.com/zigtools/zls/issues/1370
 test "cyclic struct init field" {
     try testCompletion(
