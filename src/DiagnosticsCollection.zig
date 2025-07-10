@@ -354,11 +354,20 @@ fn convertErrorBundleToLSPDiangostics(
             break :blk lsp_notes;
         };
 
+        var tags: std.ArrayListUnmanaged(lsp.types.DiagnosticTag) = .empty;
+
+        const diag_msg = eb.nullTerminatedString(err.msg);
+
+        if (std.mem.startsWith(u8, diag_msg, "unused ")) {
+            try tags.append(arena, lsp.types.DiagnosticTag.Unnecessary);
+        }
+
         try diagnostics.append(arena, .{
             .range = src_range,
             .severity = .Error,
             .source = "zls",
             .message = eb.nullTerminatedString(err.msg),
+            .tags = if (tags.items.len != 0) tags.items else null,
             .relatedInformation = relatedInformation,
         });
     }
