@@ -287,7 +287,6 @@ fn symbolReferences(
     const scope_index = Analyser.innermostScopeAtIndexWithTag(doc_scope, source_index, .init(.{
         .block = true,
         .container = true,
-        .container_usingnamespace = true,
         .function = false,
         .other = false,
     })).unwrap().?;
@@ -298,7 +297,7 @@ fn symbolReferences(
     const local_node: ?Ast.Node.Index = switch (decl_handle.decl) {
         .ast_node => switch (doc_scope.getScopeTag(scope_index)) {
             .block => scope_node,
-            .container, .container_usingnamespace => null,
+            .container => null,
             .function, .other => unreachable,
         },
         .optional_payload,
@@ -539,12 +538,8 @@ const CallBuilder = struct {
         switch (tree.nodeTag(node)) {
             .call,
             .call_comma,
-            .async_call,
-            .async_call_comma,
             .call_one,
             .call_one_comma,
-            .async_call_one,
-            .async_call_one_comma,
             => {
                 var buf: [1]Ast.Node.Index = undefined;
                 const call = tree.fullCall(&buf, node).?;

@@ -156,9 +156,7 @@ pub fn StringPool(comptime config: Config) type {
         /// equal strings are guaranteed to share the same storage
         ///
         /// only callable when thread safety is disabled.
-        pub const stringToSlice = if (config.thread_safe) @"usingnamespace" else stringToSliceUnsafe;
-
-        const @"usingnamespace" = {};
+        pub const stringToSlice = if (config.thread_safe) {} else stringToSliceUnsafe;
 
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage

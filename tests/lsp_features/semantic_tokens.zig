@@ -940,40 +940,6 @@ test "error union types" {
     });
 }
 
-test "usingnamespace" {
-    try testSemanticTokens(
-        \\const Foo = struct {
-        \\    usingnamespace {};
-        \\    pub usingnamespace {};
-        \\    /// aaa
-        \\    /// bbb
-        \\    pub usingnamespace {};
-        \\    /// ccc
-        \\    /// ddd
-        \\    usingnamespace {};
-        \\};
-    , &.{
-        .{ "const", .keyword, .{} },
-        .{ "Foo", .namespace, .{ .declaration = true } },
-        .{ "=", .operator, .{} },
-        .{ "struct", .keyword, .{} },
-
-        .{ "usingnamespace", .keyword, .{} },
-
-        .{ "pub", .keyword, .{} },
-        .{ "usingnamespace", .keyword, .{} },
-
-        .{ "/// aaa", .comment, .{ .documentation = true } },
-        .{ "/// bbb", .comment, .{ .documentation = true } },
-        .{ "pub", .keyword, .{} },
-        .{ "usingnamespace", .keyword, .{} },
-
-        .{ "/// ccc", .comment, .{ .documentation = true } },
-        .{ "/// ddd", .comment, .{ .documentation = true } },
-        .{ "usingnamespace", .keyword, .{} },
-    });
-}
-
 test "container declarations" {
     try testSemanticTokens(
         \\const Foo = struct {
@@ -1986,22 +1952,6 @@ test "zon file" {
     }, .{ .mode = .zon });
 }
 
-test "recursive usingnamespace" {
-    // this test is supposed to check against infinite recursion when resolving usingnamespace
-    try testSemanticTokens(
-        \\const A = struct {
-        \\    usingnamespace A;
-        \\};
-    , &.{
-        .{ "const", .keyword, .{} },
-        .{ "A", .namespace, .{ .declaration = true } },
-        .{ "=", .operator, .{} },
-        .{ "struct", .keyword, .{} },
-        .{ "usingnamespace", .keyword, .{} },
-        .{ "A", .namespace, .{} },
-    });
-}
-
 test "weird code" {
     // the expected output is irrelevant, just ensure no crash
     try testSemanticTokens(
@@ -2018,11 +1968,6 @@ test "weird code" {
         .{ "asm", .keyword, .{} },
         .{ "fn", .keyword, .{} },
         .{ "bar", .function, .{ .declaration = true } },
-    });
-    try testSemanticTokens(
-        \\_ = async bar
-    , &.{
-        .{ "bar", .variable, .{} },
     });
     try testSemanticTokens(
         \\error. .foo

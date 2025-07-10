@@ -421,12 +421,8 @@ fn writeNodeInlayHint(
     switch (tree.nodeTag(node)) {
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         => {
             if (!builder.config.inlay_hints_show_parameter_name) return;
 

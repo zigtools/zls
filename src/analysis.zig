@@ -33,8 +33,6 @@ store: *DocumentStore,
 ip: *InternPool,
 resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?Type) = .empty,
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Binding, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .empty,
-/// used to detect recursion
-use_trail: NodeSet = .empty,
 collect_callsite_references: bool,
 /// avoid unnecessarily parsing number literals
 resolve_number_literal_values: bool,
@@ -65,8 +63,6 @@ pub fn init(
 pub fn deinit(self: *Analyser) void {
     self.resolved_callsites.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
-    std.debug.assert(self.use_trail.count() == 0);
-    self.use_trail.deinit(self.gpa);
 }
 
 fn allocType(analyser: *Analyser, ty: Type) error{OutOfMemory}!*Type {
@@ -1900,12 +1896,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         },
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         => {
             var buffer: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&buffer, node).?;
@@ -2885,7 +2877,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {},
 
         .root,
-        .@"usingnamespace",
         .test_decl,
         .@"errdefer",
         .@"defer",
@@ -2902,7 +2893,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             return Type.fromIP(analyser, .noreturn_type, null);
         },
 
-        .@"await",
         .@"suspend",
         .@"resume",
         => {},
@@ -4113,13 +4103,13 @@ pub const Type = struct {
         }
         if (self.is_type_val) {
             if (self.isEnumType() or self.isTaggedUnion()) {
-                if (try analyser.lookupSymbolContainer(self, symbol, .field)) |decl| {
+                if (try lookupSymbolContainer(self, symbol, .field)) |decl| {
                     return decl;
                 }
             }
-            return try analyser.lookupSymbolContainer(self, symbol, .other);
+            return try lookupSymbolContainer(self, symbol, .other);
         } else {
-            if (try analyser.lookupSymbolContainer(self, symbol, .other)) |decl| {
+            if (try lookupSymbolContainer(self, symbol, .other)) |decl| {
                 const ty = try decl.resolveType(analyser) orelse return null;
                 const func_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
                 if (firstParamIs(func_type, try self.typeOf(analyser))) {
@@ -4129,7 +4119,7 @@ pub const Type = struct {
             if (self.isEnumType()) {
                 return null;
             }
-            return try analyser.lookupSymbolContainer(self, symbol, .field);
+            return try lookupSymbolContainer(self, symbol, .field);
         }
     }
 
@@ -5575,48 +5565,6 @@ pub fn collectDeclarationsOfContainer(
 
         try decl_collection.append(analyser.arena, decl_with_handle);
     }
-
-    for (document_scope.getScopeUsingnamespaceNodesConst(scope)) |use| {
-        try analyser.collectUsingnamespaceDeclarationsOfContainer(
-            .of(use, handle),
-            original_handle,
-            false,
-            decl_collection,
-        );
-    }
-}
-
-fn collectUsingnamespaceDeclarationsOfContainer(
-    analyser: *Analyser,
-    usingnamespace_node: NodeWithHandle,
-    original_handle: *DocumentStore.Handle,
-    instance_access: bool,
-    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
-) !void {
-    const key: NodeWithUri = .{
-        .node = usingnamespace_node.node,
-        .uri = usingnamespace_node.handle.uri,
-    };
-    const gop = try analyser.use_trail.getOrPut(analyser.gpa, key);
-    if (gop.found_existing) return;
-    defer std.debug.assert(analyser.use_trail.remove(key));
-
-    const handle = usingnamespace_node.handle;
-    const tree = handle.tree;
-
-    const use_token = tree.nodeMainToken(usingnamespace_node.node);
-    const is_pub = use_token > 0 and tree.tokenTag(use_token - 1) == .keyword_pub;
-    if (handle != original_handle and !is_pub) return;
-
-    const expr = tree.nodeData(usingnamespace_node.node).node;
-    const use_expr = try analyser.resolveTypeOfNode(.of(expr, handle)) orelse return;
-
-    try analyser.collectDeclarationsOfContainer(
-        use_expr,
-        original_handle,
-        instance_access,
-        decl_collection,
-    );
 }
 
 /// Collects all symbols/declarations that are accessible at the given source index.
@@ -5630,7 +5578,6 @@ pub fn collectAllSymbolsAtSourceIndex(
     decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
 ) error{OutOfMemory}!void {
     std.debug.assert(source_index <= handle.tree.source.len);
-    analyser.use_trail.clearRetainingCapacity();
 
     const document_scope = try handle.getDocumentScope();
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
@@ -5641,15 +5588,6 @@ pub fn collectAllSymbolsAtSourceIndex(
             if (decl == .ast_node and handle.tree.nodeTag(decl.ast_node).isContainerField()) continue;
             if (decl == .label) continue;
             try decl_collection.append(analyser.arena, .{ .decl = decl, .handle = handle });
-        }
-
-        for (document_scope.getScopeUsingnamespaceNodesConst(scope_index)) |use| {
-            try analyser.collectUsingnamespaceDeclarationsOfContainer(
-                .of(use, handle),
-                handle,
-                false,
-                decl_collection,
-            );
         }
     }
 }
@@ -5743,7 +5681,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
-            .container, .container_usingnamespace => current = scope_index,
+            .container => current = scope_index,
             .function => {
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
@@ -5775,33 +5713,6 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
     };
 }
 
-fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
-    for (uses) |index| {
-        const key: NodeWithUri = .{
-            .node = index,
-            .uri = handle.uri,
-        };
-        const gop = try analyser.use_trail.getOrPut(analyser.gpa, key);
-        if (gop.found_existing) continue;
-        defer std.debug.assert(analyser.use_trail.remove(key));
-
-        const tree = handle.tree;
-
-        const expr = tree.nodeData(index).node;
-        const expr_type = (try analyser.resolveTypeOfNodeUncached(.of(expr, handle))) orelse
-            continue;
-
-        if (!expr_type.is_type_val) continue;
-
-        if (try expr_type.lookupSymbol(analyser, symbol)) |candidate| {
-            if (candidate.handle == handle or candidate.isPublic()) {
-                return candidate;
-            }
-        }
-    }
-    return null;
-}
-
 pub fn lookupLabel(
     handle: *DocumentStore.Handle,
     symbol: []const u8,
@@ -5825,7 +5736,7 @@ pub fn lookupLabel(
 }
 
 pub fn lookupSymbolGlobal(
-    analyser: *Analyser,
+    _: *Analyser,
     handle: *DocumentStore.Handle,
     symbol: []const u8,
     source_index: usize,
@@ -5860,9 +5771,6 @@ pub fn lookupSymbolGlobal(
             const decl = document_scope.declarations.get(@intFromEnum(decl_index));
             return .{ .decl = decl, .handle = handle };
         }
-        if (try analyser.resolveUse(document_scope.getScopeUsingnamespaceNodesConst(current_scope), symbol, handle)) |result| {
-            return result;
-        }
 
         current_scope = document_scope.getScopeParent(current_scope).unwrap() orelse break;
     }
@@ -5871,7 +5779,6 @@ pub fn lookupSymbolGlobal(
 }
 
 pub fn lookupSymbolContainer(
-    analyser: *Analyser,
     container_type: Type,
     symbol: []const u8,
     kind: DocumentScope.DeclarationLookup.Kind,
@@ -5892,8 +5799,6 @@ pub fn lookupSymbolContainer(
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         return .{ .decl = decl, .handle = handle, .container_type = container_type };
     }
-
-    if (try analyser.resolveUse(document_scope.getScopeUsingnamespaceNodesConst(container_scope.scope), symbol, handle)) |result| return result;
 
     return null;
 }
@@ -6102,12 +6007,8 @@ pub fn resolveExpressionTypeFromAncestors(
         },
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         => {
             var buffer: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&buffer, ancestors[0]).?;

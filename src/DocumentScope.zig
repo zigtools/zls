@@ -251,13 +251,6 @@ pub const Scope = struct {
     pub const Tag = enum(u3) {
         /// `tree.nodeTag(ast_node)` is ContainerDecl or Root or ErrorSetDecl
         container,
-        /// index into `DocumentScope.extra`
-        /// Body:
-        ///     ast_node: Ast.Node.Index,
-        ///     usingnamespace_count: u32,
-        ///     usingnamespaces: [usingnamespace_count]u32,
-        /// `tree.nodeTag(ast_node)` is ContainerDecl or Root
-        container_usingnamespace,
         /// `tree.nodeTag(ast_node)` is FnProto
         function,
         /// `tree.nodeTag(ast_node)` is Block
@@ -266,7 +259,7 @@ pub const Scope = struct {
 
         pub fn isContainer(self: @This()) bool {
             return switch (self) {
-                .container, .container_usingnamespace => true,
+                .container => true,
                 .block, .function, .other => false,
             };
         }
@@ -274,7 +267,6 @@ pub const Scope = struct {
 
     pub const Data = packed union {
         ast_node: Ast.Node.Index,
-        container_usingnamespace: u32,
     };
 
     pub const SmallLoc = packed struct {
@@ -651,7 +643,6 @@ fn walkNode(
         => walkSwitchNode(context, tree, node_idx),
         .@"errdefer" => walkErrdeferNode(context, tree, node_idx),
 
-        .@"usingnamespace",
         .@"defer",
         .bool_not,
         .negation,
@@ -659,7 +650,6 @@ fn walkNode(
         .negation_wrap,
         .address_of,
         .@"try",
-        .@"await",
         .optional_type,
         .deref,
         .@"suspend",
@@ -736,8 +726,6 @@ fn walkNode(
         .struct_init_one_comma,
         .call_one,
         .call_one_comma,
-        .async_call_one,
-        .async_call_one_comma,
         .switch_case_one,
         .switch_case_inline_one,
         .container_field_init,
@@ -767,8 +755,6 @@ fn walkNode(
         .struct_init_comma,
         .call,
         .call_comma,
-        .async_call,
-        .async_call_comma,
         .switch_case,
         .switch_case_inline,
         .builtin_call,
@@ -812,8 +798,6 @@ noinline fn walkContainerDecl(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = context.allocator;
-
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
 
@@ -834,16 +818,10 @@ noinline fn walkContainerDecl(
         locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
-    var uses: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
-    defer uses.deinit(allocator);
-
     for (container_decl.ast.members) |decl| {
         try walkNode(context, tree, decl);
 
         switch (tree.nodeTag(decl)) {
-            .@"usingnamespace" => {
-                try uses.append(allocator, decl);
-            },
             .test_decl,
             .@"comptime",
             => continue,
@@ -902,17 +880,6 @@ noinline fn walkContainerDecl(
     }
 
     try scope.finalize();
-
-    if (uses.items.len != 0) {
-        const scope_data = &context.doc_scope.scopes.items(.data)[@intFromEnum(scope.scope)];
-        scope_data.tag = .container_usingnamespace;
-        scope_data.data = .{ .container_usingnamespace = @intCast(context.doc_scope.extra.items.len) };
-
-        try context.doc_scope.extra.ensureUnusedCapacity(allocator, uses.items.len + 2);
-        context.doc_scope.extra.appendAssumeCapacity(@intFromEnum(node_idx));
-        context.doc_scope.extra.appendAssumeCapacity(@intCast(uses.items.len));
-        context.doc_scope.extra.appendSliceAssumeCapacity(@ptrCast(uses.items));
-    }
 }
 
 noinline fn walkErrorSetNode(
@@ -1368,21 +1335,6 @@ pub fn getScopeParent(
     return doc_scope.scopes.items(.parent_scope)[@intFromEnum(scope)];
 }
 
-pub fn getScopeUsingnamespaceNodesConst(
-    doc_scope: DocumentScope,
-    scope: Scope.Index,
-) []const Ast.Node.Index {
-    const data = doc_scope.scopes.items(.data)[@intFromEnum(scope)];
-    switch (data.tag) {
-        .container_usingnamespace => {
-            const start = data.data.container_usingnamespace;
-            const len = doc_scope.extra.items[start + 1];
-            return @ptrCast(doc_scope.extra.items[start + 2 .. start + 2 + len]);
-        },
-        else => return &.{},
-    }
-}
-
 pub fn getScopeAstNode(
     doc_scope: DocumentScope,
     scope: Scope.Index,
@@ -1392,7 +1344,6 @@ pub fn getScopeAstNode(
     const data = slice.items(.data)[@intFromEnum(scope)];
 
     return switch (data.tag) {
-        .container_usingnamespace => @as(Ast.Node.Index, @enumFromInt(doc_scope.extra.items[data.data.container_usingnamespace])),
         .container, .function, .block => data.data.ast_node,
         .other => null,
     };
