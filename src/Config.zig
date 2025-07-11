@@ -81,11 +81,4 @@ build_runner_path: ?[]const u8 = null,
 /// Path to a directory that will be used as zig's cache. Will default to `${KnownFolders.Cache}/zls`.
 global_cache_path: ?[]const u8 = null,
 
-/// Configure where import statements are organized when using the 'organize imports' code action. 'auto' maintains current placement, 'top' moves all imports to the top, 'bottom' moves all imports to the bottom.
-import_organization: enum {
-    auto,
-    top,
-    bottom,
-} = .auto,
-
 // DO NOT EDIT

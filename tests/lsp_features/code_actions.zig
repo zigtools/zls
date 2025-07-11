@@ -431,7 +431,7 @@ test "organize imports" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , .auto);
+    );
     // Three different import groups: std, build_options and builtin, but these groups do not have separator
     // Builtin comes before build_options despite alphabetical order (they are different import kinds)
     // Case insensitive, pub is preserved
@@ -462,7 +462,7 @@ test "organize imports" {
         \\const Server = @import("Server.zig");
         \\
         \\
-    , .auto);
+    );
     // Relative paths are sorted by import path
     try testOrganizeImports(
         \\const y = @import("a/file2.zig");
@@ -474,7 +474,7 @@ test "organize imports" {
         \\const x = @import("a/file3.zig");
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - bubbles up" {
@@ -490,7 +490,7 @@ test "organize imports - bubbles up" {
         \\
         \\fn main() void {}
         \\fn foo() void {}
-    , .auto);
+    );
 }
 
 test "organize imports - bottom placement" {
@@ -515,7 +515,7 @@ test "organize imports - bottom placement" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - bottom placement with multiple functions" {
@@ -544,7 +544,7 @@ test "organize imports - bottom placement with multiple functions" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - mixed placement defaults to bottom" {
@@ -566,7 +566,7 @@ test "organize imports - mixed placement defaults to bottom" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - scope" {
@@ -590,7 +590,7 @@ test "organize imports - scope" {
         \\  _ = y; // autofix
         \\  _ = x; // autofix
         \\}
-    , .auto);
+    );
 }
 
 test "organize imports - comments" {
@@ -605,7 +605,7 @@ test "organize imports - comments" {
         \\const xyz = @import("xyz.zig");
         \\
         \\
-    , .auto);
+    );
     // Respects top-level doc-comment
     try testOrganizeImports(
         \\//! A module doc
@@ -622,7 +622,7 @@ test "organize imports - comments" {
         \\const abc = @import("abc.zig");
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - field access" {
@@ -635,7 +635,7 @@ test "organize imports - field access" {
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\
         \\
-    , .auto);
+    );
     // declarations without @import move under the parent import
     try testOrganizeImports(
         \\const xyz = @import("xyz.zig").a.long.chain;
@@ -647,7 +647,7 @@ test "organize imports - field access" {
         \\const xyz = @import("xyz.zig").a.long.chain;
         \\
         \\
-    , .auto);
+    );
     try testOrganizeImports(
         \\const std = @import("std");
         \\const builtin = @import("builtin");
@@ -659,7 +659,7 @@ test "organize imports - field access" {
         \\const builtin = @import("builtin");
         \\
         \\
-    , .auto);
+    );
     // Inverse chain of parents
     try testOrganizeImports(
         \\const abc = @import("abc.zig");
@@ -674,7 +674,7 @@ test "organize imports - field access" {
         \\const abc = @import("abc.zig");
         \\
         \\
-    , .auto);
+    );
     // Parent chains are not mixed
     try testOrganizeImports(
         \\const xyz = @import("xyz.zig");
@@ -690,7 +690,7 @@ test "organize imports - field access" {
         \\const xyz_related = xyz.related;
         \\
         \\
-    , .auto);
+    );
 }
 
 test "organize imports - @embedFile" {
@@ -703,7 +703,7 @@ test "organize imports - @embedFile" {
         \\
         \\const foo = @embedFile("foo.zig");
         \\const bar = @embedFile("bar.zig");
-    , .auto);
+    );
 }
 
 test "organize imports - edge cases" {
@@ -719,31 +719,7 @@ test "organize imports - edge cases" {
         \\const abc = @import("abc.zig");
         \\
         \\
-    , .auto);
-}
-
-test "organize imports - force top" {
-    try testOrganizeImports(
-        \\fn foo() void {}
-        \\const std = @import("std");
-    ,
-        \\const std = @import("std");
-        \\
-        \\fn foo() void {}
-        \\
-    , .top);
-}
-
-test "organize imports - force bottom" {
-    try testOrganizeImports(
-        \\const std = @import("std");
-        \\fn foo() void {}
-    ,
-        \\fn foo() void {}
-        \\const std = @import("std");
-        \\
-        \\
-    , .bottom);
+    );
 }
 
 test "convert multiline string literal" {
@@ -940,8 +916,8 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
 }
 
-fn testOrganizeImports(before: []const u8, after: []const u8, config: @FieldType(zls.Config, "import_organization")) !void {
-    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports", .import_organization = config });
+fn testOrganizeImports(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports" });
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
@@ -955,13 +931,11 @@ fn testDiagnostic(
         filter_kind: ?types.CodeActionKind = null,
         filter_title: ?[]const u8 = null,
         want_zir: bool = true,
-        import_organization: @FieldType(zls.Config, "import_organization") = .auto,
     },
 ) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
     ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
-    ctx.server.config.import_organization = options.import_organization;
 
     var phr = try helper.collectClearPlaceholders(allocator, before);
     defer phr.deinit(allocator);

@@ -4,7 +4,6 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 
-const Config = @import("../Config.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const Analyser = @import("../analysis.zig");
@@ -16,7 +15,6 @@ const tracy = @import("tracy");
 pub const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
-    config: *const Config,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
     only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
@@ -597,42 +595,26 @@ const ImportPlacement = enum {
 fn analyzeImportPlacement(tree: Ast, imports: []const ImportDecl) ImportPlacement {
     const root_decls = tree.rootDecls();
 
-    // If there are no declarations or imports, just return a default value
     if (root_decls.len == 0 or imports.len == 0) return .top;
 
-    // Imports are not in source order, so we need to find the first and last import indices
-    var first_import: u32 = std.math.maxInt(u32);
-    var last_import: u32 = std.math.minInt(u32);
-    for (imports) |import| {
-        first_import = @min(first_import, @intFromEnum(import.var_decl));
-        last_import = @max(last_import, @intFromEnum(import.var_decl));
-    }
-    const first_decl: u32 = @intFromEnum(root_decls[0]);
-    const last_decl: u32 = @intFromEnum(root_decls[root_decls.len - 1]);
+    const first_import = imports[0].var_decl;
+    const last_import = imports[imports.len - 1].var_decl;
+
+    const first_decl = root_decls[0];
+    const last_decl = root_decls[root_decls.len - 1];
 
     const starts_with_import = first_decl == first_import;
-    const has_gaps = root_decls.len != imports.len;
     const ends_with_import = last_decl == last_import;
 
-    // These are the clear-cut cases.
-    if (starts_with_import and !ends_with_import) {
-        return .top;
-    } else if (ends_with_import and !starts_with_import) {
-        return .bottom;
-    } else if (!starts_with_import and !ends_with_import) {
-        return .top;
+    if (starts_with_import and ends_with_import) {
+        // If there are only imports, choose "top" to avoid unnecessary newlines.
+        // Otherwise, having an import at the bottom is a strong signal that that is the preferred style.
+        const has_gaps = root_decls.len != imports.len;
+
+        return if (has_gaps) .bottom else .top;
     }
 
-    // In the ambiguous case, there is an import at both the top and bottom. The deciding factor is if there are other
-    // non-import declarations between them.
-    //
-    // If there aren't, the file is only imports, so we can choose "top" to avoid unnecessary newlines.
-    // If there are; there being an import at the bottom is a strong signal that that is what they want.
-    if (!has_gaps) {
-        return .top;
-    } else {
-        return .bottom;
-    }
+    return if (!starts_with_import and ends_with_import) .bottom else .top;
 }
 
 fn handleUnorganizedImport(builder: *Builder) !void {
@@ -651,14 +633,10 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
 
+    const placement = analyzeImportPlacement(tree, imports);
+
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
-
-    const placement = switch (builder.config.import_organization) {
-        .auto => analyzeImportPlacement(tree, imports),
-        .top => .top,
-        .bottom => .bottom,
-    };
 
     var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
 
