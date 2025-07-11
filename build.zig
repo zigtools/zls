@@ -517,6 +517,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         const extensions: []const FileExtension = if (is_windows) &.{.zip} else &.{ .@"tar.xz", .@"tar.gz" };
 
         for (extensions) |extension| {
+            comptime std.debug.assert(zls_version.pre != null); // Zig has renamed their tarballs from `armv7a` to `arm`. ZLS 0.15.0 should match them.
             const cpu_arch_name = switch (resolved_target.cpu.arch) {
                 .arm => "armv7a", // To match the https://ziglang.org/download/ tarballs
                 else => |arch| @tagName(arch),
