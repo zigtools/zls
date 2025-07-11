@@ -51,9 +51,6 @@ pub fn build(b: *Build) !void {
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const strip = b.option(bool, "strip", "Strip executable");
-    const enable_tracy = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
-    const enable_tracy_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy;
-    const enable_tracy_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable_tracy;
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
     const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
     const coverage = b.option(bool, "coverage", "Generate a coverage report with kcov") orelse false;
@@ -90,27 +87,21 @@ pub fn build(b: *Build) !void {
 
         break :blk test_options.createModule();
     };
+    const tracy_options, const tracy_enable = blk: {
+        const tracy_options = b.addOptions();
+        tracy_options.step.name = "tracy options";
 
-    const known_folders_module = b.dependency("known_folders", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("known-folders");
-    const diffz_module = b.dependency("diffz", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("diffz");
-    const lsp_module = b.dependency("lsp_codegen", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("lsp");
+        const enable = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
+        const enable_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable;
+        const enable_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable;
+        if (!enable) std.debug.assert(!enable_allocation and !enable_callstack);
 
-    const tracy_module = getTracyModule(b, .{
-        .target = target,
-        .optimize = optimize,
-        .enable = enable_tracy,
-        .enable_allocation = enable_tracy_allocation,
-        .enable_callstack = enable_tracy_callstack,
-    });
+        tracy_options.addOption(bool, "enable", enable);
+        tracy_options.addOption(bool, "enable_allocation", enable and enable_allocation);
+        tracy_options.addOption(bool, "enable_callstack", enable and enable_callstack);
+
+        break :blk .{ tracy_options.createModule(), enable };
+    };
 
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
@@ -152,59 +143,58 @@ pub fn build(b: *Build) !void {
         }
     }
 
-    const zls_module = b.addModule("zls", .{
-        .root_source_file = b.path("src/zls.zig"),
-        .target = target,
-        .optimize = optimize,
-        .single_threaded = single_threaded,
-        .pic = pie,
-        .imports = &.{
-            .{ .name = "known-folders", .module = known_folders_module },
-            .{ .name = "diffz", .module = diffz_module },
-            .{ .name = "lsp", .module = lsp_module },
-            .{ .name = "tracy", .module = tracy_module },
-            .{ .name = "build_options", .module = build_options },
-            .{ .name = "version_data", .module = version_data_module },
-        },
-    });
-
-    if (target.result.os.tag == .windows) {
-        zls_module.linkSystemLibrary("advapi32", .{});
-    }
-
     { // zig build release
         const is_tagged_release = zls_version.pre == null and zls_version.build == null;
         const targets = comptime if (is_tagged_release) release_targets ++ additional_tagged_release_targets else release_targets;
 
         var release_artifacts: [targets.len]*Build.Step.Compile = undefined;
         for (targets, &release_artifacts) |target_query, *artifact| {
+            const release_target = b.resolveTargetQuery(target_query);
+
+            const zls_release_module = createZLSModule(b, .{
+                .target = release_target,
+                .optimize = optimize,
+                .tracy_enable = tracy_enable,
+                .tracy_options = tracy_options,
+                .build_options = build_options,
+                .version_data = version_data_module,
+            });
+
+            const exe_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = release_target,
+                .optimize = optimize,
+                .single_threaded = single_threaded,
+                .pic = pie,
+                .strip = strip,
+                .imports = &.{
+                    .{ .name = "exe_options", .module = exe_options },
+                    .{ .name = "known-folders", .module = zls_release_module.import_table.get("known-folders").? },
+                    .{ .name = "tracy", .module = zls_release_module.import_table.get("tracy").? },
+                    .{ .name = "zls", .module = zls_release_module },
+                },
+            });
+
             artifact.* = b.addExecutable(.{
                 .name = "zls",
-                .root_module = b.createModule(.{
-                    .root_source_file = b.path("src/main.zig"),
-                    .target = b.resolveTargetQuery(target_query),
-                    .optimize = optimize,
-                    .single_threaded = single_threaded,
-                    .pic = pie,
-                    .imports = &.{
-                        .{ .name = "exe_options", .module = exe_options },
-                        .{ .name = "known-folders", .module = known_folders_module },
-                        .{ .name = "tracy", .module = tracy_module },
-                        .{ .name = "zls", .module = zls_module },
-                    },
-                }),
+                .root_module = exe_module,
                 .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_800_000_000,
                 .use_llvm = use_llvm,
                 .use_lld = use_llvm,
             });
-
-            if (target_query.os_tag == .windows) {
-                artifact.*.root_module.linkSystemLibrary("advapi32", .{});
-            }
         }
 
         release(b, &release_artifacts, resolved_zls_version);
     }
+
+    const zls_module = createZLSModule(b, .{
+        .target = target,
+        .optimize = optimize,
+        .tracy_enable = tracy_enable,
+        .tracy_options = tracy_options,
+        .build_options = build_options,
+        .version_data = version_data_module,
+    });
 
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -215,14 +205,13 @@ pub fn build(b: *Build) !void {
         .strip = strip,
         .imports = &.{
             .{ .name = "exe_options", .module = exe_options },
-            .{ .name = "known-folders", .module = known_folders_module },
-            .{ .name = "tracy", .module = tracy_module },
+            .{ .name = "known-folders", .module = zls_module.import_table.get("known-folders").? },
+            .{ .name = "tracy", .module = zls_module.import_table.get("tracy").? },
             .{ .name = "zls", .module = zls_module },
         },
     });
 
     { // zig build
-
         const exe = b.addExecutable(.{
             .name = "zls",
             .root_module = exe_module,
@@ -405,34 +394,79 @@ fn getVersion(b: *Build) std.SemanticVersion {
     }
 }
 
-fn getTracyModule(
+fn createZLSModule(
+    b: *Build,
+    options: struct {
+        target: Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        tracy_enable: bool,
+        tracy_options: *std.Build.Module,
+        build_options: *std.Build.Module,
+        version_data: *std.Build.Module,
+    },
+) *std.Build.Module {
+    const known_folders_module = b.dependency("known_folders", .{
+        .target = options.target,
+        .optimize = options.optimize,
+    }).module("known-folders");
+    const diffz_module = b.dependency("diffz", .{
+        .target = options.target,
+        .optimize = options.optimize,
+    }).module("diffz");
+    const lsp_module = b.dependency("lsp_codegen", .{
+        .target = options.target,
+        .optimize = options.optimize,
+    }).module("lsp");
+    const tracy_module = createTracyModule(b, .{
+        .target = options.target,
+        .optimize = options.optimize,
+        .enable = options.tracy_enable,
+        .tracy_options = options.tracy_options,
+    });
+
+    const zls_module = b.addModule("zls", .{
+        .root_source_file = b.path("src/zls.zig"),
+        .target = options.target,
+        .optimize = options.optimize,
+        .imports = &.{
+            .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "lsp", .module = lsp_module },
+            .{ .name = "tracy", .module = tracy_module },
+            .{ .name = "build_options", .module = options.build_options },
+            .{ .name = "version_data", .module = options.version_data },
+        },
+    });
+
+    if (options.target.result.os.tag == .windows) {
+        zls_module.linkSystemLibrary("advapi32", .{});
+    }
+
+    return zls_module;
+}
+
+fn createTracyModule(
     b: *Build,
     options: struct {
         target: Build.ResolvedTarget,
         optimize: std.builtin.OptimizeMode,
         enable: bool,
-        enable_allocation: bool,
-        enable_callstack: bool,
+        tracy_options: *std.Build.Module,
     },
 ) *Build.Module {
-    const tracy_options = b.addOptions();
-    tracy_options.step.name = "tracy options";
-    tracy_options.addOption(bool, "enable", options.enable);
-    tracy_options.addOption(bool, "enable_allocation", options.enable and options.enable_allocation);
-    tracy_options.addOption(bool, "enable_callstack", options.enable and options.enable_callstack);
-
     const tracy_module = b.addModule("tracy", .{
         .root_source_file = b.path("src/tracy.zig"),
         .target = options.target,
         .optimize = options.optimize,
         .imports = &.{
-            .{ .name = "options", .module = tracy_options.createModule() },
+            .{ .name = "options", .module = options.tracy_options },
         },
         .link_libc = options.enable,
         .link_libcpp = options.enable,
         .sanitize_c = .off,
     });
     if (!options.enable) return tracy_module;
+
     const tracy_dependency = b.lazyDependency("tracy", .{
         .target = options.target,
         .optimize = options.optimize,
