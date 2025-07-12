@@ -93,7 +93,7 @@ test "nested struct with self" {
     );
 }
 
-fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
+fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
@@ -108,19 +108,18 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var got: std.ArrayListUnmanaged(u8) = .empty;
-    defer got.deinit(allocator);
+    var actual: std.ArrayListUnmanaged(u8) = .empty;
+    defer actual.deinit(allocator);
 
     var stack: std.BoundedArray([]const types.DocumentSymbol, 16) = .{};
     stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
 
-    var writer = got.writer(allocator);
     while (stack.len > 0) {
         const depth = stack.len - 1;
         const top = stack.get(depth);
         if (top.len > 0) {
-            try writer.writeByteNTimes(' ', (depth) * 2);
-            try writer.print("{s} {s}\n", .{ @tagName(top[0].kind), top[0].name });
+            try actual.appendNTimes(allocator, ' ', depth * 2);
+            try actual.print(allocator, "{t} {s}\n", .{ top[0].kind, top[0].name });
             if (top[0].children) |children| {
                 try stack.append(children);
             }
@@ -129,7 +128,7 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
             _ = stack.pop();
         }
     }
-    _ = got.pop(); // Final \n
+    _ = actual.pop(); // Final \n
 
-    try std.testing.expectEqualStrings(want, got.items);
+    try std.testing.expectEqualStrings(expected, actual.items);
 }

@@ -611,16 +611,15 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     // add sorted imports
     {
         var new_text: std.ArrayListUnmanaged(u8) = .empty;
-        var writer = new_text.writer(builder.arena);
 
         for (sorted_imports, 0..) |import_decl, i| {
             if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
                 try new_text.append(builder.arena, '\n');
             }
 
-            try writer.print("{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
+            try new_text.print(builder.arena, "{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
         }
-        try writer.writeByte('\n');
+        try new_text.append(builder.arena, '\n');
 
         const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
         const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);

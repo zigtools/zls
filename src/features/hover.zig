@@ -128,10 +128,13 @@ fn hoverSymbolResolvedType(
         var possible_types: Analyser.Type.ArraySet = .empty;
         has_more = try typeof.getAllTypesWithHandlesArraySet(analyser, &possible_types);
         for (possible_types.keys()) |ty| {
-            try resolved_type_strings.append(arena, try std.fmt.allocPrint(arena, "{}", .{ty.fmtTypeVal(analyser, .{
-                .referenced = &referenced,
-                .truncate_container_decls = possible_types.count() > 1,
-            })}));
+            try resolved_type_strings.append(
+                arena,
+                try ty.stringifyTypeVal(analyser, .{
+                    .referenced = &referenced,
+                    .truncate_container_decls = possible_types.count() > 1,
+                }),
+            );
         }
     }
     const referenced_types: []const Analyser.ReferencedType = referenced.keys();
@@ -155,44 +158,44 @@ fn hoverSymbolResolved(
     has_more: bool,
     referenced_types: []const Analyser.ReferencedType,
 ) error{OutOfMemory}![]const u8 {
-    var hover_text: std.ArrayListUnmanaged(u8) = .empty;
-    const writer = hover_text.writer(arena);
+    var output: std.ArrayListUnmanaged(u8) = .empty;
+
     if (markup_kind == .markdown) {
-        try writer.print("```zig\n{s}\n```", .{def_str});
+        try output.print(arena, "```zig\n{s}\n```", .{def_str});
         for (resolved_type_strings) |resolved_type_str|
-            try writer.print("\n```zig\n({s})\n```", .{resolved_type_str});
+            try output.print(arena, "\n```zig\n({s})\n```", .{resolved_type_str});
         if (resolved_type_strings.len == 0)
-            try writer.writeAll("\n```zig\n(unknown)\n```");
+            try output.appendSlice(arena, "\n```zig\n(unknown)\n```");
         if (has_more)
-            try writer.print("\n```txt\n(...)\n```", .{});
+            try output.print(arena, "\n```txt\n(...)\n```", .{});
         if (referenced_types.len > 0)
-            try writer.print("\n\n" ++ "Go to ", .{});
+            try output.print(arena, "\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
-                try writer.print(" | ", .{});
+                try output.print(arena, " | ", .{});
             const source_index = ref.handle.tree.tokenStart(ref.token);
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
-            try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
+            try output.print(arena, "[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
-        try writer.print("{s}", .{def_str});
+        try output.print(arena, "{s}", .{def_str});
         for (resolved_type_strings) |resolved_type_str|
-            try writer.print("\n({s})", .{resolved_type_str});
+            try output.print(arena, "\n({s})", .{resolved_type_str});
         if (resolved_type_strings.len == 0)
-            try writer.writeAll("\n(unknown)");
+            try output.appendSlice(arena, "\n(unknown)");
         if (has_more)
-            try writer.print("\n(...)", .{});
+            try output.print(arena, "\n(...)", .{});
     }
 
     if (doc_strings.len > 0) {
-        try writer.writeAll("\n\n");
+        try output.appendSlice(arena, "\n\n");
         for (doc_strings, 0..) |doc, i| {
-            try writer.writeAll(doc);
-            if (i != doc_strings.len - 1) try writer.writeAll("\n\n");
+            try output.appendSlice(arena, doc);
+            if (i != doc_strings.len - 1) try output.appendSlice(arena, "\n\n");
         }
     }
 
-    return hover_text.items;
+    return output.items;
 }
 
 fn hoverDefinitionLabel(
@@ -237,7 +240,6 @@ fn hoverDefinitionBuiltin(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
     var contents: std.ArrayListUnmanaged(u8) = .empty;
-    var writer = contents.writer(arena);
 
     if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
@@ -250,13 +252,13 @@ fn hoverDefinitionBuiltin(
 
         switch (markup_kind) {
             .plaintext, .unknown_value => {
-                try writer.print(
+                try contents.print(arena,
                     \\{s}
                     \\
                 , .{source});
             },
             .markdown => {
-                try writer.print(
+                try contents.print(arena,
                     \\```c
                     \\{s}
                     \\```
@@ -270,13 +272,13 @@ fn hoverDefinitionBuiltin(
 
     switch (markup_kind) {
         .plaintext, .unknown_value => {
-            try writer.print(
+            try contents.print(arena,
                 \\{s}
                 \\{s}
             , .{ builtin.signature, builtin.documentation });
         },
         .markdown => {
-            try writer.print(
+            try contents.print(arena,
                 \\```zig
                 \\{s}
                 \\```
@@ -314,7 +316,7 @@ fn hoverDefinitionGlobal(
         if (!is_escaped_identifier) {
             if (std.mem.eql(u8, name, "_")) return null;
             if (try analyser.resolvePrimitive(name)) |ip_index| {
-                const resolved_type_str = try std.fmt.allocPrint(arena, "{}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
+                const resolved_type_str = try std.fmt.allocPrint(arena, "{f}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
                 break :blk try hoverSymbolResolved(arena, markup_kind, &.{}, name, &.{resolved_type_str}, false, &.{});
             }
         }
@@ -355,10 +357,10 @@ fn hoverDefinitionStructInit(
         try doc_strings.append(arena, doc);
 
     var referenced: Analyser.ReferencedType.Set = .empty;
-    const def_str = try std.fmt.allocPrint(arena, "{}", .{try resolved_type.fmtTypeOf(analyser, .{
+    const def_str = try resolved_type.stringifyTypeOf(analyser, .{
         .referenced = &referenced,
         .truncate_container_decls = false,
-    })});
+    });
     const referenced_types: []const Analyser.ReferencedType = referenced.keys();
 
     return .{

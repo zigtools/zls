@@ -97,8 +97,8 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
 
     const allocator = eb.gpa;
 
-    var msg_buffer: std.ArrayListUnmanaged(u8) = .empty;
-    defer msg_buffer.deinit(allocator);
+    var aw: std.io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
     defer notes.deinit(allocator);
@@ -107,18 +107,18 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
     for (tree.errors[1..]) |err| {
         if (!err.is_note) break;
 
-        msg_buffer.clearRetainingCapacity();
-        try tree.renderError(err, msg_buffer.writer(allocator));
+        aw.clearRetainingCapacity();
+        tree.renderError(err, &aw.writer) catch return error.OutOfMemory;
         try notes.append(allocator, try eb.addErrorMessage(.{
-            .msg = try eb.addString(msg_buffer.items),
+            .msg = try eb.addString(aw.getWritten()),
             .src_loc = try errorBundleSourceLocationFromToken(tree, eb, err.token),
         }));
     }
 
-    msg_buffer.clearRetainingCapacity();
-    try tree.renderError(current_error, msg_buffer.writer(allocator));
+    aw.clearRetainingCapacity();
+    tree.renderError(current_error, &aw.writer) catch return error.OutOfMemory;
     try eb.addRootErrorMessage(.{
-        .msg = try eb.addString(msg_buffer.items),
+        .msg = try eb.addString(aw.getWritten()),
         .src_loc = try errorBundleSourceLocationFromToken(tree, eb, current_error.token),
         .notes_len = @intCast(notes.items.len),
     });
@@ -585,6 +585,17 @@ pub const BuildOnSave = struct {
             const header = transport.receiveMessage(null) catch |err| switch (err) {
                 error.EndOfStream => {
                     log.debug("zig build runner process has exited", .{});
+
+                    const stderr = if (child_process.stderr) |stderr|
+                        stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+                    else
+                        "";
+                    defer allocator.free(stderr);
+
+                    if (stderr.len != 0) {
+                        log.debug("build runner stderr:\n{s}", .{stderr});
+                    }
+
                     return;
                 },
                 else => {
@@ -673,9 +684,9 @@ fn terminateChildProcessReportError(
         },
         else => {
             if (stderr.len != 0) {
-                log.warn("{s} exitied abnormally: {s}\nstderr:\n{s}", .{ name, @tagName(term), stderr });
+                log.warn("{s} exitied abnormally: {t}\nstderr:\n{s}", .{ name, term, stderr });
             } else {
-                log.warn("{s} exitied abnormally: {s}", .{ name, @tagName(term) });
+                log.warn("{s} exitied abnormally: {t}", .{ name, term });
             }
         },
     }

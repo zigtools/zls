@@ -4311,10 +4311,10 @@ fn testCompletionWithOptions(
         };
 
         if (actual_completion.kind == null or expected_completion.kind != actual_completion.kind.?) {
-            try error_builder.msgAtIndex("completion item '{s}' should be of kind '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should be of kind '{t}' but was '{?t}'!", test_uri, cursor_idx, .err, .{
                 label,
-                @tagName(expected_completion.kind),
-                if (actual_completion.kind) |kind| @tagName(kind) else null,
+                expected_completion.kind,
+                if (actual_completion.kind) |kind| kind else null,
             });
             return error.InvalidCompletionKind;
         }
@@ -4328,10 +4328,10 @@ fn testCompletionWithOptions(
 
             if (actual_doc != null and std.mem.eql(u8, expected_doc, actual_doc.?)) break :doc_blk;
 
-            try error_builder.msgAtIndex("completion item '{s}' should have doc '{'}' but was '{?'}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should have doc '{f}' but was '{?f}'!", test_uri, cursor_idx, .err, .{
                 label,
-                std.zig.fmtEscapes(expected_doc),
-                if (actual_doc) |str| std.zig.fmtEscapes(str) else null,
+                std.zig.fmtString(expected_doc),
+                if (actual_doc) |str| std.zig.fmtString(str) else null,
             });
             return error.InvalidCompletionDoc;
         }
@@ -4403,11 +4403,10 @@ fn testCompletionWithOptions(
     if (missing.count() != 0 or unexpected.count() != 0) {
         var buffer: std.ArrayListUnmanaged(u8) = .empty;
         defer buffer.deinit(allocator);
-        const out = buffer.writer(allocator);
 
-        try printLabels(out, found, "found");
-        try printLabels(out, missing, "missing");
-        try printLabels(out, unexpected, "unexpected");
+        try printLabels(&buffer, found, "found");
+        try printLabels(&buffer, missing, "missing");
+        try printLabels(&buffer, unexpected, "unexpected");
         try error_builder.msgAtIndex("invalid completions\n{s}", test_uri, cursor_idx, .err, .{buffer.items});
         return error.MissingOrUnexpectedCompletions;
     }
@@ -4451,11 +4450,11 @@ fn set_difference(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHa
     return result;
 }
 
-fn printLabels(writer: anytype, labels: std.StringArrayHashMapUnmanaged(void), name: []const u8) @TypeOf(writer).Error!void {
+fn printLabels(output: *std.ArrayListUnmanaged(u8), labels: std.StringArrayHashMapUnmanaged(void), name: []const u8) error{OutOfMemory}!void {
     if (labels.count() != 0) {
-        try writer.print("{s}:\n", .{name});
+        try output.print(allocator, "{s}:\n", .{name});
         for (labels.keys()) |label| {
-            try writer.print("  - {s}\n", .{label});
+            try output.print(allocator, "  - {s}\n", .{label});
         }
     }
 }
@@ -4577,10 +4576,8 @@ fn searchCompletionItemWithLabel(completion_list: types.CompletionList, label: [
         if (std.mem.eql(u8, item.label, label)) return item;
     }
 
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-
-    const stderr = std.io.getStdErr().writer();
+    const stderr = std.debug.lockStderrWriter(&.{});
+    defer std.debug.unlockStderrWriter();
 
     try stderr.print(
         \\server returned no completion item with label '{s}'

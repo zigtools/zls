@@ -39,10 +39,13 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-var log_transport: ?zls.lsp.AnyTransport = null;
+/// Log messages with the LSP 'window/logMessage' message.
+var log_transport: ?*zls.lsp.Transport = null;
+/// Log messages to stderr.
 var log_stderr: bool = true;
-var log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
+/// Log messages to the given file.
 var log_file: ?std.fs.File = null;
+var log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
 
 fn logFn(
     comptime level: std.log.Level,
@@ -75,27 +78,31 @@ fn logFn(
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
 
-    var fbs = std.io.fixedBufferStream(&buffer);
+    var writer: std.io.Writer = .fixed(&buffer);
     const no_space_left = blk: {
-        fbs.writer().print("{s} ({s:^6}): ", .{ level_txt, scope_txt }) catch break :blk true;
-        fbs.writer().print(format, args) catch break :blk true;
-        fbs.writer().writeByte('\n') catch break :blk true;
+        writer.print("{s} ({s:^6}): ", .{ level_txt, scope_txt }) catch break :blk true;
+        writer.print(format, args) catch break :blk true;
+        writer.writeByte('\n') catch break :blk true;
         break :blk false;
     };
     if (no_space_left) {
-        buffer[buffer.len - 4 ..][0..4].* = "...\n".*;
+        const trailing = "...\n".*;
+        writer.undo(trailing.len -| writer.unusedCapacityLen());
+        (writer.writableArray(trailing.len) catch unreachable).* = trailing;
     }
 
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
 
     if (log_stderr) {
-        std.io.getStdErr().writeAll(fbs.getWritten()) catch {};
+        var stderr_writer = std.fs.File.stderr().writer(&.{});
+        stderr_writer.interface.writeAll(writer.buffered()) catch {};
     }
 
     if (log_file) |file| {
+        var log_writer = file.writer(&.{});
         file.seekFromEnd(0) catch {};
-        file.writeAll(fbs.getWritten()) catch {};
+        log_writer.interface.writeAll(writer.buffered()) catch {};
     }
 }
 
@@ -194,6 +201,10 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
     const log_file_path = try defaultLogFilePath(allocator);
     defer if (log_file_path) |path| allocator.free(path);
 
+    var buffer: [512]u8 = undefined;
+    var file_writer = std.fs.File.stdout().writer(&buffer);
+    const writer = &file_writer.interface;
+
     const env: Env = .{
         .version = zls.build_options.version_string,
         .global_cache_dir = zls_global_cache_dir,
@@ -202,8 +213,17 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
         .config_file = config_file_path,
         .log_file = log_file_path,
     };
-    try std.json.stringify(env, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
-    try std.io.getStdOut().writeAll("\n");
+    {
+        // Remove this once `std.json` has been ported to `std.io.Writer`
+        const any_writer: std.io.AnyWriter = .{
+            .context = writer,
+            .writeFn = @ptrCast(&std.io.Writer.write),
+        };
+        std.json.stringify(env, .{ .whitespace = .indent_1 }, any_writer) catch return file_writer.err.?;
+    }
+    writer.writeAll("\n") catch return file_writer.err.?;
+    writer.flush() catch return file_writer.err.?;
+
     std.process.exit(0);
 }
 
@@ -228,8 +248,6 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
     var result: ParseArgsResult = .{};
     errdefer result.deinit(allocator);
 
-    const stdout = std.io.getStdOut().writer();
-
     var args_it: std.process.ArgIterator = try .initWithAllocator(allocator);
     defer args_it.deinit();
 
@@ -240,10 +258,10 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
     while (args_it.next()) |arg| : (arg_index += 1) {
         if (arg_index == 0) {
             if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) { // help
-                try std.io.getStdErr().writeAll(usage);
+                try std.fs.File.stderr().writeAll(usage);
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "version") or std.mem.eql(u8, arg, "--version")) { // version
-                try stdout.writeAll(zls.build_options.version_string ++ "\n");
+                try std.fs.File.stdout().writeAll(zls.build_options.version_string ++ "\n");
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "env")) { // env
                 try @"zls env"(allocator);
@@ -283,7 +301,7 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
         }
     }
 
-    if (zig_builtin.target.os.tag != .wasi and std.io.getStdIn().isTty()) {
+    if (zig_builtin.target.os.tag != .wasi and std.fs.File.stdin().isTty()) {
         log.warn("ZLS is not a CLI tool, it communicates over the Language Server Protocol.", .{});
         log.warn("Did you mean to run 'zls --help'?", .{});
         log.warn("", .{});
@@ -323,13 +341,17 @@ pub fn main() !u8 {
         log_file = null;
     };
 
-    var transport: zls.lsp.ThreadSafeTransport(.{
-        .ChildTransport = zls.lsp.TransportOverStdio,
+    var read_buffer: [256]u8 = undefined;
+    var stdio_transport: zls.lsp.Transport.Stdio = .init(&read_buffer, .stdin(), .stdout());
+
+    var thread_safe_transport: zls.lsp.ThreadSafeTransport(.{
         .thread_safe_read = false,
         .thread_safe_write = true,
-    }) = .{ .child_transport = .init(std.io.getStdIn(), std.io.getStdOut()) };
+    }) = .init(&stdio_transport.transport);
 
-    log_transport = if (result.disable_lsp_logs) null else transport.any();
+    const transport: *zls.lsp.Transport = &thread_safe_transport.transport;
+
+    log_transport = if (result.disable_lsp_logs) null else transport;
     log_stderr = result.enable_stderr_logs;
     log_level = result.log_level orelse log_level;
     defer {
@@ -339,14 +361,14 @@ pub fn main() !u8 {
 
     log.info("Starting ZLS      {s} @ '{s}'", .{ zls.build_options.version_string, result.zls_exe_path });
     if (log_file_path) |path| {
-        log.info("Log File:         {s} ({s})", .{ path, @tagName(log_level) });
+        log.info("Log File:         {s} ({t})", .{ path, log_level });
     } else {
         log.info("Log File:         none", .{});
     }
 
     const server = try zls.Server.create(allocator);
     defer server.destroy();
-    server.setTransport(transport.any());
+    server.setTransport(transport);
     server.config_path = result.config_path;
 
     try server.loop();

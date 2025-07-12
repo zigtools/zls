@@ -689,15 +689,15 @@ pub const Index = enum(u32) {
         }
     };
 
-    pub inline fn fmt(index: Index, ip: *InternPool) std.fmt.Formatter(format) {
+    pub inline fn fmt(index: Index, ip: *InternPool) std.fmt.Alt(FormatContext, format) {
         return fmtOptions(index, ip, .{});
     }
 
-    pub inline fn fmtDebug(index: Index, ip: *InternPool) std.fmt.Formatter(format) {
+    pub inline fn fmtDebug(index: Index, ip: *InternPool) std.fmt.Alt(FormatContext, format) {
         return fmtOptions(index, ip, .{ .debug = true });
     }
 
-    pub fn fmtOptions(index: Index, ip: *InternPool, options: FormatOptions) std.fmt.Formatter(format) {
+    pub fn fmtOptions(index: Index, ip: *InternPool, options: FormatOptions) std.fmt.Alt(FormatContext, format) {
         return .{ .data = .{ .index = index, .ip = ip, .options = options } };
     }
 };
@@ -3861,13 +3861,7 @@ pub const FormatOptions = struct {
     truncate_container: bool = false,
 };
 
-fn format(
-    ctx: FormatContext,
-    comptime fmt_str: []const u8,
-    _: std.fmt.FormatOptions,
-    writer: anytype,
-) @TypeOf(writer).Error!void {
-    if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.index);
+fn format(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
     if (ctx.options.debug and ctx.index == .none) {
         return writer.writeAll(".none");
     } else {
@@ -3875,11 +3869,11 @@ fn format(
     }
 }
 
-pub fn print(ip: *InternPool, index: Index, writer: anytype, options: FormatOptions) @TypeOf(writer).Error!void {
+pub fn print(ip: *InternPool, index: Index, writer: *std.io.Writer, options: FormatOptions) std.io.Writer.Error!void {
     var tv = index;
     const ty = ip.typeOf(tv);
     while (true) {
-        if (options.debug and ty != .type_type) try writer.print("@as({},", .{ip.typeOf(tv).fmt(ip)});
+        if (options.debug and ty != .type_type) try writer.print("@as({f},", .{ip.typeOf(tv).fmt(ip)});
         var child_options = options;
         child_options.debug = false;
         tv = try ip.printInternal(tv, writer, child_options) orelse break;
@@ -3887,7 +3881,7 @@ pub fn print(ip: *InternPool, index: Index, writer: anytype, options: FormatOpti
     if (options.debug and ty != .type_type) try writer.writeByte(')');
 }
 
-fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOptions) @TypeOf(writer).Error!?Index {
+fn printInternal(ip: *InternPool, ty: Index, writer: *std.io.Writer, options: FormatOptions) std.io.Writer.Error!?Index {
     switch (ip.indexToKey(ty)) {
         .simple_type => |simple| switch (simple) {
             .f16,
@@ -3945,8 +3939,8 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             if (pointer_info.sentinel != Index.none) {
                 switch (pointer_info.flags.size) {
                     .one, .c => unreachable,
-                    .many => try writer.print("[*:{}]", .{pointer_info.sentinel.fmt(ip)}),
-                    .slice => try writer.print("[:{}]", .{pointer_info.sentinel.fmt(ip)}),
+                    .many => try writer.print("[*:{f}]", .{pointer_info.sentinel.fmt(ip)}),
+                    .slice => try writer.print("[:{f}]", .{pointer_info.sentinel.fmt(ip)}),
                 }
             } else switch (pointer_info.flags.size) {
                 .one => try writer.writeAll("*"),
@@ -3966,7 +3960,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             }
 
             if (pointer_info.flags.address_space != .generic) {
-                try writer.print("addrspace(.{s}) ", .{@tagName(pointer_info.flags.address_space)});
+                try writer.print("addrspace(.{t}) ", .{pointer_info.flags.address_space});
             }
 
             if (pointer_info.flags.is_const) try writer.writeAll("const ");
@@ -3989,7 +3983,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             const optional_decl_index = ip.getStruct(struct_index).owner_decl;
             const decl_index = optional_decl_index.unwrap() orelse return panicOrElse(?Index, "TODO", null);
             const decl = ip.getDecl(decl_index);
-            try writer.print("{}", .{ip.fmtId(decl.name)});
+            try writer.print("{f}", .{ip.fmtId(decl.name)});
         },
         .optional_type => |optional_info| {
             try writer.writeByte('?');
@@ -4005,7 +3999,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
         .error_set_type => |error_set_info| {
             if (error_set_info.owner_decl.unwrap()) |decl_index| {
                 const decl = ip.getDecl(decl_index);
-                try writer.print("{}", .{ip.fmtId(decl.name)});
+                try writer.print("{f}", .{ip.fmtId(decl.name)});
                 return null;
             }
             if (options.truncate_container and error_set_info.names.len > 2) {
@@ -4016,7 +4010,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             for (0..error_set_info.names.len) |i| {
                 if (i != 0) try writer.writeByte(',');
                 const name = error_set_info.names.at(@intCast(i), ip);
-                try writer.print("{}", .{ip.fmtId(name)});
+                try writer.print("{f}", .{ip.fmtId(name)});
             }
             try writer.writeByte('}');
         },
@@ -4060,7 +4054,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
                     }
                 }
                 switch (cc) {
-                    .auto, .naked, .@"inline" => try writer.print("callconv(.{}) ", .{std.zig.fmtId(@tagName(cc))}),
+                    .auto, .naked, .@"inline" => try writer.print("callconv(.{f}) ", .{std.zig.fmtId(@tagName(cc))}),
                     else => try writer.print("callconv({any}) ", .{cc}),
                 }
             }
@@ -4089,7 +4083,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             try writer.writeByte('}');
         },
         .vector_type => |vector_info| {
-            try writer.print("@Vector({d},{})", .{
+            try writer.print("@Vector({d},{f})", .{
                 vector_info.len,
                 vector_info.child.fmtOptions(ip, options),
             });
@@ -4139,7 +4133,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
                 const field = aggregate.values.at(@intCast(i), ip);
                 if (i != 0) try writer.writeAll(", ");
 
-                try writer.print(".{} = {}", .{
+                try writer.print(".{f} = {f}", .{
                     ip.fmtId(field_name),
                     field.fmtOptions(ip, options),
                 });
@@ -4150,12 +4144,12 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
             const union_info = ip.getUnion(ip.indexToKey(union_value.ty).union_type);
             const name = union_info.fields.keys()[union_value.field_index];
 
-            try writer.print(".{{ .{} = {} }}", .{
+            try writer.print(".{{ .{f} = {f} }}", .{
                 ip.fmtId(name),
                 union_value.val.fmtOptions(ip, options),
             });
         },
-        .error_value => |error_value| try writer.print("error.{}", .{ip.fmtId(error_value.error_tag_name)}),
+        .error_value => |error_value| try writer.print("error.{f}", .{ip.fmtId(error_value.error_tag_name)}),
         .null_value => try writer.print("null", .{}),
         .undefined_value => try writer.print("undefined", .{}),
         .unknown_value => try writer.print("(unknown value)", .{}),
@@ -4163,23 +4157,18 @@ fn printInternal(ip: *InternPool, ty: Index, writer: anytype, options: FormatOpt
     return null;
 }
 
-fn formatId(
-    ctx: struct {
-        ip: *InternPool,
-        string: String,
-    },
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) @TypeOf(writer).Error!void {
-    _ = options;
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx.string);
-    const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.string);
-    defer locked_string.release(&ctx.ip.string_pool);
-    try std.fmt.format(writer, "{}", .{std.zig.fmtId(locked_string.slice)});
-}
+const FormatId = struct {
+    ip: *InternPool,
+    string: String,
 
-pub fn fmtId(ip: *InternPool, string: String) std.fmt.Formatter(formatId) {
+    fn render(ctx: FormatId, writer: *std.io.Writer) std.io.Writer.Error!void {
+        const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.string);
+        defer locked_string.release(&ctx.ip.string_pool);
+        try writer.print("{f}", .{std.zig.fmtId(locked_string.slice)});
+    }
+};
+
+pub fn fmtId(ip: *InternPool, string: String) std.fmt.Alt(FormatId, FormatId.render) {
     return .{ .data = .{ .ip = ip, .string = string } };
 }
 
@@ -4204,16 +4193,16 @@ test "simple types" {
     const bool_true = try ip.get(gpa, .{ .simple_value = .bool_true });
     const bool_false = try ip.get(gpa, .{ .simple_value = .bool_false });
 
-    try expectFmt("@TypeOf(null)", "{}", .{null_type.fmt(&ip)});
-    try expectFmt("@TypeOf(undefined)", "{}", .{undefined_type.fmt(&ip)});
-    try expectFmt("@Type(.enum_literal)", "{}", .{enum_literal_type.fmt(&ip)});
+    try expectFmt("@TypeOf(null)", "{f}", .{null_type.fmt(&ip)});
+    try expectFmt("@TypeOf(undefined)", "{f}", .{undefined_type.fmt(&ip)});
+    try expectFmt("@Type(.enum_literal)", "{f}", .{enum_literal_type.fmt(&ip)});
 
-    try expectFmt("undefined", "{}", .{undefined_value.fmt(&ip)});
-    try expectFmt("{}", "{}", .{void_value.fmt(&ip)});
-    try expectFmt("unreachable", "{}", .{unreachable_value.fmt(&ip)});
-    try expectFmt("null", "{}", .{null_value.fmt(&ip)});
-    try expectFmt("true", "{}", .{bool_true.fmt(&ip)});
-    try expectFmt("false", "{}", .{bool_false.fmt(&ip)});
+    try expectFmt("undefined", "{f}", .{undefined_value.fmt(&ip)});
+    try expectFmt("{}", "{f}", .{void_value.fmt(&ip)});
+    try expectFmt("unreachable", "{f}", .{unreachable_value.fmt(&ip)});
+    try expectFmt("null", "{f}", .{null_value.fmt(&ip)});
+    try expectFmt("true", "{f}", .{bool_true.fmt(&ip)});
+    try expectFmt("false", "{f}", .{bool_false.fmt(&ip)});
 
     try expect(!ip.isSignedInt(null_type, builtin.target));
     try expect(!ip.isSignedInt(undefined_type, builtin.target));
@@ -4241,9 +4230,9 @@ test "int type" {
     try expect(i16_type != another_i32_type);
     try expect(i16_type != u7_type);
 
-    try expectFmt("i32", "{}", .{i32_type.fmt(&ip)});
-    try expectFmt("i16", "{}", .{i16_type.fmt(&ip)});
-    try expectFmt("u7", "{}", .{u7_type.fmt(&ip)});
+    try expectFmt("i32", "{f}", .{i32_type.fmt(&ip)});
+    try expectFmt("i16", "{f}", .{i16_type.fmt(&ip)});
+    try expectFmt("u7", "{f}", .{u7_type.fmt(&ip)});
 
     try expect(ip.isSignedInt(.isize_type, builtin.target));
     try expect(ip.isSignedInt(.c_short_type, builtin.target));
@@ -4297,14 +4286,14 @@ test "int value" {
     try expect(u64_max_value != i64_max_value);
     try expect(i64_max_value != i64_min_value);
 
-    try expectFmt("0", "{}", .{unsigned_zero_value.fmt(&ip)});
-    try expectFmt("1", "{}", .{unsigned_one_value.fmt(&ip)});
-    try expectFmt("0", "{}", .{signed_zero_value.fmt(&ip)});
-    try expectFmt("1", "{}", .{signed_one_value.fmt(&ip)});
+    try expectFmt("0", "{f}", .{unsigned_zero_value.fmt(&ip)});
+    try expectFmt("1", "{f}", .{unsigned_one_value.fmt(&ip)});
+    try expectFmt("0", "{f}", .{signed_zero_value.fmt(&ip)});
+    try expectFmt("1", "{f}", .{signed_one_value.fmt(&ip)});
 
-    try expectFmt("18446744073709551615", "{}", .{u64_max_value.fmt(&ip)});
-    try expectFmt("9223372036854775807", "{}", .{i64_max_value.fmt(&ip)});
-    try expectFmt("-9223372036854775808", "{}", .{i64_min_value.fmt(&ip)});
+    try expectFmt("18446744073709551615", "{f}", .{u64_max_value.fmt(&ip)});
+    try expectFmt("9223372036854775807", "{f}", .{i64_max_value.fmt(&ip)});
+    try expectFmt("-9223372036854775808", "{f}", .{i64_min_value.fmt(&ip)});
 }
 
 test "big int value" {
@@ -4332,8 +4321,8 @@ test "big int value" {
     try std.testing.expectEqual(Index.comptime_int_type, ip.typeOf(negative_big_int_value));
     try std.testing.expectEqual(Index.comptime_int_type, ip.typeOf(another_positive_big_int_value));
 
-    try expectFmt("340282366920938463463374607431768211456", "{}", .{positive_big_int_value.fmt(&ip)});
-    try expectFmt("-340282366920938463463374607431768211456", "{}", .{negative_big_int_value.fmt(&ip)});
+    try expectFmt("340282366920938463463374607431768211456", "{f}", .{positive_big_int_value.fmt(&ip)});
+    try expectFmt("-340282366920938463463374607431768211456", "{f}", .{negative_big_int_value.fmt(&ip)});
 }
 
 test "float type" {
@@ -4359,11 +4348,11 @@ test "float type" {
     try expect(f32_type == another_f32_type);
     try expect(f64_type == another_f64_type);
 
-    try expectFmt("f16", "{}", .{f16_type.fmt(&ip)});
-    try expectFmt("f32", "{}", .{f32_type.fmt(&ip)});
-    try expectFmt("f64", "{}", .{f64_type.fmt(&ip)});
-    try expectFmt("f80", "{}", .{f80_type.fmt(&ip)});
-    try expectFmt("f128", "{}", .{f128_type.fmt(&ip)});
+    try expectFmt("f16", "{f}", .{f16_type.fmt(&ip)});
+    try expectFmt("f32", "{f}", .{f32_type.fmt(&ip)});
+    try expectFmt("f64", "{f}", .{f64_type.fmt(&ip)});
+    try expectFmt("f80", "{f}", .{f80_type.fmt(&ip)});
+    try expectFmt("f128", "{f}", .{f128_type.fmt(&ip)});
 }
 
 test "float value" {
@@ -4408,20 +4397,20 @@ test "float value" {
     try expect(ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_zero_value), &ip));
     try expect(!ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_nzero_value), &ip));
 
-    try expectFmt("0.25", "{}", .{f16_value.fmt(&ip)});
-    try expectFmt("0.5", "{}", .{f32_value.fmt(&ip)});
-    try expectFmt("1", "{}", .{f64_value.fmt(&ip)});
-    try expectFmt("2", "{}", .{f80_value.fmt(&ip)});
-    try expectFmt("2.75", "{}", .{f128_value.fmt(&ip)});
+    try expectFmt("0.25", "{f}", .{f16_value.fmt(&ip)});
+    try expectFmt("0.5", "{f}", .{f32_value.fmt(&ip)});
+    try expectFmt("1", "{f}", .{f64_value.fmt(&ip)});
+    try expectFmt("2", "{f}", .{f80_value.fmt(&ip)});
+    try expectFmt("2.75", "{f}", .{f128_value.fmt(&ip)});
 
-    try expectFmt("nan", "{}", .{f32_snan_value.fmt(&ip)});
-    try expectFmt("nan", "{}", .{f32_qnan_value.fmt(&ip)});
+    try expectFmt("nan", "{f}", .{f32_snan_value.fmt(&ip)});
+    try expectFmt("nan", "{f}", .{f32_qnan_value.fmt(&ip)});
 
-    try expectFmt("inf", "{}", .{f32_inf_value.fmt(&ip)});
-    try expectFmt("-inf", "{}", .{f32_ninf_value.fmt(&ip)});
+    try expectFmt("inf", "{f}", .{f32_inf_value.fmt(&ip)});
+    try expectFmt("-inf", "{f}", .{f32_ninf_value.fmt(&ip)});
 
-    try expectFmt("0", "{}", .{f32_zero_value.fmt(&ip)});
-    try expectFmt("-0", "{}", .{f32_nzero_value.fmt(&ip)});
+    try expectFmt("0", "{f}", .{f32_zero_value.fmt(&ip)});
+    try expectFmt("-0", "{f}", .{f32_nzero_value.fmt(&ip)});
 }
 
 test "pointer type" {
@@ -4499,17 +4488,17 @@ test "pointer type" {
     try expect(@"[*:0]u32" != @"[:0]u32");
     try expect(@"[:0]u32" != @"[*c]u32");
 
-    try expectFmt("*i32", "{}", .{@"*i32".fmt(&ip)});
-    try expectFmt("*u32", "{}", .{@"*u32".fmt(&ip)});
-    try expectFmt("*const volatile u32", "{}", .{@"*const volatile u32".fmt(&ip)});
-    try expectFmt("*align(4:2:3) u32", "{}", .{@"*align(4:2:3) u32".fmt(&ip)});
-    try expectFmt("*addrspace(.shared) const u32", "{}", .{@"*addrspace(.shared) const u32".fmt(&ip)});
+    try expectFmt("*i32", "{f}", .{@"*i32".fmt(&ip)});
+    try expectFmt("*u32", "{f}", .{@"*u32".fmt(&ip)});
+    try expectFmt("*const volatile u32", "{f}", .{@"*const volatile u32".fmt(&ip)});
+    try expectFmt("*align(4:2:3) u32", "{f}", .{@"*align(4:2:3) u32".fmt(&ip)});
+    try expectFmt("*addrspace(.shared) const u32", "{f}", .{@"*addrspace(.shared) const u32".fmt(&ip)});
 
-    try expectFmt("[*]u32", "{}", .{@"[*]u32".fmt(&ip)});
-    try expectFmt("[*:0]u32", "{}", .{@"[*:0]u32".fmt(&ip)});
-    try expectFmt("[]u32", "{}", .{@"[]u32".fmt(&ip)});
-    try expectFmt("[:0]u32", "{}", .{@"[:0]u32".fmt(&ip)});
-    try expectFmt("[*c]u32", "{}", .{@"[*c]u32".fmt(&ip)});
+    try expectFmt("[*]u32", "{f}", .{@"[*]u32".fmt(&ip)});
+    try expectFmt("[*:0]u32", "{f}", .{@"[*:0]u32".fmt(&ip)});
+    try expectFmt("[]u32", "{f}", .{@"[]u32".fmt(&ip)});
+    try expectFmt("[:0]u32", "{f}", .{@"[:0]u32".fmt(&ip)});
+    try expectFmt("[*c]u32", "{f}", .{@"[*c]u32".fmt(&ip)});
 }
 
 test "optional type" {
@@ -4523,8 +4512,8 @@ test "optional type" {
 
     try expect(i32_optional_type != u32_optional_type);
 
-    try expectFmt("?i32", "{}", .{i32_optional_type.fmt(&ip)});
-    try expectFmt("?u32", "{}", .{u32_optional_type.fmt(&ip)});
+    try expectFmt("?i32", "{f}", .{i32_optional_type.fmt(&ip)});
+    try expectFmt("?u32", "{f}", .{u32_optional_type.fmt(&ip)});
 }
 
 test "optional value" {
@@ -4538,7 +4527,7 @@ test "optional value" {
     const u64_42_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
     const optional_42_value = try ip.get(gpa, .{ .optional_value = .{ .ty = u32_optional_type, .val = u64_42_value } });
 
-    try expectFmt("42", "{}", .{optional_42_value.fmt(&ip)});
+    try expectFmt("42", "{f}", .{optional_42_value.fmt(&ip)});
 }
 
 test "error set type" {
@@ -4569,9 +4558,9 @@ test "error set type" {
     try expect(empty_error_set != foo_bar_baz_set);
     try expect(foo_bar_baz_set != foo_bar_set);
 
-    try expectFmt("error{}", "{}", .{empty_error_set.fmt(&ip)});
-    try expectFmt("error{foo,bar,baz}", "{}", .{foo_bar_baz_set.fmt(&ip)});
-    try expectFmt("error{foo,bar}", "{}", .{foo_bar_set.fmt(&ip)});
+    try expectFmt("error{}", "{f}", .{empty_error_set.fmt(&ip)});
+    try expectFmt("error{foo,bar,baz}", "{f}", .{foo_bar_baz_set.fmt(&ip)});
+    try expectFmt("error{foo,bar}", "{f}", .{foo_bar_set.fmt(&ip)});
 }
 
 test "error union type" {
@@ -4591,7 +4580,7 @@ test "error union type" {
         .payload_type = bool_type,
     } });
 
-    try expectFmt("error{}!bool", "{}", .{@"error{}!bool".fmt(&ip)});
+    try expectFmt("error{}!bool", "{f}", .{@"error{}!bool".fmt(&ip)});
 }
 
 test "array type" {
@@ -4612,8 +4601,8 @@ test "array type" {
 
     try expect(i32_3_array_type != u32_0_0_array_type);
 
-    try expectFmt("[3]i32", "{}", .{i32_3_array_type.fmt(&ip)});
-    try expectFmt("[3:0]u32", "{}", .{u32_0_0_array_type.fmt(&ip)});
+    try expectFmt("[3]i32", "{f}", .{i32_3_array_type.fmt(&ip)});
+    try expectFmt("[3:0]u32", "{f}", .{u32_0_0_array_type.fmt(&ip)});
 }
 
 test "struct value" {
@@ -4643,7 +4632,7 @@ test "struct value" {
         .values = try ip.getIndexSlice(gpa, &.{ .one_usize, .bool_true }),
     } });
 
-    try expectFmt(".{.foo = 1, .bar = true}", "{}", .{aggregate_value.fmt(&ip)});
+    try expectFmt(".{.foo = 1, .bar = true}", "{f}", .{aggregate_value.fmt(&ip)});
 }
 
 test "function type" {
@@ -4686,10 +4675,10 @@ test "function type" {
         },
     } });
 
-    try expectFmt("fn(i32) bool", "{}", .{@"fn(i32) bool".fmt(&ip)});
-    try expectFmt("fn(comptime type, noalias i32) type", "{}", .{@"fn(comptime type, noalias i32) type".fmt(&ip)});
-    try expectFmt("fn(i32, ...) type", "{}", .{@"fn(i32, ...) type".fmt(&ip)});
-    try expectFmt("fn() align(4) callconv(.c) type", "{}", .{@"fn() align(4) callconv(.c) type".fmt(&ip)});
+    try expectFmt("fn(i32) bool", "{f}", .{@"fn(i32) bool".fmt(&ip)});
+    try expectFmt("fn(comptime type, noalias i32) type", "{f}", .{@"fn(comptime type, noalias i32) type".fmt(&ip)});
+    try expectFmt("fn(i32, ...) type", "{f}", .{@"fn(i32, ...) type".fmt(&ip)});
+    try expectFmt("fn() align(4) callconv(.c) type", "{f}", .{@"fn() align(4) callconv(.c) type".fmt(&ip)});
 }
 
 test "union value" {
@@ -4726,8 +4715,8 @@ test "union value" {
         .val = f16_value,
     } });
 
-    try expectFmt(".{ .int = 1 }", "{}", .{union_value1.fmt(&ip)});
-    try expectFmt(".{ .float = 0.25 }", "{}", .{union_value2.fmt(&ip)});
+    try expectFmt(".{ .int = 1 }", "{f}", .{union_value1.fmt(&ip)});
+    try expectFmt(".{ .float = 0.25 }", "{f}", .{union_value2.fmt(&ip)});
 }
 
 test "anyframe type" {
@@ -4741,8 +4730,8 @@ test "anyframe type" {
 
     try expect(@"anyframe->i32" != @"anyframe->bool");
 
-    try expectFmt("anyframe->i32", "{}", .{@"anyframe->i32".fmt(&ip)});
-    try expectFmt("anyframe->bool", "{}", .{@"anyframe->bool".fmt(&ip)});
+    try expectFmt("anyframe->i32", "{f}", .{@"anyframe->i32".fmt(&ip)});
+    try expectFmt("anyframe->bool", "{f}", .{@"anyframe->bool".fmt(&ip)});
 }
 
 test "vector type" {
@@ -4766,9 +4755,9 @@ test "vector type" {
 
     try expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
 
-    try expectFmt("@Vector(2,i32)", "{}", .{@"@Vector(2,i32)".fmt(&ip)});
-    try expectFmt("@Vector(2,u32)", "{}", .{@"@Vector(2,u32)".fmt(&ip)});
-    try expectFmt("@Vector(2,bool)", "{}", .{@"@Vector(2,bool)".fmt(&ip)});
+    try expectFmt("@Vector(2,i32)", "{f}", .{@"@Vector(2,i32)".fmt(&ip)});
+    try expectFmt("@Vector(2,u32)", "{f}", .{@"@Vector(2,u32)".fmt(&ip)});
+    try expectFmt("@Vector(2,bool)", "{f}", .{@"@Vector(2,bool)".fmt(&ip)});
 
     try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,i32)", builtin.target));
     try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,u32)", builtin.target));
@@ -5264,7 +5253,7 @@ fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !v
 fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
     const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{ lhs, rhs }, builtin.target);
     if (expected == actual) return;
-    std.debug.print("expected `{}`, found `{}`\n", .{ expected.fmtDebug(ip), actual.fmtDebug(ip) });
+    std.debug.print("expected `{f}`, found `{f}`\n", .{ expected.fmtDebug(ip), actual.fmtDebug(ip) });
     return error.TestExpectedEqual;
 }
 
@@ -5297,17 +5286,17 @@ fn testCoerce(ip: *InternPool, dest_ty: Index, inst: Index, expected: Index) !vo
     if (expected == actual) return;
 
     std.debug.print(
-        \\expression: @as({}, {})
-        \\expected:   {}
+        \\expression: @as({f}, {f})
+        \\expected:   {f}
     , .{
         dest_ty.fmtDebug(ip),
         inst.fmtDebug(ip),
         expected.fmtDebug(ip),
     });
     if (actual == .none) {
-        std.debug.print("got error:  '{}'", .{err_msg.fmt(ip)});
+        std.debug.print("got error:  '{f}'", .{err_msg.fmt(ip)});
     } else {
-        std.debug.print("actual:     '{}'", .{actual.fmtDebug(ip)});
+        std.debug.print("actual:     '{f}'", .{actual.fmtDebug(ip)});
     }
 
     return error.TestExpectedEqual;

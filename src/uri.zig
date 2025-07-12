@@ -12,8 +12,6 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) error{OutOfMemor
 
     buf.appendSliceAssumeCapacity(prefix);
 
-    const writer = buf.writer(allocator);
-
     var start: usize = 0;
     for (path, 0..) |char, index| {
         switch (char) {
@@ -30,15 +28,15 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) error{OutOfMemor
             else => {},
         }
 
-        try writer.writeAll(path[start..index]);
+        try buf.appendSlice(allocator, path[start..index]);
         if (std.fs.path.isSep(char)) {
-            try writer.writeByte('/');
+            try buf.append(allocator, '/');
         } else {
-            try writer.print("%{X:0>2}", .{char});
+            try buf.print(allocator, "%{X:0>2}", .{char});
         }
         start = index + 1;
     }
-    try writer.writeAll(path[start..]);
+    try buf.appendSlice(allocator, path[start..]);
 
     // On windows, we need to lowercase the drive name.
     if (builtin.os.tag == .windows) {
@@ -75,5 +73,8 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) (std.Uri.ParseError 
     if (builtin.os.tag == .windows and uri.path.percent_encoded.len != 0 and uri.path.percent_encoded[0] == '/') {
         uri.path.percent_encoded = uri.path.percent_encoded[1..];
     }
-    return try std.fmt.allocPrint(allocator, "{raw}", .{uri.path});
+    var aw: std.io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    uri.path.formatRaw(&aw.writer) catch return error.OutOfMemory;
+    return try aw.toOwnedSlice();
 }

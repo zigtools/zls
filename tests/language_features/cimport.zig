@@ -68,7 +68,7 @@ test "cUndef" {
 }
 
 fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
-    const source: [:0]u8 = try std.fmt.allocPrintZ(allocator, "const c = {s};", .{cimport_source});
+    const source: [:0]u8 = try std.fmt.allocPrintSentinel(allocator, "const c = {s};", .{cimport_source}, 0);
     defer allocator.free(source);
 
     var tree: Ast = try .parse(allocator, source, .zig);

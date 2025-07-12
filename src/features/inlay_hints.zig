@@ -266,7 +266,10 @@ fn writeCallHint(
         const no_alias = if (param.modifier) |m| m == .noalias_param else false;
         const comp_time = if (param.modifier) |m| m == .comptime_param else false;
 
-        const tooltip = try std.fmt.allocPrint(builder.arena, "{}", .{param.type.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = true })});
+        const tooltip = try param.type.stringifyTypeVal(
+            builder.analyser,
+            .{ .truncate_container_decls = true },
+        );
 
         try builder.appendParameterHint(
             handle.tree.nodeTag(arg),
@@ -325,15 +328,10 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, param
 
 fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, builder.handle)) orelse return null;
-
-    const type_str: []const u8 = try std.fmt.allocPrint(
-        builder.arena,
-        "{}",
-        .{try resolved_type.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
+    return try resolved_type.stringifyTypeOf(
+        builder.analyser,
+        .{ .truncate_container_decls = true },
     );
-    if (type_str.len == 0) return null;
-
-    return type_str;
 }
 
 fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
@@ -343,15 +341,10 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
         builder.handle.tree.tokenStart(token),
     ) orelse return null;
     const resolved_type = try things.resolveType(builder.analyser) orelse return null;
-
-    const type_str: []const u8 = try std.fmt.allocPrint(
-        builder.arena,
-        "{}",
-        .{try resolved_type.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
+    return try resolved_type.stringifyTypeOf(
+        builder.analyser,
+        .{ .truncate_container_decls = true },
     );
-    if (type_str.len == 0) return null;
-
-    return type_str;
 }
 
 /// Append a hint in the form `: hint`
@@ -534,11 +527,7 @@ fn writeNodeInlayHint(
                 const name = offsets.locToSlice(tree.source, name_loc);
                 const decl = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
                 const ty = try decl.resolveType(builder.analyser) orelse continue;
-                const type_str: []const u8 = try std.fmt.allocPrint(
-                    builder.arena,
-                    "{}",
-                    .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })},
-                );
+                const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true });
                 if (type_str.len == 0) continue;
                 try appendTypeHintString(
                     builder,

@@ -55,26 +55,18 @@ pub const ErrorMsg = union(enum) {
         ip: *InternPool,
     };
 
-    pub fn fmt(self: ErrorMsg, ip: *InternPool) std.fmt.Formatter(format) {
+    pub fn fmt(self: ErrorMsg, ip: *InternPool) std.fmt.Alt(FormatContext, format) {
         return .{ .data = .{ .error_msg = self, .ip = ip } };
     }
 
-    pub fn format(
-        ctx: FormatContext,
-        comptime fmt_str: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        _ = options;
+    pub fn format(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
         const ip = ctx.ip;
-        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.error_msg);
-        return switch (ctx.error_msg) {
-            .expected_type => |info| std.fmt.format(
-                writer,
-                "expected type '{}', found '{}'",
+        switch (ctx.error_msg) {
+            .expected_type => |info| try writer.print(
+                "expected type '{f}', found '{f}'",
                 .{ info.expected.fmt(ip), ip.typeOf(info.actual).fmt(ip) },
             ),
-            .expected_tag_type => |info| blk: {
+            .expected_tag_type => |info| {
                 const expected_tag_str = switch (info.expected_tag) {
                     .type => "type",
                     .void => "void",
@@ -101,61 +93,53 @@ pub const ErrorMsg = union(enum) {
                     .vector => "vector",
                     .enum_literal => "enum literal",
                 };
-                break :blk std.fmt.format(
-                    writer,
-                    "expected {s} type, found '{}'",
+                try writer.print(
+                    "expected {s} type, found '{f}'",
                     .{ expected_tag_str, info.actual.fmt(ip) },
                 );
             },
-            .compare_eq_with_null => |info| std.fmt.format(
-                writer,
-                "comparison of '{}' with null",
+            .compare_eq_with_null => |info| try writer.print(
+                "comparison of '{f}' with null",
                 .{info.non_null_type.fmt(ip)},
             ),
-            .invalid_optional_unwrap => |info| blk: {
+            .invalid_optional_unwrap => |info| {
                 const operand_ty = ip.typeOf(info.operand);
                 const payload_ty = ip.indexToKey(operand_ty).optional_type.payload_type;
-                break :blk std.fmt.format(
-                    writer,
-                    "tried to unwrap optional of type `{}` which was {}",
+                try writer.print(
+                    "tried to unwrap optional of type `{f}` which was {f}",
                     .{ payload_ty.fmt(ip), info.operand.fmt(ip) },
                 );
             },
-            .integer_out_of_range => |info| std.fmt.format(
-                writer,
-                "type '{}' cannot represent integer value '{}'",
+            .integer_out_of_range => |info| try writer.print(
+                "type '{f}' cannot represent integer value '{f}'",
                 .{ info.dest_ty.fmt(ip), info.actual.fmt(ip) },
             ),
-            .wrong_array_elem_count => |info| std.fmt.format(
-                writer,
+            .wrong_array_elem_count => |info| try writer.print(
                 "expected {d} array elements; found {d}",
                 .{ info.expected, info.actual },
             ),
-            .expected_indexable_type => |info| std.fmt.format(
-                writer,
-                "type '{}' does not support indexing",
+            .expected_indexable_type => |info| try writer.print(
+                "type '{f}' does not support indexing",
                 .{info.actual.fmt(ip)},
             ),
-            .duplicate_struct_field => |info| std.fmt.format(
-                writer,
-                "duplicate struct field: '{}'",
+            .duplicate_struct_field => |info| try writer.print(
+                "duplicate struct field: '{f}'",
                 .{info.name.fmt(&ip.string_pool)},
             ),
-            .unknown_field => |info| blk: {
+            .unknown_field => |info| {
                 const accessed_ty = ip.typeOf(info.accessed);
-                break :blk if (ip.canHaveFields(accessed_ty))
-                    std.fmt.format(
-                        writer,
-                        "'{}' has no member '{s}'",
+                if (ip.canHaveFields(accessed_ty)) {
+                    try writer.print(
+                        "'{f}' has no member '{s}'",
                         .{ accessed_ty.fmt(ip), info.field_name },
-                    )
-                else
-                    std.fmt.format(
-                        writer,
-                        "'{}' does not support field access",
+                    );
+                } else {
+                    try writer.print(
+                        "'{f}' does not support field access",
                         .{accessed_ty.fmt(ip)},
                     );
+                }
             },
-        };
+        }
     }
 };

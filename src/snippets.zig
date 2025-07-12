@@ -91,11 +91,9 @@ pub const generic = [_]Snipped{
     .{ .label = "log debug", .kind = .Snippet, .text = "std.log.debug(\"$1\", .{$0});" },
     .{ .label = "format", .kind = .Snippet, .text = 
     \\pub fn format(
-    \\    ${1:self}: ${2:@This()},
-    \\    comptime fmt: []const u8,
-    \\    options: std.fmt.FormatOptions,
-    \\    writer: anytype,
-    \\) !void {$0}
+    \\    self: @This(),
+    \\    writer: *std.io.Writer,
+    \\) std.io.Writer.Error!void {}
     },
 
     // types

@@ -42,22 +42,14 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 builder.completions.appendAssumeCapacity(.{
                     .label = "*",
                     .kind = .Operator,
-                    .detail = try std.fmt.allocPrint(
-                        builder.arena,
-                        "{}",
-                        .{info.elem_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
-                    ),
+                    .detail = try info.elem_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
                 });
 
                 if (info.size == .c) {
                     builder.completions.appendAssumeCapacity(.{
                         .label = "?",
                         .kind = .Operator,
-                        .detail = try std.fmt.allocPrint(
-                            builder.arena,
-                            "{}",
-                            .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })},
-                        ),
+                        .detail = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false }),
                     });
                     return;
                 }
@@ -81,11 +73,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 builder.completions.appendAssumeCapacity(.{
                     .label = "ptr",
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(
-                        builder.arena,
-                        "{}",
-                        .{many_ptr_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
-                    ),
+                    .detail = try many_ptr_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
                 });
             },
             .many => {},
@@ -108,11 +96,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
                 builder.completions.appendAssumeCapacity(.{
                     .label = try std.fmt.allocPrint(builder.arena, "@\"{}\"", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(
-                        builder.arena,
-                        "{}",
-                        .{elem_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
-                    ),
+                    .detail = try elem_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
                 });
             }
         },
@@ -121,11 +105,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             builder.completions.appendAssumeCapacity(.{
                 .label = "?",
                 .kind = .Operator,
-                .detail = try std.fmt.allocPrint(
-                    builder.arena,
-                    "{}",
-                    .{child_ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })},
-                ),
+                .detail = try child_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
             });
         },
         .container => {
@@ -275,9 +255,9 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
 
             const detail = if (maybe_resolved_ty) |ty| blk: {
                 if (ty.is_type_val and ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{ty.fmtTypeVal(builder.analyser, .{ .truncate_container_decls = false })});
+                    break :blk try ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false });
                 } else {
-                    break :blk try std.fmt.allocPrint(builder.arena, "{}", .{try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false })});
+                    break :blk try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                 }
             } else null;
 
@@ -343,7 +323,7 @@ fn functionTypeCompletion(
         .only_name => func_name,
         .snippet => blk: {
             if (use_snippets and builder.server.config.enable_argument_placeholders) {
-                break :blk try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+                break :blk try builder.analyser.stringifyFunction(.{
                     .info = info,
                     .include_fn_keyword = false,
                     .include_name = true,
@@ -356,7 +336,7 @@ fn functionTypeCompletion(
                     } },
                     .include_return_type = false,
                     .snippet_placeholders = true,
-                })});
+                });
             }
 
             if (!use_snippets) break :blk func_name;
@@ -391,7 +371,7 @@ fn functionTypeCompletion(
     const label_details: ?types.CompletionItemLabelDetails = blk: {
         if (!builder.server.client_capabilities.label_details_support) break :blk null;
 
-        const detail = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+        const detail = try builder.analyser.stringifyFunction(.{
             .info = info,
             .include_fn_keyword = false,
             .include_name = false,
@@ -406,9 +386,12 @@ fn functionTypeCompletion(
                 .collapse,
             .include_return_type = false,
             .snippet_placeholders = false,
-        })});
+        });
 
-        const description = try std.fmt.allocPrint(builder.arena, "{}", .{try info.return_value.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = true })});
+        const description = try info.return_value.stringifyTypeOf(
+            builder.analyser,
+            .{ .truncate_container_decls = true },
+        );
 
         break :blk .{
             .detail = detail,
@@ -416,7 +399,7 @@ fn functionTypeCompletion(
         };
     };
 
-    const details = try std.fmt.allocPrint(builder.arena, "{}", .{builder.analyser.fmtFunction(.{
+    const details = try builder.analyser.stringifyFunction(.{
         .info = info,
         .include_fn_keyword = true,
         .include_name = false,
@@ -427,7 +410,7 @@ fn functionTypeCompletion(
         } },
         .include_return_type = true,
         .snippet_placeholders = false,
-    })});
+    });
 
     return .{
         .label = func_name,
@@ -1008,7 +991,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
                 gop.key_ptr.* = .{
                     .label = name,
                     .detail = switch (kind) {
-                        .error_set => try std.fmt.allocPrint(builder.arena, "error.{}", .{std.zig.fmtId(name)}),
+                        .error_set => try std.fmt.allocPrint(builder.arena, "error.{f}", .{std.zig.fmtId(name)}),
                         .enum_set => null,
                     },
                     .kind = switch (kind) {
@@ -1437,12 +1420,12 @@ fn collectContainerFields(
                 };
 
                 const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
-                    const type_fmt = try ty.fmtTypeOf(builder.analyser, .{ .truncate_container_decls = false });
+                    const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
-                        break :detail try std.fmt.allocPrint(builder.arena, "{} = {s}", .{ type_fmt, value_str });
+                        break :detail try std.fmt.allocPrint(builder.arena, "{s} = {s}", .{ type_str, value_str });
                     } else {
-                        break :detail try std.fmt.allocPrint(builder.arena, "{}", .{type_fmt});
+                        break :detail try std.fmt.allocPrint(builder.arena, "{s}", .{type_str});
                     }
                 } else if (Analyser.getContainerFieldSignature(tree, field)) |signature| detail: {
                     if (std.mem.eql(u8, name, signature) and field.ast.tuple_like) break :detail null;
