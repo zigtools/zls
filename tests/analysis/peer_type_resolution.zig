@@ -130,6 +130,38 @@ pub fn main() !void {
     _ = try try error_union_15;
     //          ^^^^^^^^^^^^^^ (error{A,B}!error{B,A}!?S)()
 
+    const error_union_16 = if (runtime_bool) error.A else s;
+    _ = error_union_16;
+    //  ^^^^^^^^^^^^^^ (error{A}!S)()
+
+    const error_union_17 = if (runtime_bool) s else error.A;
+    _ = error_union_17;
+    //  ^^^^^^^^^^^^^^ (error{A}!S)()
+
+    const error_union_18 = if (runtime_bool) error.A else @as(i32, 0);
+    _ = error_union_18;
+    //  ^^^^^^^^^^^^^^ (error{A}!i32)()
+
+    const error_union_19 = if (runtime_bool) @as(i32, 0) else error.A;
+    _ = error_union_19;
+    //  ^^^^^^^^^^^^^^ (error{A}!i32)()
+
+    const error_union_20 = if (runtime_bool) error.A else @as(error{B}!S, s);
+    _ = error_union_20;
+    //  ^^^^^^^^^^^^^^ (error{A,B}!S)()
+
+    const error_union_21 = if (runtime_bool) @as(error{B}!S, s) else error.A;
+    _ = error_union_21;
+    //  ^^^^^^^^^^^^^^ (error{A,B}!S)()
+
+    const error_union_22 = if (runtime_bool) error.A else @as(error{B}!i32, 0);
+    _ = error_union_22;
+    //  ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+
+    const error_union_23 = if (runtime_bool) @as(error{B}!i32, 0) else error.A;
+    _ = error_union_23;
+    //  ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+
     const noreturn_0 = if (runtime_bool) s else return;
     _ = noreturn_0;
     //  ^^^^^^^^^^ (S)()

@@ -1512,8 +1512,9 @@ fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?T
     if (a.data == .ip_index and b.data == .ip_index) {
         const a_type = a.data.ip_index.type;
         const b_type = b.data.ip_index.type;
-        const resolved_type = try analyser.resolvePeerTypesIP(a_type, b_type) orelse return null;
-        return Type.fromIP(analyser, resolved_type, null);
+        if (try analyser.resolvePeerTypesIP(a_type, b_type)) |resolved_type| {
+            return Type.fromIP(analyser, resolved_type, null);
+        }
     }
 
     return try analyser.resolvePeerTypesInternal(a, b) orelse try analyser.resolvePeerTypesInternal(b, a);
@@ -1523,6 +1524,19 @@ fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.In
     const resolved = try analyser.ip.resolvePeerTypes(analyser.gpa, &.{ a, b }, builtin.target);
     if (resolved == .none) return null;
     return resolved;
+}
+
+fn resolvePeerErrorSets(analyser: *Analyser, a: Type, b: Type) !?Type {
+    if (a.data != .ip_index) return null;
+    if (b.data != .ip_index) return null;
+    if (a.data.ip_index.type != .type_type) return null;
+    if (b.data.ip_index.type != .type_type) return null;
+    const a_index = a.data.ip_index.index orelse return null;
+    const b_index = b.data.ip_index.index orelse return null;
+    if (analyser.ip.zigTypeTag(a_index) != .error_set) return null;
+    if (analyser.ip.zigTypeTag(b_index) != .error_set) return null;
+    const resolved_index = try analyser.ip.errorSetMerge(analyser.gpa, a_index, b_index);
+    return Type.fromIP(analyser, .type_type, resolved_index);
 }
 
 fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
@@ -1559,16 +1573,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                         const a_error_set = a_info.error_set orelse break :blk null;
                         const b_error_set = b_info.error_set orelse break :blk null;
                         if (a_error_set.eql(b_error_set.*)) break :blk a_error_set;
-                        if (a_error_set.data != .ip_index) return null;
-                        if (b_error_set.data != .ip_index) return null;
-                        if (a_error_set.data.ip_index.type != .type_type) return null;
-                        if (b_error_set.data.ip_index.type != .type_type) return null;
-                        const a_index = a_error_set.data.ip_index.index orelse return null;
-                        const b_index = b_error_set.data.ip_index.index orelse return null;
-                        if (analyser.ip.zigTypeTag(a_index) != .error_set) return null;
-                        if (analyser.ip.zigTypeTag(b_index) != .error_set) return null;
-                        const resolved_index = try analyser.ip.errorSetMerge(analyser.gpa, a_index, b_index);
-                        const resolved_error_set = Type.fromIP(analyser, .type_type, resolved_index);
+                        const resolved_error_set = try analyser.resolvePeerErrorSets(a_error_set.*, b_error_set.*) orelse break :blk null;
                         break :blk try analyser.allocType(resolved_error_set);
                     };
                     const resolved_payload = blk: {
@@ -1591,9 +1596,9 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                 else => {},
             }
         },
-        .ip_index => |a_payload| switch (a_payload.type) {
-            .noreturn_type => return b,
-            .null_type => switch (b.data) {
+        .ip_index => |a_payload| switch (analyser.ip.zigTypeTag(a_payload.type) orelse return null) {
+            .noreturn => return b,
+            .null => switch (b.data) {
                 .optional => return b,
                 .error_union => |b_info| {
                     return .{
@@ -1611,6 +1616,35 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
                 },
                 else => return .{
                     .data = .{ .optional = try analyser.allocType(try b.typeOf(analyser)) },
+                    .is_type_val = false,
+                },
+            },
+            .error_set => switch (b.data) {
+                .error_union => |b_info| {
+                    const resolved_error_set = blk: {
+                        const a_error_set = try a.typeOf(analyser);
+                        const b_error_set = b_info.error_set orelse break :blk null;
+                        if (a_error_set.eql(b_error_set.*)) break :blk b_error_set;
+                        const resolved_error_set = try analyser.resolvePeerErrorSets(a_error_set, b_error_set.*) orelse break :blk null;
+                        break :blk try analyser.allocType(resolved_error_set);
+                    };
+                    return .{
+                        .data = .{
+                            .error_union = .{
+                                .error_set = resolved_error_set,
+                                .payload = b_info.payload,
+                            },
+                        },
+                        .is_type_val = false,
+                    };
+                },
+                else => return .{
+                    .data = .{
+                        .error_union = .{
+                            .error_set = try analyser.allocType(try a.typeOf(analyser)),
+                            .payload = try analyser.allocType(try b.typeOf(analyser)),
+                        },
+                    },
                     .is_type_val = false,
                 },
             },
