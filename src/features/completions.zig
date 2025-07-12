@@ -173,7 +173,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         }
     }
 
-    const documentation: std.meta.FieldType(types.CompletionItem, .documentation) = .{
+    const documentation: @FieldType(types.CompletionItem, "documentation") = .{
         .MarkupContent = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
             .value = try std.mem.join(builder.arena, "\n\n", doc_comments.constSlice()),

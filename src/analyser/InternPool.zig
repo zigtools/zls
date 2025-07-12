@@ -3813,7 +3813,7 @@ pub fn toInt(ip: *InternPool, val: Index, comptime T: type) ?T {
         },
         .int_u64_value => |int_value| std.math.cast(T, int_value.int),
         .int_i64_value => |int_value| std.math.cast(T, int_value.int),
-        .int_big_value => |int_value| int_value.getConst(ip).to(T) catch null,
+        .int_big_value => |int_value| int_value.getConst(ip).toInt(T) catch null,
         .null_value => 0,
         else => null,
     };

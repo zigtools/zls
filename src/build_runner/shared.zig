@@ -18,7 +18,7 @@ pub const BuildConfig = struct {
         name: []const u8,
         path: []const u8,
     };
-    pub const AvailableOption = std.meta.FieldType(std.meta.FieldType(std.Build, .available_options_map).KV, .value);
+    pub const AvailableOption = @FieldType(@FieldType(std.Build, "available_options_map").KV, "value");
 };
 
 pub const Transport = struct {
@@ -145,7 +145,7 @@ pub const ServerToClient = struct {
 
 pub const BuildOnSaveSupport = union(enum) {
     supported,
-    invalid_linux_kernel_version: if (builtin.os.tag == .linux) std.meta.FieldType(std.posix.utsname, .release) else noreturn,
+    invalid_linux_kernel_version: if (builtin.os.tag == .linux) @FieldType(std.posix.utsname, "release") else noreturn,
     unsupported_linux_kernel_version: if (builtin.os.tag == .linux) std.SemanticVersion else noreturn,
     unsupported_zig_version: if (@TypeOf(os_support) == std.SemanticVersion) void else noreturn,
     unsupported_os: if (@TypeOf(os_support) == bool and !os_support) void else noreturn,
