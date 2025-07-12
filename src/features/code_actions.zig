@@ -587,6 +587,36 @@ fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
     });
 }
 
+const ImportPlacement = enum {
+    top,
+    bottom,
+};
+
+fn analyzeImportPlacement(tree: Ast, imports: []const ImportDecl) ImportPlacement {
+    const root_decls = tree.rootDecls();
+
+    if (root_decls.len == 0 or imports.len == 0) return .top;
+
+    const first_import = imports[0].var_decl;
+    const last_import = imports[imports.len - 1].var_decl;
+
+    const first_decl = root_decls[0];
+    const last_decl = root_decls[root_decls.len - 1];
+
+    const starts_with_import = first_decl == first_import;
+    const ends_with_import = last_decl == last_import;
+
+    if (starts_with_import and ends_with_import) {
+        // If there are only imports, choose "top" to avoid unnecessary newlines.
+        // Otherwise, having an import at the bottom is a strong signal that that is the preferred style.
+        const has_gaps = root_decls.len != imports.len;
+
+        return if (has_gaps) .bottom else .top;
+    }
+
+    return if (!starts_with_import and ends_with_import) .bottom else .top;
+}
+
 fn handleUnorganizedImport(builder: *Builder) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -603,6 +633,8 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     // The optimization is disabled because it does not detect the case where imports and other decls are mixed
     // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
 
+    const placement = analyzeImportPlacement(tree, imports);
+
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
@@ -612,6 +644,10 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     {
         var new_text: std.ArrayListUnmanaged(u8) = .empty;
 
+        if (placement == .bottom) {
+            try new_text.append(builder.arena, '\n');
+        }
+
         for (sorted_imports, 0..) |import_decl, i| {
             if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
                 try new_text.append(builder.arena, '\n');
@@ -619,13 +655,24 @@ fn handleUnorganizedImport(builder: *Builder) !void {
 
             try new_text.print(builder.arena, "{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
         }
+
         try new_text.append(builder.arena, '\n');
 
-        const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
-        const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+        const range: offsets.Range = switch (placement) {
+            .top => blk: {
+                // Current behavior: insert at top after doc comments
+                const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
+                const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+                break :blk .{ .start = insert_pos, .end = insert_pos };
+            },
+            .bottom => blk: {
+                // Current behavior: insert at eof
+                break :blk offsets.tokenToRange(tree, @intCast(tree.tokens.len - 1), builder.offset_encoding);
+            },
+        };
 
         try edits.append(builder.arena, .{
-            .range = .{ .start = insert_pos, .end = insert_pos },
+            .range = range,
             .newText = new_text.items,
         });
     }
