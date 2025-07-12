@@ -18,7 +18,7 @@ tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
     }) = .empty,
 }) = .empty,
 outdated_files: std.StringArrayHashMapUnmanaged(void) = .empty,
-transport: ?lsp.AnyTransport = null,
+transport: ?*lsp.Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
 
 const DiagnosticsCollection = @This();
@@ -230,7 +230,7 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
     return try URI.fromPath(allocator, absolute_src_path);
 }
 
-pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || lsp.AnyTransport.WriteError)!void {
+pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || std.posix.WriteError)!void {
     const transport = collection.transport orelse return;
 
     var arena_allocator: std.heap.ArenaAllocator = .init(collection.allocator);

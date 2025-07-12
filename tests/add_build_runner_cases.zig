@@ -53,9 +53,11 @@ pub fn addCases(
         build_cmd.addArg("--build-runner");
         build_cmd.addFileArg(build_runner);
         build_cmd.addArg("--cache-dir");
-        build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.cache_root}) });
+        build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.cache_root}) });
         build_cmd.addArg("--global-cache-dir");
-        build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.global_cache_root}) });
+        build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.global_cache_root}) });
+        build_cmd.addArg("--zig-lib-dir");
+        build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
 
         const actual_build_config_json = build_cmd.captureStdOut();
 

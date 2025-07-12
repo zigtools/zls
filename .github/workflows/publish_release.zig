@@ -32,9 +32,7 @@ pub fn main() !void {
     const authorization: std.http.Client.Request.Headers.Value = authorization: {
         const zls_worker_api_token = env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
         const usename_password = try std.fmt.allocPrint(arena, "admin:{s}", .{zls_worker_api_token});
-        const base64_encode_buffer = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(usename_password.len));
-        const auth = std.base64.standard.Encoder.encode(base64_encode_buffer, usename_password);
-        break :authorization .{ .override = try std.fmt.allocPrint(arena, "Basic {s}", .{auth}) };
+        break :authorization .{ .override = try std.fmt.allocPrint(arena, "Basic {b64}", .{usename_password}) };
     };
 
     const body = try createRequestBody(arena, artifacts_dir, metadata, "full");
@@ -76,9 +74,9 @@ fn createRequestBody(
     metadata: Metadata,
     compatibility: []const u8,
 ) ![]const u8 {
-    var output_buffer: std.ArrayListUnmanaged(u8) = .empty;
-
-    var write_stream = std.json.writeStream(output_buffer.writer(arena), .{ .whitespace = .indent_2 });
+    var aw: std.io.Writer.Allocating = .init(arena);
+    defer aw.deinit();
+    var write_stream = std.json.writeStream(&aw.writer, .{ .whitespace = .indent_2 });
 
     try write_stream.beginObject();
 
@@ -119,10 +117,8 @@ fn createRequestBody(
         }
         std.debug.assert(sha256sum.total_len == stat.size);
 
-        const hash = sha256sum.finalResult();
-
         try write_stream.objectField("shasum");
-        try write_stream.print("\"{}\"", .{std.fmt.fmtSliceHexLower(&hash)});
+        try write_stream.print("\"{x}\"", .{sha256sum.finalResult()});
 
         try write_stream.objectField("size");
         try write_stream.write(sha256sum.total_len);
@@ -133,7 +129,7 @@ fn createRequestBody(
     try write_stream.endObject();
     try write_stream.endObject();
 
-    return output_buffer.items;
+    return try aw.toOwnedSlice();
 }
 
 fn nextArg(args: []const [:0]const u8, i: *usize) ?[:0]const u8 {

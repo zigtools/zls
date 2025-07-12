@@ -37,7 +37,7 @@ pub fn StringPool(comptime config: Config) type {
                 return @enumFromInt(@intFromEnum(self));
             }
 
-            pub fn fmt(self: String, pool: *Pool) std.fmt.Formatter(print) {
+            pub fn fmt(self: String, pool: *Pool) std.fmt.Alt(FormatContext, print) {
                 return .{ .data = .{ .string = self, .pool = pool } };
             }
         };
@@ -200,8 +200,7 @@ pub fn StringPool(comptime config: Config) type {
             pool: *Pool,
         };
 
-        fn print(ctx: FormatContext, comptime fmt_str: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-            if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.string);
+        fn print(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
             const locked_string = ctx.pool.stringToSliceLock(ctx.string);
             defer locked_string.release(ctx.pool);
             try writer.writeAll(locked_string.slice);
@@ -240,7 +239,7 @@ test StringPool {
 
         try std.testing.expectEqualStrings(str, locked_string.slice);
     }
-    try std.testing.expectFmt(str, "{}", .{index.fmt(&pool)});
+    try std.testing.expectFmt(str, "{f}", .{index.fmt(&pool)});
 }
 
 test "StringPool - check interning" {

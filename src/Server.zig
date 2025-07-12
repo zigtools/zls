@@ -50,7 +50,7 @@ config: Config = .{},
 config_path: ?[]const u8 = null,
 document_store: DocumentStore,
 /// Use `setTransport` to set the Transport.
-transport: ?lsp.AnyTransport = null,
+transport: ?*lsp.Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
@@ -244,7 +244,7 @@ fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ls
     return try sendToClientInternal(server.allocator, server.transport, response);
 }
 
-fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?lsp.AnyTransport, message: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport, message: anytype) error{OutOfMemory}![]u8 {
     const message_stringified = try std.json.stringifyAlloc(allocator, message, .{
         .emit_null_optional_fields = false,
     });
@@ -506,8 +506,8 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     if (request.clientInfo) |clientInfo| {
         log.info("Client Info:      {s} ({s})", .{ clientInfo.name, clientInfo.version orelse "unknown version" });
     }
-    log.info("Autofix Mode:     '{s}'", .{@tagName(server.getAutofixMode())});
-    log.debug("Offset Encoding:  '{s}'", .{@tagName(server.offset_encoding)});
+    log.info("Autofix Mode:     '{t}'", .{server.getAutofixMode()});
+    log.debug("Offset Encoding:  '{t}'", .{server.offset_encoding});
 
     if (request.workspaceFolders) |workspace_folders| {
         for (workspace_folders) |src| {
@@ -730,7 +730,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
             return;
         },
         else => {
-            log.err("workspace/configuration expects an array but received {s}", .{@tagName(json)});
+            log.err("workspace/configuration expects an array but received {t}", .{json});
             return;
         },
     };
@@ -742,7 +742,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     var new_config: configuration.Configuration = .{};
 
     inline for (fields, result) |field, json_value| {
-        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
+        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
         runtime_known_field_name = field.name;
 
         const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
@@ -756,7 +756,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
     const maybe_root_dir: ?[]const u8 = if (server.workspaces.items.len == 1) dir: {
         const uri = std.Uri.parse(server.workspaces.items[0].uri) catch |err| {
-            log.err("failed to parse root uri for workspace {s}: {!}", .{
+            log.err("failed to parse root uri for workspace {s}: {}", .{
                 server.workspaces.items[0].uri, err,
             });
             break :dir null;
@@ -1063,9 +1063,9 @@ pub fn updateConfiguration(
             };
 
             if (override_value) {
-                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.fmt.format`
+                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
                 runtime_known_field_name = field.name;
-                log.info("Set config option '{s}' to {}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
+                log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, jsonFmt(new_value, .{}) });
                 has_changed[field_index] = true;
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
@@ -1176,19 +1176,19 @@ pub fn updateConfiguration(
         if (zig_version_is_tagged) {
             server.showMessage(
                 .Warning,
-                "ZLS '{}' does not support Zig '{}'. A ZLS '{}.{}' release should be used instead.",
+                "ZLS '{f}' does not support Zig '{f}'. A ZLS '{}.{}' release should be used instead.",
                 .{ zls_version, zig_version, zig_version.major, zig_version.minor },
             );
         } else if (zls_version_is_tagged) {
             server.showMessage(
                 .Warning,
-                "ZLS '{}' should be used with a Zig '{}.{}' release but found Zig '{}'.",
+                "ZLS '{f}' should be used with a Zig '{}.{}' release but found Zig '{f}'.",
                 .{ zls_version, zls_version.major, zls_version.minor, zig_version },
             );
         } else {
             server.showMessage(
                 .Warning,
-                "ZLS '{}' requires at least Zig '{s}' but got Zig '{}'. Update Zig to avoid unexpected behavior.",
+                "ZLS '{f}' requires at least Zig '{s}' but got Zig '{f}'. Update Zig to avoid unexpected behavior.",
                 .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
             );
         }
@@ -1207,10 +1207,10 @@ pub fn updateConfiguration(
         } else if (server.status == .initialized and options.resolve and server.resolved_config.zig_runtime_version != null) {
             switch (BuildOnSaveSupport.isSupportedRuntime(server.resolved_config.zig_runtime_version.?)) {
                 .supported => {},
-                .invalid_linux_kernel_version => |*utsname_release| log.warn("Build-On-Save cannot run in watch mode because it because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
-                .unsupported_linux_kernel_version => |kernel_version| log.warn("Build-On-Save cannot run in watch mode because it is not supported by Linux '{}' (requires at least {})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
-                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s} by Zig {} (requires at least {})", .{ @tagName(zig_builtin.os.tag), server.resolved_config.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
-                .unsupported_os => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {s}", .{@tagName(zig_builtin.os.tag)}),
+                .invalid_linux_kernel_version => |*utsname_release| log.warn("Build-On-Save cannot run in watch mode because the Linux version '{s}' could not be parsed", .{std.mem.sliceTo(utsname_release, 0)}),
+                .unsupported_linux_kernel_version => |kernel_version| log.warn("Build-On-Save cannot run in watch mode because it is not supported by Linux '{f}' (requires at least {f})", .{ kernel_version, BuildOnSaveSupport.minimum_linux_version }),
+                .unsupported_zig_version => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {t} by Zig {f} (requires at least {f})", .{ zig_builtin.os.tag, server.resolved_config.zig_runtime_version.?, BuildOnSaveSupport.minimum_zig_version }),
+                .unsupported_os => log.warn("Build-On-Save cannot run in watch mode because it is not supported on {t}", .{zig_builtin.os.tag}),
             }
         }
     }
@@ -1218,7 +1218,7 @@ pub fn updateConfiguration(
     if (server.config.force_autofix and server.getAutofixMode() == .none) {
         log.warn("`force_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
     } else if (new_force_autofix) {
-        log.info("Autofix Mode: '{s}'", .{@tagName(server.getAutofixMode())});
+        log.info("Autofix Mode: '{t}'", .{server.getAutofixMode()});
     }
 }
 
@@ -2108,7 +2108,7 @@ pub fn destroy(server: *Server) void {
     server.allocator.destroy(server);
 }
 
-pub fn setTransport(server: *Server, transport: lsp.AnyTransport) void {
+pub fn setTransport(server: *Server, transport: *lsp.Transport) void {
     server.transport = transport;
     server.diagnostics_collection.transport = transport;
     server.document_store.transport = transport;
@@ -2274,7 +2274,7 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
 
 fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
     return server.processMessage(message) catch |err| {
-        log.err("failed to process {}: {}", .{ fmtMessage(message), err });
+        log.err("failed to process {f}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpStackTrace(trace.*);
         }
@@ -2416,21 +2416,36 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     };
 }
 
-pub fn formatMessage(
-    message: Message,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = options;
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, message);
+fn formatMessage(message: Message, writer: *std.io.Writer) std.io.Writer.Error!void {
     switch (message) {
-        .request => |request| try writer.print("request-{}-{s}", .{ std.json.fmt(request.id, .{}), @tagName(request.params) }),
-        .notification => |notification| try writer.print("notification-{s}", .{@tagName(notification.params)}),
-        .response => |response| try writer.print("response-{?}", .{std.json.fmt(response.id, .{})}),
+        .request => |request| try writer.print("request-{f}-{t}", .{ jsonFmt(request.id, .{}), request.params }),
+        .notification => |notification| try writer.print("notification-{t}", .{notification.params}),
+        .response => |response| try writer.print("response-{f}", .{jsonFmt(response.id, .{})}),
     }
 }
 
-fn fmtMessage(message: Message) std.fmt.Formatter(formatMessage) {
+fn fmtMessage(message: Message) std.fmt.Alt(Message, formatMessage) {
     return .{ .data = message };
+}
+
+/// Like `std.json.fmt` but supports `std.io.Writer`.
+/// Remove this once `std.json` has been ported to `std.io.Writer`
+fn jsonFmt(value: anytype, options: std.json.StringifyOptions) std.fmt.Alt(FormatJson(@TypeOf(value)), FormatJson(@TypeOf(value)).format) {
+    return .{ .data = .{ .value = value, .options = options } };
+}
+
+/// Remove this once `std.json` has been ported to `std.io.Writer`
+fn FormatJson(comptime T: type) type {
+    return struct {
+        value: T,
+        options: std.json.StringifyOptions,
+
+        pub fn format(data: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
+            const any_writer: std.io.AnyWriter = .{
+                .context = writer,
+                .writeFn = @ptrCast(&std.io.Writer.write),
+            };
+            std.json.stringify(data.value, data.options, any_writer) catch |err| return @errorCast(err);
+        }
+    };
 }

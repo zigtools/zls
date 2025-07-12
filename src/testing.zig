@@ -6,22 +6,23 @@ const DocumentScope = @import("DocumentScope.zig");
 pub const print_ast = @import("print_ast.zig");
 
 pub fn expectEqual(expected: anytype, actual: anytype) error{TestExpectedEqual}!void {
-    var expected_stringified: std.ArrayListUnmanaged(u8) = .empty;
-    defer expected_stringified.deinit(std.testing.allocator);
+    var expected_writer: std.ArrayListUnmanaged(u8) = .empty;
+    defer expected_writer.deinit(std.testing.allocator);
 
-    var actual_stringified: std.ArrayListUnmanaged(u8) = .empty;
-    defer actual_stringified.deinit(std.testing.allocator);
+    var actual_writer: std.ArrayListUnmanaged(u8) = .empty;
+    defer actual_writer.deinit(std.testing.allocator);
 
     const options: std.json.StringifyOptions = .{
         .whitespace = .indent_2,
         .emit_null_optional_fields = false,
     };
 
-    std.json.stringify(expected, options, expected_stringified.writer(std.testing.allocator)) catch @panic("OOM");
-    std.json.stringify(actual, options, actual_stringified.writer(std.testing.allocator)) catch @panic("OOM");
+    // Remove this once `std.json` has been ported to `std.io.Writer`
+    std.json.stringify(expected, options, expected_writer.writer(std.testing.allocator)) catch @panic("OOM");
+    std.json.stringify(actual, options, actual_writer.writer(std.testing.allocator)) catch @panic("OOM");
 
-    if (std.mem.eql(u8, expected_stringified.items, actual_stringified.items)) return;
-    renderLineDiff(std.testing.allocator, expected_stringified.items, actual_stringified.items);
+    if (std.mem.eql(u8, expected_writer.items, actual_writer.items)) return;
+    renderLineDiff(std.testing.allocator, expected_writer.items, actual_writer.items);
     return error.TestExpectedEqual;
 }
 
@@ -236,24 +237,26 @@ pub fn renderLineDiff(
     std.debug.print("\n======================================\n", .{});
     std.debug.print("\n============ difference: =============\n", .{});
 
-    const stderr = std.io.getStdErr();
+    const stderr = std.fs.File.stderr();
     const tty_config = std.io.tty.detectConfig(stderr);
+    var file_writer = stderr.writer(&.{});
+    const writer = &file_writer.interface;
 
     for (diff_list.items(.operation), diff_list.items(.text)) |op, text| {
-        tty_config.setColor(stderr.writer(), switch (op) {
+        tty_config.setColor(writer, switch (op) {
             .insert => .green,
             .delete => .red,
             .equal => .reset,
         }) catch {};
-        stderr.writeAll(switch (op) {
+        writer.writeAll(switch (op) {
             .insert => "+ ",
             .delete => "- ",
             .equal => "  ",
         }) catch {};
         printLine(text);
     }
-    tty_config.setColor(stderr.writer(), .reset) catch {};
-    stderr.writeAll("␃") catch {}; // End of Text symbol (ETX)
+    tty_config.setColor(writer, .reset) catch {};
+    writer.writeAll("␃") catch {}; // End of Text symbol (ETX)
     std.debug.print("\n======================================\n", .{});
 }
 

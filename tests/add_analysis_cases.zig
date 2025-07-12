@@ -51,7 +51,7 @@ pub fn addCases(
             run_check.addArgs(&.{
                 "wasmtime",
                 "--dir=.",
-                b.fmt("--dir={}::/lib", .{b.graph.zig_lib_directory}),
+                b.fmt("--dir={f}::/lib", .{b.graph.zig_lib_directory}),
                 "--",
             });
         }
@@ -63,7 +63,7 @@ pub fn addCases(
         }
         if (!target.result.cpu.arch.isWasm()) {
             run_check.addArg("--zig-lib-path");
-            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{}", .{b.graph.zig_lib_directory}) });
+            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
         }
 
         const input_file = cases_dir.path(b, entry.name);

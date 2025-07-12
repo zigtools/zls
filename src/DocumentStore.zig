@@ -27,7 +27,7 @@ build_files: if (supports_build_system) std.StringArrayHashMapUnmanaged(*BuildFi
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
-transport: ?lsp.AnyTransport = null,
+transport: ?*lsp.Transport = null,
 lsp_capabilities: struct {
     supports_work_done_progress: bool = false,
     supports_semantic_tokens_refresh: bool = false,
@@ -892,7 +892,7 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 
 const progress_token = "buildProgressToken";
 
-fn sendMessageToClient(allocator: std.mem.Allocator, transport: lsp.AnyTransport, message: anytype) !void {
+fn sendMessageToClient(allocator: std.mem.Allocator, transport: *lsp.Transport, message: anytype) !void {
     const serialized = try std.json.stringifyAlloc(
         allocator,
         message,

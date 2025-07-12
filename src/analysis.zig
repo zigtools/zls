@@ -158,15 +158,7 @@ pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
     return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
-fn formatSnippetPlaceholder(
-    data: []const u8,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, data);
-    _ = options;
-
+fn formatSnippetPlaceholder(data: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
     var split_it = std.mem.splitScalar(u8, data, '}');
     while (split_it.next()) |segment| {
         try writer.writeAll(segment);
@@ -177,7 +169,7 @@ fn formatSnippetPlaceholder(
     }
 }
 
-fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Formatter(formatSnippetPlaceholder) {
+fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Alt([]const u8, formatSnippetPlaceholder) {
     return .{ .data = bytes };
 }
 
@@ -192,36 +184,34 @@ pub const FormatParameterOptions = struct {
     snippet_placeholders: bool,
 };
 
-const FormatParameterContext = struct {
+pub fn stringifyParameter(analyser: *Analyser, options: FormatParameterOptions) error{OutOfMemory}![]u8 {
+    var aw: std.io.Writer.Allocating = .init(analyser.arena);
+    defer aw.deinit();
+    analyser.rawStringifyParameter(&aw.writer, options) catch |err| switch (err) {
+        error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
+    };
+    return try aw.toOwnedSlice();
+}
+
+fn rawStringifyParameter(
     analyser: *Analyser,
+    writer: *std.io.Writer,
     options: FormatParameterOptions,
-};
+) error{ OutOfMemory, WriteFailed }!void {
+    const referenced = options.referenced;
+    const info = options.info;
 
-pub fn formatParameter(
-    ctx: FormatParameterContext,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx);
-    _ = options;
-
-    const analyser = ctx.analyser;
-    const data = ctx.options;
-    const referenced = data.referenced;
-    const info = data.info;
-
-    if (data.index != 0) {
+    if (options.index != 0) {
         try writer.writeAll(", ");
     }
 
-    if (data.snippet_placeholders) {
-        try writer.print("${{{d}:", .{data.index + 1});
+    if (options.snippet_placeholders) {
+        try writer.print("${{{d}:", .{options.index + 1});
     }
 
     // Note that parameter doc comments are being skipped
 
-    if (data.include_modifier) {
+    if (options.include_modifier) {
         if (info.modifier) |modifier| {
             switch (modifier) {
                 .comptime_param => try writer.writeAll("comptime "),
@@ -230,33 +220,29 @@ pub fn formatParameter(
         }
     }
 
-    if (data.include_name) {
+    if (options.include_name) {
         if (info.name) |name| {
-            if (data.snippet_placeholders) {
-                try writer.print("{}", .{fmtSnippetPlaceholder(name)});
+            if (options.snippet_placeholders) {
+                try writer.print("{f}", .{fmtSnippetPlaceholder(name)});
             } else {
                 try writer.writeAll(name);
             }
         }
     }
 
-    if (data.include_type) {
-        const has_parameter_name = data.include_name and info.name != null;
+    if (options.include_type) {
+        const has_parameter_name = options.include_name and info.name != null;
         if (has_parameter_name) try writer.writeAll(": ");
 
-        try writer.print("{}", .{info.type.fmtTypeVal(analyser, .{
+        try info.type.rawStringify(writer, analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
-        })});
+        });
     }
 
-    if (data.snippet_placeholders) {
+    if (options.snippet_placeholders) {
         try writer.writeByte('}');
     }
-}
-
-pub fn fmtParameter(analyser: *Analyser, options: FormatParameterOptions) std.fmt.Formatter(formatParameter) {
-    return .{ .data = .{ .analyser = analyser, .options = options } };
 }
 
 pub const FormatFunctionOptions = struct {
@@ -280,32 +266,30 @@ pub const FormatFunctionOptions = struct {
     snippet_placeholders: bool,
 };
 
-const FormatFunctionContext = struct {
+pub fn stringifyFunction(analyser: *Analyser, options: FormatFunctionOptions) error{OutOfMemory}![]u8 {
+    var aw: std.io.Writer.Allocating = .init(analyser.arena);
+    defer aw.deinit();
+    analyser.rawStringifyFunction(&aw.writer, options) catch |err| switch (err) {
+        error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
+    };
+    return try aw.toOwnedSlice();
+}
+
+fn rawStringifyFunction(
     analyser: *Analyser,
+    writer: *std.io.Writer,
     options: FormatFunctionOptions,
-};
-
-pub fn formatFunction(
-    ctx: FormatFunctionContext,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, ctx);
-    _ = options;
-
-    const analyser = ctx.analyser;
-    const data = ctx.options;
-    const referenced = data.referenced;
-    const info = data.info;
+) error{ OutOfMemory, WriteFailed }!void {
+    const referenced = options.referenced;
+    const info = options.info;
     var parameters = info.parameters;
 
-    if (data.include_fn_keyword) {
+    if (options.include_fn_keyword) {
         try writer.writeAll("fn ");
     }
 
-    if (data.include_name) {
-        if (data.override_name) |name| {
+    if (options.include_name) {
+        if (options.override_name) |name| {
             try writer.writeAll(name);
         } else if (info.name) |name| {
             try writer.writeAll(name);
@@ -314,17 +298,17 @@ pub fn formatFunction(
 
     try writer.writeByte('(');
 
-    if (data.skip_first_param) {
+    if (options.skip_first_param) {
         if (parameters.len >= 1) {
             parameters = parameters[1..];
         }
     }
 
-    switch (data.parameters) {
+    switch (options.parameters) {
         .collapse => {
             const has_arguments = parameters.len != 0;
             if (has_arguments) {
-                if (data.snippet_placeholders) {
+                if (options.snippet_placeholders) {
                     try writer.writeAll("${1:...}");
                 } else {
                     try writer.writeAll("...");
@@ -333,15 +317,15 @@ pub fn formatFunction(
         },
         .show => |parameter_options| {
             for (parameters, 0..) |param_info, index| {
-                try writer.print("{}", .{fmtParameter(analyser, .{
+                try analyser.rawStringifyParameter(writer, .{
                     .referenced = referenced,
                     .info = param_info,
                     .index = index,
                     .include_modifier = parameter_options.include_modifiers,
                     .include_name = parameter_options.include_names,
                     .include_type = parameter_options.include_types,
-                    .snippet_placeholders = data.snippet_placeholders,
-                })});
+                    .snippet_placeholders = options.snippet_placeholders,
+                });
             }
         },
     }
@@ -360,17 +344,15 @@ pub fn formatFunction(
     // ignoring section_expr
     // ignoring callconv_expr
 
-    if (data.include_return_type) {
+    if (options.include_return_type) {
         try writer.writeByte(' ');
-        try writer.print("{}", .{try info.return_value.fmtTypeOf(analyser, .{
+
+        const return_type = try options.info.return_value.typeOf(analyser);
+        try return_type.rawStringify(writer, analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
-        })});
+        });
     }
-}
-
-pub fn fmtFunction(analyser: *Analyser, options: FormatFunctionOptions) std.fmt.Formatter(formatFunction) {
-    return .{ .data = .{ .analyser = analyser, .options = options } };
 }
 
 pub fn isInstanceCall(
@@ -859,7 +841,7 @@ fn resolveGenericTypeInternal(
     ty: Type,
     bound_params: TokenToTypeMap,
     visiting: *Type.Data.GenericSet,
-) !Type {
+) error{OutOfMemory}!Type {
     var resolved = ty;
     if (!ty.is_type_val) {
         resolved = try resolved.typeOf(analyser);
@@ -4125,16 +4107,28 @@ pub const Type = struct {
         }
     }
 
-    const Formatter = std.fmt.Formatter(format);
-
-    pub fn fmtTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) !Formatter {
+    pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
         const typeof = try ty.typeOf(analyser);
-        return .{ .data = .{ .ty = typeof, .analyser = analyser, .options = options } };
+        var aw: std.io.Writer.Allocating = .init(analyser.arena);
+        defer aw.deinit();
+        rawStringify(typeof, &aw.writer, analyser, options) catch |err| switch (err) {
+            error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
+        };
+        return aw.toOwnedSlice();
     }
 
-    pub fn fmtTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) Formatter {
+    pub fn stringifyTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
         std.debug.assert(ty.data == .ip_index or ty.is_type_val);
-        return .{ .data = .{ .ty = ty, .analyser = analyser, .options = options } };
+        var aw: std.io.Writer.Allocating = .init(analyser.arena);
+        defer aw.deinit();
+        rawStringify(ty, &aw.writer, analyser, options) catch |err| switch (err) {
+            error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
+        };
+        return aw.toOwnedSlice();
+    }
+
+    fn writeString(str: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
+        try writer.writeAll(str);
     }
 
     pub const FormatOptions = struct {
@@ -4142,25 +4136,13 @@ pub const Type = struct {
         truncate_container_decls: bool,
     };
 
-    const FormatContext = struct {
+    fn rawStringify(
         ty: Type,
+        writer: *std.io.Writer,
         analyser: *Analyser,
         options: FormatOptions,
-    };
-
-    fn format(
-        ctx: FormatContext,
-        comptime fmt_str: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, ctx.ty);
-
-        const ty = ctx.ty;
-        const analyser = ctx.analyser;
-        const options = ctx.options;
+    ) error{ OutOfMemory, WriteFailed }!void {
         const referenced = options.referenced;
-        const arena = analyser.arena;
 
         switch (ty.data) {
             .pointer => |info| {
@@ -4169,21 +4151,21 @@ pub const Type = struct {
                     .many => {
                         try writer.writeAll("[*");
                         if (info.sentinel != .none) {
-                            try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
                         }
                         try writer.writeByte(']');
                     },
                     .slice => {
                         try writer.writeAll("[");
                         if (info.sentinel != .none) {
-                            try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
                         }
                         try writer.writeByte(']');
                     },
                     .c => try writer.writeAll("[*c]"),
                 }
                 if (info.is_const) try writer.writeAll("const ");
-                return try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
+                try info.elem_ty.rawStringify(writer, analyser, options);
             },
             .array => |info| {
                 try writer.writeByte('[');
@@ -4193,10 +4175,10 @@ pub const Type = struct {
                     try writer.writeAll("?");
                 }
                 if (info.sentinel != .none) {
-                    try writer.print(":{}", .{info.sentinel.fmt(analyser.ip)});
+                    try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
                 }
                 try writer.writeByte(']');
-                try writer.print("{}", .{info.elem_ty.fmtTypeVal(analyser, ctx.options)});
+                try info.elem_ty.rawStringify(writer, analyser, options);
             },
             .tuple => |elem_ty_slice| {
                 try writer.writeAll("struct { ");
@@ -4204,32 +4186,39 @@ pub const Type = struct {
                     if (i != 0) {
                         try writer.writeAll(", ");
                     }
-                    try writer.print("{}", .{elem_ty.fmtTypeVal(analyser, ctx.options)});
+                    try elem_ty.rawStringify(writer, analyser, options);
                 }
                 try writer.writeAll(" }");
             },
-            .optional => |child_ty| try writer.print("?{}", .{child_ty.fmtTypeVal(analyser, ctx.options)}),
+            .optional => |child_ty| {
+                try writer.writeByte('?');
+                try child_ty.rawStringify(writer, analyser, options);
+            },
             .error_union => |info| {
                 if (info.error_set) |error_set| {
-                    try writer.print("{}", .{error_set.fmtTypeVal(analyser, ctx.options)});
+                    try error_set.rawStringify(writer, analyser, options);
                 }
-                try writer.print("!{}", .{info.payload.fmtTypeVal(analyser, ctx.options)});
+                try writer.writeByte('!');
+                try info.payload.rawStringify(writer, analyser, options);
             },
-            .union_tag => |t| try writer.print("@typeInfo({}).@\"union\".tag_type.?", .{t.fmtTypeVal(analyser, ctx.options)}),
+            .union_tag => |t| {
+                try writer.writeAll("@typeInfo(");
+                try t.rawStringify(writer, analyser, options);
+                try writer.writeAll(").@\"union\".tag_type.?");
+            },
             .container => |info| {
                 const scope_handle = info.scope_handle;
                 const handle = scope_handle.handle;
                 const tree = handle.tree;
 
-                const doc_scope = try handle.getDocumentScope();
                 const node = scope_handle.toNode();
 
                 switch (handle.tree.nodeTag(node)) {
                     .root => {
-                        const path = URI.parse(arena, handle.uri) catch handle.uri;
+                        const path = URI.parse(analyser.arena, handle.uri) catch handle.uri;
                         const str = std.fs.path.stem(path);
                         try writer.writeAll(str);
-                        if (referenced) |r| try r.put(arena, .of(str, handle, tree.firstToken(node)), {});
+                        if (referenced) |r| try r.put(analyser.arena, .of(str, handle, tree.firstToken(node)), {});
                     },
 
                     .container_decl,
@@ -4256,10 +4245,11 @@ pub const Type = struct {
                             }
                             const str = tree.tokenSlice(str_token);
                             try writer.writeAll(str);
-                            if (referenced) |r| try r.put(arena, .of(str, handle, str_token), {});
+                            if (referenced) |r| try r.put(analyser.arena, .of(str, handle, str_token), {});
                             return;
                         }
                         if (token >= 1 and tree.tokenTag(token - 1) == .keyword_return) blk: {
+                            const doc_scope = try handle.getDocumentScope();
                             const function_scope = innermostScopeAtIndexWithTag(doc_scope, tree.tokenStart(token - 1), .initOne(.function)).unwrap() orelse break :blk;
                             const function_node = doc_scope.getScopeAstNode(function_scope).?;
                             var buf: [1]Ast.Node.Index = undefined;
@@ -4267,7 +4257,7 @@ pub const Type = struct {
                             const func_name_token = func.name_token orelse break :blk;
                             const func_name = offsets.tokenToSlice(tree, func_name_token);
                             try writer.writeAll(func_name);
-                            if (referenced) |r| try r.put(arena, .of(func_name, handle, func_name_token), {});
+                            if (referenced) |r| try r.put(analyser.arena, .of(func_name, handle, func_name_token), {});
                             var first = true;
                             try writer.writeByte('(');
                             var it = func.iterate(&tree);
@@ -4282,23 +4272,24 @@ pub const Type = struct {
                                     .data = .{ .type_parameter = .{ .token = param_name_token, .handle = handle } },
                                     .is_type_val = true,
                                 }, info.bound_params);
-                                try writer.print("{}", .{param_ty.fmtTypeVal(analyser, .{
+
+                                try param_ty.rawStringify(writer, analyser, .{
                                     .referenced = referenced,
                                     .truncate_container_decls = options.truncate_container_decls,
-                                })});
+                                });
                                 first = false;
                             }
                             try writer.writeByte(')');
                             return;
                         }
 
-                        if (!ctx.options.truncate_container_decls) {
+                        if (!options.truncate_container_decls) {
                             try writer.writeAll(offsets.nodeToSlice(tree, node));
                             return;
                         }
 
-                        var buffer: [2]Ast.Node.Index = undefined;
-                        const container_decl = tree.fullContainerDecl(&buffer, node).?;
+                        var container_decl_buffer: [2]Ast.Node.Index = undefined;
+                        const container_decl = tree.fullContainerDecl(&container_decl_buffer, node).?;
 
                         const start_token = container_decl.layout_token orelse container_decl.ast.main_token;
                         const end_token = if (container_decl.ast.arg.unwrap()) |arg|
@@ -4320,7 +4311,7 @@ pub const Type = struct {
                 }
             },
             .function => |info| {
-                try writer.print("{}", .{analyser.fmtFunction(.{
+                try analyser.rawStringifyFunction(writer, .{
                     .referenced = referenced,
                     .info = info,
                     .include_fn_keyword = true,
@@ -4333,12 +4324,12 @@ pub const Type = struct {
                     } },
                     .include_return_type = true,
                     .snippet_placeholders = false,
-                })});
+                });
             },
             .ip_index => |payload| {
                 const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
                 try analyser.ip.print(ip_index, writer, .{
-                    .truncate_container = ctx.options.truncate_container_decls,
+                    .truncate_container = options.truncate_container_decls,
                 });
             },
             .either => try writer.writeAll("either type"), // TODO
@@ -4354,7 +4345,7 @@ pub const Type = struct {
                 const handle = token_handle.handle;
                 const str = handle.tree.tokenSlice(token);
                 try writer.writeAll(str);
-                if (referenced) |r| try r.put(arena, .of(str, handle, token), {});
+                if (referenced) |r| try r.put(analyser.arena, .of(str, handle, token), {});
             },
             .anytype_parameter => |info| {
                 const token = info.token_handle.token;

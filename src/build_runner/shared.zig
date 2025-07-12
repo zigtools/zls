@@ -228,11 +228,11 @@ fn parseUnameKernelVersion(kernel_version: []const u8) !std.SemanticVersion {
 }
 
 test parseUnameKernelVersion {
-    try std.testing.expectFmt("5.17.0", "{}", .{try parseUnameKernelVersion("5.17.0")});
-    try std.testing.expectFmt("6.12.9", "{}", .{try parseUnameKernelVersion("6.12.9-rc7")});
-    try std.testing.expectFmt("6.6.71", "{}", .{try parseUnameKernelVersion("6.6.71-42-generic")});
-    try std.testing.expectFmt("5.15.167", "{}", .{try parseUnameKernelVersion("5.15.167.4-microsoft-standard-WSL2")}); // WSL2
-    try std.testing.expectFmt("4.4.0", "{}", .{try parseUnameKernelVersion("4.4.0-20241-Microsoft")}); // WSL1
+    try std.testing.expectFmt("5.17.0", "{f}", .{try parseUnameKernelVersion("5.17.0")});
+    try std.testing.expectFmt("6.12.9", "{f}", .{try parseUnameKernelVersion("6.12.9-rc7")});
+    try std.testing.expectFmt("6.6.71", "{f}", .{try parseUnameKernelVersion("6.6.71-42-generic")});
+    try std.testing.expectFmt("5.15.167", "{f}", .{try parseUnameKernelVersion("5.15.167.4-microsoft-standard-WSL2")}); // WSL2
+    try std.testing.expectFmt("4.4.0", "{f}", .{try parseUnameKernelVersion("4.4.0-20241-Microsoft")}); // WSL1
 
     try std.testing.expectError(error.InvalidCharacter, parseUnameKernelVersion(""));
     try std.testing.expectError(error.InvalidVersion, parseUnameKernelVersion("5"));

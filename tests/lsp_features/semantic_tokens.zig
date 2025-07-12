@@ -2111,10 +2111,10 @@ fn testSemanticTokensOptions(
             try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri, token.loc, .err, .{ expected_token_source, token_source });
             return error.UnexpectedTokenContent;
         } else if (expected_token_type != token.type) {
-            try error_builder.msgAtLoc("expected token type `{s}` but got `{s}`", uri, token.loc, .err, .{ @tagName(expected_token_type), @tagName(token.type) });
+            try error_builder.msgAtLoc("expected token type `{t}` but got `{t}`", uri, token.loc, .err, .{ expected_token_type, token.type });
             return error.UnexpectedTokenType;
         } else if (!std.meta.eql(expected_token_modifiers, token.modifiers)) {
-            try error_builder.msgAtLoc("expected token modifiers `{}` but got `{}`", uri, token.loc, .err, .{ expected_token_modifiers, token.modifiers });
+            try error_builder.msgAtLoc("expected token modifiers `{f}` but got `{f}`", uri, token.loc, .err, .{ expected_token_modifiers, token.modifiers });
             return error.UnexpectedTokenModifiers;
         }
     }

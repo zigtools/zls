@@ -53,8 +53,6 @@ fn convertCIncludeInternal(
     node: Ast.Node.Index,
     output: *std.ArrayListUnmanaged(u8),
 ) error{ OutOfMemory, Unsupported }!void {
-    var writer = output.writer(allocator);
-
     var buffer: [2]Ast.Node.Index = undefined;
     if (tree.blockStatements(&buffer, node)) |statements| {
         for (statements) |statement| {
@@ -69,7 +67,7 @@ fn convertCIncludeInternal(
         const first = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[0])));
 
         if (std.mem.eql(u8, call_name, "@cInclude")) {
-            try writer.print("#include <{s}>\n", .{first});
+            try output.print(allocator, "#include <{s}>\n", .{first});
         } else if (std.mem.eql(u8, call_name, "@cDefine")) {
             if (params.len < 2) return;
 
@@ -77,14 +75,14 @@ fn convertCIncludeInternal(
             const is_void = if (tree.blockStatements(&buffer2, params[1])) |block| block.len == 0 else false;
 
             if (is_void) {
-                try writer.print("#define {s}\n", .{first});
+                try output.print(allocator, "#define {s}\n", .{first});
             } else {
                 if (tree.nodeTag(params[1]) != .string_literal) return error.Unsupported;
                 const second = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[1])));
-                try writer.print("#define {s} {s}\n", .{ first, second });
+                try output.print(allocator, "#define {s} {s}\n", .{ first, second });
             }
         } else if (std.mem.eql(u8, call_name, "@cUndef")) {
-            try writer.print("#undef {s}\n", .{first});
+            try output.print(allocator, "#undef {s}\n", .{first});
         } else {
             return error.Unsupported;
         }

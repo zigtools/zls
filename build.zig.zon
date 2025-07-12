@@ -13,16 +13,16 @@
     // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/e97515b48d9d3eee636c186d31bd1761fae82791.tar.gz",
-            .hash = "known_folders-0.0.0-Fy-PJnDCAACNyr_dWSI3vev-jU3ZqZv8f3quddcfuug0",
+            .url = "https://github.com/ziglibs/known-folders/archive/e893a795cde649157d12ed0945d59ac83918329d.tar.gz",
+            .hash = "known_folders-0.0.0-Fy-PJmPRAAACn0mJEDnCpUaLoqt63Uulh8Y5nqULMFlm",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/a20dd1f11b10819a6f570f98b42e1c91e3704357.tar.gz",
             .hash = "diffz-0.0.1-G2tlIQrOAQCfH15jdyaLyrMgV8eGPouFhkCeYFTmJaLk",
         },
         .lsp_codegen = .{
-            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/3b26e5781bb7d0c7b547bb48e154d1ab13180b69.tar.gz",
-            .hash = "lsp_codegen-0.1.0-CMjjozO0CQBBS-ateW3KKgV0iP2iLlNryW-rnub3wLPL",
+            .url = "https://github.com/zigtools/zig-lsp-codegen/archive/0a452e11da1d38ed5cf1f6ec7ad42abe5df58751.tar.gz",
+            .hash = "lsp_codegen-0.1.0-CMjjo-UyCgB9MlBG9b-3CXSfYO0-L3UlC8YqfCV7qZJf",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",

@@ -678,7 +678,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
     });
 
     if (std.meta.activeTag(ctx) != expected_tag) {
-        std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(expected_tag), @tagName(std.meta.activeTag(ctx)) });
+        std.debug.print("Expected tag `{t}`, got `{t}`\n", .{ expected_tag, std.meta.activeTag(ctx) });
         return error.DifferentTag;
     }
 

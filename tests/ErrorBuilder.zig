@@ -51,26 +51,26 @@ pub fn removeFile(builder: *ErrorBuilder, name: []const u8) void {
 
 pub fn msgAtLoc(
     builder: *ErrorBuilder,
-    comptime fmt: []const u8,
+    comptime fmt_str: []const u8,
     file_name: []const u8,
     loc: offsets.Loc,
     level: std.log.Level,
     args: anytype,
 ) error{OutOfMemory}!void {
-    const message = try std.fmt.allocPrint(builder.allocator, fmt, args);
+    const message = try std.fmt.allocPrint(builder.allocator, fmt_str, args);
     errdefer builder.allocator.free(message);
     try builder.appendMessage(message, file_name, loc, level);
 }
 
 pub fn msgAtIndex(
     builder: *ErrorBuilder,
-    comptime fmt: []const u8,
+    comptime fmt_str: []const u8,
     file_name: []const u8,
     source_index: usize,
     level: std.log.Level,
     args: anytype,
 ) error{OutOfMemory}!void {
-    return msgAtLoc(builder, fmt, file_name, .{ .start = source_index, .end = source_index }, level, args);
+    return msgAtLoc(builder, fmt_str, file_name, .{ .start = source_index, .end = source_index }, level, args);
 }
 
 pub fn hasMessages(builder: ErrorBuilder) bool {
@@ -102,55 +102,13 @@ pub fn removeUnusedFiles(builder: *ErrorBuilder) void {
     }
 }
 
-pub const FormatContext = struct {
-    builder: *const ErrorBuilder,
-    tty_config: ?std.io.tty.Config = null,
-};
-
-pub fn format(
-    builder: *const ErrorBuilder,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) @TypeOf(writer).Error!void {
-    _ = options;
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, builder.*);
-    try write(.{ .builder = builder }, writer);
-}
-
-pub fn formatContext(
-    context: FormatContext,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) @TypeOf(writer).Error!void {
-    _ = options;
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, context.builder.*);
-    try write(context, writer);
-}
-
-pub fn fmtContext(builder: *const ErrorBuilder, tty_config: std.io.tty.Config) std.fmt.Formatter(formatContext) {
-    return .{ .data = .{
-        .builder = builder,
-        .tty_config = tty_config,
-    } };
-}
-
-pub fn writeDebug(builder: *const ErrorBuilder) void {
-    const stderr = std.io.getStdErr();
-    const tty_config = std.io.tty.detectConfig(stderr);
-    // does zig trim the output or why is this needed?
-    stderr.writeAll(" ") catch return;
-    std.debug.print("\n{}\n", .{builder.fmtContext(tty_config)});
-}
-
 //
 //
 //
 
-fn assertFmt(ok: bool, comptime fmt: []const u8, args: anytype) void {
+fn assertFmt(ok: bool, comptime fmt_str: []const u8, args: anytype) void {
     if (builtin.mode == .Debug or builtin.is_test) {
-        if (!ok) std.debug.panic(fmt, args);
+        if (!ok) std.debug.panic(fmt_str, args);
     } else {
         std.debug.assert(ok);
     }
@@ -207,7 +165,31 @@ fn appendMessage(
     builder.message_count += 1;
 }
 
-fn write(context: FormatContext, writer: anytype) @TypeOf(writer).Error!void {
+pub const FormatContext = struct {
+    builder: *const ErrorBuilder,
+    tty_config: ?std.io.tty.Config,
+};
+
+pub fn fmt(builder: *const ErrorBuilder, tty_config: std.io.tty.Config) std.fmt.Alt(FormatContext, render) {
+    return .{ .data = .{
+        .builder = builder,
+        .tty_config = tty_config,
+    } };
+}
+
+pub fn writeDebug(builder: *const ErrorBuilder) void {
+    const stderr = std.fs.File.stderr();
+    const tty_config = std.io.tty.detectConfig(stderr);
+    // does zig trim the output or why is this needed?
+    stderr.writeAll(" ") catch return;
+    std.debug.print("\n{f}\n", .{builder.fmt(tty_config)});
+}
+
+pub fn format(builder: *const ErrorBuilder, writer: *std.io.Writer) std.io.Writer.Error!void {
+    try render(.{ .builder = builder, .tty_config = null }, writer);
+}
+
+fn render(context: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
     const builder = context.builder;
     var first = true;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
@@ -401,7 +383,7 @@ test "ErrorBuilder - write" {
     var eb: ErrorBuilder = .init(std.testing.allocator);
     defer eb.deinit();
 
-    try std.testing.expectFmt("", "{}", .{eb});
+    try std.testing.expectFmt("", "{f}", .{eb});
 
     try eb.addFile("",
         \\The missile knows where it is at all times.
@@ -427,7 +409,7 @@ test "ErrorBuilder - write" {
         \\it was, it is able to obtain the deviation and its variation, which is called error.
     );
 
-    try std.testing.expectFmt("", "{}", .{eb});
+    try std.testing.expectFmt("", "{f}", .{eb});
 
     {
         eb.clearMessages();
@@ -437,7 +419,7 @@ test "ErrorBuilder - write" {
         try std.testing.expectFmt(
             \\(whichever is greater), it obtains a difference, or deviation.
             \\ ^^^^^^^^^^^^^^^^^^^^ warning: what about equality?
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 
     {
@@ -450,7 +432,7 @@ test "ErrorBuilder - write" {
             \\By subtracting where it is from where it isn't, or where it isn't from where it is
             \\   ^^^^^^^^^^^ info: are safety checks enabled?
             \\(whichever is greater), it obtains a difference, or deviation.
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 
     {
@@ -462,7 +444,7 @@ test "ErrorBuilder - write" {
             \\The missile knows where it is at all times.
             \\    ^^^^^^^ info: AAM or ASM?
             \\It knows this because it knows where it isn't.
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 
     {
@@ -475,7 +457,7 @@ test "ErrorBuilder - write" {
             \\differentiating this from the algebraic sum of where it shouldn't be, and where
             \\it was, it is able to obtain the deviation and its variation, which is called error.
             \\                                                                              ^^^^^ error: reserved keyword!
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 
     {
@@ -489,7 +471,7 @@ test "ErrorBuilder - write" {
             \\            ^^^^^ info: declared here
             \\It knows this because it knows where it isn't.
             \\                         ^^^^^ error: redeclaration of work 'knows'
-        , "{}", .{eb});
+        , "{f}", .{eb});
 
         eb.unified = 1;
         try std.testing.expectFmt(
@@ -498,7 +480,7 @@ test "ErrorBuilder - write" {
             \\It knows this because it knows where it isn't.
             \\                         ^^^^^ error: redeclaration of work 'knows'
             \\By subtracting where it is from where it isn't, or where it isn't from where it is
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 
     {
@@ -512,7 +494,7 @@ test "ErrorBuilder - write" {
             \\            ^^^^^ info: declared here
             \\It knows this because it knows where it isn't.
             \\                         ^^^^^ error: redeclaration of work 'knows'
-        , "{}", .{eb});
+        , "{f}", .{eb});
 
         eb.unified = 1;
         try std.testing.expectFmt(
@@ -521,7 +503,7 @@ test "ErrorBuilder - write" {
             \\It knows this because it knows where it isn't.
             \\                         ^^^^^ error: redeclaration of work 'knows'
             \\By subtracting where it is from where it isn't, or where it isn't from where it is
-        , "{}", .{eb});
+        , "{f}", .{eb});
     }
 }
 
@@ -536,19 +518,19 @@ test "ErrorBuilder - write on empty file" {
     try std.testing.expectFmt(
         \\
         \\^ warning: why is this empty?
-    , "{}", .{eb});
+    , "{f}", .{eb});
 
     eb.unified = 0;
     try std.testing.expectFmt(
         \\
         \\^ warning: why is this empty?
-    , "{}", .{eb});
+    , "{f}", .{eb});
 
     eb.unified = 2;
     try std.testing.expectFmt(
         \\
         \\^ warning: why is this empty?
-    , "{}", .{eb});
+    , "{f}", .{eb});
 }
 
 test "ErrorBuilder - file name visibility" {
@@ -632,7 +614,7 @@ test "ErrorBuilder - file name visibility" {
         \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-    , "{}", .{eb});
+    , "{f}", .{eb});
 
     eb.file_name_visibility = .always;
     try std.testing.expectFmt(
@@ -665,7 +647,7 @@ test "ErrorBuilder - file name visibility" {
         \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-    , "{}", .{eb});
+    , "{f}", .{eb});
 
     eb.file_name_visibility = .never;
     try std.testing.expectFmt(
@@ -693,5 +675,5 @@ test "ErrorBuilder - file name visibility" {
         \\// comment
         \\const w = hw[7..];
         \\      ^ error: this should be `*const [6:0]u8`
-    , "{}", .{eb});
+    , "{f}", .{eb});
 }

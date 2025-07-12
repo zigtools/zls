@@ -22,7 +22,7 @@ fn fnProtoToSignatureInfo(
 ) !types.SignatureInformation {
     const info = func_type.data.function;
 
-    const label = try std.fmt.allocPrint(arena, "{}", .{analyser.fmtFunction(.{
+    const label = try analyser.stringifyFunction(.{
         .info = info,
         .include_fn_keyword = true,
         .include_name = true,
@@ -33,7 +33,7 @@ fn fnProtoToSignatureInfo(
         } },
         .include_return_type = true,
         .snippet_placeholders = false,
-    })});
+    });
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(func_type);
@@ -42,14 +42,14 @@ fn fnProtoToSignatureInfo(
 
     var params: std.ArrayListUnmanaged(types.ParameterInformation) = .empty;
     for (info.parameters) |param| {
-        const param_label = try std.fmt.allocPrint(arena, "{}", .{analyser.fmtParameter(.{
+        const param_label = try analyser.stringifyParameter(.{
             .info = param,
             .index = 0, // we don't want a comma in the label
             .include_modifier = true,
             .include_name = true,
             .include_type = true,
             .snippet_placeholders = false,
-        })});
+        });
 
         try params.append(arena, .{
             .label = .{ .string = param_label },

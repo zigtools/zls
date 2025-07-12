@@ -705,7 +705,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
 
     switch (request) {
         .rename => |rename| {
-            const escaped_rename = try std.fmt.allocPrint(arena, "{}", .{std.zig.fmtId(rename.newName)});
+            const escaped_rename = try std.fmt.allocPrint(arena, "{f}", .{std.zig.fmtId(rename.newName)});
             var changes: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)) = .{};
 
             for (locations.items) |loc| {

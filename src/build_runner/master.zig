@@ -3,7 +3,9 @@
 //! This build runner is targeting compatibility with the following Zig versions:
 //!   - 0.15.0-dev.936+fc2c1883b or later
 //!
-//! Handling multiple Zig versions can be achieved by branching on the `builtin.zig_version` at comptime.
+//! Handling multiple Zig versions can be achieved with one of the following strategies:
+//!   - use `@hasDecl` or `@hasField` (recommended)
+//!   - use `builtin.zig_version`
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
 //! `zig build --build-runner src/build_runner/master.zig`
@@ -25,7 +27,7 @@ const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
 
-// -----------------------------------------------------------------------------
+const writergate = @hasDecl(std.fs.File, "stdout");
 
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
@@ -329,9 +331,15 @@ pub fn main() !void {
             .data = buffer.items,
             .flags = .{ .exclusive = true },
         }) catch |err| {
-            fatal("unable to write configuration results to '{}{s}': {s}", .{
-                local_cache_directory, tmp_sub_path, @errorName(err),
-            });
+            if (writergate) {
+                fatal("unable to write configuration results to '{f}{s}': {}", .{
+                    local_cache_directory, tmp_sub_path, err,
+                });
+            } else {
+                fatal("unable to write configuration results to '{}{s}': {}", .{
+                    local_cache_directory, tmp_sub_path, err,
+                });
+            }
         };
 
         process.exit(3); // Indicate configure phase failed with meaningful stdout.
@@ -381,14 +389,19 @@ pub fn main() !void {
 
     const message_thread = try std.Thread.spawn(.{}, struct {
         fn do(ww: *Watch) void {
-            while (std.io.getStdIn().reader().readByte()) |tag| {
-                switch (tag) {
+            while (true) {
+                var buffer: if (writergate) [1]u8 else void = undefined;
+                var file_reader = if (writergate) std.fs.File.stdin().reader(&buffer);
+                const reader = if (writergate) &file_reader.interface else std.io.getStdIn().reader();
+                const takeByte = if (writergate) std.io.Reader.takeByte else std.fs.File.Reader.readByte;
+                const byte = takeByte(reader) catch |err| switch (err) {
+                    error.EndOfStream => process.exit(0),
+                    else => process.exit(1),
+                };
+                switch (byte) {
                     '\x00' => ww.trigger(),
                     else => process.exit(1),
                 }
-            } else |err| switch (err) {
-                error.EndOfStream => process.exit(0),
-                else => process.exit(1),
             }
         }
     }.do, .{&w});
@@ -397,8 +410,8 @@ pub fn main() !void {
     const gpa = arena;
     var transport = Transport.init(.{
         .gpa = gpa,
-        .in = std.io.getStdIn(),
-        .out = std.io.getStdOut(),
+        .in = if (writergate) std.fs.File.stdin() else std.io.getStdIn(),
+        .out = if (writergate) std.fs.File.stdout() else std.io.getStdOut(),
     });
     defer transport.deinit();
 
@@ -1255,7 +1268,8 @@ fn extractBuildInformation(
         available_options.map.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
     }
 
-    try std.json.stringify(
+    const stringified_build_config = try std.json.stringifyAlloc(
+        gpa,
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,
             .packages = try packages.toPackageList(),
@@ -1264,11 +1278,15 @@ fn extractBuildInformation(
             .available_options = available_options,
             .c_macros = c_macros.keys(),
         },
-        .{
-            .whitespace = .indent_2,
-        },
-        std.io.getStdOut().writer(),
+        .{ .whitespace = .indent_2 },
     );
+
+    if (writergate) {
+        var file_writer = std.fs.File.stdout().writer(&.{});
+        file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
+    } else {
+        try std.io.getStdOut().writeAll(stringified_build_config);
+    }
 }
 
 fn processPkgConfig(

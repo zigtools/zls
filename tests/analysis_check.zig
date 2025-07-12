@@ -211,10 +211,10 @@ pub fn main() Error!void {
         };
 
         if (expect_unknown) {
-            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{try ty.fmtTypeOf(&analyser, .{
-                .truncate_container_decls = false,
-            })});
-            defer gpa.free(actual_type);
+            const actual_type = try ty.stringifyTypeOf(
+                &analyser,
+                .{ .truncate_container_decls = false },
+            );
 
             try error_builder.msgAtLoc("expected unknown but got `{s}`", file_path, identifier_loc, .err, .{
                 actual_type,
@@ -227,10 +227,10 @@ pub fn main() Error!void {
         }
 
         if (test_item.expected_type) |expected_type| {
-            const actual_type = try std.fmt.allocPrint(gpa, "{}", .{try ty.fmtTypeOf(&analyser, .{
-                .truncate_container_decls = false,
-            })});
-            defer gpa.free(actual_type);
+            const actual_type = try ty.stringifyTypeOf(
+                &analyser,
+                .{ .truncate_container_decls = false },
+            );
 
             if (!std.mem.eql(u8, expected_type, actual_type)) {
                 try error_builder.msgAtLoc("expected type `{s}` but got `{s}`", file_path, identifier_loc, .err, .{
@@ -249,10 +249,10 @@ pub fn main() Error!void {
                 continue;
             }
 
-            const actual_value = try std.fmt.allocPrint(gpa, "{}", .{ty.fmtTypeVal(&analyser, .{
-                .truncate_container_decls = false,
-            })});
-            defer gpa.free(actual_value);
+            const actual_value = try ty.stringifyTypeVal(
+                &analyser,
+                .{ .truncate_container_decls = false },
+            );
 
             if (!std.mem.eql(u8, expected_value, actual_value)) {
                 try error_builder.msgAtLoc("expected value `{s}` but got `{s}`", file_path, identifier_loc, .err, .{

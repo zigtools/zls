@@ -60,15 +60,7 @@ pub const TokenModifiers = packed struct(u16) {
     mutable: bool = false,
     _: u4 = 0,
 
-    pub fn format(
-        modifiers: TokenModifiers,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, modifiers);
-        _ = options;
-
+    pub fn format(modifiers: TokenModifiers, writer: *std.io.Writer) std.io.Writer.Error!void {
         try writer.writeAll(".{");
         var i: usize = 0;
         inline for (std.meta.fields(TokenModifiers)) |field| {

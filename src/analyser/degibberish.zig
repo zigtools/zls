@@ -11,15 +11,12 @@ const FormatDegibberishData = struct {
     ty: InternPool.Index,
 };
 
-pub fn fmtDegibberish(ip: *InternPool, ty: InternPool.Index) std.fmt.Formatter(formatDegibberish) {
+pub fn fmtDegibberish(ip: *InternPool, ty: InternPool.Index) std.fmt.Alt(FormatDegibberishData, formatDegibberish) {
     const data: FormatDegibberishData = .{ .ip = ip, .ty = ty };
     return .{ .data = data };
 }
 
-fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, data.ty);
-    _ = options;
-
+fn formatDegibberish(data: FormatDegibberishData, writer: *std.io.Writer) std.io.Writer.Error!void {
     const ip = data.ip;
     var ty = data.ty;
 
@@ -27,7 +24,7 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
         switch (ip.indexToKey(ty)) {
             .simple_type,
             .int_type,
-            => try writer.print("{}", .{ty.fmt(ip)}),
+            => try writer.print("{f}", .{ty.fmt(ip)}),
 
             .pointer_type => |pointer_info| {
                 // ignored attributes:
@@ -37,7 +34,7 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
                 // - packed_offset
 
                 if (pointer_info.sentinel != .none) {
-                    try writer.print("{} terminated ", .{pointer_info.sentinel.fmt(ip)});
+                    try writer.print("{f} terminated ", .{pointer_info.sentinel.fmt(ip)});
                 }
 
                 // single pointer
@@ -65,13 +62,13 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
             },
             .array_type => |array_info| {
                 if (array_info.sentinel != .none) {
-                    try writer.print("{} terminated ", .{array_info.sentinel.fmt(ip)});
+                    try writer.print("{f} terminated ", .{array_info.sentinel.fmt(ip)});
                 }
                 try writer.print("array {d} of ", .{array_info.len});
                 ty = array_info.child;
                 continue;
             },
-            .struct_type => try writer.print("struct {}", .{ty.fmt(ip)}),
+            .struct_type => try writer.print("struct {f}", .{ty.fmt(ip)}),
             .optional_type => |optional_info| {
                 try writer.writeAll("optional of ");
                 ty = optional_info.payload_type;
@@ -79,7 +76,7 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
             },
             .error_union_type => |error_union_info| {
                 try writer.writeAll("error union with ");
-                try writer.print("{}", .{fmtDegibberish(ip, error_union_info.error_set_type)});
+                try writer.print("{f}", .{fmtDegibberish(ip, error_union_info.error_set_type)});
                 try writer.writeAll(" and payload ");
                 ty = error_union_info.payload_type;
                 continue;
@@ -89,30 +86,30 @@ fn formatDegibberish(data: FormatDegibberishData, comptime fmt: []const u8, opti
                 for (0..error_set_info.names.len) |i| {
                     if (i != 0) try writer.writeByte(',');
                     const name = error_set_info.names.at(@intCast(i), ip);
-                    try writer.print("{}", .{InternPool.fmtId(ip, name)});
+                    try writer.print("{f}", .{InternPool.fmtId(ip, name)});
                 }
                 try writer.writeAll(")");
             },
-            .enum_type => try writer.print("enum {}", .{ty.fmt(ip)}),
+            .enum_type => try writer.print("enum {f}", .{ty.fmt(ip)}),
             .function_type => |function_info| {
                 try writer.writeAll("function (");
                 for (0..function_info.args.len) |i| {
                     if (i != 0) try writer.writeAll(", ");
                     const arg_ty = function_info.args.at(@intCast(i), ip);
-                    try writer.print("{}", .{fmtDegibberish(ip, arg_ty)});
+                    try writer.print("{f}", .{fmtDegibberish(ip, arg_ty)});
                 }
                 try writer.writeAll(") returning ");
                 ty = function_info.return_type;
                 continue;
             },
-            .union_type => try writer.print("union {}", .{ty.fmt(ip)}),
+            .union_type => try writer.print("union {f}", .{ty.fmt(ip)}),
             .tuple_type => |tuple_info| {
                 std.debug.assert(tuple_info.types.len == tuple_info.values.len);
                 try writer.writeAll("tuple of (");
                 for (0..tuple_info.types.len) |i| {
                     if (i != 0) try writer.writeAll(", ");
                     const field_ty = tuple_info.types.at(@intCast(i), ip);
-                    try writer.print("{}", .{fmtDegibberish(ip, field_ty)});
+                    try writer.print("{f}", .{fmtDegibberish(ip, field_ty)});
                 }
                 try writer.writeAll(")");
             },
@@ -156,8 +153,8 @@ test "degibberish - simple types" {
     var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
-    try std.testing.expectFmt("u32", "{}", .{fmtDegibberish(&ip, .u32_type)});
-    try std.testing.expectFmt("comptime_float", "{}", .{fmtDegibberish(&ip, .comptime_float_type)});
+    try std.testing.expectFmt("u32", "{f}", .{fmtDegibberish(&ip, .u32_type)});
+    try std.testing.expectFmt("comptime_float", "{f}", .{fmtDegibberish(&ip, .comptime_float_type)});
 }
 
 test "degibberish - pointer types" {
@@ -165,12 +162,12 @@ test "degibberish - pointer types" {
     var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
-    try std.testing.expectFmt("many-item pointer to u8", "{}", .{fmtDegibberish(&ip, .manyptr_u8_type)});
-    try std.testing.expectFmt("many-item pointer to const u8", "{}", .{fmtDegibberish(&ip, .manyptr_const_u8_type)});
-    try std.testing.expectFmt("0 terminated many-item pointer to const u8", "{}", .{fmtDegibberish(&ip, .manyptr_const_u8_sentinel_0_type)});
-    try std.testing.expectFmt("single-item pointer to const comptime_int", "{}", .{fmtDegibberish(&ip, .single_const_pointer_to_comptime_int_type)});
-    try std.testing.expectFmt("slice (pointer + length) to const u8", "{}", .{fmtDegibberish(&ip, .slice_const_u8_type)});
-    try std.testing.expectFmt("0 terminated slice (pointer + length) to const u8", "{}", .{fmtDegibberish(&ip, .slice_const_u8_sentinel_0_type)});
+    try std.testing.expectFmt("many-item pointer to u8", "{f}", .{fmtDegibberish(&ip, .manyptr_u8_type)});
+    try std.testing.expectFmt("many-item pointer to const u8", "{f}", .{fmtDegibberish(&ip, .manyptr_const_u8_type)});
+    try std.testing.expectFmt("0 terminated many-item pointer to const u8", "{f}", .{fmtDegibberish(&ip, .manyptr_const_u8_sentinel_0_type)});
+    try std.testing.expectFmt("single-item pointer to const comptime_int", "{f}", .{fmtDegibberish(&ip, .single_const_pointer_to_comptime_int_type)});
+    try std.testing.expectFmt("slice (pointer + length) to const u8", "{f}", .{fmtDegibberish(&ip, .slice_const_u8_type)});
+    try std.testing.expectFmt("0 terminated slice (pointer + length) to const u8", "{f}", .{fmtDegibberish(&ip, .slice_const_u8_sentinel_0_type)});
 }
 
 test "degibberish - array types" {
@@ -181,8 +178,8 @@ test "degibberish - array types" {
     const @"[3:0]u8" = try ip.get(gpa, .{ .array_type = .{ .len = 3, .child = .u8_type, .sentinel = .zero_u8 } });
     const @"[0]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 0, .child = .u32_type } });
 
-    try std.testing.expectFmt("0 terminated array 3 of u8", "{}", .{fmtDegibberish(&ip, @"[3:0]u8")});
-    try std.testing.expectFmt("array 0 of u32", "{}", .{fmtDegibberish(&ip, @"[0]u32")});
+    try std.testing.expectFmt("0 terminated array 3 of u8", "{f}", .{fmtDegibberish(&ip, @"[3:0]u8")});
+    try std.testing.expectFmt("array 0 of u32", "{f}", .{fmtDegibberish(&ip, @"[0]u32")});
 }
 
 test "degibberish - optional types" {
@@ -192,7 +189,7 @@ test "degibberish - optional types" {
 
     const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
 
-    try std.testing.expectFmt("optional of u32", "{}", .{fmtDegibberish(&ip, @"?u32")});
+    try std.testing.expectFmt("optional of u32", "{f}", .{fmtDegibberish(&ip, @"?u32")});
 }
 
 test "degibberish - error union types" {
@@ -214,7 +211,7 @@ test "degibberish - error union types" {
         .payload_type = .u32_type,
     } });
 
-    try std.testing.expectFmt("error union with error set of (foo,bar,baz) and payload u32", "{}", .{fmtDegibberish(&ip, @"error{foo,bar,baz}!u32")});
+    try std.testing.expectFmt("error union with error set of (foo,bar,baz) and payload u32", "{f}", .{fmtDegibberish(&ip, @"error{foo,bar,baz}!u32")});
 }
 
 test "degibberish - error set types" {
@@ -231,7 +228,7 @@ test "degibberish - error set types" {
         .owner_decl = .none,
     } });
 
-    try std.testing.expectFmt("error set of (foo,bar,baz)", "{}", .{fmtDegibberish(&ip, @"error{foo,bar,baz}")});
+    try std.testing.expectFmt("error set of (foo,bar,baz)", "{f}", .{fmtDegibberish(&ip, @"error{foo,bar,baz}")});
 }
 
 test "degibberish - function types" {
@@ -244,9 +241,9 @@ test "degibberish - function types" {
         .return_type = .type_type,
     } });
 
-    try std.testing.expectFmt("function () returning noreturn", "{}", .{fmtDegibberish(&ip, .fn_noreturn_no_args_type)});
-    try std.testing.expectFmt("function () returning void", "{}", .{fmtDegibberish(&ip, .fn_void_no_args_type)});
-    try std.testing.expectFmt("function (u32, void) returning type", "{}", .{fmtDegibberish(&ip, @"fn(u32, void) type")});
+    try std.testing.expectFmt("function () returning noreturn", "{f}", .{fmtDegibberish(&ip, .fn_noreturn_no_args_type)});
+    try std.testing.expectFmt("function () returning void", "{f}", .{fmtDegibberish(&ip, .fn_void_no_args_type)});
+    try std.testing.expectFmt("function (u32, void) returning type", "{f}", .{fmtDegibberish(&ip, @"fn(u32, void) type")});
 }
 
 test "degibberish - tuple types" {
@@ -259,7 +256,7 @@ test "degibberish - tuple types" {
         .values = try ip.getIndexSlice(gpa, &.{ .none, .none, .none }),
     } });
 
-    try std.testing.expectFmt("tuple of (u32, comptime_float, c_int)", "{}", .{fmtDegibberish(&ip, @"struct{u32, comptime_float, c_int}")});
+    try std.testing.expectFmt("tuple of (u32, comptime_float, c_int)", "{f}", .{fmtDegibberish(&ip, @"struct{u32, comptime_float, c_int}")});
 }
 
 test "degibberish - vector types" {
@@ -270,8 +267,8 @@ test "degibberish - vector types" {
     const @"@Vector(3, u8)" = try ip.get(gpa, .{ .vector_type = .{ .len = 3, .child = .u8_type } });
     const @"@Vector(0, u32)" = try ip.get(gpa, .{ .vector_type = .{ .len = 0, .child = .u32_type } });
 
-    try std.testing.expectFmt("vector 3 of u8", "{}", .{fmtDegibberish(&ip, @"@Vector(3, u8)")});
-    try std.testing.expectFmt("vector 0 of u32", "{}", .{fmtDegibberish(&ip, @"@Vector(0, u32)")});
+    try std.testing.expectFmt("vector 3 of u8", "{f}", .{fmtDegibberish(&ip, @"@Vector(3, u8)")});
+    try std.testing.expectFmt("vector 0 of u32", "{f}", .{fmtDegibberish(&ip, @"@Vector(0, u32)")});
 }
 
 test "degibberish - anyframe types" {
@@ -280,5 +277,5 @@ test "degibberish - anyframe types" {
     defer ip.deinit(gpa);
 
     const @"anyframe->u32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .u32_type } });
-    try std.testing.expectFmt("function frame returning u32", "{}", .{fmtDegibberish(&ip, @"anyframe->u32")});
+    try std.testing.expectFmt("function frame returning u32", "{f}", .{fmtDegibberish(&ip, @"anyframe->u32")});
 }

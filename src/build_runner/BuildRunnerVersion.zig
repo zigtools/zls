@@ -113,7 +113,7 @@ test selectVersionInternal {
         const build_runner = BuildRunnerVersion.selectBuildRunnerVersion(current_zig_version);
         if (build_runner == null) {
             std.debug.print(
-                \\ZLS is being tested with Zig {}.
+                \\ZLS is being tested with Zig {f}.
                 \\No build runner could be resolved for this Zig version!
                 \\
             , .{current_zig_version});
