@@ -1,3 +1,10 @@
+//! This script takes care of the following tasks:
+//!
+//! - generate `src/Config.zig`
+//! - generate `schema.json`
+//! - generate metadata about Zig's builtins (uses `src/tools/langref.html.in`)
+//! - generate ZLS configuration options for vscode-zig's package.json
+
 const std = @import("std");
 
 const ConfigOption = struct {
