@@ -66,6 +66,13 @@ const one_minus_c = one_u32 - c_u32;
 //    ^^^^^^^^^^^ (usize)()
 
 //
+// array pointer *[n]T
+//
+
+const array_u32: *const [2]u32 = &[_]u32{ 1, 2 };
+//    ^^^^^^^^^ (*const [2]u32)()
+
+//
 // many item pointer [*]T
 //
 
@@ -233,6 +240,21 @@ const c_minus_slice = c_u32 - slice_u32;
 
 const c_minus_c = c_u32 - c_u32;
 //    ^^^^^^^^^ (usize)()
+
+const c_u32_or_one_u32 = if (runtime_bool) c_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_array_u32 = if (runtime_bool) c_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const c_u32_or_many_u32 = if (runtime_bool) c_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_slice_u32 = if (runtime_bool) c_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const c_u32_or_c_u32 = if (runtime_bool) c_u32 else c_u32;
+//    ^^^^^^^^^^^^^^ ([*c]const u32)()
 
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
