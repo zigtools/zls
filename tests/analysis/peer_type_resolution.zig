@@ -18,6 +18,38 @@ pub fn main() !void {
     _ = widened_int_1;
     //  ^^^^^^^^^^^^^ (i16)()
 
+    const u8_and_comptime_int = if (runtime_bool) @as(u8, 0) else 0;
+    _ = u8_and_comptime_int;
+    //  ^^^^^^^^^^^^^^^^^^^ (u8)()
+
+    const comptime_int_and_u8 = if (runtime_bool) 0 else @as(u8, 0);
+    _ = comptime_int_and_u8;
+    //  ^^^^^^^^^^^^^^^^^^^ (u8)()
+
+    const widened_float_0 = if (runtime_bool) @as(f16, 0) else @as(f32, 0);
+    _ = widened_float_0;
+    //  ^^^^^^^^^^^^^^^ (f32)()
+
+    const widened_float_1 = if (runtime_bool) @as(f32, 0) else @as(f16, 0);
+    _ = widened_float_1;
+    //  ^^^^^^^^^^^^^^^ (f32)()
+
+    const f64_and_comptime_int = if (runtime_bool) @as(f64, 0) else 0;
+    _ = f64_and_comptime_int;
+    //  ^^^^^^^^^^^^^^^^^^^^ (f64)()
+
+    const comptime_int_and_f64 = if (runtime_bool) 0 else @as(f64, 0);
+    _ = comptime_int_and_f64;
+    //  ^^^^^^^^^^^^^^^^^^^^ (f64)()
+
+    const f64_and_comptime_float = if (runtime_bool) @as(f64, 0) else 0.1;
+    _ = f64_and_comptime_float;
+    //  ^^^^^^^^^^^^^^^^^^^^^^ (f64)()
+
+    const comptime_float_and_f64 = if (runtime_bool) 0.1 else @as(f64, 0);
+    _ = comptime_float_and_f64;
+    //  ^^^^^^^^^^^^^^^^^^^^^^ (f64)()
+
     const optional_0 = if (runtime_bool) s else @as(?S, s);
     _ = optional_0;
     //  ^^^^^^^^^^ (?S)()
@@ -152,7 +184,7 @@ pub fn main() !void {
 
     const error_union_21 = if (runtime_bool) @as(error{B}!S, s) else error.A;
     _ = error_union_21 catch {};
-    //  ^^^^^^^^^^^^^^ (error{A,B}!S)()
+    //  ^^^^^^^^^^^^^^ (error{B,A}!S)()
 
     const error_union_22 = if (runtime_bool) error.A else @as(error{B}!i32, 0);
     _ = error_union_22 catch {};
@@ -160,7 +192,23 @@ pub fn main() !void {
 
     const error_union_23 = if (runtime_bool) @as(error{B}!i32, 0) else error.A;
     _ = error_union_23 catch {};
-    //  ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+    //  ^^^^^^^^^^^^^^ (error{B,A}!i32)()
+
+    const error_union_24 = if (runtime_bool) @as(error{A}!?S, null) else s;
+    _ = error_union_24 catch {};
+    //  ^^^^^^^^^^^^^^ (error{A}!?S)()
+
+    const error_union_25 = if (runtime_bool) s else @as(error{A}!?S, null);
+    _ = error_union_25 catch {};
+    //  ^^^^^^^^^^^^^^ (error{A}!?S)()
+
+    const error_union_26 = if (runtime_bool) @as(error{A}!i8, 0) else @as(i16, 0);
+    _ = error_union_26 catch {};
+    //  ^^^^^^^^^^^^^^ (error{A}!i16)()
+
+    const error_union_27 = if (runtime_bool) @as(i16, 0) else @as(error{A}!i8, 0);
+    _ = error_union_27 catch {};
+    //  ^^^^^^^^^^^^^^ (error{A}!i16)()
 
     const noreturn_0 = if (runtime_bool) s else return;
     _ = noreturn_0;
@@ -180,6 +228,21 @@ const comptime_bool: bool = true;
 
 const comptime_int_and_void = if (comptime_bool) 0 else {};
 //    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const optional_comptime_int = if (comptime_bool) @as(?comptime_int, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^^^ (?comptime_int)()
+
+const optional_comptime_float = if (comptime_bool) @as(?comptime_float, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (?comptime_float)()
+
+const null_error_union = if (comptime_bool) @as(error{A}!@TypeOf(null), null) else null;
+//    ^^^^^^^^^^^^^^^^ (error{A}!@TypeOf(null))()
+
+const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
+//    ^^^^^^^^^^^ (either type)()
+
+const u32_and_f32 = if (comptime_bool) @as(u32, 0) else @as(f32, 0);
+//    ^^^^^^^^^^^ (either type)()
 
 const compile_error_0 = if (comptime_bool) s else @compileError("Foo");
 //    ^^^^^^^^^^^^^^^ (S)()
