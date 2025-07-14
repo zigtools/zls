@@ -1326,8 +1326,8 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
         defer self.allocator.free(joined);
 
         log.err(
-            "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
-            .{ joined, zig_run_result.stderr },
+            "Failed to execute build runner to collect build configuration, command:\ncd {s};{s}\nError: {s}",
+            .{ cwd, joined, zig_run_result.stderr },
         );
 
         var error_bundle = try @import("features/diagnostics.zig").getErrorBundleFromStderr(self.allocator, zig_run_result.stderr, false, null);
