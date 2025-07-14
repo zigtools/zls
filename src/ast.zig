@@ -792,7 +792,7 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
                     var i: u32 = switch (tag) {
                         .container_decl_two, .container_decl_two_trailing => 2, // lbrace + rbrace
                         .tagged_union_two, .tagged_union_two_trailing => 5, // (enum) {}
-                        else => @panic(@tagName(tag)),
+                        else => unreachable,
                     };
                     while (tree.tokenTag(tree.nodeMainToken(n) + i) == .container_doc_comment) i += 1;
                     end_offset += i;
