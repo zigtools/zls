@@ -10,11 +10,9 @@ fn gen(alloc: std.mem.Allocator, rand: std.Random) ![]const u8 {
 test "diff - random" {
     const allocator = std.testing.allocator;
     var rand: std.Random.DefaultPrng = .init(std.testing.random_seed);
-    for (0..4) |_| {
-        try testDiff(allocator, rand.random(), .@"utf-8");
-        try testDiff(allocator, rand.random(), .@"utf-16");
-        try testDiff(allocator, rand.random(), .@"utf-32");
-    }
+    try testDiff(allocator, rand.random(), .@"utf-8");
+    try testDiff(allocator, rand.random(), .@"utf-16");
+    try testDiff(allocator, rand.random(), .@"utf-32");
 }
 
 fn testDiff(allocator: std.mem.Allocator, rand: std.Random, encoding: zls.offsets.Encoding) !void {

@@ -11,6 +11,7 @@ const allocator = std.testing.allocator;
 
 const default_config: Config = .{
     .semantic_tokens = .full,
+    .prefer_ast_check_as_child_process = false,
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,
 };
