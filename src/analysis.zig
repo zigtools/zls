@@ -1509,6 +1509,11 @@ fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?T
     if (a.is_type_val or b.is_type_val) return null;
     if (a.eql(b)) return a;
 
+    var peer_tys = [_]?Type{ try a.typeOf(analyser), try b.typeOf(analyser) };
+    if (try analyser.resolvePeerTypesInner(&peer_tys)) |ty| {
+        return ty.instanceTypeVal(analyser);
+    }
+
     if (a.data == .ip_index and b.data == .ip_index) {
         const a_type = a.data.ip_index.type;
         const b_type = b.data.ip_index.type;
@@ -1517,7 +1522,7 @@ fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?T
         }
     }
 
-    return try analyser.resolvePeerTypesInternal(a, b) orelse try analyser.resolvePeerTypesInternal(b, a);
+    return null;
 }
 
 fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.Index) error{OutOfMemory}!?InternPool.Index {
@@ -1537,123 +1542,6 @@ fn resolvePeerErrorSets(analyser: *Analyser, a: Type, b: Type) !?Type {
     if (analyser.ip.zigTypeTag(b_index) != .error_set) return null;
     const resolved_index = try analyser.ip.errorSetMerge(analyser.gpa, a_index, b_index);
     return Type.fromIP(analyser, .type_type, resolved_index);
-}
-
-fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
-    switch (a.data) {
-        .compile_error => return b,
-        .optional => |a_type| {
-            if (a_type.eql(try b.typeOf(analyser))) {
-                return a;
-            }
-            switch (b.data) {
-                .error_union => |b_info| {
-                    if (a_type.eql(b_info.payload.*)) {
-                        return .{
-                            .data = .{
-                                .error_union = .{
-                                    .error_set = b_info.error_set,
-                                    .payload = try analyser.allocType(try a.typeOf(analyser)),
-                                },
-                            },
-                            .is_type_val = false,
-                        };
-                    }
-                },
-                else => {},
-            }
-        },
-        .error_union => |a_info| {
-            if (a_info.payload.eql(try b.typeOf(analyser))) {
-                return a;
-            }
-            switch (b.data) {
-                .error_union => |b_info| {
-                    const resolved_error_set = blk: {
-                        const a_error_set = a_info.error_set orelse break :blk null;
-                        const b_error_set = b_info.error_set orelse break :blk null;
-                        if (a_error_set.eql(b_error_set.*)) break :blk a_error_set;
-                        const resolved_error_set = try analyser.resolvePeerErrorSets(a_error_set.*, b_error_set.*) orelse break :blk null;
-                        break :blk try analyser.allocType(resolved_error_set);
-                    };
-                    const resolved_payload = blk: {
-                        if (a_info.payload.eql(b_info.payload.*)) break :blk a_info.payload;
-                        const a_instance = try a_info.payload.instanceTypeVal(analyser) orelse return null;
-                        const b_instance = try b_info.payload.instanceTypeVal(analyser) orelse return null;
-                        const resolved_instance = try analyser.resolvePeerTypes(a_instance, b_instance) orelse return null;
-                        break :blk try analyser.allocType(try resolved_instance.typeOf(analyser));
-                    };
-                    return .{
-                        .data = .{
-                            .error_union = .{
-                                .error_set = resolved_error_set,
-                                .payload = resolved_payload,
-                            },
-                        },
-                        .is_type_val = false,
-                    };
-                },
-                else => {},
-            }
-        },
-        .ip_index => |a_payload| switch (analyser.ip.zigTypeTag(a_payload.type) orelse return null) {
-            .noreturn => return b,
-            .null => switch (b.data) {
-                .optional => return b,
-                .error_union => |b_info| {
-                    return .{
-                        .data = .{
-                            .error_union = .{
-                                .error_set = b_info.error_set,
-                                .payload = try analyser.allocType(.{
-                                    .data = .{ .optional = try analyser.allocType(b_info.payload.*) },
-                                    .is_type_val = true,
-                                }),
-                            },
-                        },
-                        .is_type_val = false,
-                    };
-                },
-                else => return .{
-                    .data = .{ .optional = try analyser.allocType(try b.typeOf(analyser)) },
-                    .is_type_val = false,
-                },
-            },
-            .error_set => switch (b.data) {
-                .error_union => |b_info| {
-                    const resolved_error_set = blk: {
-                        const a_error_set = try a.typeOf(analyser);
-                        const b_error_set = b_info.error_set orelse break :blk null;
-                        if (a_error_set.eql(b_error_set.*)) break :blk b_error_set;
-                        const resolved_error_set = try analyser.resolvePeerErrorSets(a_error_set, b_error_set.*) orelse break :blk null;
-                        break :blk try analyser.allocType(resolved_error_set);
-                    };
-                    return .{
-                        .data = .{
-                            .error_union = .{
-                                .error_set = resolved_error_set,
-                                .payload = b_info.payload,
-                            },
-                        },
-                        .is_type_val = false,
-                    };
-                },
-                else => return .{
-                    .data = .{
-                        .error_union = .{
-                            .error_set = try analyser.allocType(try a.typeOf(analyser)),
-                            .payload = try analyser.allocType(try b.typeOf(analyser)),
-                        },
-                    },
-                    .is_type_val = false,
-                },
-            },
-            else => {},
-        },
-        else => {},
-    }
-
-    return null;
 }
 
 fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !?Type {
@@ -3589,12 +3477,17 @@ pub const Type = struct {
             return entries[0].type;
 
         peer_type_resolution: {
-            var chosen = entries[0].type;
-            for (entries[1..]) |entry| {
-                const candidate = entry.type;
-                chosen = try analyser.resolvePeerTypes(chosen, candidate) orelse break :peer_type_resolution;
+            const peer_tys = try analyser.gpa.alloc(?Type, entries.len);
+            defer analyser.gpa.free(peer_tys);
+
+            for (entries, peer_tys) |entry, *ty| {
+                if (entry.type.is_type_val) break :peer_type_resolution;
+                ty.* = try entry.type.typeOf(analyser);
             }
-            return chosen;
+
+            if (try analyser.resolvePeerTypesInner(peer_tys)) |ty| {
+                return try ty.instanceTypeVal(analyser);
+            }
         }
 
         // Note that we don't hash/equate descriptors to remove
@@ -4142,6 +4035,34 @@ pub const Type = struct {
             }
             return try lookupSymbolContainer(self, symbol, .field);
         }
+    }
+
+    fn zigTypeTag(ty: Type, analyser: *Analyser) ?std.builtin.TypeId {
+        if (!ty.is_type_val) return null;
+        return switch (ty.data) {
+            .either => null,
+            .anytype_parameter => null,
+            .optional => .optional,
+            .pointer => .pointer,
+            .array => .array,
+            .tuple => .@"struct",
+            .container => switch (ty.getContainerKind().?) {
+                .keyword_struct => .@"struct",
+                .keyword_enum => .@"enum",
+                .keyword_union => .@"union",
+                .keyword_opaque => .@"opaque",
+                else => null,
+            },
+            .error_union => .error_union,
+            .function => .@"fn",
+            .union_tag => .@"enum",
+            .compile_error => .noreturn,
+            .type_parameter => null,
+            .ip_index => |payload| {
+                const ip_index = payload.index orelse return null;
+                return analyser.ip.zigTypeTag(ip_index);
+            },
+        };
     }
 
     pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
@@ -6384,3 +6305,338 @@ pub const ReferencedType = struct {
         }
     };
 };
+
+// Based on src/Sema.zig from the zig codebase
+// https://github.com/ziglang/zig/blob/master/src/Sema.zig
+fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
+    const PeerResolveStrategy = enum {
+        unknown,
+        error_set,
+        error_union,
+        nullable,
+        optional,
+        array,
+        vector,
+        c_ptr,
+        ptr,
+        func,
+        enum_or_union,
+        int_or_float,
+        tuple,
+        exact,
+
+        const PeerResolveStrategy = @This();
+
+        fn merge(a: PeerResolveStrategy, b: PeerResolveStrategy, reason_peer: *usize, b_peer_idx: usize) PeerResolveStrategy {
+            const s0_is_a = @intFromEnum(a) <= @intFromEnum(b);
+            const s0 = if (s0_is_a) a else b;
+            const s1 = if (s0_is_a) b else a;
+
+            const ReasonMethod = enum {
+                all_s0,
+                all_s1,
+                either,
+            };
+
+            const reason_method: ReasonMethod, const strat: PeerResolveStrategy = switch (s0) {
+                .unknown => .{ .all_s1, s1 },
+                .error_set => switch (s1) {
+                    .error_set => .{ .either, .error_set },
+                    else => .{ .all_s0, .error_union },
+                },
+                .error_union => switch (s1) {
+                    .error_union => .{ .either, .error_union },
+                    else => .{ .all_s0, .error_union },
+                },
+                .nullable => switch (s1) {
+                    .nullable => .{ .either, .nullable },
+                    .c_ptr => .{ .all_s1, .c_ptr },
+                    else => .{ .all_s0, .optional },
+                },
+                .optional => switch (s1) {
+                    .optional => .{ .either, .optional },
+                    .c_ptr => .{ .all_s1, .c_ptr },
+                    else => .{ .all_s0, .optional },
+                },
+                .array => switch (s1) {
+                    .array => .{ .either, .array },
+                    .vector => .{ .all_s1, .vector },
+                    else => .{ .all_s0, .array },
+                },
+                .vector => switch (s1) {
+                    .vector => .{ .either, .vector },
+                    else => .{ .all_s0, .vector },
+                },
+                .c_ptr => switch (s1) {
+                    .c_ptr => .{ .either, .c_ptr },
+                    else => .{ .all_s0, .c_ptr },
+                },
+                .ptr => switch (s1) {
+                    .ptr => .{ .either, .ptr },
+                    else => .{ .all_s0, .ptr },
+                },
+                .func => switch (s1) {
+                    .func => .{ .either, .func },
+                    else => .{ .all_s1, s1 },
+                },
+                .enum_or_union => switch (s1) {
+                    .enum_or_union => .{ .either, .enum_or_union },
+                    else => .{ .all_s0, .enum_or_union },
+                },
+                .int_or_float => switch (s1) {
+                    .int_or_float => .{ .either, .int_or_float },
+                    else => .{ .all_s1, s1 },
+                },
+                .tuple => switch (s1) {
+                    .exact => .{ .all_s1, .exact },
+                    else => .{ .all_s0, .tuple },
+                },
+                .exact => .{ .all_s0, .exact },
+            };
+
+            switch (reason_method) {
+                .all_s0 => {
+                    if (!s0_is_a) {
+                        reason_peer.* = b_peer_idx;
+                    }
+                },
+                .all_s1 => {
+                    if (s0_is_a) {
+                        reason_peer.* = b_peer_idx;
+                    }
+                },
+                .either => {
+                    reason_peer.* = @min(reason_peer.*, b_peer_idx);
+                },
+            }
+
+            return strat;
+        }
+
+        fn select(ty: Type, tag: std.builtin.TypeId) PeerResolveStrategy {
+            return switch (tag) {
+                .type, .void, .bool, .@"opaque", .frame, .@"anyframe" => .exact,
+                .noreturn, .undefined => .unknown,
+                .null => .nullable,
+                .comptime_int, .int, .comptime_float, .float => .int_or_float,
+                .pointer => if (ty.data == .pointer and ty.data.pointer.size == .c) .c_ptr else .ptr,
+                .array => .array,
+                .vector => .vector,
+                .optional => .optional,
+                .error_set => .error_set,
+                .error_union => .error_union,
+                .enum_literal, .@"enum", .@"union" => .enum_or_union,
+                .@"struct" => if (ty.data == .tuple) .tuple else .exact,
+                .@"fn" => .func,
+            };
+        }
+    };
+
+    var strat_reason: usize = 0;
+    var s: PeerResolveStrategy = .unknown;
+    for (peer_tys, 0..) |opt_ty, i| {
+        const ty = opt_ty orelse continue;
+        const tag = ty.zigTypeTag(analyser) orelse return null;
+        s = s.merge(PeerResolveStrategy.select(ty, tag), &strat_reason, i);
+    }
+
+    if (s == .unknown) {
+        s = .exact;
+    } else {
+        for (peer_tys) |*ty_ptr| {
+            const ty = ty_ptr.* orelse continue;
+            switch (ty.zigTypeTag(analyser).?) {
+                .noreturn, .undefined => ty_ptr.* = null,
+                else => {},
+            }
+        }
+    }
+
+    switch (s) {
+        .unknown => unreachable,
+
+        .error_set => {
+            var final_set: ?Type = null;
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                if (final_set) |cur_set| {
+                    final_set = try analyser.resolvePeerErrorSets(cur_set, ty) orelse {
+                        return null;
+                    };
+                } else {
+                    final_set = ty;
+                }
+            }
+            return final_set.?;
+        },
+
+        .error_union => {
+            var final_set: union(enum) {
+                unknown: void,
+                inferred: void,
+                known: Type,
+            } = .unknown;
+            for (peer_tys) |*ty_ptr| {
+                const ty = ty_ptr.* orelse continue;
+                const set_ty = switch (ty.zigTypeTag(analyser).?) {
+                    .error_set => blk: {
+                        ty_ptr.* = null;
+                        break :blk ty;
+                    },
+                    .error_union => blk: {
+                        ty_ptr.* = ty.data.error_union.payload.*;
+                        const set_ty = ty.data.error_union.error_set orelse {
+                            final_set = .inferred;
+                            continue;
+                        };
+                        break :blk set_ty.*;
+                    },
+                    else => continue,
+                };
+                const merged_set = switch (final_set) {
+                    .known => |cur_set| blk: {
+                        break :blk try analyser.resolvePeerErrorSets(cur_set, set_ty) orelse {
+                            return null;
+                        };
+                    },
+                    .inferred => continue,
+                    .unknown => set_ty,
+                };
+                final_set = .{ .known = merged_set };
+            }
+            std.debug.assert(final_set != .unknown);
+            const final_payload = try analyser.resolvePeerTypesInner(peer_tys) orelse {
+                return null;
+            };
+            return .{
+                .data = .{
+                    .error_union = .{
+                        .error_set = switch (final_set) {
+                            .unknown => unreachable,
+                            .inferred => null,
+                            .known => |set_ty| try analyser.allocType(set_ty),
+                        },
+                        .payload = try analyser.allocType(final_payload),
+                    },
+                },
+                .is_type_val = true,
+            };
+        },
+
+        .nullable => {
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                switch (ty.zigTypeTag(analyser).?) {
+                    .null => {},
+                    else => return null,
+                }
+            }
+            return Type.fromIP(analyser, .type_type, .null_type);
+        },
+
+        .optional => {
+            for (peer_tys) |*ty_ptr| {
+                const ty = ty_ptr.* orelse continue;
+                switch (ty.zigTypeTag(analyser).?) {
+                    .null => ty_ptr.* = null,
+                    .optional => ty_ptr.* = ty.data.optional.*,
+                    else => {},
+                }
+            }
+            const child_ty = try analyser.resolvePeerTypesInner(peer_tys) orelse {
+                return null;
+            };
+            return .{
+                .data = .{ .optional = try analyser.allocType(child_ty) },
+                .is_type_val = true,
+            };
+        },
+
+        .array => return null, // TODO
+
+        .vector => return null, // TODO
+
+        .c_ptr => return null, // TODO
+
+        .ptr => return null, // TODO
+
+        .func => return null, // TODO
+
+        .enum_or_union => return null, // TODO
+
+        .int_or_float => {
+            var ip_indices: std.ArrayListUnmanaged(InternPool.Index) = try .initCapacity(analyser.gpa, peer_tys.len);
+            defer ip_indices.deinit(analyser.gpa);
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                const ip_index = switch (ty.data) {
+                    .ip_index => |payload| payload.index orelse return null,
+                    else => return null,
+                };
+                ip_indices.appendAssumeCapacity(ip_index);
+            }
+            const ip_index = try analyser.ip.resolvePeerTypes(analyser.gpa, ip_indices.items, builtin.target);
+            if (ip_index == .none) return null;
+            return Type.fromIP(analyser, .type_type, ip_index);
+        },
+
+        .tuple => {
+            var field_count: ?usize = null;
+
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+
+                if (ty.data != .tuple) {
+                    return null;
+                }
+
+                if (field_count) |count| {
+                    if (ty.data.tuple.len != count) {
+                        return null;
+                    }
+                } else {
+                    field_count = ty.data.tuple.len;
+                }
+            }
+
+            std.debug.assert(field_count != null);
+
+            const field_types = try analyser.arena.alloc(Type, field_count.?);
+            const sub_peer_tys = try analyser.arena.alloc(?Type, peer_tys.len);
+
+            for (field_types, 0..) |*field_ty, field_index| {
+                for (peer_tys, sub_peer_tys) |opt_ty, *peer_field_ty| {
+                    const ty = opt_ty orelse {
+                        peer_field_ty.* = null;
+                        continue;
+                    };
+                    peer_field_ty.* = ty.data.tuple[field_index];
+                }
+
+                field_ty.* = try analyser.resolvePeerTypesInner(sub_peer_tys) orelse {
+                    return null;
+                };
+            }
+
+            return .{
+                .data = .{ .tuple = field_types },
+                .is_type_val = true,
+            };
+        },
+
+        .exact => {
+            var expect_ty: ?Type = null;
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                if (expect_ty) |expect| {
+                    if (!ty.eql(expect)) {
+                        return null;
+                    }
+                } else {
+                    expect_ty = ty;
+                }
+            }
+            return expect_ty.?;
+        },
+    }
+}
