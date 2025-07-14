@@ -6,9 +6,9 @@ const std = @import("std");
 const zls = @import("zls");
 
 pub fn main() !u8 {
-    var general_purpose_allocator: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    defer _ = general_purpose_allocator.deinit();
-    const gpa = general_purpose_allocator.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const gpa = debug_allocator.allocator();
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);

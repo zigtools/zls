@@ -26,9 +26,9 @@ const Error = error{
 };
 
 pub fn main() Error!void {
-    var general_purpose_allocator: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    defer _ = general_purpose_allocator.deinit();
-    const gpa = general_purpose_allocator.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const gpa = debug_allocator.allocator();
 
     var arg_it = std.process.argsWithAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
     defer arg_it.deinit();

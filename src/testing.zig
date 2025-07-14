@@ -1,6 +1,7 @@
 //! Custom unit testing utilities similar to `std.testing`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const DocumentScope = @import("DocumentScope.zig");
 
 pub const print_ast = @import("print_ast.zig");
@@ -33,7 +34,7 @@ pub fn expectEqualStrings(expected: []const u8, actual: []const u8) error{TestEx
 }
 
 pub fn printDocumentScope(doc_scope: DocumentScope) void {
-    if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
+    if (builtin.mode != .Debug) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
         const scope_index: DocumentScope.Scope.Index = @enumFromInt(index);

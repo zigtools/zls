@@ -1903,7 +1903,7 @@ fn coerceInt(
 }
 
 pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, target: std.Target) Allocator.Error!Index {
-    if (std.debug.runtime_safety) {
+    if (builtin.mode == .Debug) {
         for (types) |ty| {
             assert(ip.isType(ty));
         }
