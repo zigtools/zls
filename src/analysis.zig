@@ -3137,6 +3137,7 @@ pub const Type = struct {
                     const b_type = b.pointer;
                     if (a_type.size != b_type.size) return false;
                     if (a_type.sentinel != b_type.sentinel) return false;
+                    if (a_type.is_const != b_type.is_const) return false;
                     if (!a_type.elem_ty.eql(b_type.elem_ty.*)) return false;
                 },
                 .array => |a_type| {
@@ -6627,7 +6628,64 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
 
         .vector => return null, // TODO
 
-        .c_ptr => return null, // TODO
+        .c_ptr => {
+            var opt_ptr_info: ?PointerInfo = null;
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                switch (ty.zigTypeTag(analyser).?) {
+                    .comptime_int => continue,
+                    .int => {
+                        const ptr_bits = builtin.target.ptrBitWidth();
+                        const bits = analyser.ip.intInfo(ty.data.ip_index.index.?, builtin.target).bits;
+                        if (bits >= ptr_bits) continue;
+                    },
+                    .null => continue,
+                    else => {},
+                }
+
+                if (!analyser.typeIsPointerAtRuntime(ty)) {
+                    return null;
+                }
+
+                const peer_info = analyser.typePointerInfo(ty).?;
+
+                var ptr_info = opt_ptr_info orelse {
+                    opt_ptr_info = peer_info;
+                    continue;
+                };
+
+                if (!ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                    // TODO: coerce C pointer types
+                    return null;
+                }
+
+                if (ptr_info.flags.alignment != ptr_info.flags.alignment) {
+                    // TODO: find minimum C pointer alignment
+                    return null;
+                }
+
+                if (ptr_info.flags.address_space != peer_info.flags.address_space) {
+                    return null;
+                }
+
+                ptr_info.flags.is_const = ptr_info.flags.is_const or peer_info.flags.is_const;
+                ptr_info.flags.is_volatile = ptr_info.flags.is_volatile or peer_info.flags.is_volatile;
+
+                opt_ptr_info = ptr_info;
+            }
+            const info = opt_ptr_info.?;
+            return .{
+                .data = .{
+                    .pointer = .{
+                        .elem_ty = try analyser.allocType(info.elem_ty),
+                        .sentinel = .none,
+                        .size = .c,
+                        .is_const = info.flags.is_const,
+                    },
+                },
+                .is_type_val = true,
+            };
+        },
 
         .ptr => return null, // TODO
 
@@ -6752,5 +6810,67 @@ fn typeIsArrayLike(analyser: *Analyser, ty: Type) ?ArrayLike {
         },
         .tuple_type => null, // TODO
         else => null,
+    };
+}
+
+const PointerInfo = struct {
+    is_optional: bool,
+    elem_ty: Type,
+    sentinel: InternPool.Index,
+    flags: InternPool.Key.Pointer.Flags,
+};
+fn typePointerInfo(analyser: *Analyser, ty: Type) ?PointerInfo {
+    std.debug.assert(ty.is_type_val);
+    const ip_index = switch (ty.data) {
+        .ip_index => |payload| payload.index orelse return null,
+        .pointer => |p| return .{
+            .is_optional = false,
+            .elem_ty = p.elem_ty.*,
+            .sentinel = p.sentinel,
+            .flags = .{
+                .size = p.size,
+                .is_const = p.is_const,
+            },
+        },
+        .optional => |child| switch (child.data) {
+            .pointer => |p| return .{
+                .is_optional = true,
+                .elem_ty = p.elem_ty.*,
+                .sentinel = p.sentinel,
+                .flags = .{
+                    .size = p.size,
+                    .is_const = p.is_const,
+                },
+            },
+            else => return null,
+        },
+        else => return null,
+    };
+    return switch (analyser.ip.indexToKey(ip_index)) {
+        .pointer_type => |p| .{
+            .is_optional = false,
+            .elem_ty = Type.fromIP(analyser, .type_type, p.elem_type),
+            .sentinel = p.sentinel,
+            .flags = p.flags,
+        },
+        .optional_type => |info| switch (analyser.ip.indexToKey(info.payload_type)) {
+            .pointer_type => |p| .{
+                .is_optional = true,
+                .elem_ty = Type.fromIP(analyser, .type_type, p.elem_type),
+                .sentinel = p.sentinel,
+                .flags = p.flags,
+            },
+            else => null,
+        },
+        else => null,
+    };
+}
+
+fn typeIsPointerAtRuntime(analyser: *Analyser, ty: Type) bool {
+    const ptr_info = analyser.typePointerInfo(ty) orelse return false;
+    return switch (ptr_info.flags.size) {
+        .slice => false,
+        .c => !ptr_info.is_optional,
+        .one, .many => !ptr_info.is_optional or !ptr_info.flags.is_allowzero,
     };
 }
