@@ -6552,7 +6552,78 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
             };
         },
 
-        .array => return null, // TODO
+        .array => {
+            var len: ?u64 = null;
+            var sentinel: InternPool.Index = .none;
+            var elem_ty: ?Type = null;
+
+            for (peer_tys) |*ty_ptr| {
+                const ty = ty_ptr.* orelse continue;
+
+                if (ty.data != .array) {
+                    const arr_like = analyser.typeIsArrayLike(ty) orelse {
+                        return null;
+                    };
+
+                    if (len) |cur_len| {
+                        if (arr_like.len != cur_len) return null;
+                    } else {
+                        len = arr_like.len;
+                    }
+
+                    sentinel = .none;
+
+                    continue;
+                }
+
+                const arr_info = ty.data.array;
+                const arr_len = arr_info.elem_count orelse {
+                    return null;
+                };
+
+                const cur_elem_ty = elem_ty orelse {
+                    if (len) |cur_len| {
+                        if (arr_len != cur_len) return null;
+                    } else {
+                        len = arr_len;
+                        sentinel = arr_info.sentinel;
+                    }
+                    elem_ty = arr_info.elem_ty.*;
+                    continue;
+                };
+
+                if (arr_info.elem_count != len) {
+                    return null;
+                }
+
+                const peer_elem_ty = arr_info.elem_ty.*;
+                if (!peer_elem_ty.eql(cur_elem_ty)) {
+                    // TODO: check if coercible
+                    return null;
+                }
+
+                if (sentinel != .none) {
+                    if (arr_info.sentinel != .none) {
+                        if (arr_info.sentinel != sentinel) sentinel = .none;
+                    } else {
+                        sentinel = .none;
+                    }
+                }
+            }
+
+            std.debug.assert(elem_ty != null);
+
+            return .{
+                .data = .{
+                    .array = .{
+                        .elem_count = len,
+                        .sentinel = sentinel,
+                        .elem_ty = try analyser.allocType(elem_ty.?),
+                    },
+                },
+                .is_type_val = true,
+            };
+        },
 
         .vector => return null, // TODO
 
@@ -6639,4 +6710,47 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
             return expect_ty.?;
         },
     }
+}
+
+const ArrayLike = struct {
+    len: u64,
+    /// `noreturn` indicates that this is `.{}` so can coerce to anything
+    elem_ty: Type,
+};
+fn typeIsArrayLike(analyser: *Analyser, ty: Type) ?ArrayLike {
+    std.debug.assert(ty.is_type_val);
+    const ip_index = switch (ty.data) {
+        .ip_index => |payload| payload.index orelse return null,
+        .array => |info| return .{
+            .len = info.elem_count orelse return null,
+            .elem_ty = info.elem_ty.*,
+        },
+        .tuple => |field_tys| {
+            const elem_ty = field_tys[0];
+            for (field_tys[1..]) |field_ty| {
+                if (!field_ty.eql(elem_ty)) {
+                    return null;
+                }
+            }
+            return .{
+                .len = field_tys.len,
+                .elem_ty = elem_ty,
+            };
+        },
+        else => return null,
+    };
+    if (ip_index == .empty_struct_type) {
+        return .{
+            .len = 0,
+            .elem_ty = Type.fromIP(analyser, .type_type, .noreturn_type),
+        };
+    }
+    return switch (analyser.ip.indexToKey(ip_index)) {
+        .array_type => |info| .{
+            .len = info.len,
+            .elem_ty = Type.fromIP(analyser, .type_type, info.child),
+        },
+        .tuple_type => null, // TODO
+        else => null,
+    };
 }

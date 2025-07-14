@@ -189,6 +189,18 @@ const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
 const u32_and_f32 = if (comptime_bool) @as(u32, 0) else @as(f32, 0);
 //    ^^^^^^^^^^^ (either type)()
 
+const array_2_and_array_3 = if (comptime_bool) [2]S{ s, s } else [3]S{ s, s, s };
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tuple_2_and_array_3 = if (comptime_bool) @as(struct { S, S }, .{ s, s }) else [3]S{ s, s, s };
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_3_and_tuple_2 = if (comptime_bool) [3]S{ s, s, s } else @as(struct { S, S }, .{ s, s });
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_3_and_tuple_3 = if (comptime_bool) [3]S{ s, s, s } else @as(struct { S, S, S }, .{ s, s, s });
+//    ^^^^^^^^^^^^^^^^^^^ ([3]S)()
+
 const compile_error_0 = if (comptime_bool) s else @compileError("Foo");
 //    ^^^^^^^^^^^^^^^ (S)()
 
