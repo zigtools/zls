@@ -127,6 +127,12 @@ pub const Declaration = union(enum) {
     /// used as child declarations of an error set declaration
     error_token: Ast.TokenIndex,
 
+    comptime {
+        for (std.meta.fields(Declaration)) |field| {
+            std.debug.assert(@sizeOf(field.type) <= 8); // a Declaration without the union tag must be less than 8 bytes
+        }
+    }
+
     pub const Param = struct {
         param_index: u16,
         func: Ast.Node.Index,
