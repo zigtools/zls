@@ -413,7 +413,7 @@ fn createZLSModule(
         .target = options.target,
         .optimize = options.optimize,
     }).module("diffz");
-    const lsp_module = b.dependency("lsp_codegen", .{
+    const lsp_module = b.dependency("lsp_kit", .{
         .target = options.target,
         .optimize = options.optimize,
     }).module("lsp");
