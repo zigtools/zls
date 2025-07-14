@@ -2179,7 +2179,7 @@ pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u
 
 pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!lsp.ResultType(method) {
     comptime std.debug.assert(lsp.isRequestMethod(method));
-    const tracy_zone = tracy.trace(@src());
+    const tracy_zone = tracy.traceNamed(@src(), "sendRequestSync(" ++ method ++ ")");
     defer tracy_zone.end();
     tracy_zone.setName(method);
 
@@ -2215,7 +2215,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
 
 pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!void {
     comptime std.debug.assert(lsp.isNotificationMethod(method));
-    const tracy_zone = tracy.trace(@src());
+    const tracy_zone = tracy.traceNamed(@src(), "sendNotificationSync(" ++ method ++ ")");
     defer tracy_zone.end();
     tracy_zone.setName(method);
 

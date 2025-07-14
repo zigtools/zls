@@ -314,6 +314,9 @@ fn getErrorBundleFromAstCheck(
     zig_ast_check_lock: *std.Thread.Mutex,
     source: [:0]const u8,
 ) !std.zig.ErrorBundle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     comptime std.debug.assert(std.process.can_spawn);
 
     var stderr_bytes: []u8 = "";
