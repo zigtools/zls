@@ -65,12 +65,60 @@ const one_minus_slice = one_u32 - slice_u32;
 const one_minus_c = one_u32 - c_u32;
 //    ^^^^^^^^^^^ (usize)()
 
+const one_u32_or_one_u32 = if (runtime_bool) one_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^ (*const u32)()
+
+const one_u32_or_array_u32 = if (runtime_bool) one_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_many_u32 = if (runtime_bool) one_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_slice_u32 = if (runtime_bool) one_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_c_u32 = if (runtime_bool) one_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const one_u32_or_runtime_one_u32 = if (runtime_bool) one_u32 else runtime_one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const u32)()
+
+const one_u32_or_empty = if (runtime_bool) one_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_one_u32 = if (runtime_bool) &.{} else one_u32;
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
 //
 // array pointer *[n]T
 //
 
 const array_u32: *const [2]u32 = &[_]u32{ 1, 2 };
 //    ^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_one_u32 = if (runtime_bool) array_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_u32_or_array_u32 = if (runtime_bool) array_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_many_u32 = if (runtime_bool) array_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const array_u32_or_slice_u32 = if (runtime_bool) array_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const array_u32_or_c_u32 = if (runtime_bool) array_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_u32_or_runtime_array_u32 = if (runtime_bool) array_u32 else runtime_array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_empty = if (runtime_bool) array_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const empty_or_array_u32 = if (runtime_bool) &.{} else array_u32;
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
 
 //
 // many item pointer [*]T
@@ -129,6 +177,30 @@ const many_minus_slice = many_u32 - slice_u32;
 const many_minus_c = many_u32 - c_u32;
 //    ^^^^^^^^^^^^ (usize)()
 
+const many_u32_or_one_u32 = if (runtime_bool) many_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_u32_or_array_u32 = if (runtime_bool) many_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_many_u32 = if (runtime_bool) many_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_slice_u32 = if (runtime_bool) many_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_u32_or_c_u32 = if (runtime_bool) many_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const many_u32_or_runtime_many_u32 = if (runtime_bool) many_u32 else runtime_many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_empty = if (runtime_bool) many_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_many_u32 = if (runtime_bool) &.{} else many_u32;
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
 //
 // slice []T
 //
@@ -183,6 +255,30 @@ const slice_minus_slice = slice_u32 - slice_u32;
 
 const slice_minus_c = slice_u32 - c_u32;
 //    ^^^^^^^^^^^^^ (unknown)()
+
+const slice_u32_or_one_u32 = if (runtime_bool) slice_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_array_u32 = if (runtime_bool) slice_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_many_u32 = if (runtime_bool) slice_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_slice_u32 = if (runtime_bool) slice_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_c_u32 = if (runtime_bool) slice_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_runtime_slice_u32 = if (runtime_bool) slice_u32 else runtime_slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_empty = if (runtime_bool) slice_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const empty_or_slice_u32 = if (runtime_bool) &.{} else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
 
 //
 // C pointer [*c]T
@@ -256,9 +352,27 @@ const c_u32_or_slice_u32 = if (runtime_bool) c_u32 else slice_u32;
 const c_u32_or_c_u32 = if (runtime_bool) c_u32 else c_u32;
 //    ^^^^^^^^^^^^^^ ([*c]const u32)()
 
+const c_u32_or_runtime_c_u32 = if (runtime_bool) c_u32 else runtime_c_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_empty = if (runtime_bool) c_u32 else &.{};
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_c_u32 = if (runtime_bool) &.{} else c_u32;
+//    ^^^^^^^^^^^^^^ (either type)()
+
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
+var runtime_bool = true;
+var runtime_u32: u32 = 0;
+var runtime_u32_array: [2]u32 = .{ 1, 2 };
+
+const runtime_one_u32: *u32 = &runtime_u32;
+const runtime_c_u32: [*c]u32 = &runtime_u32;
+const runtime_array_u32: *[2]u32 = &runtime_u32_array;
+const runtime_many_u32: [*]u32 = &runtime_u32_array;
+const runtime_slice_u32: []u32 = &runtime_u32_array;
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:

@@ -6687,7 +6687,285 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
             };
         },
 
-        .ptr => return null, // TODO
+        .ptr => {
+            var any_slice = false;
+            var any_abi_aligned = false;
+            var opt_ptr_info: ?PointerInfo = null;
+
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                const peer_info: PointerInfo = switch (ty.zigTypeTag(analyser).?) {
+                    .pointer => analyser.typePointerInfo(ty).?,
+                    .@"fn" => .{
+                        .is_optional = false,
+                        .elem_ty = ty,
+                        .sentinel = .none,
+                        .flags = .{ .size = .one },
+                    },
+                    else => return null,
+                };
+
+                switch (peer_info.flags.size) {
+                    .one, .many => {},
+                    .slice => any_slice = true,
+                    .c => return null,
+                }
+
+                var ptr_info = opt_ptr_info orelse {
+                    opt_ptr_info = peer_info;
+                    continue;
+                };
+
+                if (peer_info.flags.alignment == 0) {
+                    any_abi_aligned = true;
+                } else if (ptr_info.flags.alignment == 0) {
+                    any_abi_aligned = true;
+                    ptr_info.flags.alignment = peer_info.flags.alignment;
+                } else {
+                    ptr_info.flags.alignment = @min(ptr_info.flags.alignment, peer_info.flags.alignment);
+                }
+
+                if (ptr_info.flags.address_space != peer_info.flags.address_space) {
+                    return null;
+                }
+
+                ptr_info.flags.is_const = ptr_info.flags.is_const or peer_info.flags.is_const;
+                ptr_info.flags.is_volatile = ptr_info.flags.is_volatile or peer_info.flags.is_volatile;
+                ptr_info.flags.is_allowzero = ptr_info.flags.is_allowzero or peer_info.flags.is_allowzero;
+
+                const peer_sentinel: InternPool.Index = switch (peer_info.flags.size) {
+                    .one => switch (peer_info.elem_ty.data) {
+                        .array => |array_info| array_info.sentinel,
+                        .ip_index => |payload| switch (analyser.ip.indexToKey(payload.index orelse .unknown_type)) {
+                            .array_type => |info| info.sentinel,
+                            else => .none,
+                        },
+                        else => .none,
+                    },
+                    .many, .slice => peer_info.sentinel,
+                    .c => unreachable,
+                };
+
+                const cur_sentinel: InternPool.Index = switch (ptr_info.flags.size) {
+                    .one => switch (ptr_info.elem_ty.data) {
+                        .array => |array_info| array_info.sentinel,
+                        .ip_index => |payload| switch (analyser.ip.indexToKey(payload.index orelse .unknown_type)) {
+                            .array_type => |info| info.sentinel,
+                            else => .none,
+                        },
+                        else => .none,
+                    },
+                    .many, .slice => ptr_info.sentinel,
+                    .c => unreachable,
+                };
+
+                const peer_pointee_array = analyser.typeIsArrayLike(peer_info.elem_ty);
+                const cur_pointee_array = analyser.typeIsArrayLike(ptr_info.elem_ty);
+
+                good: {
+                    switch (peer_info.flags.size) {
+                        .one => switch (ptr_info.flags.size) {
+                            .one => {
+                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                    break :good;
+                                }
+                                // TODO: coerce pointer types
+
+                                const cur_arr = cur_pointee_array orelse return null;
+                                const peer_arr = peer_pointee_array orelse return null;
+
+                                if (cur_arr.elem_ty.eql(peer_arr.elem_ty)) {
+                                    const elem_ty = peer_arr.elem_ty;
+                                    // *[n:x]T + *[n:y]T = *[n]T
+                                    if (cur_arr.len == peer_arr.len) {
+                                        ptr_info.elem_ty = .{
+                                            .data = .{
+                                                .array = .{
+                                                    .elem_count = cur_arr.len,
+                                                    .sentinel = .none,
+                                                    .elem_ty = try analyser.allocType(elem_ty),
+                                                },
+                                            },
+                                            .is_type_val = true,
+                                        };
+                                        break :good;
+                                    }
+                                    // *[a]T + *[b]T = []T
+                                    ptr_info.flags.size = .slice;
+                                    ptr_info.elem_ty = elem_ty;
+                                    break :good;
+                                }
+                                // TODO: coerce array types
+
+                                if (peer_arr.elem_ty.isNoreturnType()) {
+                                    // *struct{} + *[a]T = []T
+                                    ptr_info.flags.size = .slice;
+                                    ptr_info.elem_ty = cur_arr.elem_ty;
+                                    break :good;
+                                }
+
+                                if (cur_arr.elem_ty.isNoreturnType()) {
+                                    // *[a]T + *struct{} = []T
+                                    ptr_info.flags.size = .slice;
+                                    ptr_info.elem_ty = peer_arr.elem_ty;
+                                    break :good;
+                                }
+
+                                return null;
+                            },
+                            .many => {
+                                // Only works for *[n]T + [*]T -> [*]T
+                                const arr = peer_pointee_array orelse return null;
+                                if (ptr_info.elem_ty.eql(arr.elem_ty)) {
+                                    break :good;
+                                }
+                                // TODO: coerce array and many-item pointer types
+                                return null;
+                            },
+                            .slice => {
+                                // Only works for *[n]T + []T -> []T
+                                const arr = peer_pointee_array orelse return null;
+                                if (ptr_info.elem_ty.eql(arr.elem_ty)) {
+                                    break :good;
+                                }
+                                // TODO: coerce array and slice types
+                                if (arr.elem_ty.isNoreturnType()) {
+                                    // *struct{} + []T -> []T
+                                    break :good;
+                                }
+                                return null;
+                            },
+                            .c => unreachable,
+                        },
+                        .many => switch (ptr_info.flags.size) {
+                            .one => {
+                                // Only works for [*]T + *[n]T -> [*]T
+                                const arr = cur_pointee_array orelse return null;
+                                if (arr.elem_ty.eql(peer_info.elem_ty)) {
+                                    ptr_info.flags.size = .many;
+                                    ptr_info.elem_ty = peer_info.elem_ty;
+                                    break :good;
+                                }
+                                // TODO: coerce many-item pointer and array types
+                                return null;
+                            },
+                            .many => {
+                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                    break :good;
+                                }
+                                // TODO: coerce many-item pointer types
+                                return null;
+                            },
+                            .slice => {
+                                // Only works if no peers are actually slices
+                                if (any_slice) {
+                                    return null;
+                                }
+                                // Okay, then works for [*]T + "[]T" -> [*]T
+                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                    ptr_info.flags.size = .many;
+                                    break :good;
+                                }
+                                // TODO: coerce many-item pointer and "slice" types
+                                return null;
+                            },
+                            .c => unreachable,
+                        },
+                        .slice => switch (ptr_info.flags.size) {
+                            .one => {
+                                // Only works for []T + *[n]T -> []T
+                                const arr = cur_pointee_array orelse return null;
+                                if (arr.elem_ty.eql(peer_info.elem_ty)) {
+                                    ptr_info.flags.size = .slice;
+                                    ptr_info.elem_ty = peer_info.elem_ty;
+                                    break :good;
+                                }
+                                // TODO: coerce slice and array types
+                                if (arr.elem_ty.isNoreturnType()) {
+                                    // []T + *struct{} -> []T
+                                    ptr_info.flags.size = .slice;
+                                    ptr_info.elem_ty = peer_info.elem_ty;
+                                    break :good;
+                                }
+                                return null;
+                            },
+                            .many => {
+                                return null;
+                            },
+                            .slice => {
+                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                    break :good;
+                                }
+                                // TODO: coerce slice types
+                                return null;
+                            },
+                            .c => unreachable,
+                        },
+                        .c => unreachable,
+                    }
+                }
+
+                sentinel: {
+                    no_sentinel: {
+                        if (peer_sentinel == .none) break :no_sentinel;
+                        if (cur_sentinel == .none) break :no_sentinel;
+                        if (peer_sentinel != cur_sentinel) {
+                            // TODO: coerce pointer sentinels
+                            return null;
+                        }
+                        break :sentinel;
+                    }
+                    ptr_info.sentinel = .none;
+                    if (ptr_info.flags.size == .one) switch (ptr_info.elem_ty.data) {
+                        .array => |*array_info| array_info.sentinel = .none,
+                        .ip_index => |*payload| switch (analyser.ip.indexToKey(payload.index orelse .unknown_type)) {
+                            .array_type => |info| {
+                                payload.index = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
+                                    .len = info.len,
+                                    .child = info.child,
+                                    .sentinel = .none,
+                                } });
+                            },
+                            else => {},
+                        },
+                        else => {},
+                    };
+                }
+
+                opt_ptr_info = ptr_info;
+            }
+
+            const info = opt_ptr_info.?;
+            const pointee = info.elem_ty;
+            if (pointee.isNoreturnType()) {
+                return null;
+            }
+            switch (pointee.data) {
+                .array => |array_info| {
+                    if (array_info.elem_ty.isNoreturnType()) {
+                        return null;
+                    }
+                },
+                else => {},
+            }
+
+            if (any_abi_aligned and info.flags.alignment != 0) {
+                // TODO: find minimum pointer alignment
+                return null;
+            }
+
+            return .{
+                .data = .{
+                    .pointer = .{
+                        .elem_ty = try analyser.allocType(info.elem_ty),
+                        .sentinel = info.sentinel,
+                        .size = info.flags.size,
+                        .is_const = info.flags.is_const,
+                    },
+                },
+                .is_type_val = true,
+            };
+        },
 
         .func => return null, // TODO
 
