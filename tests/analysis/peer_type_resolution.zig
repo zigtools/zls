@@ -1,3 +1,6 @@
+// Also see:
+// - pointer.zig
+
 const S = struct {
     int: i64,
     float: f32,
