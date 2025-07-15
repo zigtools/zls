@@ -20,7 +20,7 @@ fn hoverSymbol(
     markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?[]const u8 {
     var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
-    return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings);
+    return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings, null);
 }
 
 fn hoverSymbolRecursive(
@@ -29,12 +29,14 @@ fn hoverSymbolRecursive(
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
     doc_strings: *std.ArrayListUnmanaged([]const u8),
+    resolved_type_maybe: ?Analyser.Type,
 ) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = decl_handle.handle;
     const tree = handle.tree;
+    const resolved_type = resolved_type_maybe orelse try decl_handle.resolveType(analyser);
 
     if (try decl_handle.docComments(arena)) |doc|
         try doc_strings.append(arena, doc);
@@ -45,7 +47,7 @@ fn hoverSymbolRecursive(
                 .node_handle = .of(node, handle),
                 .container_type = decl_handle.container_type,
             })) |result| {
-                return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings);
+                return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings, resolved_type);
             }
 
             switch (tree.nodeTag(node)) {
@@ -106,7 +108,7 @@ fn hoverSymbolRecursive(
         def_str,
         markup_kind,
         doc_strings,
-        try decl_handle.resolveType(analyser),
+        resolved_type,
     );
 }
 
