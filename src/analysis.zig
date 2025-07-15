@@ -2279,6 +2279,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buf, node).?;
 
+            // TODO: should we avoid calling innermostContainer if this is a function type?
             const container_type = options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
             const doc_comments = try getDocComments(analyser.arena, tree, node);
             const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
@@ -3097,8 +3098,6 @@ pub const Type = struct {
                     }
                 },
                 .function => |info| {
-                    std.hash.autoHash(hasher, info.fn_token);
-                    hasher.update(info.handle.uri);
                     info.container_type.hashWithHasher(hasher);
                     for (info.parameters) |param| {
                         param.type.hashWithHasher(hasher);
@@ -3178,8 +3177,6 @@ pub const Type = struct {
                 },
                 .function => |a_info| {
                     const b_info = b.function;
-                    if (a_info.fn_token != b_info.fn_token) return false;
-                    if (!std.mem.eql(u8, a_info.handle.uri, b_info.handle.uri)) return false;
                     if (!a_info.container_type.eql(b_info.container_type.*)) return false;
                     if (a_info.parameters.len != b_info.parameters.len) return false;
                     for (a_info.parameters, b_info.parameters) |a_param, b_param| {
@@ -6967,7 +6964,25 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
             };
         },
 
-        .func => return null, // TODO
+        .func => {
+            var opt_cur_ty: ?Type = null;
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                const cur_ty = opt_cur_ty orelse {
+                    opt_cur_ty = ty;
+                    continue;
+                };
+                if (ty.zigTypeTag(analyser).? != .@"fn") {
+                    return null;
+                }
+                if (cur_ty.eql(ty)) {
+                    continue;
+                }
+                // TODO: coerce function types
+                return null;
+            }
+            return opt_cur_ty.?;
+        },
 
         .enum_or_union => return null, // TODO
 

@@ -162,6 +162,33 @@ const error_union_26 = if (runtime_bool) @as(error{A}!i8, 0) else @as(i16, 0);
 const error_union_27 = if (runtime_bool) @as(i16, 0) else @as(error{A}!i8, 0);
 //    ^^^^^^^^^^^^^^ (error{A}!i16)()
 
+const FnCoerce = struct {
+    fn errorsA() [2]error{A} {
+        return .{ error.A, error.A };
+    }
+    fn errorsAB() [2]error{ A, B } {
+        return .{ error.A, error.A };
+    }
+    fn pointers() [2]*const S {
+        return .{ &s, &s };
+    }
+    fn optionalPointers() [2]?*const S {
+        return .{ &s, null };
+    }
+};
+
+const fn_coerce_0 = if (runtime_bool) &FnCoerce.errorsA else &FnCoerce.errorsAB;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+const fn_coerce_1 = if (runtime_bool) &FnCoerce.errorsAB else &FnCoerce.errorsA;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+const fn_coerce_2 = if (runtime_bool) &FnCoerce.pointers else &FnCoerce.optionalPointers;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
+const fn_coerce_3 = if (runtime_bool) &FnCoerce.optionalPointers else &FnCoerce.pointers;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
 test "noreturn" {
     const noreturn_0 = if (runtime_bool) s else return;
     _ = noreturn_0;
@@ -185,6 +212,11 @@ const optional_comptime_float = if (comptime_bool) @as(?comptime_float, 0) else 
 
 const null_error_union = if (comptime_bool) @as(error{A}!@TypeOf(null), null) else null;
 //    ^^^^^^^^^^^^^^^^ (error{A}!@TypeOf(null))()
+
+fn void_fn() void {}
+
+const optional_fn = if (comptime_bool) @as(?fn () void, void_fn) else void_fn;
+//    ^^^^^^^^^^^ (?fn () void)()
 
 const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
 //    ^^^^^^^^^^^ (either type)()
