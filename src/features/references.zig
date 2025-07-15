@@ -311,7 +311,7 @@ fn symbolReferences(
         => |payload| payload.node,
         .function_parameter => |payload| payload.func,
         .label => unreachable, // handled separately by labelReferences
-        .error_token => return .empty,
+        .error_token => null,
     };
 
     var builder: Builder = .{

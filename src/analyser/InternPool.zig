@@ -111,6 +111,7 @@ pub const Key = union(enum) {
     pub const ErrorSet = struct {
         owner_decl: Decl.OptionalIndex,
         names: StringSlice,
+        source_node: u32,
     };
 
     pub const Function = struct {
@@ -346,6 +347,7 @@ pub const Key = union(enum) {
             .error_set_type => |error_set_type| {
                 std.hash.autoHash(hasher, error_set_type.owner_decl);
                 error_set_type.names.hashWithHasher(hasher, ip);
+                std.hash.autoHash(hasher, error_set_type.source_node);
             },
             .function_type => |function_type| {
                 std.hash.autoHash(hasher, function_type.args_is_comptime);
@@ -435,6 +437,7 @@ pub const Key = union(enum) {
                 const b_info = b.error_set_type;
 
                 if (a_info.owner_decl != b_info.owner_decl) return false;
+                if (a_info.source_node != b_info.source_node) return false;
 
                 if (a_info.names.len != b_info.names.len) return false;
 
@@ -3545,6 +3548,7 @@ pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) 
         .error_set_type = .{
             .owner_decl = .none,
             .names = try ip.getStringSlice(gpa, set.keys()),
+            .source_node = 0,
         },
     });
 }
