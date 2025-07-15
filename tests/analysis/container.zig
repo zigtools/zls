@@ -1,3 +1,6 @@
+const empty_struct = .{};
+//    ^^^^^^^^^^^^ (@TypeOf(.{}))(.{})
+
 const Foo = struct {
     foo: i32 = 0,
     const bar: i64 = 0;
