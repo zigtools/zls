@@ -221,6 +221,37 @@ pub fn main() !void {
     _ = noreturn_1;
     //  ^^^^^^^^^^ (S)()
 
+    const FnCoerce = struct {
+        fn errorsA() [2]error{A} {
+            return .{ error.A, error.A };
+        }
+        fn errorsAB() [2]error{ A, B } {
+            return .{ error.A, error.A };
+        }
+        fn pointers() [2]*const S {
+            return .{ &s, &s };
+        }
+        fn optionalPointers() [2]?*const S {
+            return .{ &s, null };
+        }
+    };
+
+    const fn_coerce_0 = if (runtime_bool) &FnCoerce.errorsA else &FnCoerce.errorsAB;
+    _ = fn_coerce_0;
+    //  ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+    const fn_coerce_1 = if (runtime_bool) &FnCoerce.errorsAB else &FnCoerce.errorsA;
+    _ = fn_coerce_1;
+    //  ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+    const fn_coerce_2 = if (runtime_bool) &FnCoerce.pointers else &FnCoerce.optionalPointers;
+    _ = fn_coerce_2;
+    //  ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
+    const fn_coerce_3 = if (runtime_bool) &FnCoerce.optionalPointers else &FnCoerce.pointers;
+    _ = fn_coerce_3;
+    //  ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(error_union_0);
 
@@ -240,6 +271,11 @@ const optional_comptime_float = if (comptime_bool) @as(?comptime_float, 0) else 
 
 const null_error_union = if (comptime_bool) @as(error{A}!@TypeOf(null), null) else null;
 //    ^^^^^^^^^^^^^^^^ (error{A}!@TypeOf(null))()
+
+fn void_fn() void {}
+
+const optional_fn = if (comptime_bool) @as(?fn () void, void_fn) else void_fn;
+//    ^^^^^^^^^^^ (?fn () void)()
 
 const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
 //    ^^^^^^^^^^^ (either type)()
