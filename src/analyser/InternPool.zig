@@ -4547,16 +4547,19 @@ test "error set type" {
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .source_node = 0,
     } });
 
     const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name, baz_name }),
+        .source_node = 0,
     } });
 
     const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .source_node = 0,
     } });
 
     try expect(empty_error_set != foo_bar_baz_set);
@@ -4576,6 +4579,7 @@ test "error union type" {
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .source_node = 0,
     } });
     const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
@@ -4936,18 +4940,22 @@ test "coerceInMemoryAllowed error set" {
     const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ baz_name, bar_name, foo_name }),
+        .source_node = 0,
     } });
     const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .source_node = 0,
     } });
     const foo_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{foo_name}),
+        .source_node = 0,
     } });
     const empty_set = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .source_node = 0,
     } });
 
     try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
@@ -5228,21 +5236,25 @@ test "resolvePeerTypes error sets" {
     const @"error{foo}" = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{foo_name}),
+        .source_node = 0,
     } });
 
     const @"error{bar}" = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{bar_name}),
+        .source_node = 0,
     } });
 
     const @"error{foo,bar}" = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .source_node = 0,
     } });
 
     const @"error{bar,foo}" = try ip.get(gpa, .{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(gpa, &.{ bar_name, foo_name }),
+        .source_node = 0,
     } });
 
     try ip.testResolvePeerTypesInOrder(@"error{foo}", @"error{bar}", @"error{foo,bar}");
