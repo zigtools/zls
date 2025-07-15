@@ -2894,7 +2894,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .struct_init_dot_two_comma,
         .struct_init_dot,
         .struct_init_dot_comma,
-        => {},
+        => return Type.fromIP(analyser, .empty_struct_type, .empty_aggregate),
 
         .root,
         .test_decl,
