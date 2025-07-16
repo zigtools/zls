@@ -5,10 +5,35 @@ const S = struct {
     int: i64,
     float: f32,
 };
+
 const s: S = .{
     .int = 0,
     .float = 1.2,
 };
+
+const E = enum {
+    foo,
+    bar,
+    baz,
+};
+
+const e: E = .bar;
+
+const T = union(E) {
+    foo: void,
+    bar: void,
+    baz: u16,
+};
+
+const t: T = .{ .baz = 3 };
+
+const U = union {
+    foo: void,
+    bar: void,
+    baz: void,
+};
+
+const u: U = .{ .baz = {} };
 
 var runtime_bool: bool = true;
 
@@ -217,6 +242,57 @@ fn void_fn() void {}
 
 const optional_fn = if (comptime_bool) @as(?fn () void, void_fn) else void_fn;
 //    ^^^^^^^^^^^ (?fn () void)()
+
+const optional_enum_literal = if (comptime_bool) @as(?@Type(.enum_literal), .foo) else .bar;
+//    ^^^^^^^^^^^^^^^^^^^^^ (?@Type(.enum_literal))()
+
+const enum_literal_and_enum_literal = if (comptime_bool) .foo else .bar;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (@Type(.enum_literal))()
+
+const enum_literal_and_enum = if (comptime_bool) .foo else e;
+//    ^^^^^^^^^^^^^^^^^^^^^ (E)()
+
+const enum_literal_and_union = if (comptime_bool) .foo else u;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const enum_literal_and_tagged_union = if (comptime_bool) .foo else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const enum_and_enum_literal = if (comptime_bool) e else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^ (E)()
+
+const enum_and_enum = if (comptime_bool) e else e;
+//    ^^^^^^^^^^^^^ (E)()
+
+const enum_and_union = if (comptime_bool) e else u;
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const enum_and_tagged_union = if (comptime_bool) e else t;
+//    ^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const union_and_enum_literal = if (comptime_bool) u else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const union_and_enum = if (comptime_bool) u else e;
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const union_and_union = if (comptime_bool) u else u;
+//    ^^^^^^^^^^^^^^^ (U)()
+
+const union_and_tagged_union = if (comptime_bool) u else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tagged_union_and_enum_literal = if (comptime_bool) t else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const tagged_union_and_enum = if (comptime_bool) t else e;
+//    ^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const tagged_union_and_union = if (comptime_bool) t else u;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tagged_union_and_tagged_union = if (comptime_bool) t else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
 
 const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
 //    ^^^^^^^^^^^ (either type)()

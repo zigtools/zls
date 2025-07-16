@@ -982,6 +982,13 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
 }
 
 fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+    const tag_type = try analyser.resolveUnionTagType(ty) orelse
+        return null;
+
+    return try tag_type.instanceTypeVal(analyser);
+}
+
+fn resolveUnionTagType(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1000,12 +1007,10 @@ fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
         return null;
 
     if (container_decl.ast.enum_token != null)
-        return .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = false };
+        return .{ .data = .{ .union_tag = try analyser.allocType(ty) }, .is_type_val = true };
 
-    if (container_decl.ast.arg.unwrap()) |arg| {
-        const tag_type = (try analyser.resolveTypeOfNode(.of(arg, handle))) orelse return null;
-        return try tag_type.instanceTypeVal(analyser) orelse return null;
-    }
+    if (container_decl.ast.arg.unwrap()) |arg|
+        return try analyser.resolveTypeOfNode(.of(arg, handle));
 
     return null;
 }
@@ -6984,7 +6989,59 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
             return opt_cur_ty.?;
         },
 
-        .enum_or_union => return null, // TODO
+        .enum_or_union => {
+            var opt_cur_ty: ?Type = null;
+
+            for (peer_tys) |opt_ty| {
+                const ty = opt_ty orelse continue;
+                switch (ty.zigTypeTag(analyser).?) {
+                    .enum_literal, .@"enum", .@"union" => {},
+                    else => return null,
+                }
+                const cur_ty = opt_cur_ty orelse {
+                    opt_cur_ty = ty;
+                    continue;
+                };
+
+                if ((cur_ty.isUnionType() and !cur_ty.isTaggedUnion()) or
+                    (ty.isUnionType() and !ty.isTaggedUnion()))
+                {
+                    if (cur_ty.eql(ty)) continue;
+                    return null;
+                }
+
+                switch (cur_ty.zigTypeTag(analyser).?) {
+                    .enum_literal => {
+                        opt_cur_ty = ty;
+                    },
+                    .@"enum" => switch (ty.zigTypeTag(analyser).?) {
+                        .enum_literal => {},
+                        .@"enum" => {
+                            if (!ty.eql(cur_ty)) return null;
+                        },
+                        .@"union" => {
+                            const tag_ty = try analyser.resolveUnionTagType(ty);
+                            if (!tag_ty.?.eql(cur_ty)) return null;
+                            opt_cur_ty = ty;
+                        },
+                        else => unreachable,
+                    },
+                    .@"union" => switch (ty.zigTypeTag(analyser).?) {
+                        .enum_literal => {},
+                        .@"enum" => {
+                            const cur_tag_ty = try analyser.resolveUnionTagType(cur_ty);
+                            if (!ty.eql(cur_tag_ty.?)) return null;
+                        },
+                        .@"union" => {
+                            if (!ty.eql(cur_ty)) return null;
+                        },
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                }
+            }
+            return opt_cur_ty.?;
+        },
 
         .int_or_float => {
             var ip_indices: std.ArrayListUnmanaged(InternPool.Index) = try .initCapacity(analyser.gpa, peer_tys.len);
