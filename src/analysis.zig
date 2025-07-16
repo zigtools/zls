@@ -2125,7 +2125,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 try strings.append(analyser.gpa, index);
             }
             const names = try analyser.ip.getStringSlice(analyser.gpa, strings.items);
-            const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
+            const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{
+                .owner_decl = .none,
+                .names = names,
+                .source_node = @intFromEnum(node),
+            } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2700,6 +2704,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const error_set_type = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{
                 .owner_decl = .none,
                 .names = try analyser.ip.getStringSlice(analyser.gpa, &.{name_index}),
+                .source_node = 0,
             } });
             const error_value = try analyser.ip.get(analyser.gpa, .{ .error_value = .{
                 .ty = error_set_type,
@@ -4125,6 +4130,9 @@ pub const Type = struct {
                     return decl;
                 }
             }
+            if (self.isErrorSetType(analyser)) {
+                return try self.lookupErrorSetField(analyser, symbol);
+            }
             return try lookupSymbolContainer(self, symbol, .other);
         } else {
             if (try lookupSymbolContainer(self, symbol, .other)) |decl| {
@@ -4139,6 +4147,52 @@ pub const Type = struct {
             }
             return try lookupSymbolContainer(self, symbol, .field);
         }
+    }
+
+    fn lookupErrorSetField(self: Type, analyser: *Analyser, field_name: []const u8) error{OutOfMemory}!?DeclWithHandle {
+        const ip_index = self.data.ip_index.index orelse return null;
+        const error_set = analyser.ip.indexToKey(ip_index).error_set_type;
+
+        var field_index: ?usize = null;
+        const names = analyser.ip.extra.items[error_set.names.start..][0..error_set.names.len];
+        for (names, 0..) |name_index, i| {
+            const name_locked = analyser.ip.string_pool.stringToSliceLock(@enumFromInt(name_index));
+            defer name_locked.release(&analyser.ip.string_pool);
+            if (std.mem.eql(u8, name_locked.slice, field_name)) {
+                field_index = i;
+                break;
+            }
+        }
+
+        const found_index = field_index orelse return null;
+        if (error_set.source_node == 0) return null;
+
+        const node_index = error_set.source_node;
+
+        for (analyser.store.handles.values()) |handle| {
+            const tree = handle.tree;
+            if (node_index >= tree.nodes.len) continue;
+
+            const node: Ast.Node.Index = @enumFromInt(node_index);
+            if (tree.nodeTag(node) != .error_set_decl) continue;
+
+            const lbrace, const rbrace = tree.nodeData(node).token_and_token;
+
+            var error_i: usize = 0;
+            for (lbrace + 1..rbrace) |tok_i| {
+                if (tree.tokenTag(@intCast(tok_i)) != .identifier) continue;
+                if (error_i == found_index) {
+                    const identifier_token: Ast.TokenIndex = @intCast(tok_i);
+                    return .{
+                        .decl = .{ .error_token = identifier_token },
+                        .handle = handle,
+                    };
+                }
+                error_i += 1;
+            }
+        }
+
+        return null;
     }
 
     pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
