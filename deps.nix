@@ -18,10 +18,10 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "lsp_kit-0.1.0-bi_PL5IyCgCh6ZNq1VaDklFqV0u23xNSXONjfDpYceJr";
+    name = "lsp_kit-0.1.0-bi_PL500CgBbZ3Pbh6TG-Voqb9MRJO8_aLDgBU9Yy7DN";
     path = fetchzip {
-      url = "https://github.com/zigtools/lsp-kit/archive/e58d398b4058eea09d984d5d039eddd243e535ad.tar.gz";
-      hash = "sha256-0q1l1zAUC/9/bSvj0ziheVMQmsTVUPPYR3RHS+FeEs0=";
+      url = "https://github.com/zigtools/lsp-kit/archive/39820a04f098d03424ced689fa016c2130fd876c.tar.gz";
+      hash = "sha256-GHR1uIXO5ydb7xFV7SxVFuIyLl/Vy3sEl1EQZBK9hwY=";
     };
   }
 ]
