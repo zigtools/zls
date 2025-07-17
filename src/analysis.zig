@@ -6595,8 +6595,16 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                 }
 
                 const peer_elem_ty = arr_info.elem_ty.*;
-                if (!peer_elem_ty.eql(cur_elem_ty)) {
-                    // TODO: check if coercible
+                if (!peer_elem_ty.eql(cur_elem_ty)) coerce: {
+                    if (try analyser.coerceInMemoryAllowed(cur_elem_ty, peer_elem_ty, false)) {
+                        break :coerce;
+                    }
+
+                    if (try analyser.coerceInMemoryAllowed(peer_elem_ty, cur_elem_ty, false)) {
+                        elem_ty = peer_elem_ty;
+                        break :coerce;
+                    }
+
                     return null;
                 }
 

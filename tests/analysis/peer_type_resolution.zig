@@ -246,6 +246,14 @@ pub fn main() !void {
     _ = noreturn_1;
     //  ^^^^^^^^^^ (S)()
 
+    const array_coerce_0 = if (runtime_bool) [2]error{A}{ error.A, error.A } else [2]error{ A, B }{ error.A, error.B };
+    _ = array_coerce_0;
+    //  ^^^^^^^^^^^^^^ ([2]error{A,B})()
+
+    const array_coerce_1 = if (runtime_bool) [2]error{ A, B }{ error.A, error.B } else [2]error{A}{ error.A, error.A };
+    _ = array_coerce_1;
+    //  ^^^^^^^^^^^^^^ ([2]error{A,B})()
+
     const FnCoerce = struct {
         fn errorsA() [2]error{A} {
             return .{ error.A, error.A };
