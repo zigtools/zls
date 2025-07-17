@@ -2495,7 +2495,7 @@ const InMemoryCoercionResult = union(enum) {
 /// * error union: coerceable error set and payload
 /// * error set: sub-set to super-set
 /// * array: same shape and coerceable child
-fn coerceInMemoryAllowed(
+pub fn coerceInMemoryAllowed(
     ip: *InternPool,
     gpa: Allocator,
     arena: Allocator,

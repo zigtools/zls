@@ -7219,3 +7219,162 @@ fn typeIsPointerAtRuntime(analyser: *Analyser, ty: Type) bool {
         .one, .many => !ptr_info.is_optional or !ptr_info.flags.is_allowzero,
     };
 }
+
+fn typeIsSlice(analyser: *Analyser, ty: Type) bool {
+    const ptr_info = analyser.typePointerInfo(ty) orelse return false;
+    if (ptr_info.is_optional) return false;
+    return switch (ptr_info.flags.size) {
+        .slice => true,
+        .one, .many, .c => false,
+    };
+}
+
+fn typePointerOrOptionalPointerType(analyser: *Analyser, ty: Type) !?Type {
+    return switch (ty.data) {
+        .pointer => |ptr_info| switch (ptr_info.size) {
+            .one, .many, .c => ty,
+            .slice => null,
+        },
+        .optional => |opt_child| {
+            const ptr_info = analyser.typePointerInfo(ty) orelse return null;
+            return switch (ptr_info.flags.size) {
+                .slice, .c => null,
+                .many, .one => {
+                    if (ptr_info.flags.is_allowzero) return null;
+
+                    if (try analyser.typeHasOnePossibleValue(opt_child.*) != null) {
+                        return null;
+                    }
+
+                    return opt_child.*;
+                },
+            };
+        },
+        .ip_index => null, // TODO
+        else => null,
+    };
+}
+
+fn typeHasOnePossibleValue(analyser: *Analyser, ty: Type) !?InternPool.Index {
+    std.debug.assert(ty.is_type_val);
+    const ip_index = switch (ty.data) {
+        .ip_index => |payload| payload.index orelse return null,
+        else => return null,
+    };
+    if (ip_index == .unknown_type) return null;
+    return analyser.ip.onePossibleValue(ip_index);
+}
+
+fn resolvePairInMemoryCoercible(analyser: *Analyser, ty_a: Type, ty_b: Type) !?Type {
+    if (try analyser.coerceInMemoryAllowed(ty_a, ty_b, false)) {
+        return ty_a;
+    }
+
+    if (try analyser.coerceInMemoryAllowed(ty_b, ty_a, false)) {
+        return ty_b;
+    }
+
+    return null;
+}
+
+fn coerceInMemoryAllowed(
+    analyser: *Analyser,
+    dest_ty: Type,
+    src_ty: Type,
+    dest_is_mut: bool,
+) error{OutOfMemory}!bool {
+    std.debug.assert(dest_ty.is_type_val);
+    std.debug.assert(src_ty.is_type_val);
+
+    if (dest_ty.eql(src_ty))
+        return true;
+
+    // Primitives / Error Sets
+    if (dest_ty.data == .ip_index and src_ty.data == .ip_index) {
+        const dest_ip_index = dest_ty.data.ip_index.index orelse return false;
+        const src_ip_index = src_ty.data.ip_index.index orelse return false;
+        const result = try analyser.ip.coerceInMemoryAllowed(analyser.gpa, analyser.arena, dest_ip_index, src_ip_index, !dest_is_mut, builtin.target);
+        return result == .ok;
+    }
+
+    // Pointers / Pointer-like Optionals
+    const maybe_dest_ptr_ty = try analyser.typePointerOrOptionalPointerType(dest_ty);
+    const maybe_src_ptr_ty = try analyser.typePointerOrOptionalPointerType(src_ty);
+    if (maybe_dest_ptr_ty) |dest_ptr_ty| {
+        if (maybe_src_ptr_ty) |src_ptr_ty| {
+            return try analyser.coerceInMemoryAllowedPtrs(dest_ty, src_ty, dest_ptr_ty, src_ptr_ty, dest_is_mut);
+        }
+    }
+
+    // Slices
+    if (analyser.typeIsSlice(dest_ty) and analyser.typeIsSlice(src_ty)) {
+        return try analyser.coerceInMemoryAllowedPtrs(dest_ty, src_ty, dest_ty, src_ty, dest_is_mut);
+    }
+
+    // Functions
+    if (dest_ty.data == .function and src_ty.data == .function) {
+        return try analyser.coerceInMemoryAllowedFns(dest_ty, src_ty, dest_is_mut);
+    }
+
+    // Error Unions
+    if (dest_ty.data == .error_union and src_ty.data == .error_union) {
+        // TODO
+        return false;
+    }
+
+    // Arrays
+    if (dest_ty.data == .array and src_ty.data == .array) {
+        // TODO
+        return false;
+    }
+
+    // TODO: coerce non-primitive vectors/arrays
+
+    // Optionals
+    if (dest_ty.data == .optional and src_ty.data == .optional) {
+        // TODO
+        return false;
+    }
+
+    // Tuples (with in-memory-coercible fields)
+    if (dest_ty.data == .tuple and src_ty.data == .tuple) {
+        // TODO
+        return false;
+    }
+
+    return false;
+}
+
+fn coerceInMemoryAllowedErrorSets(
+    analyser: *Analyser,
+    dest_ty: Type,
+    src_ty: Type,
+) !bool {
+    // TODO
+    _ = .{ analyser, dest_ty, src_ty };
+    return false;
+}
+
+fn coerceInMemoryAllowedFns(
+    analyser: *Analyser,
+    dest_ty: Type,
+    src_ty: Type,
+    dest_is_mut: bool,
+) !bool {
+    // TODO
+    _ = .{ analyser, dest_ty, src_ty, dest_is_mut };
+    return false;
+}
+
+fn coerceInMemoryAllowedPtrs(
+    analyser: *Analyser,
+    dest_ty: Type,
+    src_ty: Type,
+    dest_ptr_ty: Type,
+    src_ptr_ty: Type,
+    dest_is_mut: bool,
+) !bool {
+    // TODO
+    _ = .{ analyser, dest_ty, src_ty, dest_ptr_ty, src_ptr_ty, dest_is_mut };
+    return false;
+}
