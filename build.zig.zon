@@ -21,8 +21,8 @@
             .hash = "diffz-0.0.1-G2tlIQrOAQCfH15jdyaLyrMgV8eGPouFhkCeYFTmJaLk",
         },
         .lsp_kit = .{
-            .url = "https://github.com/zigtools/lsp-kit/archive/39820a04f098d03424ced689fa016c2130fd876c.tar.gz",
-            .hash = "lsp_kit-0.1.0-bi_PL500CgBbZ3Pbh6TG-Voqb9MRJO8_aLDgBU9Yy7DN",
+            .url = "https://github.com/zigtools/lsp-kit/archive/eb2b440e5a309ab8c4b4c67e97d77791db21e308.tar.gz",
+            .hash = "lsp_kit-0.1.0-bi_PL7s0CgBO95W_AKmQPouVfLO2KgublMZjxra3k6uY",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",
