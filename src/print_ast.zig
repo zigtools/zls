@@ -493,6 +493,15 @@ const PrintAst = struct {
             .@"asm",
             => {
                 const asm_data = tree.fullAsm(node).?;
+                try p.renderOptField(asm_data.ast.clobbers, "clobbers", .hide_if_none);
+                try p.renderOptTokenField(asm_data.volatile_token, "volatile_token", .hide_if_none);
+                try p.renderField(asm_data.ast.template, "template");
+                try p.renderNodeSliceField(asm_data.inputs, "inputs");
+                try p.renderNodeSliceField(asm_data.outputs, "outputs");
+            },
+            .asm_legacy,
+            => {
+                const asm_data = tree.asmLegacy(node);
                 try p.renderOptTokenField(asm_data.first_clobber, "first_clobber", .hide_if_none);
                 try p.renderOptTokenField(asm_data.volatile_token, "volatile_token", .hide_if_none);
                 try p.renderField(asm_data.ast.template, "template");
@@ -751,6 +760,7 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         .block_semicolon,
         => "Block",
         .asm_simple,
+        .asm_legacy,
         .@"asm",
         => "Asm",
 

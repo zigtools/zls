@@ -2918,6 +2918,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
         .asm_simple,
         .@"asm",
+        .asm_legacy,
         .asm_output,
         .asm_input,
         => {},

@@ -768,6 +768,7 @@ fn walkNode(
         .container_field,
         .@"asm",
         .asm_simple,
+        .asm_legacy,
 
         .grouped_expression,
         .field_access,

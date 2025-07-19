@@ -122,6 +122,62 @@ fn fullAsmComponents(tree: Ast, info: full.Asm.Components) full.Asm {
         .volatile_token = null,
         .inputs = &.{},
         .outputs = &.{},
+    };
+    if (info.asm_token + 1 < tree.tokens.len and tree.tokenTag(info.asm_token + 1) == .keyword_volatile) {
+        result.volatile_token = info.asm_token + 1;
+    }
+    const outputs_end: usize = for (info.items, 0..) |item, i| {
+        switch (tree.nodeTag(item)) {
+            .asm_output => continue,
+            else => break i,
+        }
+    } else info.items.len;
+
+    result.outputs = info.items[0..outputs_end];
+    result.inputs = info.items[outputs_end..];
+
+    return result;
+}
+
+pub fn asmSimple(tree: Ast, node: Node.Index) full.Asm {
+    const template, const rparen = tree.nodeData(node).node_and_token;
+    return fullAsmComponents(tree, .{
+        .asm_token = tree.nodeMainToken(node),
+        .template = template,
+        .items = &.{},
+        .rparen = rparen,
+        .clobbers = .none,
+    });
+}
+
+pub fn asmFull(tree: Ast, node: Node.Index) full.Asm {
+    const template, const extra_index = tree.nodeData(node).node_and_extra;
+    const extra = tree.extraData(extra_index, Node.Asm);
+    const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
+    return fullAsmComponents(tree, .{
+        .asm_token = tree.nodeMainToken(node),
+        .template = template,
+        .items = items,
+        .rparen = extra.rparen,
+        .clobbers = extra.clobbers,
+    });
+}
+
+pub fn asmLegacy(tree: Ast, node: Node.Index) full.AsmLegacy {
+    const template, const extra_index = tree.nodeData(node).node_and_extra;
+    const extra = tree.extraData(extra_index, Node.AsmLegacy);
+    const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
+    const info = full.AsmLegacy.Components{
+        .asm_token = tree.nodeMainToken(node),
+        .template = template,
+        .items = items,
+        .rparen = extra.rparen,
+    };
+    var result: full.AsmLegacy = .{
+        .ast = info,
+        .volatile_token = null,
+        .inputs = &.{},
+        .outputs = &.{},
         .first_clobber = null,
     };
     if (info.asm_token + 1 < tree.tokens.len and tree.tokenTag(info.asm_token + 1) == .keyword_volatile) {
@@ -177,28 +233,6 @@ fn fullAsmComponents(tree: Ast, info: full.Asm.Components) full.Asm {
     }
 
     return result;
-}
-
-pub fn asmSimple(tree: Ast, node: Node.Index) full.Asm {
-    const template, const rparen = tree.nodeData(node).node_and_token;
-    return fullAsmComponents(tree, .{
-        .asm_token = tree.nodeMainToken(node),
-        .template = template,
-        .items = &.{},
-        .rparen = rparen,
-    });
-}
-
-pub fn asmFull(tree: Ast, node: Node.Index) full.Asm {
-    const template, const extra_index = tree.nodeData(node).node_and_extra;
-    const extra = tree.extraData(extra_index, Node.Asm);
-    const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
-    return fullAsmComponents(tree, .{
-        .asm_token = tree.nodeMainToken(node),
-        .template = template,
-        .items = items,
-        .rparen = extra.rparen,
-    });
 }
 
 fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
@@ -654,7 +688,7 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
             const index = @intFromEnum(extra_index) + extra.inputs + @intFromBool(extra.has_else);
             n = @enumFromInt(tree.extra_data[index]);
         },
-        .@"asm" => {
+        .@"asm", .asm_legacy => {
             _, const extra_index = tree.nodeData(n).node_and_extra;
             const extra = tree.extraData(extra_index, Node.Asm);
             break extra.rparen;
@@ -1437,6 +1471,24 @@ fn iterateChildrenTypeErased(
             if (field.value_expr.unwrap()) |value_expr| try callback(context, tree, value_expr);
         },
 
+        .asm_legacy => {
+            const asm_node = tree.asmLegacy(node);
+
+            try callback(context, tree, asm_node.ast.template);
+
+            for (asm_node.outputs) |output_node| {
+                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
+                if (has_arrow) {
+                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
+                        try callback(context, tree, lhs);
+                    }
+                }
+            }
+
+            for (asm_node.inputs) |input_node| {
+                try callback(context, tree, tree.nodeData(input_node).node_and_token[0]);
+            }
+        },
         .@"asm" => {
             const asm_node = tree.asmFull(node);
 
