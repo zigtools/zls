@@ -2671,8 +2671,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .string_literal => {
             const token_bytes = tree.tokenSlice(tree.nodeMainToken(node));
 
-            var counting_writer = std.io.countingWriter(std.io.null_writer);
-            const result = try std.zig.string_literal.parseWrite(counting_writer.writer(), token_bytes);
+            var discarding_writer: std.io.Writer.Discarding = .init(&.{});
+            const result = std.zig.string_literal.parseWrite(&discarding_writer.writer, token_bytes) catch |err| switch (err) {
+                error.WriteFailed => unreachable,
+            };
             switch (result) {
                 .success => {},
                 .failure => return null,
@@ -2681,7 +2683,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{
                 .elem_type = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
                     .child = .u8_type,
-                    .len = counting_writer.bytes_written,
+                    .len = discarding_writer.count,
                     .sentinel = .zero_u8,
                 } }),
                 .flags = .{

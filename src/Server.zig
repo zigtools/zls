@@ -1857,7 +1857,7 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     if (handle.tree.errors.len != 0) return null;
 
-    const formatted = try handle.tree.render(arena);
+    const formatted = try handle.tree.renderAlloc(arena);
 
     if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
