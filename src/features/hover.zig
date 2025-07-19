@@ -18,7 +18,7 @@ fn hoverSymbol(
     arena: std.mem.Allocator,
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
-) error{OutOfMemory}!?[]const u8 {
+) error{ OutOfMemory, WriteFailed }!?[]const u8 {
     var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
     return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings);
 }
@@ -29,7 +29,7 @@ fn hoverSymbolRecursive(
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
     doc_strings: *std.ArrayListUnmanaged([]const u8),
-) error{OutOfMemory}!?[]const u8 {
+) error{ OutOfMemory, WriteFailed }!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -206,7 +206,7 @@ fn hoverDefinitionLabel(
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) error{ OutOfMemory, WriteFailed }!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -305,7 +305,7 @@ fn hoverDefinitionGlobal(
     pos_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) error{ OutOfMemory, WriteFailed }!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -342,7 +342,7 @@ fn hoverDefinitionStructInit(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) error{ OutOfMemory, WriteFailed }!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -381,7 +381,7 @@ fn hoverDefinitionEnumLiteral(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) error{ OutOfMemory, WriteFailed }!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -410,7 +410,7 @@ fn hoverDefinitionFieldAccess(
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) error{ OutOfMemory, WriteFailed }!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

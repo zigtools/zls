@@ -410,7 +410,7 @@ fn writeNodeInlayHint(
     builder: *Builder,
     tree: Ast,
     node: Ast.Node.Index,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     switch (tree.nodeTag(node)) {
         .call_one,
         .call_one_comma,
@@ -551,7 +551,7 @@ pub fn writeRangeInlayHint(
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}![]types.InlayHint {
+) error{ OutOfMemory, WriteFailed }![]types.InlayHint {
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,
@@ -564,7 +564,7 @@ pub fn writeRangeInlayHint(
 
     for (nodes) |child| {
         try writeNodeInlayHint(&builder, handle.tree, child);
-        try ast.iterateChildrenRecursive(handle.tree, child, &builder, error{OutOfMemory}, writeNodeInlayHint);
+        try ast.iterateChildrenRecursive(handle.tree, child, &builder, error{ OutOfMemory, WriteFailed }, writeNodeInlayHint);
     }
 
     return try builder.getInlayHints(offset_encoding);

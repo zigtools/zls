@@ -132,7 +132,7 @@ fn fmtDocs(text: []const u8, comment_kind: FormatDocs.CommentKind) std.fmt.Alt(F
     return .{ .data = .{ .text = text, .comment_kind = comment_kind } };
 }
 
-fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.mem.Allocator.Error)!void {
+fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.Io.Writer.Error || std.mem.Allocator.Error)!void {
     var buffer: std.ArrayList(u8) = .init(allocator);
     defer buffer.deinit();
 
@@ -172,8 +172,10 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
     defer tree.deinit(allocator);
     std.debug.assert(tree.errors.len == 0);
 
+    var writer = buffer.writer().adaptToNewApi();
+
     buffer.clearRetainingCapacity();
-    try tree.renderToArrayList(&buffer, .{});
+    try tree.render(allocator, &writer.new_interface, .{});
 
     try std.fs.cwd().writeFile(.{
         .sub_path = path,

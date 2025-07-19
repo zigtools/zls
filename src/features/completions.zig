@@ -28,7 +28,7 @@ const Builder = struct {
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
 };
 
-fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!void {
+fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -142,7 +142,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
     }
 }
 
-fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
+fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) error{ OutOfMemory, WriteFailed }!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
@@ -543,7 +543,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
     }
 }
 
-fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
+fn completeGlobal(builder: *Builder) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -555,7 +555,7 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     try populateSnippedCompletions(builder, &snipped_data.generic);
 }
 
-fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
+fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -644,7 +644,7 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
     return used_members_set;
 }
 
-fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
+fn completeDot(builder: *Builder, loc: offsets.Loc) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -841,7 +841,7 @@ pub fn completionAtIndex(
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
-) error{OutOfMemory}!?types.CompletionList {
+) error{ OutOfMemory, WriteFailed }!?types.CompletionList {
     std.debug.assert(source_index <= handle.tree.source.len);
 
     var builder: Builder = .{
@@ -1367,7 +1367,7 @@ fn collectContainerFields(
     likely: EnumLiteralContext.Likely,
     container: Analyser.Type,
     omit_members: std.BufSet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const info = switch (container.data) {
         .container => |info| info,
         else => return,
@@ -1485,7 +1485,7 @@ fn collectContainerNodes(
     builder: *Builder,
     handle: *DocumentStore.Handle,
     dot_context: EnumLiteralContext,
-) error{OutOfMemory}![]Analyser.Type {
+) error{ OutOfMemory, WriteFailed }![]Analyser.Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1551,7 +1551,7 @@ fn resolveBuiltinFnArg(
     arg_index: usize,
     /// Includes leading `@`
     name: []const u8,
-) std.mem.Allocator.Error!?Analyser.Type {
+) error{ OutOfMemory, WriteFailed }!?Analyser.Type {
     const builtin = version_data.builtins.get(name) orelse return null;
     if (arg_index >= builtin.parameters.len) return null;
     const param = builtin.parameters[arg_index];
@@ -1565,7 +1565,7 @@ fn collectBuiltinContainerNodes(
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     if (dot_context.need_ret_type) return;
     if (try resolveBuiltinFnArg(
         builder.analyser,
@@ -1582,7 +1582,7 @@ fn collectVarAccessContainerNodes(
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const analyser = builder.analyser;
 
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
@@ -1647,7 +1647,7 @@ fn collectFieldAccessContainerNodes(
     loc: offsets.Loc,
     dot_context: EnumLiteralContext,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const analyser = builder.analyser;
     const arena = builder.arena;
 
@@ -1682,7 +1682,7 @@ fn collectEnumLiteralContainerNodes(
     loc: offsets.Loc,
     nodes: []const Ast.Node.Index,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const analyser = builder.analyser;
     const alleged_field_name = offsets.locToSlice(handle.tree.source, offsets.identifierIndexToLoc(handle.tree.source, loc.start + 1, .name));
     const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
@@ -1703,7 +1703,7 @@ fn collectKeywordFnContainerNodes(
     token: Ast.TokenIndex,
     dot_context: EnumLiteralContext,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const builtin_type_name: []const u8 = name: {
         switch (builder.orig_handle.tree.tokenTag(token)) {
             .keyword_addrspace => switch (dot_context.fn_arg_index) {

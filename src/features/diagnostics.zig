@@ -22,7 +22,7 @@ const Zir = std.zig.Zir;
 pub fn generateDiagnostics(
     server: *Server,
     handle: *DocumentStore.Handle,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

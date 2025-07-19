@@ -360,7 +360,7 @@ pub fn isInstanceCall(
     call_handle: *DocumentStore.Handle,
     call: Ast.full.Call,
     func_ty: Type,
-) error{OutOfMemory}!bool {
+) error{ OutOfMemory, WriteFailed }!bool {
     std.debug.assert(!func_ty.is_type_val);
     if (call_handle.tree.nodeTag(call.ast.fn_expr) != .field_access) return false;
 
@@ -712,7 +712,7 @@ test identifierLocFromIndex {
 /// const decl = @import("decl-file.zig").decl;
 /// const other = decl.middle.other;
 ///```
-pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?DeclWithHandle {
+pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -721,7 +721,7 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) error{O
     return try analyser.resolveVarDeclAliasInternal(options, &node_trail);
 }
 
-fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, node_trail: *NodeSet) error{ OutOfMemory, WriteFailed }!?DeclWithHandle {
     const node_handle = options.node_handle;
     const node_with_uri: NodeWithUri = .{
         .node = node_handle.node,
@@ -891,7 +891,7 @@ fn resolveReturnValueOfFuncNode(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     func_node: Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) error{ OutOfMemory, WriteFailed }!?Type {
     const tree = handle.tree;
 
     var buf: [1]Ast.Node.Index = undefined;
@@ -981,7 +981,7 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
     };
 }
 
-fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+fn resolveUnionTag(analyser: *Analyser, ty: Type) error{ OutOfMemory, WriteFailed }!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1010,7 +1010,7 @@ fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     return null;
 }
 
-fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{ OutOfMemory, WriteFailed }!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1085,7 +1085,7 @@ pub const BracketAccess = union(enum) {
         analyser: *Analyser,
         handle: *DocumentStore.Handle,
         slice: Ast.full.Slice,
-    ) error{OutOfMemory}!BracketAccess {
+    ) error{ OutOfMemory, WriteFailed }!BracketAccess {
         const start_node = slice.ast.start;
         const end_node = slice.ast.end.unwrap() orelse
             return .{
@@ -1360,12 +1360,12 @@ fn resolveOptionalIPValue(
     analyser: *Analyser,
     optional_node: Ast.Node.OptionalIndex,
     handle: *DocumentStore.Handle,
-) error{OutOfMemory}!?InternPool.Index {
+) error{ OutOfMemory, WriteFailed }!?InternPool.Index {
     const node = optional_node.unwrap() orelse return null;
     return try analyser.resolveInternPoolValue(.of(node, handle));
 }
 
-fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
+fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?InternPool.Index {
     const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
     analyser.resolve_number_literal_values = true;
     defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
@@ -1377,7 +1377,7 @@ fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{Ou
     }
 }
 
-fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: ResolveOptions) error{OutOfMemory}!?T {
+fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?T {
     const ip_index = try analyser.resolveInternPoolValue(options) orelse return null;
     return analyser.ip.toInt(ip_index, T);
 }
@@ -1494,7 +1494,7 @@ fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const 
     return field_name[1 .. field_name.len - 1];
 }
 
-fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
+fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?InternPool.Index {
     const ty = try analyser.resolveTypeOfNodeInternal(options) orelse return null;
     if (!ty.is_type_val) return null;
     const ip_index = switch (ty.data) {
@@ -1842,24 +1842,24 @@ const FindBreaks = struct {
 
 /// Resolves the type of an Ast Node.
 /// Returns `null` if the type could not be resolved.
-pub fn resolveTypeOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+pub fn resolveTypeOfNode(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Type {
     const binding = try analyser.resolveBindingOfNode(options) orelse return null;
     return binding.type;
 }
 
-fn resolveTypeOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+fn resolveTypeOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Type {
     const binding = try analyser.resolveBindingOfNodeInternal(options) orelse return null;
     return binding.type;
 }
 
-pub fn resolveBindingOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+pub fn resolveBindingOfNode(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Binding {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     return analyser.resolveBindingOfNodeInternal(options);
 }
 
-fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Binding {
     const node_handle = options.node_handle;
     const node_with_uri: NodeWithUri = .{
         .node = node_handle.node,
@@ -1879,7 +1879,7 @@ fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) er
     return binding;
 }
 
-fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Type {
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -2672,7 +2672,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const token_bytes = tree.tokenSlice(tree.nodeMainToken(node));
 
             var counting_writer = std.io.countingWriter(std.io.null_writer);
-            const result = try std.zig.string_literal.parseWrite(counting_writer.writer(), token_bytes);
+            var w = counting_writer.writer().adaptToNewApi();
+            const result = try std.zig.string_literal.parseWrite(&w.new_interface, token_bytes);
             switch (result) {
                 .success => {},
                 .failure => return null,
@@ -2937,7 +2938,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
     return null;
 }
 
-fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{ OutOfMemory, WriteFailed }!?Binding {
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -4105,7 +4106,7 @@ pub const Type = struct {
         self: Type,
         analyser: *Analyser,
         symbol: []const u8,
-    ) error{OutOfMemory}!?DeclWithHandle {
+    ) error{ OutOfMemory, WriteFailed }!?DeclWithHandle {
         switch (self.data) {
             .either => |entries| {
                 // TODO: Return all options instead of first valid one
@@ -4416,7 +4417,7 @@ pub const ScopeWithHandle = struct {
 
 /// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
-pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Type {
+pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{ OutOfMemory, WriteFailed }!?Type {
     const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
     const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "builtin.zig" });
     const builtin_uri = try URI.fromPath(analyser.arena, builtin_path);
@@ -4524,7 +4525,7 @@ pub fn getFieldAccessType(
     handle: *DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) error{OutOfMemory}!?Type {
+) error{ OutOfMemory, WriteFailed }!?Type {
     const held_range = try analyser.arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
     var tokenizer: std.zig.Tokenizer = .init(held_range);
     var current_type: ?Type = null;
@@ -5146,7 +5147,7 @@ pub const DeclWithHandle = struct {
         return self.decl.nameToken(self.handle.tree);
     }
 
-    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) error{OutOfMemory}!TokenWithHandle {
+    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) error{ OutOfMemory, WriteFailed }!TokenWithHandle {
         if (resolve_alias) {
             switch (self.decl) {
                 .ast_node => |node| {
@@ -5361,7 +5362,7 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) error{OutOfMemory}!?Type {
+    pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) error{ OutOfMemory, WriteFailed }!?Type {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
@@ -5518,7 +5519,7 @@ pub fn collectDeclarationsOfContainer(
     instance_access: bool,
     /// allocated with `analyser.arena`
     decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const info = switch (container_type.data) {
         .container => |info| info,
         .either => |entries| {
@@ -5836,7 +5837,7 @@ pub fn lookupSymbolFieldInit(
     field_name: []const u8,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?DeclWithHandle {
+) error{ OutOfMemory, WriteFailed }!?DeclWithHandle {
     var container_type = (try analyser.resolveExpressionType(
         handle,
         node,
@@ -5891,7 +5892,7 @@ pub fn resolveExpressionType(
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) error{ OutOfMemory, WriteFailed }!?Type {
     return (try analyser.resolveExpressionTypeFromAncestors(
         handle,
         node,
@@ -5904,7 +5905,7 @@ pub fn resolveExpressionTypeFromAncestors(
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) error{ OutOfMemory, WriteFailed }!?Type {
     if (ancestors.len == 0) return null;
 
     const tree = handle.tree;
@@ -6240,7 +6241,7 @@ pub fn getSymbolEnumLiteral(
     handle: *DocumentStore.Handle,
     source_index: usize,
     name: []const u8,
-) error{OutOfMemory}!?DeclWithHandle {
+) error{ OutOfMemory, WriteFailed }!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -6254,7 +6255,7 @@ pub fn resolveStructInitType(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     source_index: usize,
-) error{OutOfMemory}!?Type {
+) error{ OutOfMemory, WriteFailed }!?Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -6280,7 +6281,7 @@ pub fn getSymbolFieldAccesses(
     source_index: usize,
     held_loc: offsets.Loc,
     name: []const u8,
-) error{OutOfMemory}!?[]const DeclWithHandle {
+) error{ OutOfMemory, WriteFailed }!?[]const DeclWithHandle {
     var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
     var property_types: std.ArrayListUnmanaged(Type) = .empty;
     try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls_with_handles, &property_types);
@@ -6296,7 +6297,7 @@ pub fn getSymbolFieldAccessesArrayList(
     name: []const u8,
     decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
     property_types: *std.ArrayListUnmanaged(Type),
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

@@ -109,6 +109,7 @@ const ClientCapabilities = struct {
 
 pub const Error = error{
     OutOfMemory,
+    WriteFailed,
     ParseError,
     InvalidRequest,
     MethodNotFound,
@@ -1857,7 +1858,7 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     if (handle.tree.errors.len != 0) return null;
 
-    const formatted = try handle.tree.render(arena);
+    const formatted = try handle.tree.renderAlloc(arena);
 
     if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
@@ -2283,6 +2284,7 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
             .request => |request| return server.sendToClientResponseError(request.id, .{
                 .code = @enumFromInt(switch (err) {
                     error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
+                    error.WriteFailed => @intFromEnum(types.ErrorCodes.InternalError),
                     error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
                     error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
                     error.MethodNotFound => @intFromEnum(types.ErrorCodes.MethodNotFound),

@@ -94,16 +94,16 @@ const Builder = struct {
         });
     }
 
-    fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
         const context = Context{
             .builder = self,
             .handle = handle,
         };
         try referenceNode(&context, handle.tree, node);
-        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{ OutOfMemory, WriteFailed }, referenceNode);
     }
 
-    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
         const builder = self.builder;
         const handle = self.handle;
         const decl_name = offsets.identifierTokenToNameSlice(
@@ -276,7 +276,7 @@ fn symbolReferences(
     include_decl: bool,
     /// exclude references from the std library
     skip_std_references: bool,
-) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+) error{ OutOfMemory, WriteFailed }!std.ArrayListUnmanaged(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -523,15 +523,15 @@ const CallBuilder = struct {
         });
     }
 
-    fn collectReferences(self: *CallBuilder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *CallBuilder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
         const context = Context{
             .builder = self,
             .handle = handle,
         };
-        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{ OutOfMemory, WriteFailed }, referenceNode);
     }
 
-    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
         const builder = self.builder;
         const handle = self.handle;
 
@@ -588,7 +588,7 @@ pub fn callsiteReferences(
     skip_std_references: bool,
     /// search other files for references
     workspace: bool,
-) error{OutOfMemory}!std.ArrayListUnmanaged(Callsite) {
+) error{ OutOfMemory, WriteFailed }!std.ArrayListUnmanaged(Callsite) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

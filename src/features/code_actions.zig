@@ -249,7 +249,7 @@ pub fn collectAutoDiscardDiagnostics(
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, WriteFailed }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     const tree = handle.tree;

@@ -29,7 +29,7 @@ fn gotoDefinitionSymbol(
     decl_handle: Analyser.DeclWithHandle,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -75,7 +75,7 @@ fn gotoDefinitionLabel(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -91,7 +91,7 @@ fn gotoDefinitionGlobal(
     pos_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -107,7 +107,7 @@ fn gotoDefinitionStructInit(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -134,7 +134,7 @@ fn gotoDefinitionEnumLiteral(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -194,7 +194,7 @@ fn gotoDefinitionFieldAccess(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]const types.DefinitionLink {
+) error{ OutOfMemory, WriteFailed }!?[]const types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

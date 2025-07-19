@@ -281,7 +281,7 @@ fn colorIdentifierBasedOnType(
     }
 }
 
-fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
     const handle = builder.handle;
     const tree = handle.tree;
 
@@ -763,6 +763,33 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, tree.nodeMainToken(input_node) + 2, .string);
                 try writeNodeTokens(builder, tree.nodeData(input_node).node_and_token[0]);
             }
+        },
+        .asm_legacy,
+        => {
+            const asm_node: Ast.full.AsmLegacy = ast.asmLegacy(tree, node);
+
+            try writeToken(builder, main_token, .keyword);
+            try writeToken(builder, asm_node.volatile_token, .keyword);
+            try writeNodeTokens(builder, asm_node.ast.template);
+
+            for (asm_node.outputs) |output_node| {
+                try writeToken(builder, tree.nodeMainToken(output_node), .variable);
+                try writeToken(builder, tree.nodeMainToken(output_node) + 2, .string);
+                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
+                if (has_arrow) {
+                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
+                        try writeNodeTokens(builder, lhs);
+                    }
+                } else {
+                    try writeToken(builder, tree.nodeMainToken(output_node) + 4, .variable);
+                }
+            }
+
+            for (asm_node.inputs) |input_node| {
+                try writeToken(builder, tree.nodeMainToken(input_node), .variable);
+                try writeToken(builder, tree.nodeMainToken(input_node) + 2, .string);
+                try writeNodeTokens(builder, tree.nodeData(input_node).node_and_token[0]);
+            }
 
             if (asm_node.first_clobber) |first_clobber| clobbers: {
                 var tok_i = first_clobber;
@@ -1003,7 +1030,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     }
 }
 
-fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
+fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{ OutOfMemory, WriteFailed }!void {
     const tree = builder.handle.tree;
 
     const var_decl = tree.fullVarDecl(var_decl_node).?;
@@ -1057,7 +1084,7 @@ fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type:
     }
 }
 
-fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMemory}!void {
+fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{ OutOfMemory, WriteFailed }!void {
     const handle = builder.handle;
     const tree = handle.tree;
 
@@ -1106,7 +1133,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
     }
 }
 
-fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{ OutOfMemory, WriteFailed }!void {
     const handle = builder.handle;
     const tree = builder.handle.tree;
     const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
@@ -1181,7 +1208,7 @@ pub fn writeSemanticTokens(
     encoding: offsets.Encoding,
     limited: bool,
     overlappingTokenSupport: bool,
-) error{OutOfMemory}!types.SemanticTokens {
+) error{ OutOfMemory, WriteFailed }!types.SemanticTokens {
     var builder = Builder{
         .arena = arena,
         .analyser = analyser,

@@ -21,6 +21,7 @@ pub const std_options: std.Options = .{
 
 const Error = error{
     OutOfMemory,
+    WriteFailed,
     InvalidTestItem,
     CheckFailed,
 };

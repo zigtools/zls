@@ -76,7 +76,7 @@ pub fn getSignatureInfo(
     handle: *DocumentStore.Handle,
     absolute_index: usize,
     markup_kind: types.MarkupKind,
-) !?types.SignatureInformation {
+) error{ OutOfMemory, WriteFailed }!?types.SignatureInformation {
     const document_scope = try handle.getDocumentScope();
     const innermost_block_scope = Analyser.innermostScopeAtIndexWithTag(document_scope, absolute_index, .init(.{
         .block = true,
