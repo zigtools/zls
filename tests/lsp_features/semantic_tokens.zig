@@ -1829,14 +1829,40 @@ test "test decl" {
     });
 }
 
-test "assembly" {
+test "legacy asm" {
+    try testSemanticTokens(
+        \\fn foo() void {
+        \\    asm volatile (""
+        \\        : [_] "" (-> type),
+        \\        :
+        \\        : "clobber"
+        \\    );
+        \\}
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+
+        .{ "asm", .keyword, .{} },
+        .{ "volatile", .keyword, .{} },
+        .{ "\"\"", .string, .{} },
+
+        .{ "_", .variable, .{} },
+        .{ "\"\"", .string, .{} },
+        .{ "type", .type, .{} },
+
+        .{ "\"clobber\"", .string, .{} },
+    });
+}
+
+test "asm" {
     try testSemanticTokens(
         \\fn syscall1(number: usize, arg1: usize) usize {
         \\    return asm volatile ("syscall"
         \\        : [ret] "={rax}" (-> usize),
         \\        : [number] "{rax}" (number),
         \\          [arg1] "{rdi}" (arg1),
-        \\        : "rcx", "r11"
+        \\        : .{ .rcx = true, .@"r11" = true }
         \\    );
         \\}
     , &.{
@@ -1865,11 +1891,18 @@ test "assembly" {
         .{ "\"{rdi}\"", .string, .{} },
         .{ "arg1", .parameter, .{} },
 
-        .{ "\"rcx\"", .string, .{} },
-        .{ "\"r11\"", .string, .{} },
+        .{ ".", .property, .{} },
+        .{ "rcx", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "true", .keywordLiteral, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "@\"r11\"", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "true", .keywordLiteral, .{} },
     });
     try testSemanticTokens(
-        \\const alpha = asm volatile ("foo" ::: "a", "b",);
+        \\const alpha = asm volatile ("foo" ::: .{ .a = true, .b = false });
     , &.{
         .{ "const", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true, .static = true } },
@@ -1878,8 +1911,16 @@ test "assembly" {
         .{ "asm", .keyword, .{} },
         .{ "volatile", .keyword, .{} },
         .{ "\"foo\"", .string, .{} },
-        .{ "\"a\"", .string, .{} },
-        .{ "\"b\"", .string, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "a", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "true", .keywordLiteral, .{} },
+
+        .{ ".", .property, .{} },
+        .{ "b", .property, .{} },
+        .{ "=", .operator, .{} },
+        .{ "false", .keywordLiteral, .{} },
     });
 }
 

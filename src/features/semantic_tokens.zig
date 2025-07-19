@@ -736,10 +736,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .unreachable_literal => {
             try writeToken(builder, main_token, .keywordLiteral);
         },
-        .@"asm",
-        .asm_simple,
-        => {
-            const asm_node: Ast.full.Asm = ast.fullAsm(tree, node).?;
+        .asm_legacy => {
+            const asm_node: Ast.full.AsmLegacy = ast.asmLegacy(tree, node);
 
             try writeToken(builder, main_token, .keyword);
             try writeToken(builder, asm_node.volatile_token, .keyword);
@@ -781,6 +779,38 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                         else => break :clobbers,
                     }
                 }
+            }
+        },
+        .asm_simple,
+        .@"asm",
+        => {
+            const asm_node: Ast.full.Asm = ast.fullAsm(tree, node).?;
+
+            try writeToken(builder, main_token, .keyword);
+            try writeToken(builder, asm_node.volatile_token, .keyword);
+            try writeNodeTokens(builder, asm_node.ast.template);
+
+            for (asm_node.outputs) |output_node| {
+                try writeToken(builder, tree.nodeMainToken(output_node), .variable);
+                try writeToken(builder, tree.nodeMainToken(output_node) + 2, .string);
+                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
+                if (has_arrow) {
+                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
+                        try writeNodeTokens(builder, lhs);
+                    }
+                } else {
+                    try writeToken(builder, tree.nodeMainToken(output_node) + 4, .variable);
+                }
+            }
+
+            for (asm_node.inputs) |input_node| {
+                try writeToken(builder, tree.nodeMainToken(input_node), .variable);
+                try writeToken(builder, tree.nodeMainToken(input_node) + 2, .string);
+                try writeNodeTokens(builder, tree.nodeData(input_node).node_and_token[0]);
+            }
+
+            if (asm_node.ast.clobbers.unwrap()) |clobers_node| {
+                try writeNodeTokens(builder, clobers_node);
             }
         },
         .asm_output,
