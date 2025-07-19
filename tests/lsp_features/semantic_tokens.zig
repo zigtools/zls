@@ -211,12 +211,19 @@ test "var decl" {
         .{ "3", .number, .{} },
     });
     try testSemanticTokens(
-        \\extern var alpha: u32;
+        \\extern "c" var alpha: u32 align(4) addrspace(.generic) linksection(".data");
     , &.{
         .{ "extern", .keyword, .{} },
+        .{ "\"c\"", .string, .{} },
         .{ "var", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "u32", .type, .{} },
+        .{ "align", .keyword, .{} },
+        .{ "4", .number, .{} },
+        .{ "addrspace", .keyword, .{} },
+        .{ "generic", .enumMember, .{} },
+        .{ "linksection", .keyword, .{} },
+        .{ "\".data\"", .string, .{} },
     });
     try testSemanticTokens(
         \\pub extern var alpha = 3;
@@ -818,12 +825,10 @@ test "struct literal" {
         .{ "alpha", .variable, .{ .declaration = true, .static = true, .mutable = true } },
         .{ "=", .operator, .{} },
 
-        .{ ".", .property, .{} },
         .{ "foo", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "1", .number, .{} },
 
-        .{ ".", .property, .{} },
         .{ "bar", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "2", .number, .{} },
@@ -1357,13 +1362,18 @@ test "function" {
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
-        \\extern fn foo() align(4) callconv(.C) void;
+        \\extern "c" fn foo() align(4) addrspace(.generic) linksection(".text") callconv(.C) void;
     , &.{
         .{ "extern", .keyword, .{} },
+        .{ "\"c\"", .string, .{} },
         .{ "fn", .keyword, .{} },
         .{ "foo", .function, .{ .declaration = true } },
         .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },
+        .{ "addrspace", .keyword, .{} },
+        .{ "generic", .enumMember, .{} },
+        .{ "linksection", .keyword, .{} },
+        .{ "\".text\"", .string, .{} },
         .{ "callconv", .keyword, .{} },
         .{ "C", .enumMember, .{} },
         .{ "void", .type, .{} },
@@ -1891,12 +1901,10 @@ test "asm" {
         .{ "\"{rdi}\"", .string, .{} },
         .{ "arg1", .parameter, .{} },
 
-        .{ ".", .property, .{} },
         .{ "rcx", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "true", .keywordLiteral, .{} },
 
-        .{ ".", .property, .{} },
         .{ "@\"r11\"", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "true", .keywordLiteral, .{} },
@@ -1912,12 +1920,10 @@ test "asm" {
         .{ "volatile", .keyword, .{} },
         .{ "\"foo\"", .string, .{} },
 
-        .{ ".", .property, .{} },
         .{ "a", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "true", .keywordLiteral, .{} },
 
-        .{ ".", .property, .{} },
         .{ "b", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "false", .keywordLiteral, .{} },
@@ -1981,12 +1987,10 @@ test "zon file" {
         \\    .baz = true,
         \\}
     , &.{
-        .{ ".", .property, .{} },
         .{ "foo", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "\"bar\"", .string, .{} },
 
-        .{ ".", .property, .{} },
         .{ "baz", .property, .{} },
         .{ "=", .operator, .{} },
         .{ "true", .keywordLiteral, .{} },
