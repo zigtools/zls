@@ -65,6 +65,121 @@ const one_minus_slice = one_u32 - slice_u32;
 const one_minus_c = one_u32 - c_u32;
 //    ^^^^^^^^^^^ (usize)()
 
+const one_u32_or_one_u32 = if (runtime_bool) one_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^ (*const u32)()
+
+const one_u32_or_array_u32 = if (runtime_bool) one_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_many_u32 = if (runtime_bool) one_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_slice_u32 = if (runtime_bool) one_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_u32_or_c_u32 = if (runtime_bool) one_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const one_u32_or_runtime_one_u32 = if (runtime_bool) one_u32 else runtime_one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const u32)()
+
+const one_u32_or_empty = if (runtime_bool) one_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_one_u32 = if (runtime_bool) &.{} else one_u32;
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const one_one_coerce_0 = if (runtime_bool) @as(*const error{A}, &error.A) else @as(*const error{ A, B }, &error.B);
+//    ^^^^^^^^^^^^^^^^ (*const error{A,B})()
+
+const one_one_coerce_1 = if (runtime_bool) @as(*const error{ A, B }, &error.B) else @as(*const error{A}, &error.A);
+//    ^^^^^^^^^^^^^^^^ (*const error{A,B})()
+
+const one_array_coerce_0 = if (runtime_bool) @as(*const error{A}, &error.A) else @as(*const [1]error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_array_coerce_1 = if (runtime_bool) @as(*const error{ A, B }, &error.B) else @as(*const [1]error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_many_coerce_0 = if (runtime_bool) @as(*const error{A}, &error.A) else @as([*]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_many_coerce_1 = if (runtime_bool) @as(*const error{ A, B }, &error.B) else @as([*]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_slice_coerce_0 = if (runtime_bool) @as(*const error{A}, &error.A) else @as([]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_slice_coerce_1 = if (runtime_bool) @as(*const error{ A, B }, &error.B) else @as([]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const one_c_coerce_0 = if (runtime_bool) @as(*const *const bool, &&true) else @as([*c]const ?*const bool, &&false);
+//    ^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const one_c_coerce_1 = if (runtime_bool) @as(*const ?*const bool, &&true) else @as([*c]const *const bool, &&false);
+//    ^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+//
+// array pointer *[n]T
+//
+
+const array_u32: *const [2]u32 = &[_]u32{ 1, 2 };
+//    ^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_one_u32 = if (runtime_bool) array_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_u32_or_array_u32 = if (runtime_bool) array_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_many_u32 = if (runtime_bool) array_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const array_u32_or_slice_u32 = if (runtime_bool) array_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const array_u32_or_c_u32 = if (runtime_bool) array_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_u32_or_runtime_array_u32 = if (runtime_bool) array_u32 else runtime_array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
+
+const array_u32_or_empty = if (runtime_bool) array_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const empty_or_array_u32 = if (runtime_bool) &.{} else array_u32;
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const array_one_coerce_0 = if (runtime_bool) @as(*const [1]error{A}, &.{error.A}) else @as(*const error{ A, B }, &error.B);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_one_coerce_1 = if (runtime_bool) @as(*const [1]error{ A, B }, &.{error.B}) else @as(*const error{A}, &error.A);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_array_coerce_0 = if (runtime_bool) @as(*const [1]error{A}, &.{error.A}) else @as(*const [1]error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^^ (*const [1]error{A,B})()
+
+const array_array_coerce_1 = if (runtime_bool) @as(*const [1]error{ A, B }, &.{error.B}) else @as(*const [1]error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^^ (*const [1]error{A,B})()
+
+const array_many_coerce_0 = if (runtime_bool) @as(*const [1]error{A}, &.{error.A}) else @as([*]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const array_many_coerce_1 = if (runtime_bool) @as(*const [1]error{ A, B }, &.{error.B}) else @as([*]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const array_slice_coerce_0 = if (runtime_bool) @as(*const [1]error{A}, &.{error.A}) else @as([]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const array_slice_coerce_1 = if (runtime_bool) @as(*const [1]error{ A, B }, &.{error.B}) else @as([]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const array_c_coerce_0 = if (runtime_bool) @as(*const [1]*const bool, &.{&true}) else @as([*c]const ?*const bool, &&false);
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const array_c_coerce_1 = if (runtime_bool) @as(*const [1]?*const bool, &.{&true}) else @as([*c]const *const bool, &&false);
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
 //
 // many item pointer [*]T
 //
@@ -122,6 +237,76 @@ const many_minus_slice = many_u32 - slice_u32;
 const many_minus_c = many_u32 - c_u32;
 //    ^^^^^^^^^^^^ (usize)()
 
+const many_u32_or_one_u32 = if (runtime_bool) many_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_u32_or_array_u32 = if (runtime_bool) many_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_many_u32 = if (runtime_bool) many_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_slice_u32 = if (runtime_bool) many_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_u32_or_c_u32 = if (runtime_bool) many_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const many_u32_or_runtime_many_u32 = if (runtime_bool) many_u32 else runtime_many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([*]const u32)()
+
+const many_u32_or_empty = if (runtime_bool) many_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_many_u32 = if (runtime_bool) &.{} else many_u32;
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_one_coerce_0 = if (runtime_bool) @as([*]const error{A}, &.{error.A}) else @as(*const error{ A, B }, &error.B);
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_one_coerce_1 = if (runtime_bool) @as([*]const error{ A, B }, &.{error.B}) else @as(*const error{A}, &error.A);
+//    ^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_array_coerce_0 = if (runtime_bool) @as([*]const error{ A, B }, &.{error.B}) else @as(*const [1]error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const many_array_coerce_1 = if (runtime_bool) @as([*]const error{A}, &.{error.A}) else @as(*const [1]error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const many_many_coerce_0 = if (runtime_bool) @as([*]const error{A}, &.{error.A}) else @as([*]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const many_many_coerce_1 = if (runtime_bool) @as([*]const error{ A, B }, &.{error.B}) else @as([*]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^ ([*]const error{A,B})()
+
+const many_slice_coerce_0 = if (runtime_bool) @as([*]const error{A}, &.{error.A}) else @as([]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_slice_coerce_1 = if (runtime_bool) @as([*]const error{ A, B }, &.{error.B}) else @as([]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const many_c_coerce_0 = if (runtime_bool) @as([*]const *const bool, &.{&true}) else @as([*c]const ?*const bool, &&false);
+//    ^^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const many_c_coerce_1 = if (runtime_bool) @as([*]const ?*const bool, &.{&true}) else @as([*c]const *const bool, &&false);
+//    ^^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+// zig fmt: off
+const many_array_1_array_2_coerce = switch (runtime_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([*]const error{A})()
+    0 => @as([*]const error{A}, &.{error.A}),
+    1 => @as(*const [1]error{A}, &.{error.A}),
+    else => @as(*const [2]error{A}, &.{ error.A, error.A }),
+};
+
+const array_2_array_1_many_coerce = switch (runtime_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([*]const error{A})()
+    0 => @as(*const [2]error{A}, &.{ error.A, error.A }),
+    1 => @as(*const [1]error{A}, &.{error.A}),
+    else => @as([*]const error{A}, &.{error.A}),
+};
+// zig fmt: on
+
 //
 // slice []T
 //
@@ -176,6 +361,60 @@ const slice_minus_slice = slice_u32 - slice_u32;
 
 const slice_minus_c = slice_u32 - c_u32;
 //    ^^^^^^^^^^^^^ (unknown)()
+
+const slice_u32_or_one_u32 = if (runtime_bool) slice_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_array_u32 = if (runtime_bool) slice_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_many_u32 = if (runtime_bool) slice_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_slice_u32 = if (runtime_bool) slice_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_c_u32 = if (runtime_bool) slice_u32 else c_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_u32_or_runtime_slice_u32 = if (runtime_bool) slice_u32 else runtime_slice_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_or_empty = if (runtime_bool) slice_u32 else &.{};
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const empty_or_slice_u32 = if (runtime_bool) &.{} else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_one_coerce_0 = if (runtime_bool) @as([]const error{A}, &.{error.A}) else @as(*const error{ A, B }, &error.B);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_one_coerce_1 = if (runtime_bool) @as([]const error{ A, B }, &.{error.B}) else @as(*const error{A}, &error.A);
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_array_coerce_0 = if (runtime_bool) @as([]const error{ A, B }, &.{error.B}) else @as(*const [1]error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const slice_array_coerce_1 = if (runtime_bool) @as([]const error{A}, &.{error.A}) else @as(*const [1]error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const slice_slice_coerce_0 = if (runtime_bool) @as([]const error{A}, &.{error.A}) else @as([]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const slice_slice_coerce_1 = if (runtime_bool) @as([]const error{ A, B }, &.{error.B}) else @as([]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^^ ([]const error{A,B})()
+
+const slice_many_coerce_0 = if (runtime_bool) @as([]const error{A}, &.{error.A}) else @as([*]const error{ A, B }, &.{error.B});
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_many_coerce_1 = if (runtime_bool) @as([]const error{ A, B }, &.{error.B}) else @as([*]const error{A}, &.{error.A});
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_c_coerce_0 = if (runtime_bool) @as([]const *const bool, &.{&true}) else @as([*c]const ?*const bool, &&false);
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const slice_c_coerce_1 = if (runtime_bool) @as([]const ?*const bool, &.{&true}) else @as([*c]const *const bool, &&false);
+//    ^^^^^^^^^^^^^^^^ (either type)()
 
 //
 // C pointer [*c]T
@@ -234,9 +473,72 @@ const c_minus_slice = c_u32 - slice_u32;
 const c_minus_c = c_u32 - c_u32;
 //    ^^^^^^^^^ (usize)()
 
+const c_u32_or_one_u32 = if (runtime_bool) c_u32 else one_u32;
+//    ^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_array_u32 = if (runtime_bool) c_u32 else array_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const c_u32_or_many_u32 = if (runtime_bool) c_u32 else many_u32;
+//    ^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_slice_u32 = if (runtime_bool) c_u32 else slice_u32;
+//    ^^^^^^^^^^^^^^^^^^ (either type)()
+
+const c_u32_or_c_u32 = if (runtime_bool) c_u32 else c_u32;
+//    ^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_runtime_c_u32 = if (runtime_bool) c_u32 else runtime_c_u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^ ([*c]const u32)()
+
+const c_u32_or_empty = if (runtime_bool) c_u32 else &.{};
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const empty_or_c_u32 = if (runtime_bool) &.{} else c_u32;
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const c_one_coerce_0 = if (runtime_bool) @as([*c]const *const bool, &&true) else @as(*const ?*const bool, &&false);
+//    ^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const c_one_coerce_1 = if (runtime_bool) @as([*c]const ?*const bool, &&true) else @as(*const *const bool, &&false);
+//    ^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const c_array_coerce_0 = if (runtime_bool) @as([*c]const *const bool, &&true) else @as(*const [1]?*const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const c_array_coerce_1 = if (runtime_bool) @as([*c]const ?*const bool, &&true) else @as(*const [1]*const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const c_many_coerce_0 = if (runtime_bool) @as([*c]const *const bool, &&true) else @as([*]const ?*const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const c_many_coerce_1 = if (runtime_bool) @as([*c]const ?*const bool, &&true) else @as([*]const *const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const c_slice_coerce_0 = if (runtime_bool) @as([*c]const *const bool, &&true) else @as([]const ?*const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const c_slice_coerce_1 = if (runtime_bool) @as([*c]const ?*const bool, &&true) else @as([]const *const bool, &.{&false});
+//    ^^^^^^^^^^^^^^^^ (either type)()
+
+const c_c_coerce_0 = if (runtime_bool) @as([*c]const *const bool, &&true) else @as([*c]const ?*const bool, &&false);
+//    ^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
+const c_c_coerce_1 = if (runtime_bool) @as([*c]const ?*const bool, &&true) else @as([*c]const *const bool, &&false);
+//    ^^^^^^^^^^^^ ([*c]const ?*const bool)()
+
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
+var runtime_bool = true;
+var runtime_u32: u32 = 0;
+var runtime_u32_array: [2]u32 = .{ 1, 2 };
+
+const runtime_one_u32: *u32 = &runtime_u32;
+const runtime_c_u32: [*c]u32 = &runtime_u32;
+const runtime_array_u32: *[2]u32 = &runtime_u32_array;
+const runtime_many_u32: [*]u32 = &runtime_u32_array;
+const runtime_slice_u32: []u32 = &runtime_u32_array;
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:
