@@ -3480,12 +3480,17 @@ pub const Type = struct {
             return entries[0].type;
 
         peer_type_resolution: {
-            var chosen = entries[0].type;
-            for (entries[1..]) |entry| {
-                const candidate = entry.type;
-                chosen = try analyser.resolvePeerTypes(chosen, candidate) orelse break :peer_type_resolution;
+            const peer_tys = try analyser.gpa.alloc(?Type, entries.len);
+            defer analyser.gpa.free(peer_tys);
+
+            for (entries, peer_tys) |entry, *ty| {
+                if (entry.type.is_type_val) break :peer_type_resolution;
+                ty.* = try entry.type.typeOf(analyser);
             }
-            return chosen;
+
+            if (try analyser.resolvePeerTypesInner(peer_tys)) |ty| {
+                return try ty.instanceTypeVal(analyser);
+            }
         }
 
         // Note that we don't hash/equate descriptors to remove
@@ -6659,10 +6664,9 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                     continue;
                 };
 
-                if (!ptr_info.elem_ty.eql(peer_info.elem_ty)) {
-                    // TODO: coerce C pointer types
+                ptr_info.elem_ty = try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, peer_info.elem_ty) orelse {
                     return null;
-                }
+                };
 
                 if (ptr_info.flags.alignment != ptr_info.flags.alignment) {
                     // TODO: find minimum C pointer alignment
@@ -6771,16 +6775,15 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                     switch (peer_info.flags.size) {
                         .one => switch (ptr_info.flags.size) {
                             .one => {
-                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, peer_info.elem_ty)) |pointee| {
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce pointer types
 
                                 const cur_arr = cur_pointee_array orelse return null;
                                 const peer_arr = peer_pointee_array orelse return null;
 
-                                if (cur_arr.elem_ty.eql(peer_arr.elem_ty)) {
-                                    const elem_ty = peer_arr.elem_ty;
+                                if (try analyser.resolvePairInMemoryCoercible(cur_arr.elem_ty, peer_arr.elem_ty)) |elem_ty| {
                                     // *[n:x]T + *[n:y]T = *[n]T
                                     if (cur_arr.len == peer_arr.len) {
                                         ptr_info.elem_ty = .{
@@ -6800,7 +6803,6 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                                     ptr_info.elem_ty = elem_ty;
                                     break :good;
                                 }
-                                // TODO: coerce array types
 
                                 if (peer_arr.elem_ty.isNoreturnType()) {
                                     // *struct{} + *[a]T = []T
@@ -6821,19 +6823,19 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                             .many => {
                                 // Only works for *[n]T + [*]T -> [*]T
                                 const arr = peer_pointee_array orelse return null;
-                                if (ptr_info.elem_ty.eql(arr.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, arr.elem_ty)) |pointee| {
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce array and many-item pointer types
                                 return null;
                             },
                             .slice => {
                                 // Only works for *[n]T + []T -> []T
                                 const arr = peer_pointee_array orelse return null;
-                                if (ptr_info.elem_ty.eql(arr.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, arr.elem_ty)) |pointee| {
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce array and slice types
                                 if (arr.elem_ty.isNoreturnType()) {
                                     // *struct{} + []T -> []T
                                     break :good;
@@ -6846,19 +6848,18 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                             .one => {
                                 // Only works for [*]T + *[n]T -> [*]T
                                 const arr = cur_pointee_array orelse return null;
-                                if (arr.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(arr.elem_ty, peer_info.elem_ty)) |pointee| {
                                     ptr_info.flags.size = .many;
-                                    ptr_info.elem_ty = peer_info.elem_ty;
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce many-item pointer and array types
                                 return null;
                             },
                             .many => {
-                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, peer_info.elem_ty)) |pointee| {
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce many-item pointer types
                                 return null;
                             },
                             .slice => {
@@ -6867,11 +6868,11 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                                     return null;
                                 }
                                 // Okay, then works for [*]T + "[]T" -> [*]T
-                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, peer_info.elem_ty)) |pointee| {
                                     ptr_info.flags.size = .many;
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce many-item pointer and "slice" types
                                 return null;
                             },
                             .c => unreachable,
@@ -6880,12 +6881,11 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                             .one => {
                                 // Only works for []T + *[n]T -> []T
                                 const arr = cur_pointee_array orelse return null;
-                                if (arr.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(arr.elem_ty, peer_info.elem_ty)) |pointee| {
                                     ptr_info.flags.size = .slice;
-                                    ptr_info.elem_ty = peer_info.elem_ty;
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce slice and array types
                                 if (arr.elem_ty.isNoreturnType()) {
                                     // []T + *struct{} -> []T
                                     ptr_info.flags.size = .slice;
@@ -6898,10 +6898,10 @@ fn resolvePeerTypesInner(analyser: *Analyser, peer_tys: []?Type) !?Type {
                                 return null;
                             },
                             .slice => {
-                                if (ptr_info.elem_ty.eql(peer_info.elem_ty)) {
+                                if (try analyser.resolvePairInMemoryCoercible(ptr_info.elem_ty, peer_info.elem_ty)) |pointee| {
+                                    ptr_info.elem_ty = pointee;
                                     break :good;
                                 }
-                                // TODO: coerce slice types
                                 return null;
                             },
                             .c => unreachable,
@@ -7285,6 +7285,22 @@ fn resolvePairInMemoryCoercible(analyser: *Analyser, ty_a: Type, ty_b: Type) !?T
     return null;
 }
 
+fn typePointerAllowsZero(analyser: *Analyser, ty: Type) bool {
+    if (analyser.typeIsPointerLikeOptional(ty)) {
+        return true;
+    }
+    return analyser.typePointerInfo(ty).?.flags.is_allowzero;
+}
+
+fn typeIsPointerLikeOptional(analyser: *Analyser, ty: Type) bool {
+    const ptr_info = analyser.typePointerInfo(ty) orelse return false;
+    return switch (ptr_info.flags.size) {
+        .slice => false,
+        .c => !ptr_info.is_optional,
+        .many, .one => ptr_info.is_optional and !ptr_info.flags.is_allowzero,
+    };
+}
+
 fn coerceInMemoryAllowed(
     analyser: *Analyser,
     dest_ty: Type,
@@ -7382,7 +7398,72 @@ fn coerceInMemoryAllowedPtrs(
     src_ptr_ty: Type,
     dest_is_mut: bool,
 ) !bool {
-    // TODO
-    _ = .{ analyser, dest_ty, src_ty, dest_ptr_ty, src_ptr_ty, dest_is_mut };
-    return false;
+    const dest_info = analyser.typePointerInfo(dest_ptr_ty).?;
+    const src_info = analyser.typePointerInfo(src_ptr_ty).?;
+
+    const ok_ptr_size = src_info.flags.size == dest_info.flags.size or
+        src_info.flags.size == .c or dest_info.flags.size == .c;
+    if (!ok_ptr_size) {
+        return false;
+    }
+
+    const ok_const = src_info.flags.is_const == dest_info.flags.is_const or
+        (!dest_is_mut and dest_info.flags.is_const);
+
+    if (!ok_const) {
+        return false;
+    }
+
+    const ok_volatile = src_info.flags.is_volatile == dest_info.flags.is_volatile or
+        (!dest_is_mut and dest_info.flags.is_volatile);
+
+    if (!ok_volatile) {
+        return false;
+    }
+
+    const dest_allowzero = analyser.typePointerAllowsZero(dest_ty);
+    const src_allowzero = analyser.typePointerAllowsZero(src_ty);
+    const ok_allowzero = src_allowzero == dest_allowzero or
+        (!dest_is_mut and dest_allowzero);
+
+    if (!ok_allowzero) {
+        return false;
+    }
+
+    if (dest_info.flags.address_space != src_info.flags.address_space) {
+        return false;
+    }
+
+    const child_ok = try analyser.coerceInMemoryAllowed(
+        dest_info.elem_ty,
+        src_info.elem_ty,
+        !dest_is_mut and dest_info.flags.is_const,
+    );
+    if (!child_ok and !dest_is_mut) {
+        return false;
+    }
+
+    const sentinel_ok = ok: {
+        const ss = src_info.sentinel;
+        const ds = dest_info.sentinel;
+        if (ss == .none and ds == .none) break :ok true;
+        if (ss == ds) break :ok true;
+        // TODO: check if src sentinel coerces to dest sentinel
+        if (src_info.flags.size == .c) break :ok true;
+        if (!dest_is_mut and dest_info.sentinel == .none) break :ok true;
+        break :ok false;
+    };
+
+    if (!sentinel_ok) {
+        return false;
+    }
+
+    if (src_info.flags.alignment != 0 or dest_info.flags.alignment != 0 or
+        !dest_info.elem_ty.eql(src_info.elem_ty))
+    {
+        // TODO: check pointer alignments
+        return false;
+    }
+
+    return true;
 }
