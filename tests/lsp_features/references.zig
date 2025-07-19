@@ -302,21 +302,24 @@ test "switch case capture - union tag" {
 }
 
 test "cross-file reference" {
-    if (true) return error.SkipZigTest; // https://github.com/zigtools/zls/issues/1071
     try testMultiFileSymbolReferences(&.{
-        \\pub const <0> = struct {};
+        // TODO not putting a reference here is a hack to workaround cross-file references being broken https://github.com/zigtools/zls/issues/1071
+        // for now this only tests the ability to find references within a file to a decl from another file
+        \\pub const placeholder = struct {};
         ,
-        \\const file = @import("file_0.zig");
-        \\const F = file.<0>;
-    });
+        \\const file = @import("test-0.zig");
+        \\const first = file.<0>;
+        \\const second = file.<0>;
+        ,
+    }, false);
 }
 
 fn testSymbolReferences(source: []const u8) !void {
-    return testMultiFileSymbolReferences(&.{source});
+    return testMultiFileSymbolReferences(&.{source}, true);
 }
 
-/// source files have the following name pattern: `file_{d}.zig`
-fn testMultiFileSymbolReferences(sources: []const []const u8) !void {
+/// source files have the following name pattern: `test-{d}.zig`
+fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool) !void {
     const placeholder_name = "placeholder";
 
     var ctx: Context = try .init();
@@ -372,7 +375,7 @@ fn testMultiFileSymbolReferences(sources: []const []const u8) !void {
             const params: types.ReferenceParams = .{
                 .textDocument = .{ .uri = file_uri },
                 .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
-                .context = .{ .includeDeclaration = true },
+                .context = .{ .includeDeclaration = include_decl },
             };
             const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params);
 

@@ -276,6 +276,7 @@ fn symbolReferences(
     include_decl: bool,
     /// exclude references from the std library
     skip_std_references: bool,
+    curr_handle: *DocumentStore.Handle,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -325,14 +326,14 @@ fn symbolReferences(
 
     if (include_decl) try builder.add(decl_handle.handle, decl_handle.nameToken());
 
-    try builder.collectReferences(decl_handle.handle, local_node orelse .root);
+    try builder.collectReferences(curr_handle, local_node orelse .root);
 
     const workspace = local_node == null and request != .highlight and decl_handle.isPublic();
     if (workspace) {
         try gatherReferences(
             allocator,
             analyser,
-            decl_handle.handle,
+            curr_handle,
             skip_std_references,
             include_decl,
             &builder,
@@ -699,6 +700,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 server.offset_encoding,
                 include_decl,
                 server.config.skip_std_references,
+                handle,
             ),
         };
     };
