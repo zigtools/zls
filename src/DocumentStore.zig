@@ -435,6 +435,11 @@ pub const Handle = struct {
                 };
                 errdefer document_store.allocator.free(potential_build_files);
 
+                if (potential_build_files.len == 0) {
+                    self.impl.associated_build_file = .none;
+                    return .none;
+                }
+
                 var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(document_store.allocator, potential_build_files.len);
                 errdefer has_been_checked.deinit(document_store.allocator);
 
@@ -1235,6 +1240,8 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    if (isInStd(uri)) return &.{};
 
     var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
     errdefer potential_build_files.deinit(self.allocator);
