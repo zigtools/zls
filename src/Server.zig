@@ -763,7 +763,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                 break :check_relative;
             };
 
-            const absolute = try std.fs.path.join(arena, &.{
+            const absolute = try std.fs.path.resolve(arena, &.{
                 root_dir, maybe_relative,
             });
 
