@@ -442,14 +442,16 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 try writeToken(builder, tree.firstToken(align_expr) - 2, .keyword);
                 try writeNodeTokens(builder, align_expr);
             }
-
+            if (fn_proto.ast.addrspace_expr.unwrap()) |addrspace_expr| {
+                try writeToken(builder, tree.firstToken(addrspace_expr) - 2, .keyword);
+                try writeNodeTokens(builder, addrspace_expr);
+            }
             if (fn_proto.ast.section_expr.unwrap()) |section_expr| {
+                try writeToken(builder, tree.firstToken(section_expr) - 2, .keyword);
                 try writeNodeTokens(builder, section_expr);
             }
             if (fn_proto.ast.callconv_expr.unwrap()) |callconv_expr| {
                 try writeToken(builder, tree.firstToken(callconv_expr) - 2, .keyword);
-            }
-            if (fn_proto.ast.callconv_expr.unwrap()) |callconv_expr| {
                 try writeNodeTokens(builder, callconv_expr);
             }
             if (fn_proto.ast.return_type.unwrap()) |return_type| {
@@ -620,7 +622,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             for (struct_init.ast.fields) |field_init| {
                 const init_token = tree.firstToken(field_init);
-                try writeToken(builder, init_token - 3, field_token_type orelse .property); // '.'
                 try writeToken(builder, init_token - 2, field_token_type orelse .property); // name
                 try writeToken(builder, init_token - 1, .operator); // '='
                 try writeNodeTokens(builder, field_init);
@@ -1039,6 +1040,7 @@ fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type:
     const var_decl = tree.fullVarDecl(var_decl_node).?;
     try writeToken(builder, var_decl.visib_token, .keyword);
     try writeToken(builder, var_decl.extern_export_token, .keyword);
+    try writeToken(builder, var_decl.lib_name, .string);
     try writeToken(builder, var_decl.threadlocal_token, .keyword);
     try writeToken(builder, var_decl.comptime_token, .keyword);
     try writeToken(builder, var_decl.ast.mut_token, .keyword);
@@ -1075,8 +1077,18 @@ fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type:
     }
 
     if (var_decl.ast.type_node.unwrap()) |type_node| try writeNodeTokens(builder, type_node);
-    if (var_decl.ast.align_node.unwrap()) |align_node| try writeNodeTokens(builder, align_node);
-    if (var_decl.ast.section_node.unwrap()) |section_node| try writeNodeTokens(builder, section_node);
+    if (var_decl.ast.align_node.unwrap()) |align_node| {
+        try writeToken(builder, tree.firstToken(align_node) - 2, .keyword);
+        try writeNodeTokens(builder, align_node);
+    }
+    if (var_decl.ast.addrspace_node.unwrap()) |addrspace_node| {
+        try writeToken(builder, tree.firstToken(addrspace_node) - 2, .keyword);
+        try writeNodeTokens(builder, addrspace_node);
+    }
+    if (var_decl.ast.section_node.unwrap()) |section_node| {
+        try writeToken(builder, tree.firstToken(section_node) - 2, .keyword);
+        try writeNodeTokens(builder, section_node);
+    }
 
     if (var_decl.ast.init_node.unwrap()) |init_node| {
         const equal_token = tree.firstToken(init_node) - 1;
