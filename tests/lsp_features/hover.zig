@@ -1037,6 +1037,16 @@ test "var decl alias" {
     );
 }
 
+test "alias with different type" {
+    try testHoverWithOptions(
+        \\const foo: i32 = 1;
+        \\const bar<cursor>: ?i32 = foo;
+    ,
+        \\const foo: i32 = 1
+        \\(?i32)
+    , .{ .markup_kind = .plaintext });
+}
+
 test "escaped identifier" {
     try testHoverWithOptions(
         \\const @"f<cursor>oo" = 42;
