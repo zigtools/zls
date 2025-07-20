@@ -630,7 +630,9 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
 
     server.status = .initialized;
 
-    if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
+    if (server.client_capabilities.supports_configuration and
+        server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration)
+    {
         try server.registerCapability("workspace/didChangeConfiguration", null);
     }
 
@@ -961,13 +963,26 @@ fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, n
 fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
     const settings = switch (notification.settings) {
         .null => {
-            if (server.client_capabilities.supports_configuration) {
+            if (server.client_capabilities.supports_configuration and
+                server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration)
+            {
+                // The client has informed us that the configuration options have
+                // changed. The will request them with `workspace/configuration`.
                 try server.requestConfiguration();
             }
             return;
         },
-        .object => |object| object.get("zls") orelse notification.settings,
-        else => notification.settings,
+        .object => |object| blk: {
+            if (server.client_capabilities.supports_configuration and
+                server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration)
+            {
+                log.debug("Ignoring 'workspace/didChangeConfiguration' notification in favor of 'workspace/configuration'", .{});
+                try server.requestConfiguration();
+                return;
+            }
+            break :blk object.get("zls") orelse notification.settings;
+        },
+        else => notification.settings, // We will definitely fail to parse this
     };
 
     const new_config = std.json.parseFromValueLeaky(
