@@ -677,24 +677,14 @@ fn registerCapability(server: *Server, method: []const u8, registersOptions: ?ty
     server.allocator.free(json_message);
 }
 
+/// Request configuration options with the `workspace/configuration` request.
 fn requestConfiguration(server: *Server) Error!void {
-    var configuration_items = comptime config: {
-        var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
-        for (std.meta.fields(Config), 0..) |field, index| {
-            comp_config[index] = .{
-                .section = "zls." ++ field.name,
-            };
-        }
-
-        break :config comp_config;
+    const configuration_items: [1]types.ConfigurationItem = .{
+        .{
+            .section = "zls",
+            .scopeUri = if (server.workspaces.items.len == 1) server.workspaces.items[0].uri else null,
+        },
     };
-
-    if (server.workspaces.items.len == 1) {
-        const workspace = server.workspaces.items[0];
-        for (&configuration_items) |*item| {
-            item.*.scopeUri = workspace.uri;
-        }
-    }
 
     const json_message = try server.sendToClientRequest(
         .{ .string = "i_haz_configuration" },
@@ -706,18 +696,28 @@ fn requestConfiguration(server: *Server) Error!void {
     server.allocator.free(json_message);
 }
 
+/// Handle the response of the `workspace/configuration` request.
 fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const fields = std.meta.fields(configuration.Configuration);
-    const result = switch (json) {
-        .array => |arr| if (arr.items.len == fields.len) arr.items else {
-            log.err("workspace/configuration expects an array of size {d} but received {d}", .{ fields.len, arr.items.len });
-            return;
+    const result: std.json.Value = switch (json) {
+        .array => |arr| blk: {
+            if (arr.items.len != 1) {
+                log.err("Response to 'workspace/configuration' expects an array of size 1 but received {d}", .{arr.items.len});
+                return;
+            }
+            break :blk switch (arr.items[0]) {
+                .object => arr.items[0],
+                .null => return,
+                else => {
+                    log.err("Response to 'workspace/configuration' expects an array of objects but got an array of {t}.", .{json});
+                    return;
+                },
+            };
         },
         else => {
-            log.err("workspace/configuration expects an array but received {t}", .{json});
+            log.err("Response to 'workspace/configuration' expects an array but received {t}", .{json});
             return;
         },
     };
@@ -726,20 +726,15 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    var new_config: configuration.Configuration = .{};
-
-    inline for (fields, result) |field, json_value| {
-        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
-        runtime_known_field_name = field.name;
-
-        const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
-            log.err("failed to parse configuration option '{s}': {}", .{ runtime_known_field_name, err });
-            break :blk null;
-        };
-        if (maybe_new_value) |new_value| {
-            @field(new_config, field.name) = new_value;
-        }
-    }
+    var new_config = std.json.parseFromValueLeaky(
+        configuration.Configuration,
+        arena,
+        result,
+        .{ .ignore_unknown_fields = true },
+    ) catch |err| {
+        log.err("Failed to parse response from 'workspace/configuration': {}", .{err});
+        return;
+    };
 
     const maybe_root_dir: ?[]const u8 = dir: {
         if (server.workspaces.items.len != 1) break :dir null;
