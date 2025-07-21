@@ -62,7 +62,7 @@ pub fn generateDiagnostics(
 
         var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
 
-        if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
+        if (handle.tree.mode == .zig) {
             var analyser = server.initAnalyser(arena, handle);
             defer analyser.deinit();
             try code_actions.collectAutoDiscardDiagnostics(&analyser, handle, arena, &diagnostics, server.offset_encoding);
