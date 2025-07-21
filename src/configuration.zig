@@ -154,12 +154,15 @@ pub const Env = struct {
     target: ?[]const u8 = null,
 };
 
-pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.json.Parsed(Env) {
+pub fn getZigEnv(
+    allocator: std.mem.Allocator,
+    zig_exe_path: []const u8,
+) error{OutOfMemory}!?std.json.Parsed(Env) {
     const zig_env_result = std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ zig_exe_path, "env" },
-    }) catch {
-        logger.err("Failed to execute zig env", .{});
+    }) catch |err| {
+        logger.err("Failed to run 'zig env': {}", .{err});
         return null;
     };
 
@@ -175,18 +178,56 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.js
                 return null;
             }
         },
-        else => logger.err("zig env invocation failed", .{}),
+        else => {
+            logger.err("zig env invocation failed", .{});
+            return null;
+        },
     }
 
-    return std.json.parseFromSlice(
-        Env,
-        allocator,
-        zig_env_result.stdout,
-        .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
-    ) catch {
-        logger.err("Failed to parse zig env JSON result", .{});
-        return null;
-    };
+    if (std.mem.startsWith(u8, zig_env_result.stdout, "{")) {
+        return std.json.parseFromSlice(
+            Env,
+            allocator,
+            zig_env_result.stdout,
+            .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                logger.err("Failed to parse 'zig env' output as JSON: {}", .{err});
+                return null;
+            },
+        };
+    } else {
+        var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
+        errdefer arena_allocator.deinit();
+
+        const source = try allocator.dupeZ(u8, zig_env_result.stdout);
+        defer allocator.free(source);
+
+        const value = std.zon.parse.fromSlice(
+            Env,
+            arena_allocator.allocator(),
+            source,
+            null,
+            .{ .ignore_unknown_fields = true },
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                logger.err("Failed to parse 'zig env' output as Zon: {}", .{err});
+                return null;
+            },
+        };
+
+        const arena_ptr = try allocator.create(std.heap.ArenaAllocator);
+        errdefer allocator.destroy(arena_ptr);
+
+        arena_ptr.* = arena_allocator;
+
+        return .{
+            .arena = arena_ptr,
+            .value = value,
+        };
+    }
 }
 
 /// the same struct as Config but every field is optional
