@@ -4136,6 +4136,27 @@ test "insert replace behaviour - tagged union" {
     });
 }
 
+test "insert replace behaviour - tagged union - zero-bit field" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const U = union(enum) { alpha: void };
+        \\const foo: U = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: U = .alpha",
+        .expected_replace_line = "const foo: U = .alpha",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const U = union(enum) { alpha: u0 };
+        \\const foo: U = .<cursor>
+        ,
+        .label = "alpha",
+        .expected_insert_line = "const foo: U = .alpha",
+        .expected_replace_line = "const foo: U = .alpha",
+    });
+}
+
 test "insert replace behaviour - doc test name" {
     if (true) return error.SkipZigTest; // TODO
     try testCompletionTextEdit(.{
