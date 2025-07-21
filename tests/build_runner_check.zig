@@ -24,7 +24,7 @@ pub fn main() !u8 {
     defer gpa.free(actual_unsanitized);
 
     const actual = blk: {
-        var aw: std.io.Writer.Allocating = .init(gpa);
+        var aw: std.Io.Writer.Allocating = .init(gpa);
         defer aw.deinit();
 
         try std.json.Stringify.encodeJsonStringChars(args[3], .{}, &aw.writer);

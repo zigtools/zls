@@ -392,8 +392,8 @@ pub fn main() !void {
             while (true) {
                 var buffer: if (writergate) [1]u8 else void = undefined;
                 var file_reader = if (writergate) std.fs.File.stdin().reader(&buffer);
-                const reader = if (writergate) &file_reader.interface else std.io.getStdIn().reader();
-                const takeByte = if (writergate) std.io.Reader.takeByte else std.fs.File.Reader.readByte;
+                const reader = if (writergate) &file_reader.interface else std.Io.getStdIn().reader();
+                const takeByte = if (writergate) std.Io.Reader.takeByte else std.fs.File.Reader.readByte;
                 const byte = takeByte(reader) catch |err| switch (err) {
                     error.EndOfStream => process.exit(0),
                     else => process.exit(1),
@@ -410,8 +410,8 @@ pub fn main() !void {
     const gpa = arena;
     var transport = Transport.init(.{
         .gpa = gpa,
-        .in = if (writergate) std.fs.File.stdin() else std.io.getStdIn(),
-        .out = if (writergate) std.fs.File.stdout() else std.io.getStdOut(),
+        .in = if (writergate) std.fs.File.stdin() else std.Io.getStdIn(),
+        .out = if (writergate) std.fs.File.stdout() else std.Io.getStdOut(),
     });
     defer transport.deinit();
 
@@ -1287,7 +1287,7 @@ fn extractBuildInformation(
         var file_writer = std.fs.File.stdout().writer(&.{});
         file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
     } else {
-        try std.io.getStdOut().writeAll(stringified_build_config);
+        try std.Io.getStdOut().writeAll(stringified_build_config);
     }
 }
 

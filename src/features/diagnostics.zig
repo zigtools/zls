@@ -97,7 +97,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
 
     const allocator = eb.gpa;
 
-    var aw: std.io.Writer.Allocating = .init(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
     var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;

@@ -24,7 +24,7 @@ pub const BuildConfig = struct {
 pub const Transport = struct {
     in: std.fs.File,
     out: std.fs.File,
-    poller: std.io.Poller(StreamEnum),
+    poller: std.Io.Poller(StreamEnum),
 
     const StreamEnum = enum { in };
 
@@ -44,7 +44,7 @@ pub const Transport = struct {
         return .{
             .in = options.in,
             .out = options.out,
-            .poller = std.io.poll(options.gpa, StreamEnum, .{ .in = options.in }),
+            .poller = std.Io.poll(options.gpa, StreamEnum, .{ .in = options.in }),
         };
     }
 
@@ -69,7 +69,7 @@ pub const Transport = struct {
         return error.EndOfStream;
     }
 
-    pub fn reader(transport: *Transport) std.io.PollFifo.Reader {
+    pub fn reader(transport: *Transport) std.Io.PollFifo.Reader {
         return transport.poller.fifo(.in).reader();
     }
 

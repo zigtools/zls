@@ -74,7 +74,7 @@ fn createRequestBody(
     metadata: Metadata,
     compatibility: []const u8,
 ) ![]const u8 {
-    var aw: std.io.Writer.Allocating = .init(arena);
+    var aw: std.Io.Writer.Allocating = .init(arena);
 
     var write_stream: std.json.Stringify = .{
         .writer = &aw.writer,

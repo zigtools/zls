@@ -200,7 +200,7 @@ pub fn StringPool(comptime config: Config) type {
             pool: *Pool,
         };
 
-        fn print(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
+        fn print(ctx: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             const locked_string = ctx.pool.stringToSliceLock(ctx.string);
             defer locked_string.release(ctx.pool);
             try writer.writeAll(locked_string.slice);

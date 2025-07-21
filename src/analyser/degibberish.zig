@@ -16,7 +16,7 @@ pub fn fmtDegibberish(ip: *InternPool, ty: InternPool.Index) std.fmt.Alt(FormatD
     return .{ .data = data };
 }
 
-fn formatDegibberish(data: FormatDegibberishData, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatDegibberish(data: FormatDegibberishData, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const ip = data.ip;
     var ty = data.ty;
 

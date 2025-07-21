@@ -78,7 +78,7 @@ fn logFn(
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
 
-    var writer: std.io.Writer = .fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     const no_space_left = blk: {
         writer.print("{s} ({s:^6}): ", .{ level_txt, scope_txt }) catch break :blk true;
         writer.print(format, args) catch break :blk true;

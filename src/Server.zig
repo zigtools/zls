@@ -742,7 +742,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     var new_config: configuration.Configuration = .{};
 
     inline for (fields, result) |field, json_value| {
-        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
+        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
         runtime_known_field_name = field.name;
 
         const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
@@ -1063,7 +1063,7 @@ pub fn updateConfiguration(
             };
 
             if (override_value) {
-                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
+                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
                 runtime_known_field_name = field.name;
                 log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
                 has_changed[field_index] = true;
@@ -2416,7 +2416,7 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     };
 }
 
-fn formatMessage(message: Message, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatMessage(message: Message, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (message) {
         .request => |request| try writer.print("request-{f}-{t}", .{ std.json.fmt(request.id, .{}), request.params }),
         .notification => |notification| try writer.print("notification-{t}", .{notification.params}),

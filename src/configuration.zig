@@ -60,7 +60,7 @@ pub const LoadConfigResult = union(enum) {
 
         pub fn toMessage(self: @This(), allocator: std.mem.Allocator) error{OutOfMemory}!?[]u8 {
             const error_bundle = self.error_bundle orelse return null;
-            var aw: std.io.Writer.Allocating = .init(allocator);
+            var aw: std.Io.Writer.Allocating = .init(allocator);
             defer aw.deinit();
             error_bundle.renderToWriter(.{ .ttyconf = .no_color }, &aw.writer) catch |err| switch (err) {
                 error.WriteFailed => return error.OutOfMemory,

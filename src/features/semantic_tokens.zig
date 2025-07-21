@@ -60,7 +60,7 @@ pub const TokenModifiers = packed struct(u16) {
     mutable: bool = false,
     _: u4 = 0,
 
-    pub fn format(modifiers: TokenModifiers, writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn format(modifiers: TokenModifiers, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(".{");
         var i: usize = 0;
         inline for (std.meta.fields(TokenModifiers)) |field| {
