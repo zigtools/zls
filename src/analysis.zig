@@ -158,7 +158,7 @@ pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
     return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
-fn formatSnippetPlaceholder(data: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatSnippetPlaceholder(data: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     var split_it = std.mem.splitScalar(u8, data, '}');
     while (split_it.next()) |segment| {
         try writer.writeAll(segment);
@@ -185,7 +185,7 @@ pub const FormatParameterOptions = struct {
 };
 
 pub fn stringifyParameter(analyser: *Analyser, options: FormatParameterOptions) error{OutOfMemory}![]u8 {
-    var aw: std.io.Writer.Allocating = .init(analyser.arena);
+    var aw: std.Io.Writer.Allocating = .init(analyser.arena);
     defer aw.deinit();
     analyser.rawStringifyParameter(&aw.writer, options) catch |err| switch (err) {
         error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
@@ -195,7 +195,7 @@ pub fn stringifyParameter(analyser: *Analyser, options: FormatParameterOptions) 
 
 fn rawStringifyParameter(
     analyser: *Analyser,
-    writer: *std.io.Writer,
+    writer: *std.Io.Writer,
     options: FormatParameterOptions,
 ) error{ OutOfMemory, WriteFailed }!void {
     const referenced = options.referenced;
@@ -267,7 +267,7 @@ pub const FormatFunctionOptions = struct {
 };
 
 pub fn stringifyFunction(analyser: *Analyser, options: FormatFunctionOptions) error{OutOfMemory}![]u8 {
-    var aw: std.io.Writer.Allocating = .init(analyser.arena);
+    var aw: std.Io.Writer.Allocating = .init(analyser.arena);
     defer aw.deinit();
     analyser.rawStringifyFunction(&aw.writer, options) catch |err| switch (err) {
         error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
@@ -277,7 +277,7 @@ pub fn stringifyFunction(analyser: *Analyser, options: FormatFunctionOptions) er
 
 fn rawStringifyFunction(
     analyser: *Analyser,
-    writer: *std.io.Writer,
+    writer: *std.Io.Writer,
     options: FormatFunctionOptions,
 ) error{ OutOfMemory, WriteFailed }!void {
     const referenced = options.referenced;
@@ -2671,7 +2671,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .string_literal => {
             const token_bytes = tree.tokenSlice(tree.nodeMainToken(node));
 
-            var discarding_writer: std.io.Writer.Discarding = .init(&.{});
+            var discarding_writer: std.Io.Writer.Discarding = .init(&.{});
             const result = std.zig.string_literal.parseWrite(&discarding_writer.writer, token_bytes) catch |err| switch (err) {
                 error.WriteFailed => unreachable,
             };
@@ -4146,7 +4146,7 @@ pub const Type = struct {
 
     pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
         const typeof = try ty.typeOf(analyser);
-        var aw: std.io.Writer.Allocating = .init(analyser.arena);
+        var aw: std.Io.Writer.Allocating = .init(analyser.arena);
         defer aw.deinit();
         rawStringify(typeof, &aw.writer, analyser, options) catch |err| switch (err) {
             error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
@@ -4156,7 +4156,7 @@ pub const Type = struct {
 
     pub fn stringifyTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
         std.debug.assert(ty.data == .ip_index or ty.is_type_val);
-        var aw: std.io.Writer.Allocating = .init(analyser.arena);
+        var aw: std.Io.Writer.Allocating = .init(analyser.arena);
         defer aw.deinit();
         rawStringify(ty, &aw.writer, analyser, options) catch |err| switch (err) {
             error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
@@ -4164,7 +4164,7 @@ pub const Type = struct {
         return aw.toOwnedSlice();
     }
 
-    fn writeString(str: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
+    fn writeString(str: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(str);
     }
 
@@ -4175,7 +4175,7 @@ pub const Type = struct {
 
     fn rawStringify(
         ty: Type,
-        writer: *std.io.Writer,
+        writer: *std.Io.Writer,
         analyser: *Analyser,
         options: FormatOptions,
     ) error{ OutOfMemory, WriteFailed }!void {

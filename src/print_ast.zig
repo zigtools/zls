@@ -30,8 +30,8 @@ pub fn renderToFile(
 pub fn renderToWriter(
     tree: Ast,
     options: RenderOptions,
-    writer: *std.io.Writer,
-) std.io.Writer.Error!void {
+    writer: *std.Io.Writer,
+) std.Io.Writer.Error!void {
     var p: PrintAst = .{
         .w = writer,
         .tree = tree,
@@ -50,7 +50,7 @@ pub const Formatter = struct {
 
     pub fn format(
         ctx: Formatter,
-        writer: *std.io.Writer,
+        writer: *std.Io.Writer,
         comptime fmt_spec: []const u8,
     ) !void {
         comptime std.debug.assert(fmt_spec.len == 0);
@@ -59,7 +59,7 @@ pub const Formatter = struct {
 };
 
 const PrintAst = struct {
-    w: *std.io.Writer,
+    w: *std.Io.Writer,
     tree: Ast,
     options: RenderOptions,
     indent: u32 = 0,
@@ -67,12 +67,12 @@ const PrintAst = struct {
     current_column: usize = 0,
     current_source_index: usize = 0,
 
-    fn renderRoot(p: *PrintAst) std.io.Writer.Error!void {
+    fn renderRoot(p: *PrintAst) std.Io.Writer.Error!void {
         try p.renderNode(.root);
         try p.w.writeByte('\n');
     }
 
-    fn renderOptNode(p: *PrintAst, opt_node: Ast.Node.OptionalIndex) std.io.Writer.Error!void {
+    fn renderOptNode(p: *PrintAst, opt_node: Ast.Node.OptionalIndex) std.Io.Writer.Error!void {
         if (opt_node.unwrap()) |node| {
             try p.renderNode(node);
         } else {
@@ -80,7 +80,7 @@ const PrintAst = struct {
         }
     }
 
-    fn renderNode(p: *PrintAst, node: Ast.Node.Index) std.io.Writer.Error!void {
+    fn renderNode(p: *PrintAst, node: Ast.Node.Index) std.Io.Writer.Error!void {
         const tree = p.tree;
         const tag = tree.nodeTag(node);
 
@@ -866,7 +866,7 @@ test PrintAst {
     var tree: Ast = try .parse(std.testing.allocator, source, .zig);
     defer tree.deinit(std.testing.allocator);
 
-    var aw: std.io.Writer.Allocating = .init(std.testing.allocator);
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer aw.deinit();
 
     renderToWriter(tree, .{}, &aw.writer) catch return error.OutOfMemory;

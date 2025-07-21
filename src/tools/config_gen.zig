@@ -38,7 +38,7 @@ const ConfigOption = struct {
             error.UnsupportedType;
     }
 
-    fn formatZigType(config: ConfigOption, writer: *std.io.Writer) std.io.Writer.Error!void {
+    fn formatZigType(config: ConfigOption, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (config.@"enum") |enum_members| {
             try writer.writeAll("enum {\n");
             for (enum_members) |member_name| {
@@ -55,7 +55,7 @@ const ConfigOption = struct {
         return .{ .data = self };
     }
 
-    fn formatDefaultValue(config: ConfigOption, writer: *std.io.Writer) std.io.Writer.Error!void {
+    fn formatDefaultValue(config: ConfigOption, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (config.default == .array) {
             try writer.writeAll("&.{");
             for (config.default.array.items, 0..) |item, i| {
@@ -107,7 +107,7 @@ const FormatDocs = struct {
         top_level,
     };
 
-    fn render(ctx: FormatDocs, writer: *std.io.Writer) std.io.Writer.Error!void {
+    fn render(ctx: FormatDocs, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const prefix = switch (ctx.comment_kind) {
             .normal => "// ",
             .doc => "/// ",
@@ -127,7 +127,7 @@ fn fmtDocs(text: []const u8, comment_kind: FormatDocs.CommentKind) std.fmt.Alt(F
 }
 
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.mem.Allocator.Error)!void {
-    var aw: std.io.Writer.Allocating = .init(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
     aw.writer.writeAll(
@@ -541,7 +541,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                         .builtin_content => {
                             const documentation = &builtins.items[builtins.items.len - 1].documentation;
 
-                            var aw: std.io.Writer.Allocating = .fromArrayList(allocator, documentation);
+                            var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, documentation);
                             defer aw.deinit();
                             writeMarkdownCode(content_name, "zig", &aw.writer) catch return error.OutOfMemory;
                             documentation.* = aw.toArrayList();
@@ -568,7 +568,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                     const content = tokenizer.buffer[content_token.start..content_token.end];
                     const documentation = &builtins.items[builtins.items.len - 1].documentation;
 
-                    var aw: std.io.Writer.Allocating = .fromArrayList(allocator, documentation);
+                    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, documentation);
                     defer aw.deinit();
                     writeMarkdownCode(content, source_type, &aw.writer) catch return error.OutOfMemory;
                     documentation.* = aw.toArrayList();
@@ -639,7 +639,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
 
                             const documentation = &builtins.items[builtins.items.len - 1].documentation;
 
-                            var aw: std.io.Writer.Allocating = .fromArrayList(allocator, documentation);
+                            var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, documentation);
                             defer aw.deinit();
                             writeMarkdownCode(content, "zig", &aw.writer) catch return error.OutOfMemory;
                             documentation.* = aw.toArrayList();
@@ -669,7 +669,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
 /// \`\`\`{source_type}
 /// {content}
 /// \`\`\`
-fn writeMarkdownCode(content: []const u8, source_type: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn writeMarkdownCode(content: []const u8, source_type: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const trimmed_content = std.mem.trim(u8, content, " \n");
     const is_multiline = std.mem.indexOfScalar(u8, trimmed_content, '\n') != null;
     if (is_multiline) {
@@ -684,7 +684,7 @@ fn writeMarkdownCode(content: []const u8, source_type: []const u8, writer: *std.
     }
 }
 
-fn writeLine(str: []const u8, single_line: bool, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn writeLine(str: []const u8, single_line: bool, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const trimmed_content = std.mem.trim(u8, str, &std.ascii.whitespace);
     if (trimmed_content.len == 0) return;
 
@@ -708,12 +708,12 @@ fn writeLine(str: []const u8, single_line: bool, writer: *std.io.Writer) std.io.
 /// - `<ul>` and `<li>`
 /// - `<a>`
 /// - `<code>`
-fn writeMarkdownFromHtml(html: []const u8, writer: *std.io.Writer) !void {
+fn writeMarkdownFromHtml(html: []const u8, writer: *std.Io.Writer) !void {
     return writeMarkdownFromHtmlInternal(html, false, 0, writer);
 }
 
 /// this is kind of a hacky solution. A cleaner solution would be to implement using a xml/html parser.
-fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32, writer: *std.io.Writer) !void {
+fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32, writer: *std.Io.Writer) !void {
     var index: usize = 0;
     while (std.mem.indexOfScalarPos(u8, html, index, '<')) |tag_start_index| {
         const tags: []const []const u8 = &.{ "pre", "p", "em", "ul", "li", "a", "code" };
@@ -946,7 +946,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         });
 
         const html = builtin.documentation.items["</pre>".len..];
-        var markdown: std.io.Writer.Allocating = .init(allocator);
+        var markdown: std.Io.Writer.Allocating = .init(allocator);
         defer markdown.deinit();
         writeMarkdownFromHtml(html, &markdown.writer) catch return error.OutOfMemory;
 
