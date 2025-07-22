@@ -24,15 +24,14 @@ pub fn main() !u8 {
     defer gpa.free(actual_unsanitized);
 
     const actual = blk: {
-        var aw: std.ArrayListUnmanaged(u8) = .empty;
-        defer aw.deinit(gpa);
+        var aw: std.io.Writer.Allocating = .init(gpa);
+        defer aw.deinit();
 
-        // Remove this once `std.json` has been ported to `std.io.Writer`
-        try std.json.encodeJsonStringChars(args[3], .{}, aw.writer(gpa));
-        try std.json.encodeJsonStringChars(&.{std.fs.path.sep}, .{}, aw.writer(gpa));
+        try std.json.Stringify.encodeJsonStringChars(args[3], .{}, &aw.writer);
+        try std.json.Stringify.encodeJsonStringChars(&.{std.fs.path.sep}, .{}, &aw.writer);
 
         // The build runner will produce absolute paths in the output so we remove them here.
-        const actual = try std.mem.replaceOwned(u8, gpa, actual_unsanitized, aw.items, "");
+        const actual = try std.mem.replaceOwned(u8, gpa, actual_unsanitized, aw.getWritten(), "");
 
         // We also convert windows style '\\' path separators to posix style '/'.
         switch (std.fs.path.sep) {

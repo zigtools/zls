@@ -74,8 +74,12 @@ fn createRequestBody(
     metadata: Metadata,
     compatibility: []const u8,
 ) ![]const u8 {
-    var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    var write_stream = std.json.writeStream(buffer.writer(arena), .{ .whitespace = .indent_2 });
+    var aw: std.io.Writer.Allocating = .init(arena);
+
+    var write_stream: std.json.Stringify = .{
+        .writer = &aw.writer,
+        .options = .{ .whitespace = .indent_2 },
+    };
 
     try write_stream.beginObject();
 
@@ -128,7 +132,7 @@ fn createRequestBody(
     try write_stream.endObject();
     try write_stream.endObject();
 
-    return try buffer.toOwnedSlice(arena);
+    return try aw.toOwnedSlice();
 }
 
 fn nextArg(args: []const [:0]const u8, i: *usize) ?[:0]const u8 {

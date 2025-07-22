@@ -1268,7 +1268,9 @@ fn extractBuildInformation(
         available_options.map.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
     }
 
-    const stringified_build_config = try std.json.stringifyAlloc(
+    const stringifyValueAlloc = if (@hasDecl(std.json, "Stringify")) std.json.Stringify.valueAlloc else std.json.stringifyAlloc;
+
+    const stringified_build_config = try stringifyValueAlloc(
         gpa,
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,

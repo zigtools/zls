@@ -596,7 +596,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         \\  "zigVersion": "{[zig_version]f}",
         \\  "minimumBuildZigVersion": "{[minimum_build_zig_version]s}",
         \\  "minimumRuntimeZigVersion": "{[minimum_runtime_zig_version]s}",
-        \\  "files": {[files]s}
+        \\  "files": {[files]f}
         \\}}
         \\
     , .{
@@ -604,7 +604,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         .zig_version = builtin.zig_version,
         .minimum_build_zig_version = minimum_build_zig_version,
         .minimum_runtime_zig_version = minimum_runtime_zig_version,
-        .files = std.json.stringifyAlloc(b.allocator, compressed_artifacts.keys(), .{}) catch @panic("OOM"),
+        .files = std.json.fmt(compressed_artifacts.keys(), .{}),
     });
 
     const write_files = b.addWriteFiles();

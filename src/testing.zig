@@ -7,23 +7,21 @@ const DocumentScope = @import("DocumentScope.zig");
 pub const print_ast = @import("print_ast.zig");
 
 pub fn expectEqual(expected: anytype, actual: anytype) error{TestExpectedEqual}!void {
-    var expected_writer: std.ArrayListUnmanaged(u8) = .empty;
-    defer expected_writer.deinit(std.testing.allocator);
+    const allocator = std.testing.allocator;
 
-    var actual_writer: std.ArrayListUnmanaged(u8) = .empty;
-    defer actual_writer.deinit(std.testing.allocator);
-
-    const options: std.json.StringifyOptions = .{
+    const options: std.json.Stringify.Options = .{
         .whitespace = .indent_2,
         .emit_null_optional_fields = false,
     };
 
-    // Remove this once `std.json` has been ported to `std.io.Writer`
-    std.json.stringify(expected, options, expected_writer.writer(std.testing.allocator)) catch @panic("OOM");
-    std.json.stringify(actual, options, actual_writer.writer(std.testing.allocator)) catch @panic("OOM");
+    const expected_stringified = std.json.Stringify.valueAlloc(allocator, expected, options) catch @panic("OOM");
+    defer allocator.free(expected_stringified);
 
-    if (std.mem.eql(u8, expected_writer.items, actual_writer.items)) return;
-    renderLineDiff(std.testing.allocator, expected_writer.items, actual_writer.items);
+    const actual_stringified = std.json.Stringify.valueAlloc(allocator, actual, options) catch @panic("OOM");
+    defer allocator.free(actual_stringified);
+
+    if (std.mem.eql(u8, expected_stringified, actual_stringified)) return;
+    renderLineDiff(allocator, expected_stringified, actual_stringified);
     return error.TestExpectedEqual;
 }
 

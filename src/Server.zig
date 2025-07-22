@@ -245,7 +245,7 @@ fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ls
 }
 
 fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport, message: anytype) error{OutOfMemory}![]u8 {
-    const message_stringified = try std.json.stringifyAlloc(allocator, message, .{
+    const message_stringified = try std.json.Stringify.valueAlloc(allocator, message, .{
         .emit_null_optional_fields = false,
     });
     errdefer allocator.free(message_stringified);
@@ -1065,7 +1065,7 @@ pub fn updateConfiguration(
             if (override_value) {
                 var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
                 runtime_known_field_name = field.name;
-                log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, jsonFmt(new_value, .{}) });
+                log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
                 has_changed[field_index] = true;
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
@@ -1389,7 +1389,7 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        result.zig_env = configuration.getZigEnv(allocator, exe_path);
+        result.zig_env = try configuration.getZigEnv(allocator, exe_path);
         const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
@@ -2418,34 +2418,12 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
 
 fn formatMessage(message: Message, writer: *std.io.Writer) std.io.Writer.Error!void {
     switch (message) {
-        .request => |request| try writer.print("request-{f}-{t}", .{ jsonFmt(request.id, .{}), request.params }),
+        .request => |request| try writer.print("request-{f}-{t}", .{ std.json.fmt(request.id, .{}), request.params }),
         .notification => |notification| try writer.print("notification-{t}", .{notification.params}),
-        .response => |response| try writer.print("response-{f}", .{jsonFmt(response.id, .{})}),
+        .response => |response| try writer.print("response-{f}", .{std.json.fmt(response.id, .{})}),
     }
 }
 
 fn fmtMessage(message: Message) std.fmt.Alt(Message, formatMessage) {
     return .{ .data = message };
-}
-
-/// Like `std.json.fmt` but supports `std.io.Writer`.
-/// Remove this once `std.json` has been ported to `std.io.Writer`
-fn jsonFmt(value: anytype, options: std.json.StringifyOptions) std.fmt.Alt(FormatJson(@TypeOf(value)), FormatJson(@TypeOf(value)).format) {
-    return .{ .data = .{ .value = value, .options = options } };
-}
-
-/// Remove this once `std.json` has been ported to `std.io.Writer`
-fn FormatJson(comptime T: type) type {
-    return struct {
-        value: T,
-        options: std.json.StringifyOptions,
-
-        pub fn format(data: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
-            const any_writer: std.io.AnyWriter = .{
-                .context = writer,
-                .writeFn = @ptrCast(&std.io.Writer.write),
-            };
-            std.json.stringify(data.value, data.options, any_writer) catch |err| return @errorCast(err);
-        }
-    };
 }
