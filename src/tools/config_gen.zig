@@ -56,17 +56,11 @@ const ConfigOption = struct {
     }
 
     fn formatDefaultValue(config: ConfigOption, writer: *std.io.Writer) std.io.Writer.Error!void {
-        // Remove this once `std.json` has been ported to `std.io.Writer`
-        const any_writer: std.io.AnyWriter = .{
-            .context = writer,
-            .writeFn = @ptrCast(&std.io.Writer.write),
-        };
-
         if (config.default == .array) {
             try writer.writeAll("&.{");
             for (config.default.array.items, 0..) |item, i| {
                 if (i != 0) try writer.writeByte(',');
-                std.json.stringify(item, .{}, any_writer) catch |err| return @errorCast(err);
+                std.json.Stringify.value(item, .{}, writer) catch |err| return @errorCast(err);
             }
             try writer.writeByte('}');
             return;
@@ -75,7 +69,7 @@ const ConfigOption = struct {
             try writer.print(".{s}", .{config.default.string});
             return;
         }
-        std.json.stringify(config.default, .{}, any_writer) catch |err| return @errorCast(err);
+        std.json.Stringify.value(config.default, .{}, writer) catch |err| return @errorCast(err);
     }
 
     fn fmtDefaultValue(self: ConfigOption) std.fmt.Alt(ConfigOption, formatDefaultValue) {
@@ -204,17 +198,10 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
         });
     }
 
-    {
-        // Remove this once `std.json` has been ported to `std.io.Writer`
-        const any_writer: std.io.AnyWriter = .{
-            .context = writer,
-            .writeFn = @ptrCast(&std.io.Writer.write),
-        };
-        try std.json.stringify(schema, .{
-            .whitespace = .indent_4,
-            .emit_null_optional_fields = false,
-        }, any_writer);
-    }
+    try std.json.Stringify.value(schema, .{
+        .whitespace = .indent_4,
+        .emit_null_optional_fields = false,
+    }, writer);
 
     try writer.writeByte('\n');
     try file_writer.end();
@@ -290,17 +277,10 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     var file_writer = config_file.writer(&buffer);
     const writer = &file_writer.interface;
 
-    {
-        // Remove this once `std.json` has been ported to `std.io.Writer`
-        const any_writer: std.io.AnyWriter = .{
-            .context = writer,
-            .writeFn = @ptrCast(&std.io.Writer.write),
-        };
-        try std.json.stringify(configuration, .{
-            .whitespace = .indent_2,
-            .emit_null_optional_fields = false,
-        }, any_writer);
-    }
+    try std.json.Stringify.value(configuration, .{
+        .whitespace = .indent_2,
+        .emit_null_optional_fields = false,
+    }, writer);
     try file_writer.end();
 }
 
