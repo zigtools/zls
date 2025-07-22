@@ -893,7 +893,7 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 const progress_token = "buildProgressToken";
 
 fn sendMessageToClient(allocator: std.mem.Allocator, transport: *lsp.Transport, message: anytype) !void {
-    const serialized = try std.json.stringifyAlloc(
+    const serialized = try std.json.Stringify.valueAlloc(
         allocator,
         message,
         .{ .emit_null_optional_fields = false },

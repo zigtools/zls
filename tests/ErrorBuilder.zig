@@ -167,10 +167,10 @@ fn appendMessage(
 
 pub const FormatContext = struct {
     builder: *const ErrorBuilder,
-    tty_config: ?std.io.tty.Config,
+    tty_config: ?std.Io.tty.Config,
 };
 
-pub fn fmt(builder: *const ErrorBuilder, tty_config: std.io.tty.Config) std.fmt.Alt(FormatContext, render) {
+pub fn fmt(builder: *const ErrorBuilder, tty_config: std.Io.tty.Config) std.fmt.Alt(FormatContext, render) {
     return .{ .data = .{
         .builder = builder,
         .tty_config = tty_config,
@@ -179,17 +179,17 @@ pub fn fmt(builder: *const ErrorBuilder, tty_config: std.io.tty.Config) std.fmt.
 
 pub fn writeDebug(builder: *const ErrorBuilder) void {
     const stderr = std.fs.File.stderr();
-    const tty_config = std.io.tty.detectConfig(stderr);
+    const tty_config = std.Io.tty.detectConfig(stderr);
     // does zig trim the output or why is this needed?
     stderr.writeAll(" ") catch return;
     std.debug.print("\n{f}\n", .{builder.fmt(tty_config)});
 }
 
-pub fn format(builder: *const ErrorBuilder, writer: *std.io.Writer) std.io.Writer.Error!void {
+pub fn format(builder: *const ErrorBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try render(.{ .builder = builder, .tty_config = null }, writer);
 }
 
-fn render(context: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const builder = context.builder;
     var first = true;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
@@ -294,7 +294,7 @@ fn render(context: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!vo
                     .info => "info",
                     .debug => "debug",
                 };
-                const color: std.io.tty.Color = switch (item.level) {
+                const color: std.Io.tty.Color = switch (item.level) {
                     .err => .red,
                     .warn => .yellow,
                     .info => .white,

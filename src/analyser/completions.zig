@@ -211,7 +211,7 @@ const FormatFieldDetail = struct {
     item: InternPool.Struct.Field,
 };
 
-fn formatFieldDetail(ctx: FormatFieldDetail, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatFieldDetail(ctx: FormatFieldDetail, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const field = ctx.item;
     if (field.is_comptime) {
         try writer.writeAll("comptime ");

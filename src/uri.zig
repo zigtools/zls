@@ -73,7 +73,7 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) (std.Uri.ParseError 
     if (builtin.os.tag == .windows and uri.path.percent_encoded.len != 0 and uri.path.percent_encoded[0] == '/') {
         uri.path.percent_encoded = uri.path.percent_encoded[1..];
     }
-    var aw: std.io.Writer.Allocating = .init(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
     uri.path.formatRaw(&aw.writer) catch return error.OutOfMemory;
     return try aw.toOwnedSlice();

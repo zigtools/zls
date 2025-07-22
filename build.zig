@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Writergate
+/// update std.json and std.zon to new I/O API
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.1145+3ae0ba096";
+const minimum_build_zig_version = "0.15.0-dev.1160+e43617e68";
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// remove `async` and `await` keywords; remove `usingnamespace`
@@ -596,7 +596,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         \\  "zigVersion": "{[zig_version]f}",
         \\  "minimumBuildZigVersion": "{[minimum_build_zig_version]s}",
         \\  "minimumRuntimeZigVersion": "{[minimum_runtime_zig_version]s}",
-        \\  "files": {[files]s}
+        \\  "files": {[files]f}
         \\}}
         \\
     , .{
@@ -604,7 +604,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         .zig_version = builtin.zig_version,
         .minimum_build_zig_version = minimum_build_zig_version,
         .minimum_runtime_zig_version = minimum_runtime_zig_version,
-        .files = std.json.stringifyAlloc(b.allocator, compressed_artifacts.keys(), .{}) catch @panic("OOM"),
+        .files = std.json.fmt(compressed_artifacts.keys(), .{}),
     });
 
     const write_files = b.addWriteFiles();

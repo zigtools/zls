@@ -1382,6 +1382,7 @@ fn collectContainerFields(
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
+        const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
         const tree = scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
@@ -1396,6 +1397,14 @@ fn collectContainerFields(
 
                 const insert_text = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
+                        if (container.isTaggedUnion() and
+                            maybe_resolved_ty != null and
+                            maybe_resolved_ty.?.data == .ip_index and
+                            maybe_resolved_ty.?.data.ip_index.type != .unknown_type and
+                            builder.analyser.ip.onePossibleValue(maybe_resolved_ty.?.data.ip_index.type) != .none)
+                        {
+                            break :insert_text name;
+                        }
                         if (use_snippets)
                             break :insert_text try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
                         else
@@ -1419,7 +1428,7 @@ fn collectContainerFields(
                     break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
                 };
 
-                const detail = if (try decl_handle.resolveType(builder.analyser)) |ty| detail: {
+                const detail = if (maybe_resolved_ty) |ty| detail: {
                     const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
@@ -1447,7 +1456,7 @@ fn collectContainerFields(
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
-                var expected_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                var expected_ty = maybe_resolved_ty orelse continue;
                 expected_ty = try expected_ty.typeOf(builder.analyser);
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
@@ -1464,7 +1473,7 @@ fn collectContainerFields(
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
-                const resolved_ty = try decl_handle.resolveType(builder.analyser) orelse continue;
+                const resolved_ty = maybe_resolved_ty orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;

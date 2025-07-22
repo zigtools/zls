@@ -92,8 +92,8 @@ pub const generic = [_]Snipped{
     .{ .label = "format", .kind = .Snippet, .text = 
     \\pub fn format(
     \\    self: @This(),
-    \\    writer: *std.io.Writer,
-    \\) std.io.Writer.Error!void {}
+    \\    writer: *std.Io.Writer,
+    \\) std.Io.Writer.Error!void {}
     },
 
     // types

@@ -59,7 +59,7 @@ pub const ErrorMsg = union(enum) {
         return .{ .data = .{ .error_msg = self, .ip = ip } };
     }
 
-    pub fn format(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn format(ctx: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const ip = ctx.ip;
         switch (ctx.error_msg) {
             .expected_type => |info| try writer.print(

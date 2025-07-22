@@ -245,7 +245,7 @@ fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ls
 }
 
 fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport, message: anytype) error{OutOfMemory}![]u8 {
-    const message_stringified = try std.json.stringifyAlloc(allocator, message, .{
+    const message_stringified = try std.json.Stringify.valueAlloc(allocator, message, .{
         .emit_null_optional_fields = false,
     });
     errdefer allocator.free(message_stringified);
@@ -307,22 +307,21 @@ pub fn initAnalyser(server: *Server, arena: std.mem.Allocator, handle: ?*Documen
     );
 }
 
-pub fn getAutofixMode(server: *Server) enum {
-    /// Autofix is implemented by providing `source.fixall` code actions.
-    @"source.fixall",
+/// If `force_autofix` is enabled, implement autofix without relying on a `source.fixall` code action.
+pub fn autofixWorkaround(server: *Server) enum {
     /// Autofix is implemented using `textDocument/willSaveWaitUntil`.
-    /// Requires `force_autofix` to be enabled.
     will_save_wait_until,
     /// Autofix is implemented by send a `workspace/applyEdit` request after receiving a `textDocument/didSave` notification.
-    /// Requires `force_autofix` to be enabled.
     on_save,
+    /// No workaround implementation of autofix is possible.
+    unavailable,
+    /// The `force_autofix` config option is disabled.
     none,
 } {
-    if (server.client_capabilities.supports_code_action_fixall) return .@"source.fixall";
     if (!server.config.force_autofix) return .none;
     if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
     if (server.client_capabilities.supports_apply_edits) return .on_save;
-    return .none;
+    return .unavailable;
 }
 
 /// caller owns returned memory.
@@ -357,7 +356,6 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
-    var skip_set_fixall = false;
     var support_full_semantic_tokens = true;
 
     if (request.clientInfo) |clientInfo| {
@@ -376,10 +374,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             server.client_capabilities.max_detail_length = 256;
         } else if (std.mem.startsWith(u8, clientInfo.name, "emacs")) {
             // Assumes that `emacs` means `emacs-lsp/lsp-mode`. Eglot uses `Eglot`.
-
-            // https://github.com/emacs-lsp/lsp-mode/issues/1842
-            server.client_capabilities.supports_code_action_fixall = false;
-            skip_set_fixall = true;
         }
     }
 
@@ -445,14 +439,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         if (textDocument.synchronization) |synchronization| {
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
-        if (textDocument.codeAction) |_| {
-            if (!skip_set_fixall) {
-                // Some clients do not specify `source.fixAll` in
-                // `textDocument.codeAction.?.codeActionLiteralSupport.?.codeActionKind.valueSet`
-                // so we assume they support it if they support code actions in general.
-                server.client_capabilities.supports_code_action_fixall = true;
-            }
-        }
         if (textDocument.definition) |definition| {
             server.client_capabilities.supports_textDocument_definition_linkSupport = definition.linkSupport orelse false;
         }
@@ -506,7 +492,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     if (request.clientInfo) |clientInfo| {
         log.info("Client Info:      {s} ({s})", .{ clientInfo.name, clientInfo.version orelse "unknown version" });
     }
-    log.info("Autofix Mode:     '{t}'", .{server.getAutofixMode()});
     log.debug("Offset Encoding:  '{t}'", .{server.offset_encoding});
 
     if (request.workspaceFolders) |workspace_folders| {
@@ -742,7 +727,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     var new_config: configuration.Configuration = .{};
 
     inline for (fields, result) |field, json_value| {
-        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
+        var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
         runtime_known_field_name = field.name;
 
         const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
@@ -781,7 +766,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                 break :check_relative;
             };
 
-            const absolute = try std.fs.path.join(arena, &.{
+            const absolute = try std.fs.path.resolve(arena, &.{
                 root_dir, maybe_relative,
             });
 
@@ -1063,9 +1048,9 @@ pub fn updateConfiguration(
             };
 
             if (override_value) {
-                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.io.Writer.print`
+                var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
                 runtime_known_field_name = field.name;
-                log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, jsonFmt(new_value, .{}) });
+                log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
                 has_changed[field_index] = true;
                 @field(server.config, field.name) = switch (@TypeOf(new_value)) {
                     []const []const u8 => blk: {
@@ -1215,10 +1200,16 @@ pub fn updateConfiguration(
         }
     }
 
-    if (server.config.force_autofix and server.getAutofixMode() == .none) {
-        log.warn("`force_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-    } else if (new_force_autofix) {
-        log.info("Autofix Mode: '{t}'", .{server.getAutofixMode()});
+    if (new_force_autofix) {
+        switch (server.autofixWorkaround()) {
+            .none => {},
+            .unavailable => {
+                log.warn("`force_autofix` is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
+            },
+            .on_save, .will_save_wait_until => |tag| {
+                log.info("Autofix workaround enabled: '{t}'", .{tag});
+            },
+        }
     }
 }
 
@@ -1389,7 +1380,7 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        result.zig_env = configuration.getZigEnv(allocator, exe_path);
+        result.zig_env = try configuration.getZigEnv(allocator, exe_path);
         const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
@@ -1626,7 +1617,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         server.document_store.invalidateBuildFile(uri);
     }
 
-    if (server.getAutofixMode() == .on_save) {
+    if (server.autofixWorkaround() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
         var text_edits = try server.autofix(arena, handle);
 
@@ -1665,7 +1656,7 @@ fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: typ
 }
 
 fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: types.WillSaveTextDocumentParams) Error!?[]types.TextEdit {
-    if (server.getAutofixMode() != .will_save_wait_until) return null;
+    if (server.autofixWorkaround() != .will_save_wait_until) return null;
 
     switch (request.reason) {
         .Manual => {},
@@ -2416,36 +2407,14 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     };
 }
 
-fn formatMessage(message: Message, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatMessage(message: Message, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (message) {
-        .request => |request| try writer.print("request-{f}-{t}", .{ jsonFmt(request.id, .{}), request.params }),
+        .request => |request| try writer.print("request-{f}-{t}", .{ std.json.fmt(request.id, .{}), request.params }),
         .notification => |notification| try writer.print("notification-{t}", .{notification.params}),
-        .response => |response| try writer.print("response-{f}", .{jsonFmt(response.id, .{})}),
+        .response => |response| try writer.print("response-{f}", .{std.json.fmt(response.id, .{})}),
     }
 }
 
 fn fmtMessage(message: Message) std.fmt.Alt(Message, formatMessage) {
     return .{ .data = message };
-}
-
-/// Like `std.json.fmt` but supports `std.io.Writer`.
-/// Remove this once `std.json` has been ported to `std.io.Writer`
-fn jsonFmt(value: anytype, options: std.json.StringifyOptions) std.fmt.Alt(FormatJson(@TypeOf(value)), FormatJson(@TypeOf(value)).format) {
-    return .{ .data = .{ .value = value, .options = options } };
-}
-
-/// Remove this once `std.json` has been ported to `std.io.Writer`
-fn FormatJson(comptime T: type) type {
-    return struct {
-        value: T,
-        options: std.json.StringifyOptions,
-
-        pub fn format(data: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
-            const any_writer: std.io.AnyWriter = .{
-                .context = writer,
-                .writeFn = @ptrCast(&std.io.Writer.write),
-            };
-            std.json.stringify(data.value, data.options, any_writer) catch |err| return @errorCast(err);
-        }
-    };
 }

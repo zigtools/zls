@@ -269,7 +269,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             };
 
             // TODO make the diagnostics serializable without requiring the mutex to be locked
-            break :blk try std.json.stringifyAlloc(collection.allocator, notification, .{ .emit_null_optional_fields = false });
+            break :blk try std.json.Stringify.valueAlloc(collection.allocator, notification, .{ .emit_null_optional_fields = false });
         };
         defer collection.allocator.free(json_message);
 

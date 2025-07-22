@@ -78,7 +78,7 @@ fn logFn(
     };
     const scope_txt: []const u8 = comptime @tagName(scope);
 
-    var writer: std.io.Writer = .fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&buffer);
     const no_space_left = blk: {
         writer.print("{s} ({s:^6}): ", .{ level_txt, scope_txt }) catch break :blk true;
         writer.print(format, args) catch break :blk true;
@@ -213,14 +213,7 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
         .config_file = config_file_path,
         .log_file = log_file_path,
     };
-    {
-        // Remove this once `std.json` has been ported to `std.io.Writer`
-        const any_writer: std.io.AnyWriter = .{
-            .context = writer,
-            .writeFn = @ptrCast(&std.io.Writer.write),
-        };
-        std.json.stringify(env, .{ .whitespace = .indent_1 }, any_writer) catch return file_writer.err.?;
-    }
+    std.json.Stringify.value(env, .{ .whitespace = .indent_1 }, writer) catch return file_writer.err.?;
     writer.writeAll("\n") catch return file_writer.err.?;
     writer.flush() catch return file_writer.err.?;
 

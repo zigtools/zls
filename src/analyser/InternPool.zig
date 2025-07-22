@@ -3861,7 +3861,7 @@ pub const FormatOptions = struct {
     truncate_container: bool = false,
 };
 
-fn format(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn format(ctx: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     if (ctx.options.debug and ctx.index == .none) {
         return writer.writeAll(".none");
     } else {
@@ -3869,7 +3869,7 @@ fn format(ctx: FormatContext, writer: *std.io.Writer) std.io.Writer.Error!void {
     }
 }
 
-pub fn print(ip: *InternPool, index: Index, writer: *std.io.Writer, options: FormatOptions) std.io.Writer.Error!void {
+pub fn print(ip: *InternPool, index: Index, writer: *std.Io.Writer, options: FormatOptions) std.Io.Writer.Error!void {
     var tv = index;
     const ty = ip.typeOf(tv);
     while (true) {
@@ -3881,7 +3881,7 @@ pub fn print(ip: *InternPool, index: Index, writer: *std.io.Writer, options: For
     if (options.debug and ty != .type_type) try writer.writeByte(')');
 }
 
-fn printInternal(ip: *InternPool, ty: Index, writer: *std.io.Writer, options: FormatOptions) std.io.Writer.Error!?Index {
+fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: FormatOptions) std.Io.Writer.Error!?Index {
     switch (ip.indexToKey(ty)) {
         .simple_type => |simple| switch (simple) {
             .f16,
@@ -4161,7 +4161,7 @@ const FormatId = struct {
     ip: *InternPool,
     string: String,
 
-    fn render(ctx: FormatId, writer: *std.io.Writer) std.io.Writer.Error!void {
+    fn render(ctx: FormatId, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.string);
         defer locked_string.release(&ctx.ip.string_pool);
         try writer.print("{f}", .{std.zig.fmtId(locked_string.slice)});

@@ -62,7 +62,7 @@ pub fn generateDiagnostics(
 
         var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
 
-        if (server.getAutofixMode() != .none and handle.tree.mode == .zig) {
+        if (handle.tree.mode == .zig) {
             var analyser = server.initAnalyser(arena, handle);
             defer analyser.deinit();
             try code_actions.collectAutoDiscardDiagnostics(&analyser, handle, arena, &diagnostics, server.offset_encoding);
@@ -97,7 +97,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
 
     const allocator = eb.gpa;
 
-    var aw: std.io.Writer.Allocating = .init(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
     var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
