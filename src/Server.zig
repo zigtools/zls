@@ -739,15 +739,15 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    const maybe_root_dir: ?[]const u8 = if (server.workspaces.items.len == 1) dir: {
-        const uri = std.Uri.parse(server.workspaces.items[0].uri) catch |err| {
+    const maybe_root_dir: ?[]const u8 = dir: {
+        if (server.workspaces.items.len != 1) break :dir null;
+        break :dir Uri.toFsPath(arena, server.workspaces.items[0].uri) catch |err| {
             log.err("failed to parse root uri for workspace {s}: {}", .{
                 server.workspaces.items[0].uri, err,
             });
             break :dir null;
         };
-        break :dir try uri.path.toRawMaybeAlloc(arena);
-    } else null;
+    };
 
     check_relative: inline for (&.{
         "zig_exe_path",
@@ -846,7 +846,7 @@ const Workspace = struct {
         const zig_lib_path = args.server.config.zig_lib_path orelse return;
         const build_runner_path = args.server.config.build_runner_path orelse return;
 
-        const workspace_path = @import("uri.zig").parse(args.server.allocator, workspace.uri) catch |err| {
+        const workspace_path = Uri.toFsPath(args.server.allocator, workspace.uri) catch |err| {
             log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
             return;
         };
@@ -905,7 +905,7 @@ fn removeWorkspace(server: *Server, uri: types.URI) void {
 fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
     var updated_files: usize = 0;
     for (notification.changes) |change| {
-        const file_path = Uri.parse(arena, change.uri) catch |err| switch (err) {
+        const file_path = Uri.toFsPath(arena, change.uri) catch |err| switch (err) {
             error.UnsupportedScheme => continue,
             else => {
                 log.err("failed to parse URI '{s}': {}", .{ change.uri, err });

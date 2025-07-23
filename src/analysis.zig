@@ -4252,7 +4252,7 @@ pub const Type = struct {
 
                 switch (handle.tree.nodeTag(node)) {
                     .root => {
-                        const path = URI.parse(analyser.arena, handle.uri) catch handle.uri;
+                        const path = URI.toFsPath(analyser.arena, handle.uri) catch handle.uri;
                         const str = std.fs.path.stem(path);
                         try writer.writeAll(str);
                         if (referenced) |r| try r.put(analyser.arena, .of(str, handle, tree.firstToken(node)), {});

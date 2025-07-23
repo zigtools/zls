@@ -120,7 +120,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
 
     switch (result) {
         .success => |uri| {
-            const path = try zls.URI.parse(allocator, uri);
+            const path = try zls.URI.toFsPath(allocator, uri);
             defer allocator.free(path);
             try std.testing.expect(std.fs.path.isAbsolute(path));
             try std.fs.accessAbsolute(path, .{});
