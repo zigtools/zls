@@ -156,7 +156,7 @@ pub const BuildFile = struct {
                 try allocator.dupe(u8, include_path)
             else blk: {
                 const build_file_dir = std.fs.path.dirname(self.uri).?;
-                const build_file_path = try URI.parse(allocator, build_file_dir);
+                const build_file_path = try URI.toFsPath(allocator, build_file_dir);
                 defer allocator.free(build_file_path);
                 break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
             };
@@ -669,7 +669,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
 
     if (self.getHandle(uri)) |handle| return handle;
 
-    const file_path = URI.parse(self.allocator, uri) catch |err| {
+    const file_path = URI.toFsPath(self.allocator, uri) catch |err| {
         log.err("failed to parse URI '{s}': {}", .{ uri, err });
         return null;
     };
@@ -1221,7 +1221,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const build_file_path = try URI.parse(allocator, build_file.uri);
+    const build_file_path = try URI.toFsPath(allocator, build_file.uri);
     defer allocator.free(build_file_path);
     const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
@@ -1286,7 +1286,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     std.debug.assert(self.config.global_cache_dir != null);
     std.debug.assert(self.config.zig_lib_dir != null);
 
-    const build_file_path = try URI.parse(self.allocator, build_file_uri);
+    const build_file_path = try URI.toFsPath(self.allocator, build_file_uri);
     defer self.allocator.free(build_file_path);
 
     const cwd = std.fs.path.dirname(build_file_path).?;
@@ -1381,7 +1381,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
     var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
     errdefer potential_build_files.deinit(self.allocator);
 
-    const path = try URI.parse(self.allocator, uri);
+    const path = try URI.toFsPath(self.allocator, uri);
     defer self.allocator.free(path);
 
     var current_path: []const u8 = path;
@@ -1423,7 +1423,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
         build_file.build_associated_config = cfg;
 
         if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
-            const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
+            const build_file_path = URI.toFsPath(self.allocator, build_file.uri) catch break :blk;
             const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path }) catch break :blk;
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
@@ -1992,7 +1992,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        const base_path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
+        const base_path = URI.toFsPath(allocator, handle.uri) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => return null,
         };

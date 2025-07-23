@@ -716,7 +716,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             return;
         };
     } else {
-        const document_path = try URI.parse(builder.arena, builder.orig_handle.uri);
+        const document_path = try URI.toFsPath(builder.arena, builder.orig_handle.uri);
         try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
     }
 

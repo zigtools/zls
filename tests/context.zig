@@ -93,14 +93,18 @@ pub const Context = struct {
         mode: std.zig.Ast.Mode = .zig,
     }) ![]const u8 {
         const fmt = switch (builtin.os.tag) {
-            .windows => "file:///C:\\nonexistent\\test-{d}.{t}",
-            else => "file:///nonexistent/test-{d}.{t}",
+            .windows => "c:/nonexistent/test-{d}.{t}",
+            else => "/nonexistent/test-{d}.{t}",
         };
-        const uri = options.uri orelse try std.fmt.allocPrint(
-            self.arena.allocator(),
-            fmt,
-            .{ self.file_id, options.mode },
-        );
+
+        const uri = options.uri orelse uri: {
+            const path = try std.fmt.allocPrint(
+                self.arena.allocator(),
+                fmt,
+                .{ self.file_id, options.mode },
+            );
+            break :uri try zls.URI.fromPath(self.arena.allocator(), path);
+        };
 
         const params: types.DidOpenTextDocumentParams = .{
             .textDocument = .{
