@@ -1126,6 +1126,44 @@ pub fn iterateChildren(
     }
 }
 
+test "iterateChildren - fn_proto_* inside of fn_proto" {
+    const allocator = std.testing.allocator;
+
+    var tree = try std.zig.Ast.parse(
+        allocator,
+        \\pub fn nextAge(age: u32) u32 {
+        \\  return age + 1;
+        \\}
+    ,
+        .zig,
+    );
+    defer tree.deinit(allocator);
+
+    var children_tags = std.ArrayList(Ast.Node.Tag).init(allocator);
+    defer children_tags.deinit();
+
+    const Context = struct {
+        accumulator: *std.ArrayList(Ast.Node.Tag),
+        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) !void {
+            try self.accumulator.append(ast.nodeTag(child_node));
+        }
+    };
+
+    const fn_decl = tree.rootDecls()[0];
+    try iterateChildren(
+        tree,
+        fn_decl,
+        Context{ .accumulator = &children_tags },
+        error{OutOfMemory},
+        Context.callback,
+    );
+
+    try std.testing.expectEqualSlices(Ast.Node.Tag, &.{
+        .fn_proto_simple, // i.e., `pub fn nextAge(age: u32) u32`
+        .block_two_semicolon, // i.e., `return { return age + 1; }`
+    }, children_tags.items);
+}
+
 fn iterateChildrenTypeErased(
     tree: Ast,
     node: Ast.Node.Index,
@@ -1428,13 +1466,15 @@ fn iterateChildrenTypeErased(
             try callback(context, tree, if_ast.then_expr);
             if (if_ast.else_expr.unwrap()) |else_expr| try callback(context, tree, else_expr);
         },
-
+        .fn_decl => {
+            try callback(context, tree, tree.nodeData(node).node_and_node[0]);
+            try callback(context, tree, tree.nodeData(node).node_and_node[1]);
+        },
         .fn_proto_simple,
         .fn_proto_multi,
         .fn_proto_one,
         .fn_proto,
-        .fn_decl,
-        => |tag| {
+        => {
             var buffer: [1]Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buffer, node).?;
 
@@ -1447,9 +1487,6 @@ fn iterateChildrenTypeErased(
             if (fn_proto.ast.section_expr.unwrap()) |section_expr| try callback(context, tree, section_expr);
             if (fn_proto.ast.callconv_expr.unwrap()) |callconv_expr| try callback(context, tree, callconv_expr);
             if (fn_proto.ast.return_type.unwrap()) |return_type| try callback(context, tree, return_type);
-            if (tag == .fn_decl) {
-                try callback(context, tree, tree.nodeData(node).node_and_node[1]);
-            }
         },
 
         .container_decl_arg,
