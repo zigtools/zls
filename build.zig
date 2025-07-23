@@ -1,9 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const manifest = @import("build.zig.zon");
 
-/// Must match the `version` in `build.zig.zon`.
-/// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
-const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0, .pre = "dev" };
+const zls_version = std.SemanticVersion.parse(manifest.version) catch unreachable;
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// update std.json and std.zon to new I/O API
@@ -14,8 +13,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// nix flake update --commit-lock-file
 /// ```
 ///
-/// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.1160+e43617e68";
+const minimum_build_zig_version = manifest.minimum_zig_version;
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// remove `async` and `await` keywords; remove `usingnamespace`
@@ -645,7 +643,7 @@ const Build = blk: {
                 \\          ZLS version: {[current_version]s}
                 \\  minimum Zig version: {[minimum_version]s}
                 \\
-                \\This is a developer error. Set `minimum_build_zig_version` in `build.zig` and `minimum_zig_version` in `build.zig.zon` to {[current_version]s}.
+                \\This is a developer error. Set `minimum_zig_version` in `build.zig.zon` to {[current_version]s}.
             , .{ .current_version = zls_version_simple_str, .minimum_version = minimum_build_zig_version });
             @compileError(message);
         }
