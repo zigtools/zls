@@ -701,6 +701,11 @@ pub fn getOrLoadHandle(store: *DocumentStore, uri: Uri) ?*Handle {
         }
     }
 
+    defer {
+        std.debug.assert(store.currently_loading_uris.swapRemove(uri));
+        store.wait_for_currently_loading_uri.broadcast();
+    }
+
     const file_contents = store.readUri(uri) orelse return null;
     return store.createAndStoreDocument(uri, file_contents, false) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri, err });
@@ -1404,10 +1409,6 @@ fn createAndStoreDocument(
         gop.value_ptr.*.* = new_handle;
     }
     errdefer comptime unreachable; // would double free `text` on error
-
-    if (self.currently_loading_uris.swapRemove(uri)) {
-        self.wait_for_currently_loading_uri.broadcast();
-    }
 
     return gop.value_ptr.*;
 }
