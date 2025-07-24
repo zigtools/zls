@@ -1436,6 +1436,7 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize 
 
     {
         while (try walker.next()) |entry| {
+            if (entry.kind == .directory) continue;
             if (std.mem.indexOf(u8, entry.path, std.fs.path.sep_str ++ ".zig-cache" ++ std.fs.path.sep_str) != null) continue;
             if (std.mem.startsWith(u8, entry.path, ".zig-cache" ++ std.fs.path.sep_str)) continue;
             if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
