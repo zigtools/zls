@@ -462,7 +462,6 @@ pub const BuildOnSave = struct {
     thread: std.Thread,
 
     const shared = @import("../build_runner/shared.zig");
-    const Transport = shared.Transport;
     const ServerToClient = shared.ServerToClient;
 
     pub const InitOptions = struct {
@@ -569,13 +568,6 @@ pub const BuildOnSave = struct {
     ) void {
         defer allocator.free(workspace_path);
 
-        var transport: Transport = .init(.{
-            .gpa = allocator,
-            .in = child_process.stdout.?,
-            .out = child_process.stdin.?,
-        });
-        defer transport.deinit();
-
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
         defer diagnostic_tags.deinit(allocator);
 
@@ -584,34 +576,33 @@ pub const BuildOnSave = struct {
             collection.publishDiagnostics() catch {};
         }
 
-        while (true) {
-            const header = transport.receiveMessage(null) catch |err| switch (err) {
-                error.EndOfStream => {
-                    log.debug("zig build runner process has exited", .{});
+        var poller = std.Io.poll(allocator, enum { stdout }, .{ .stdout = child_process.stdout.? });
+        defer poller.deinit();
+        const stdout = poller.reader(.stdout);
 
-                    const stderr = if (child_process.stderr) |stderr|
-                        stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
-                    else
-                        "";
-                    defer allocator.free(stderr);
-
-                    if (stderr.len != 0) {
-                        log.debug("build runner stderr:\n{s}", .{stderr});
-                    }
-
-                    return;
-                },
-                else => {
+        pool: while (true) {
+            while (stdout.buffered().len < @sizeOf(ServerToClient.Header)) {
+                const keep_polling = poller.poll() catch |err| {
                     log.err("failed to receive message from zig build runner: {}", .{err});
                     return;
-                },
-            };
+                };
+                if (!keep_polling) break :pool;
+            }
+            const header = stdout.takeStruct(ServerToClient.Header, .little) catch unreachable;
+            while (stdout.buffered().len < header.bytes_len) {
+                const keep_polling = poller.poll() catch |err| {
+                    log.err("failed to receive message from zig build runner: {}", .{err});
+                    return;
+                };
+                if (!keep_polling) break :pool;
+            }
+            const body = stdout.take(header.bytes_len) catch unreachable;
 
-            switch (@as(ServerToClient.Tag, @enumFromInt(header.tag))) {
+            switch (header.tag) {
                 .watch_error_bundle => {
                     handleWatchErrorBundle(
                         allocator,
-                        &transport,
+                        body,
                         collection,
                         workspace_path,
                         &diagnostic_tags,
@@ -625,22 +616,46 @@ pub const BuildOnSave = struct {
                 },
             }
         }
+
+        log.debug("zig build runner process has exited", .{});
+
+        const stderr = if (child_process.stderr) |stderr|
+            stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+        else
+            "";
+        defer allocator.free(stderr);
+
+        if (stderr.len != 0) {
+            log.debug("build runner stderr:\n{s}", .{stderr});
+        }
     }
 
     fn handleWatchErrorBundle(
         allocator: std.mem.Allocator,
-        transport: *Transport,
+        body: []u8,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
         diagnostic_tags: *std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void),
-    ) !void {
-        const header = try transport.reader().readStructEndian(ServerToClient.ErrorBundle, .little);
+    ) (error{ OutOfMemory, InvalidMessage } || std.posix.WriteError)!void {
+        var reader: std.Io.Reader = .fixed(body);
 
-        const extra = try transport.receiveSlice(allocator, u32, header.extra_len);
+        const header = reader.takeStruct(ServerToClient.ErrorBundle, .little) catch return error.InvalidMessage;
+
+        const extra = reader.readSliceEndianAlloc(allocator, u32, header.extra_len, .little) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.EndOfStream => return error.InvalidMessage,
+            error.ReadFailed => unreachable,
+        };
         defer allocator.free(extra);
 
-        const string_bytes = try transport.receiveBytes(allocator, header.string_bytes_len);
+        const string_bytes = reader.readAlloc(allocator, header.string_bytes_len) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.EndOfStream => return error.InvalidMessage,
+            error.ReadFailed => unreachable,
+        };
         defer allocator.free(string_bytes);
+
+        if (reader.bufferedLen() != 0) return error.InvalidMessage; // ensure that we read the entire body
 
         const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
 
