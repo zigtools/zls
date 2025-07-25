@@ -27,8 +27,6 @@ const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
 
-const writergate = @hasDecl(std.fs.File, "stdout");
-
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
@@ -331,15 +329,9 @@ pub fn main() !void {
             .data = buffer.items,
             .flags = .{ .exclusive = true },
         }) catch |err| {
-            if (writergate) {
-                fatal("unable to write configuration results to '{f}{s}': {}", .{
-                    local_cache_directory, tmp_sub_path, err,
-                });
-            } else {
-                fatal("unable to write configuration results to '{}{s}': {}", .{
-                    local_cache_directory, tmp_sub_path, err,
-                });
-            }
+            fatal("unable to write configuration results to '{f}{s}': {}", .{
+                local_cache_directory, tmp_sub_path, err,
+            });
         };
 
         process.exit(3); // Indicate configure phase failed with meaningful stdout.
@@ -361,7 +353,7 @@ pub fn main() !void {
 
         .claimed_rss = 0,
 
-        .transport = null,
+        .watch = watch,
         .cycle = 0,
     };
 
@@ -390,11 +382,10 @@ pub fn main() !void {
     const message_thread = try std.Thread.spawn(.{}, struct {
         fn do(ww: *Watch) void {
             while (true) {
-                var buffer: if (writergate) [1]u8 else void = undefined;
-                var file_reader = if (writergate) std.fs.File.stdin().reader(&buffer);
-                const reader = if (writergate) &file_reader.interface else std.Io.getStdIn().reader();
-                const takeByte = if (writergate) std.Io.Reader.takeByte else std.fs.File.Reader.readByte;
-                const byte = takeByte(reader) catch |err| switch (err) {
+                var buffer: [1]u8 = undefined;
+                var file_reader = std.fs.File.stdin().reader(&buffer);
+                const reader = &file_reader.interface;
+                const byte = reader.takeByte() catch |err| switch (err) {
                     error.EndOfStream => process.exit(0),
                     else => process.exit(1),
                 };
@@ -408,14 +399,6 @@ pub fn main() !void {
     message_thread.detach();
 
     const gpa = arena;
-    var transport = Transport.init(.{
-        .gpa = gpa,
-        .in = if (writergate) std.fs.File.stdin() else std.Io.getStdIn(),
-        .out = if (writergate) std.fs.File.stdout() else std.Io.getStdOut(),
-    });
-    defer transport.deinit();
-
-    run.transport = &transport;
 
     var step_stack = try stepNamesToStepStack(gpa, builder, targets.items, check_step_only);
     if (step_stack.count() == 0) {
@@ -534,7 +517,7 @@ const Run = struct {
 
     claimed_rss: usize,
 
-    transport: ?*Transport,
+    watch: bool,
     cycle: u32,
 };
 
@@ -641,13 +624,13 @@ fn runSteps(
         }) catch @panic("OOM");
     }
 
-    if (run.transport) |transport| {
+    if (run.watch) {
         for (steps) |step| {
             const step_id: u32 = @intCast(steps_stack.getIndex(step).?);
             // missing fields:
             // - result_error_msgs
             // - result_stderr
-            serveWatchErrorBundle(transport, step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
+            serveWatchErrorBundle(step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
         }
     }
 }
@@ -769,12 +752,12 @@ fn workerMakeOneStep(
         .watch = true,
     });
 
-    if (run.transport) |transport| {
+    if (run.watch) {
         const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
         // missing fields:
         // - result_error_msgs
         // - result_stderr
-        serveWatchErrorBundle(transport, step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
+        serveWatchErrorBundle(step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
     }
 
     handle_result: {
@@ -1283,12 +1266,8 @@ fn extractBuildInformation(
         .{ .whitespace = .indent_2 },
     );
 
-    if (writergate) {
-        var file_writer = std.fs.File.stdout().writer(&.{});
-        file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
-    } else {
-        try std.Io.getStdOut().writeAll(stringified_build_config);
-    }
+    var file_writer = std.fs.File.stdout().writer(&.{});
+    file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
 }
 
 fn processPkgConfig(
@@ -1472,24 +1451,40 @@ const copied_from_zig = struct {
 };
 
 fn serveWatchErrorBundle(
-    transport: *Transport,
     step_id: u32,
     cycle: u32,
     error_bundle: std.zig.ErrorBundle,
-) !void {
-    const eb_hdr: shared.ServerToClient.ErrorBundle = .{
+) std.posix.WriteError!void {
+    const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + @sizeOf(u32) * error_bundle.extra.len + error_bundle.string_bytes.len;
+
+    var header: shared.ServerToClient.Header = .{
+        .tag = .watch_error_bundle,
+        .bytes_len = @intCast(bytes_len),
+    };
+
+    var error_bundle_header: shared.ServerToClient.ErrorBundle = .{
         .step_id = step_id,
         .cycle = cycle,
         .extra_len = @intCast(error_bundle.extra.len),
         .string_bytes_len = @intCast(error_bundle.string_bytes.len),
     };
-    const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + 4 * error_bundle.extra.len + error_bundle.string_bytes.len;
-    try transport.serveMessage(.{
-        .tag = @intFromEnum(shared.ServerToClient.Tag.watch_error_bundle),
-        .bytes_len = @intCast(bytes_len),
-    }, &.{
-        std.mem.asBytes(&eb_hdr),
+
+    const need_bswap = builtin.target.cpu.arch.endian() != .little;
+
+    if (need_bswap) {
+        std.mem.byteSwapAllFields(shared.ServerToClient.Header, &header);
+        std.mem.byteSwapAllFields(shared.ServerToClient.ErrorBundle, &error_bundle_header);
+        std.mem.byteSwapAllElements(u32, @constCast(error_bundle.extra)); // trust me bro
+    }
+
+    var file_writer = std.fs.File.stdout().writer(&.{});
+    const writer = &file_writer.interface;
+
+    var data = [_][]const u8{
+        std.mem.asBytes(&header),
+        std.mem.asBytes(&error_bundle_header),
         std.mem.sliceAsBytes(error_bundle.extra),
         error_bundle.string_bytes,
-    });
+    };
+    writer.writeVecAll(&data) catch return file_writer.err.?;
 }
