@@ -18,10 +18,10 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 const minimum_build_zig_version = "0.15.0-dev.1219+b8955a2e0";
 
 /// Specify the minimum Zig version that is usable with ZLS:
-/// remove `async` and `await` keywords; remove `usingnamespace`
+/// std.Io.poll: update to new I/O API
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.15.0-dev.936+fc2c1883b";
+const minimum_runtime_zig_version = "0.15.0-dev.1219+b8955a2e0";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
