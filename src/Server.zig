@@ -82,6 +82,7 @@ const ClientCapabilities = struct {
     supports_publish_diagnostics: bool = false,
     supports_code_action_fixall: bool = false,
     supports_semantic_tokens_overlapping: bool = false,
+    semantic_tokens_augment_syntax_tokens: bool = false,
     hover_supports_md: bool = false,
     signature_help_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
@@ -459,6 +460,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         }
         if (textDocument.semanticTokens) |semanticTokens| {
             server.client_capabilities.supports_semantic_tokens_overlapping = semanticTokens.overlappingTokenSupport orelse false;
+            server.client_capabilities.semantic_tokens_augment_syntax_tokens = semanticTokens.augmentsSyntaxTokens orelse false;
         }
     }
 
@@ -1703,7 +1705,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
         handle,
         null,
         server.offset_encoding,
-        server.config.semantic_tokens == .partial,
+        server.client_capabilities.semantic_tokens_augment_syntax_tokens or server.config.semantic_tokens == .partial,
         server.client_capabilities.supports_semantic_tokens_overlapping,
     );
 }
@@ -1730,7 +1732,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
         handle,
         loc,
         server.offset_encoding,
-        server.config.semantic_tokens == .partial,
+        server.client_capabilities.semantic_tokens_augment_syntax_tokens or server.config.semantic_tokens == .partial,
         server.client_capabilities.supports_semantic_tokens_overlapping,
     );
 }
