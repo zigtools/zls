@@ -204,6 +204,7 @@ test "degibberish - error union types" {
     const @"error{foo,bar,baz}" = try ip.get(gpa, .{ .error_set_type = .{
         .names = try ip.getStringSlice(gpa, &.{ foo_string, bar_string, baz_string }),
         .owner_decl = .none,
+        .source_node = 0,
     } });
 
     const @"error{foo,bar,baz}!u32" = try ip.get(gpa, .{ .error_union_type = .{
@@ -226,6 +227,7 @@ test "degibberish - error set types" {
     const @"error{foo,bar,baz}" = try ip.get(gpa, .{ .error_set_type = .{
         .names = try ip.getStringSlice(gpa, &.{ foo_string, bar_string, baz_string }),
         .owner_decl = .none,
+        .source_node = 0,
     } });
 
     try std.testing.expectFmt("error set of (foo,bar,baz)", "{f}", .{fmtDegibberish(&ip, @"error{foo,bar,baz}")});
