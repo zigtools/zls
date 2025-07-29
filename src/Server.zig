@@ -739,21 +739,15 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         };
     };
 
-    check_relative: inline for (&.{
-        "zig_exe_path",
-        "builtin_path",
-        "build_runner_path",
-        "zig_lib_path",
-        "global_cache_path",
-    }) |fieldName| {
-        const field: *?[]const u8 = &@field(new_config, fieldName);
+    inline for (configuration.file_system_config_options) |file_config| {
+        const field: *?[]const u8 = &@field(new_config, file_config.name);
         if (field.*) |maybe_relative| resolve: {
             if (maybe_relative.len == 0) break :resolve;
             if (std.fs.path.isAbsolute(maybe_relative)) break :resolve;
 
             const root_dir = maybe_root_dir orelse {
-                log.err("relative path only supported for {s} with exactly one workspace", .{fieldName});
-                break :check_relative;
+                log.err("relative path only supported for {s} with exactly one workspace", .{file_config.name});
+                break;
             };
 
             const absolute = try std.fs.path.resolve(arena, &.{
@@ -1220,60 +1214,30 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    comptime for (std.meta.fieldNames(Config)) |field_name| {
-        @setEvalBranchQuota(2_000);
-        if (std.mem.indexOf(u8, field_name, "path") == null) continue;
+    var values: [configuration.file_system_config_options.len]*?[]const u8 = undefined;
+    inline for (configuration.file_system_config_options, &values) |file_config, *value| {
+        value.* = &@field(config, file_config.name);
+    }
 
-        if (std.mem.eql(u8, field_name, "zig_exe_path")) continue;
-        if (std.mem.eql(u8, field_name, "builtin_path")) continue;
-        if (std.mem.eql(u8, field_name, "build_runner_path")) continue;
-        if (std.mem.eql(u8, field_name, "zig_lib_path")) continue;
-        if (std.mem.eql(u8, field_name, "global_cache_path")) continue;
-
-        @compileError(std.fmt.comptimePrint(
-            \\config option '{s}' contains the word 'path'.
-            \\Please add config option validation checks below if necessary.
-            \\If not necessary, just add a check above to ignore this error.
-            \\
-        , .{field_name}));
-    };
-
-    const FileCheckInfo = struct {
-        field_name: []const u8,
-        value: *?[]const u8,
-        kind: enum { file, directory },
-        is_accessible: bool,
-    };
-
-    // zig fmt: off
-    const checks: []const FileCheckInfo = &.{
-        .{ .field_name = "zig_exe_path",      .value = &config.zig_exe_path,      .kind = .file,      .is_accessible = true },
-        .{ .field_name = "builtin_path",      .value = &config.builtin_path,      .kind = .file,      .is_accessible = true },
-        .{ .field_name = "build_runner_path", .value = &config.build_runner_path, .kind = .file,      .is_accessible = true },
-        .{ .field_name = "zig_lib_path",      .value = &config.zig_lib_path,      .kind = .directory, .is_accessible = true },
-        .{ .field_name = "global_cache_path", .value = &config.global_cache_path, .kind = .directory, .is_accessible = false },
-    };
-    // zig fmt: on
-
-    for (checks) |check| {
-        const is_ok = if (check.value.*) |path| ok: {
+    for (configuration.file_system_config_options, &values) |file_config, value| {
+        const is_ok = if (value.*) |path| ok: {
             // Convert `""` to `null`
             if (path.len == 0) {
                 // Thank you Visual Studio Trash Code
-                check.value.* = null;
+                value.* = null;
                 break :ok true;
             }
 
             if (!std.fs.path.isAbsolute(path)) {
-                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ check.field_name, path });
+                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ file_config.name, path });
                 break :ok false;
             }
 
-            switch (check.kind) {
+            switch (file_config.kind) {
                 .file => {
                     const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
-                        if (check.is_accessible) {
-                            server.showMessage(.Warning, "config option '{s}': invalid file path '{s}': {}", .{ check.field_name, path, err });
+                        if (file_config.is_accessible) {
+                            server.showMessage(.Warning, "config option '{s}': invalid file path '{s}': {}", .{ file_config.name, path, err });
                             break :ok false;
                         }
                         break :ok true;
@@ -1286,7 +1250,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                     };
                     switch (stat.kind) {
                         .directory => {
-                            server.showMessage(.Warning, "config option '{s}': expected file path but '{s}' is a directory", .{ check.field_name, path });
+                            server.showMessage(.Warning, "config option '{s}': expected file path but '{s}' is a directory", .{ file_config.name, path });
                             break :ok false;
                         },
                         .file => {},
@@ -1298,8 +1262,8 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                 },
                 .directory => {
                     var dir = std.fs.openDirAbsolute(path, .{}) catch |err| {
-                        if (check.is_accessible) {
-                            server.showMessage(.Warning, "config option '{s}': invalid directory path '{s}': {}", .{ check.field_name, path, err });
+                        if (file_config.is_accessible) {
+                            server.showMessage(.Warning, "config option '{s}': invalid directory path '{s}': {}", .{ file_config.name, path, err });
                             break :ok false;
                         }
                         break :ok true;
@@ -1311,7 +1275,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
                     };
                     switch (stat.kind) {
                         .file => {
-                            server.showMessage(.Warning, "config option '{s}': expected directory path but '{s}' is a file", .{ check.field_name, path });
+                            server.showMessage(.Warning, "config option '{s}': expected directory path but '{s}' is a file", .{ file_config.name, path });
                             break :ok false;
                         },
                         .directory => {},
@@ -1325,7 +1289,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
         } else true;
 
         if (!is_ok) {
-            check.value.* = null;
+            value.* = null;
         }
     }
 }

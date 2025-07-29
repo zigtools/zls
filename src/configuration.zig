@@ -92,6 +92,39 @@ pub fn getZigEnv(
     }
 }
 
+pub const FileConfigInfo = struct {
+    name: []const u8,
+    kind: enum { file, directory },
+    is_accessible: bool,
+};
+
+/// A list of config options that represent file system paths.
+pub const file_system_config_options: []const FileConfigInfo = &.{
+    .{ .name = "zig_exe_path", .kind = .file, .is_accessible = true },
+    .{ .name = "builtin_path", .kind = .file, .is_accessible = true },
+    .{ .name = "build_runner_path", .kind = .file, .is_accessible = true },
+    .{ .name = "zig_lib_path", .kind = .directory, .is_accessible = true },
+    .{ .name = "global_cache_path", .kind = .directory, .is_accessible = false },
+};
+
+comptime {
+    skip: for (std.meta.fieldNames(Config)) |field_name| {
+        @setEvalBranchQuota(2_000);
+        if (std.mem.indexOf(u8, field_name, "path") == null) continue;
+
+        for (file_system_config_options) |file_config| {
+            if (std.mem.eql(u8, file_config.name, field_name)) continue :skip;
+        }
+
+        @compileError(std.fmt.comptimePrint(
+            \\config option '{s}' contains the word 'path'.
+            \\Please add config option validation checks below if necessary.
+            \\If not necessary, just add a check above to ignore this error.
+            \\
+        , .{field_name}));
+    }
+}
+
 /// the same struct as Config but every field is optional
 pub const Configuration = getConfigurationType();
 
