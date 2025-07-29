@@ -114,6 +114,8 @@ fn getConfigurationType() type {
 }
 
 pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
+    const is_windows = builtin.target.os.tag == .windows;
+
     const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => return null,
         error.OutOfMemory => |e| return e,
@@ -124,37 +126,61 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     };
     defer allocator.free(env_path);
 
-    const zig_exe = "zig" ++ comptime builtin.target.exeFileExt();
+    const env_path_ext = if (is_windows)
+        std.process.getEnvVarOwned(allocator, "PATH_EXT") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => return null,
+            error.OutOfMemory => |e| return e,
+            error.InvalidWtf8 => |e| {
+                logger.err("failed to load 'PATH' environment variable: {}", .{e});
+                return null;
+            },
+        };
+    defer if (is_windows) allocator.free(env_path_ext);
 
-    var it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);
-    while (it.next()) |path| {
-        var full_path = try std.fs.path.join(allocator, &.{ path, zig_exe });
-        defer allocator.free(full_path);
+    var filename_buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer filename_buffer.deinit(allocator);
 
-        if (!std.fs.path.isAbsolute(full_path)) {
-            logger.warn("ignoring entry in PATH '{s}' because it is not an absolute file path", .{full_path});
-            continue;
-        }
+    var path_it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);
+    var ext_it = if (is_windows) std.mem.tokenizeScalar(u8, env_path_ext, std.fs.path.delimiter);
 
-        const file = std.fs.openFileAbsolute(full_path, .{}) catch |err| switch (err) {
+    while (path_it.next()) |path| : (if (is_windows) ext_it.reset()) {
+        var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => |e| {
-                logger.warn("failed to open entry in PATH '{s}': {}", .{ full_path, e });
+                logger.warn("failed to open entry in PATH '{s}': {}", .{ path, e });
                 continue;
             },
         };
-        defer file.close();
+        defer dir.close();
 
-        stat_failed: {
-            const stat = file.stat() catch break :stat_failed;
+        var cont = true;
+        while (cont) : (cont = is_windows) {
+            const filename = if (!is_windows) "zig" else filename: {
+                const ext = ext_it.next() orelse continue;
+
+                filename_buffer.clearRetainingCapacity();
+                try filename_buffer.ensureTotalCapacity(allocator, "zig".len + ext.len);
+                filename_buffer.appendSliceAssumeCapacity("zig");
+                filename_buffer.appendSliceAssumeCapacity(ext);
+
+                break :filename filename_buffer.items;
+            };
+
+            const stat = dir.statFile(filename) catch |err| switch (err) {
+                error.FileNotFound => continue,
+                else => |e| {
+                    logger.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });
+                    continue;
+                },
+            };
+
             if (stat.kind == .directory) {
-                logger.warn("ignoring entry in PATH '{s}' because it is a directory", .{full_path});
+                logger.warn("ignoring entry in PATH '{f}' because it is a directory", .{std.fs.path.fmtJoin(&.{ path, filename })});
                 continue;
             }
-        }
 
-        defer full_path = "";
-        return full_path;
+            return try std.fs.path.join(allocator, &.{ path, filename });
+        }
     }
     return null;
 }
