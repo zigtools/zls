@@ -996,7 +996,7 @@ fn testDiagnostic(
 
     const actual = try zls.diff.applyTextEdits(allocator, source, text_edits.items, ctx.server.offset_encoding);
     defer allocator.free(actual);
-    try ctx.server.document_store.refreshDocument(uri, try allocator.dupeZ(u8, actual));
+    try ctx.server.document_store.refreshLspSyncedDocument(uri, try allocator.dupeZ(u8, actual));
 
     try std.testing.expectEqualStrings(after, handle.tree.source);
 }
