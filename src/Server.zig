@@ -1524,8 +1524,6 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
 
     var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
     var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
-    var loc_buffer: std.ArrayListUnmanaged(offsets.Loc) = .empty;
-    var range_buffer: std.ArrayListUnmanaged(offsets.Range) = .empty;
 
     for (handles) |handle| {
         const trigram_store = handle.getTrigramStoreCached();
@@ -1533,34 +1531,47 @@ fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: ty
         declaration_buffer.clearRetainingCapacity();
         try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
 
+        const SortContext = struct {
+            names: []const std.zig.Ast.TokenIndex,
+            fn lessThan(ctx: @This(), lhs: TrigramStore.Declaration.Index, rhs: TrigramStore.Declaration.Index) bool {
+                return ctx.names[@intFromEnum(lhs)] < ctx.names[@intFromEnum(rhs)];
+            }
+        };
+
+        std.mem.sortUnstable(
+            TrigramStore.Declaration.Index,
+            declaration_buffer.items,
+            SortContext{ .names = trigram_store.declarations.items(.name) },
+            SortContext.lessThan,
+        );
+
         const slice = trigram_store.declarations.slice();
         const names = slice.items(.name);
-        const locs = slice.items(.loc);
 
-        {
-            // Convert `offsets.Loc` to `offsets.Range`
-
-            try loc_buffer.resize(arena, declaration_buffer.items.len);
-            try range_buffer.resize(arena, declaration_buffer.items.len);
-
-            for (declaration_buffer.items, loc_buffer.items) |declaration, *loc| {
-                const small_loc = locs[@intFromEnum(declaration)];
-                loc.* = .{ .start = small_loc.start, .end = small_loc.end };
-            }
-
-            try offsets.multiple.locToRange(arena, handle.tree.source, loc_buffer.items, range_buffer.items, server.offset_encoding);
-        }
+        var last_index: usize = 0;
+        var last_position: offsets.Position = .{ .line = 0, .character = 0 };
 
         try symbols.ensureUnusedCapacity(arena, declaration_buffer.items.len);
-        for (declaration_buffer.items, range_buffer.items) |declaration, range| {
-            const name = names[@intFromEnum(declaration)];
+        for (declaration_buffer.items) |declaration| {
+            const name_token = names[@intFromEnum(declaration)];
+            const loc = offsets.identifierTokenToNameLoc(handle.tree, name_token);
+            const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+
+            const start_position = offsets.advancePosition(handle.tree.source, last_position, last_index, loc.start, server.offset_encoding);
+            const end_position = offsets.advancePosition(handle.tree.source, start_position, loc.start, loc.end, server.offset_encoding);
+            last_index = loc.end;
+            last_position = end_position;
+
             symbols.appendAssumeCapacity(.{
-                .name = trigram_store.names.items[name.start..name.end],
+                .name = name,
                 .kind = .Variable,
                 .location = .{
                     .Location = .{
                         .uri = handle.uri,
-                        .range = range,
+                        .range = .{
+                            .start = start_position,
+                            .end = end_position,
+                        },
                     },
                 },
             });
