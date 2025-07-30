@@ -10,14 +10,10 @@ pub const TrigramStore = @This();
 
 pub const Trigram = [3]u8;
 
-pub const NameSlice = struct { start: u32, end: u32 };
-pub const Loc = struct { start: u32, end: u32 };
-
 pub const Declaration = struct {
     pub const Index = enum(u32) { _ };
 
-    name: NameSlice,
-    loc: Loc,
+    name: Ast.TokenIndex,
 };
 
 has_filter: bool,
@@ -55,7 +51,6 @@ pub fn init(
                 .fn_proto_multi,
                 .fn_proto_one,
                 .fn_proto_simple,
-                .fn_decl,
                 => |tag| skip: {
                     context.in_function = tag == .fn_decl;
 
@@ -90,15 +85,11 @@ pub fn init(
                 else => {},
             }
 
-            if (name_token_maybe) |name_token| skip: {
-                const loc = offsets.tokenToLoc(cb_tree, name_token);
-                const name = offsets.locToSlice(cb_tree.source, loc);
-                if (name.len < 3) break :skip;
-
+            if (name_token_maybe) |name_token| {
                 try context.store.appendDeclaration(
                     context.allocator,
-                    name,
-                    .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
+                    cb_tree,
+                    name_token,
                 );
             }
 
@@ -166,23 +157,15 @@ pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
 fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
-    name: []const u8,
-    loc: Loc,
+    tree: Ast,
+    name_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    assert(name.len >= 3);
-
-    const name_slice: NameSlice = blk: {
-        const start = store.names.items.len;
-        try store.names.appendSlice(allocator, name);
-        break :blk .{
-            .start = @intCast(start),
-            .end = @intCast(store.names.items.len),
-        };
-    };
+    const loc = offsets.identifierTokenToNameLoc(tree, name_token);
+    const name = offsets.locToSlice(tree.source, loc);
+    if (name.len < 3) return;
 
     try store.declarations.append(allocator, .{
-        .name = name_slice,
-        .loc = loc,
+        .name = name_token,
     });
 
     for (0..name.len - 2) |index| {
