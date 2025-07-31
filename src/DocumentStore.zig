@@ -225,7 +225,7 @@ pub const Handle = struct {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
         /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
-        open: bool = false,
+        lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
@@ -511,16 +511,16 @@ pub const Handle = struct {
         return @bitCast(self.impl.status.load(.acquire));
     }
 
-    pub fn isOpen(self: *const Handle) bool {
-        return self.getStatus().open;
+    pub fn isLspSynced(self: *const Handle) bool {
+        return self.getStatus().lsp_synced;
     }
 
     /// returns the previous value
-    fn setOpen(self: *Handle, open: bool) bool {
-        if (open) {
-            return self.impl.status.bitSet(@offsetOf(Handle.Status, "open"), .release) == 1;
+    fn setLspSynced(self: *Handle, lsp_synced: bool) bool {
+        if (lsp_synced) {
+            return self.impl.status.bitSet(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
         } else {
-            return self.impl.status.bitReset(@offsetOf(Handle.Status, "open"), .release) == 1;
+            return self.impl.status.bitReset(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
         }
     }
 
@@ -549,7 +549,7 @@ pub const Handle = struct {
         defer tracy_zone.end();
 
         const new_status: Handle.Status = .{
-            .open = self.getStatus().open,
+            .lsp_synced = self.getStatus().lsp_synced,
         };
 
         const new_tree = try parseTree(self.impl.allocator, new_text, self.tree.mode);
@@ -767,7 +767,7 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 
 /// **Not thread safe**
 /// Assumes that no other thread is currently accessing the given document
-pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
+pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -780,7 +780,7 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
 
     const gop = try self.handles.getOrPut(self.allocator, handle_ptr.uri);
     if (gop.found_existing) {
-        if (gop.value_ptr.*.isOpen()) {
+        if (gop.value_ptr.*.isLspSynced()) {
             log.warn("Document already open: {s}", .{uri});
         }
         std.mem.swap([]const u8, &gop.value_ptr.*.uri, &handle_ptr.uri);
@@ -798,7 +798,7 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
 
 /// **Thread safe** takes a shared lock, takes an exclusive lock (with `tryLock`)
 /// Assumes that no other thread is currently accessing the given document
-pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
+pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -810,9 +810,9 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
             log.warn("Document not found: {s}", .{uri});
             return;
         };
-        // instead of destroying the handle here we just mark it not open
+        // instead of destroying the handle here we just mark it not lsp synced
         // and let it be destroy by the garbage collection code
-        if (!handle.setOpen(false)) {
+        if (!handle.setLspSynced(false)) {
             log.warn("Document already closed: {s}", .{uri});
         }
     }
@@ -832,12 +832,12 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
 ///
 /// **Thread safe** takes a shared lock when called on different documents
 /// **Not thread safe** when called on the same document
-pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
+pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = self.getHandle(uri).?;
-    if (!handle.getStatus().open) {
+    if (!handle.isLspSynced()) {
         log.warn("Document modified without being opened: {s}", .{uri});
     }
     try handle.setSource(new_text);
@@ -845,14 +845,13 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 }
 
-/// Removes a document from the store, unless said document is currently open and
-/// has been synchronized via `textDocument/didOpen`.
+/// Removes a document from the store, unless said document is lsp synced.
 /// **Thread safe** takes an exclusive lock when called on different documents
 /// **Not thread safe** when called on the same document
 pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
     {
         const handle = self.getHandle(uri) orelse return false;
-        if (handle.getStatus().open) return false;
+        if (handle.getStatus().lsp_synced) return false;
     }
 
     {
@@ -1058,7 +1057,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
 /// handle/document is a node and every `@import` and `@cImport` represent
 /// a directed edge.
 /// We can remove every document which cannot be reached from
-/// another document that is `open` (see `Handle.open`)
+/// another document that is `lsp_sycned` (see `Handle.Status.lsp_sycned`)
 /// **Not thread safe** requires access to `DocumentStore.handles`, `DocumentStore.cimports` and `DocumentStore.build_files`
 fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -1072,7 +1071,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     var queue: std.ArrayListUnmanaged(Uri) = .empty;
 
     for (self.handles.values(), 0..) |handle, handle_index| {
-        if (!handle.getStatus().open) continue;
+        if (!handle.getStatus().lsp_synced) continue;
         reachable.set(handle_index);
 
         try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
@@ -1504,14 +1503,14 @@ fn uriInImports(
 /// invalidates any pointers into `DocumentStore.build_files`
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
-fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!Handle {
+fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var handle: Handle = try .init(self.allocator, uri, text);
     errdefer handle.deinit();
 
-    _ = handle.setOpen(open);
+    _ = handle.setLspSynced(lsp_synced);
 
     if (!supports_build_system) {
         // nothing to do

@@ -134,7 +134,7 @@ pub fn main() Error!void {
     defer gpa.free(source);
 
     const handle_uri = try zls.URI.fromPath(arena, file_path);
-    try document_store.openDocument(handle_uri, source);
+    try document_store.openLspSyncedDocument(handle_uri, source);
     const handle: *zls.DocumentStore.Handle = document_store.handles.get(handle_uri).?;
 
     var error_builder: ErrorBuilder = .init(gpa);

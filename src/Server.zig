@@ -1027,7 +1027,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
         server.client_capabilities.supports_publish_diagnostics)
     {
         for (server.document_store.handles.values()) |handle| {
-            if (!handle.isOpen()) continue;
+            if (!handle.isLspSynced()) continue;
             try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
         }
     }
@@ -1137,7 +1137,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
         return error.InternalError;
     }
 
-    try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
+    try server.document_store.openLspSyncedDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{
@@ -1160,7 +1160,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
         return error.InternalError;
     }
 
-    try server.document_store.refreshDocument(handle.uri, new_text);
+    try server.document_store.refreshLspSyncedDocument(handle.uri, new_text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{
@@ -1202,7 +1202,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 }
 
 fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) error{}!void {
-    server.document_store.closeDocument(notification.textDocument.uri);
+    server.document_store.closeLspSyncedDocument(notification.textDocument.uri);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         // clear diagnostics on closed file
