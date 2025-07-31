@@ -199,11 +199,11 @@ pub const Handle = struct {
         zzoiir: ZirOrZoir = undefined,
 
         associated_build_file: union(enum) {
-            /// The Handle has no associated build file (build.zig).
-            none,
-            /// The associated build file (build.zig) has not been resolved yet.
-            /// Uris that come first have higher priority.
+            /// The initial state. The associated build file (build.zig) is resolved lazily.
+            init,
+            /// The associated build file (build.zig) has been requested but has not yet been resolved.
             unresolved: struct {
+                /// The build files are ordered in decreasing priority.
                 potential_build_files: []const *BuildFile,
                 /// to avoid checking build files multiple times, a bitset stores whether or
                 /// not the build file should be skipped because it has previously been
@@ -216,9 +216,11 @@ pub const Handle = struct {
                     self.* = undefined;
                 }
             },
+            /// The Handle has no associated build file (build.zig).
+            none,
             /// The associated build file (build.zig) has been successfully resolved.
             resolved: *BuildFile,
-        } = .none,
+        } = .init,
     },
 
     const ZirOrZoir = union(Ast.Mode) {
@@ -364,8 +366,31 @@ pub const Handle = struct {
         defer self.impl.lock.unlock();
 
         const unresolved = switch (self.impl.associated_build_file) {
-            .none => return .none,
+            .init => blk: {
+                const potential_build_files = document_store.collectPotentialBuildFiles(self.uri) catch {
+                    log.err("failed to collect potential build files of '{s}'", .{self.uri});
+                    self.impl.associated_build_file = .none;
+                    return .none;
+                };
+                errdefer document_store.allocator.free(potential_build_files);
+
+                if (potential_build_files.len == 0) {
+                    self.impl.associated_build_file = .none;
+                    return .none;
+                }
+
+                var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(document_store.allocator, potential_build_files.len);
+                errdefer has_been_checked.deinit(document_store.allocator);
+
+                self.impl.associated_build_file = .{ .unresolved = .{
+                    .has_been_checked = has_been_checked,
+                    .potential_build_files = potential_build_files,
+                } };
+
+                break :blk &self.impl.associated_build_file.unresolved;
+            },
             .unresolved => |*unresolved| unresolved,
+            .none => return .none,
             .resolved => |build_file| return .{ .resolved = build_file },
         };
 
@@ -420,14 +445,14 @@ pub const Handle = struct {
         defer self.impl.lock.unlock();
 
         switch (self.impl.associated_build_file) {
-            .none, .unresolved => return null,
+            .init, .none, .unresolved => return null,
             .resolved => |build_file| return build_file.uri,
         }
     }
 
     fn getReferencedBuildFiles(self: *Handle) []const *BuildFile {
         switch (self.impl.associated_build_file) {
-            .none => return &.{},
+            .init, .none => return &.{},
             .unresolved => |unresolved| return unresolved.potential_build_files, // some of these could be removed because of `has_been_checked`
             .resolved => |*build_file| return build_file[0..1],
         }
@@ -577,7 +602,7 @@ pub const Handle = struct {
         self.cimports.deinit(allocator);
 
         switch (self.impl.associated_build_file) {
-            .none, .resolved => {},
+            .init, .none, .resolved => {},
             .unresolved => |*payload| payload.deinit(allocator),
         }
 
@@ -1336,6 +1361,8 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
+    if (isInStd(uri)) return &.{};
+
     var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
     errdefer potential_build_files.deinit(self.allocator);
 
@@ -1476,24 +1503,8 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced
 
     _ = handle.setLspSynced(lsp_synced);
 
-    if (!supports_build_system) {
-        // nothing to do
-    } else if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
+    if (supports_build_system and isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         _ = self.getOrLoadBuildFile(handle.uri);
-    } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
-        const potential_build_files = self.collectPotentialBuildFiles(uri) catch {
-            log.err("failed to collect potential build files of '{s}'", .{handle.uri});
-            break :blk;
-        };
-        errdefer self.allocator.free(potential_build_files);
-
-        var has_been_checked: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, potential_build_files.len);
-        errdefer has_been_checked.deinit(self.allocator);
-
-        handle.impl.associated_build_file = .{ .unresolved = .{
-            .has_been_checked = has_been_checked,
-            .potential_build_files = potential_build_files,
-        } };
     }
 
     handle.import_uris = try self.collectImportUris(&handle);
