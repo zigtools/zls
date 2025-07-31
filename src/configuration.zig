@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 
 const Config = @import("Config.zig");
 
-const logger = std.log.scoped(.config);
+const log = std.log.scoped(.config);
 
 pub const Env = struct {
     zig_exe: []const u8,
@@ -24,7 +24,7 @@ pub fn getZigEnv(
         .allocator = allocator,
         .argv = &.{ zig_exe_path, "env" },
     }) catch |err| {
-        logger.err("Failed to run 'zig env': {}", .{err});
+        log.err("Failed to run 'zig env': {}", .{err});
         return null;
     };
 
@@ -36,12 +36,12 @@ pub fn getZigEnv(
     switch (zig_env_result.term) {
         .Exited => |code| {
             if (code != 0) {
-                logger.err("zig env failed with error_code: {}", .{code});
+                log.err("zig env failed with error_code: {}", .{code});
                 return null;
             }
         },
         else => {
-            logger.err("zig env invocation failed", .{});
+            log.err("zig env invocation failed", .{});
             return null;
         },
     }
@@ -55,7 +55,7 @@ pub fn getZigEnv(
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
-                logger.err("Failed to parse 'zig env' output as JSON: {}", .{err});
+                log.err("Failed to parse 'zig env' output as JSON: {}", .{err});
                 return null;
             },
         };
@@ -75,7 +75,7 @@ pub fn getZigEnv(
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
-                logger.err("Failed to parse 'zig env' output as Zon: {}", .{err});
+                log.err("Failed to parse 'zig env' output as Zon: {}", .{err});
                 return null;
             },
         };
@@ -153,7 +153,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         error.EnvironmentVariableNotFound => return null,
         error.OutOfMemory => |e| return e,
         error.InvalidWtf8 => |e| {
-            logger.err("failed to load 'PATH' environment variable: {}", .{e});
+            log.err("failed to load 'PATH' environment variable: {}", .{e});
             return null;
         },
     };
@@ -164,7 +164,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
             error.EnvironmentVariableNotFound => return null,
             error.OutOfMemory => |e| return e,
             error.InvalidWtf8 => |e| {
-                logger.err("failed to load 'PATH' environment variable: {}", .{e});
+                log.err("failed to load 'PATH' environment variable: {}", .{e});
                 return null;
             },
         };
@@ -180,7 +180,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => |e| {
-                logger.warn("failed to open entry in PATH '{s}': {}", .{ path, e });
+                log.warn("failed to open entry in PATH '{s}': {}", .{ path, e });
                 continue;
             },
         };
@@ -202,13 +202,13 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
             const stat = dir.statFile(filename) catch |err| switch (err) {
                 error.FileNotFound => continue,
                 else => |e| {
-                    logger.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });
+                    log.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });
                     continue;
                 },
             };
 
             if (stat.kind == .directory) {
-                logger.warn("ignoring entry in PATH '{f}' because it is a directory", .{std.fs.path.fmtJoin(&.{ path, filename })});
+                log.warn("ignoring entry in PATH '{f}' because it is a directory", .{std.fs.path.fmtJoin(&.{ path, filename })});
                 continue;
             }
 
