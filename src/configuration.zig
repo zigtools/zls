@@ -18,8 +18,9 @@ pub const Env = struct {
 
 pub fn getZigEnv(
     allocator: std.mem.Allocator,
+    result_arena: std.mem.Allocator,
     zig_exe_path: []const u8,
-) error{OutOfMemory}!?std.json.Parsed(Env) {
+) error{OutOfMemory}!?Env {
     const zig_env_result = std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ zig_exe_path, "env" },
@@ -47,9 +48,9 @@ pub fn getZigEnv(
     }
 
     if (std.mem.startsWith(u8, zig_env_result.stdout, "{")) {
-        return std.json.parseFromSlice(
+        return std.json.parseFromSliceLeaky(
             Env,
-            allocator,
+            result_arena,
             zig_env_result.stdout,
             .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
         ) catch |err| switch (err) {
@@ -60,15 +61,12 @@ pub fn getZigEnv(
             },
         };
     } else {
-        var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
-        errdefer arena_allocator.deinit();
-
         const source = try allocator.dupeZ(u8, zig_env_result.stdout);
         defer allocator.free(source);
 
-        const value = std.zon.parse.fromSlice(
+        return std.zon.parse.fromSlice(
             Env,
-            arena_allocator.allocator(),
+            result_arena,
             source,
             null,
             .{ .ignore_unknown_fields = true },
@@ -78,16 +76,6 @@ pub fn getZigEnv(
                 log.err("Failed to parse 'zig env' output as Zon: {}", .{err});
                 return null;
             },
-        };
-
-        const arena_ptr = try allocator.create(std.heap.ArenaAllocator);
-        errdefer allocator.destroy(arena_ptr);
-
-        arena_ptr.* = arena_allocator;
-
-        return .{
-            .arena = arena_ptr,
-            .value = value,
         };
     }
 }

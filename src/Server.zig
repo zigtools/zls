@@ -1295,7 +1295,7 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
 }
 
 const ResolvedConfiguration = struct {
-    zig_env: ?std.json.Parsed(configuration.Env),
+    zig_env: ?configuration.Env,
     zig_runtime_version: ?std.SemanticVersion,
     zig_lib_dir: ?std.Build.Cache.Directory,
     global_cache_dir: ?std.Build.Cache.Directory,
@@ -1317,7 +1317,6 @@ const ResolvedConfiguration = struct {
     };
 
     fn deinit(result: *ResolvedConfiguration, allocator: std.mem.Allocator) void {
-        if (result.zig_env) |parsed| parsed.deinit();
         if (zig_builtin.target.os.tag != .wasi) {
             if (result.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.closeAndFree(allocator);
             if (result.global_cache_dir) |*global_cache_dir| global_cache_dir.closeAndFree(allocator);
@@ -1347,11 +1346,11 @@ fn resolveConfiguration(
 
     if (config.zig_exe_path) |exe_path| blk: {
         if (!std.process.can_spawn) break :blk;
-        result.zig_env = try configuration.getZigEnv(allocator, exe_path);
+        result.zig_env = try configuration.getZigEnv(allocator, config_arena, exe_path);
         const env = result.zig_env orelse break :blk;
 
         if (config.zig_lib_path == null) {
-            if (env.value.lib_dir) |lib_dir| resolve_lib_failed: {
+            if (env.lib_dir) |lib_dir| resolve_lib_failed: {
                 if (std.fs.path.isAbsolute(lib_dir)) {
                     config.zig_lib_path = try config_arena.dupe(u8, lib_dir);
                 } else {
@@ -1368,7 +1367,7 @@ fn resolveConfiguration(
             }
         }
 
-        result.zig_runtime_version = std.SemanticVersion.parse(env.value.version) catch |err| {
+        result.zig_runtime_version = std.SemanticVersion.parse(env.version) catch |err| {
             log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
             break :blk;
         };
