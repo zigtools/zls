@@ -1157,6 +1157,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
             new_text.len,
             DocumentStore.max_document_size,
         });
+        server.allocator.free(new_text);
         return error.InternalError;
     }
 
