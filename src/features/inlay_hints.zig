@@ -545,7 +545,7 @@ fn writeNodeInlayHint(
 /// only hints in the given loc are created
 pub fn writeRangeInlayHint(
     arena: std.mem.Allocator,
-    config: Config,
+    config: *const Config,
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
@@ -555,7 +555,7 @@ pub fn writeRangeInlayHint(
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,
-        .config = &config,
+        .config = config,
         .handle = handle,
         .hover_kind = hover_kind,
     };

@@ -525,7 +525,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
     if (request.initializationOptions) |initialization_options| {
         if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{
             .ignore_unknown_fields = true,
-        })) |new_cfg| {
+        })) |*new_cfg| {
             try server.updateConfiguration2(new_cfg, .{});
         } else |err| {
             log.err("failed to read initialization_options: {}", .{err});
@@ -758,7 +758,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    server.updateConfiguration(new_config, .{}) catch |err| {
+    server.updateConfiguration(&new_config, .{}) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
@@ -962,7 +962,7 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    try server.updateConfiguration(new_config, .{});
+    try server.updateConfiguration(&new_config, .{});
 }
 
 pub const UpdateConfigurationOptions = struct {
@@ -972,19 +972,19 @@ pub const UpdateConfigurationOptions = struct {
 
 pub fn updateConfiguration2(
     server: *Server,
-    new_config: Config,
+    new_config: *const Config,
     options: UpdateConfigurationOptions,
 ) error{OutOfMemory}!void {
     var cfg: configuration.Configuration = .{};
     inline for (std.meta.fields(Config)) |field| {
         @field(cfg, field.name) = @field(new_config, field.name);
     }
-    try server.updateConfiguration(cfg, options);
+    try server.updateConfiguration(&cfg, options);
 }
 
 pub fn updateConfiguration(
     server: *Server,
-    param_new_config: configuration.Configuration,
+    param_new_config: *const configuration.Configuration,
     options: UpdateConfigurationOptions,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -996,7 +996,7 @@ pub fn updateConfiguration(
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
 
-    var new_config: configuration.Configuration = param_new_config;
+    var new_config: configuration.Configuration = param_new_config.*;
 
     server.validateConfiguration(&new_config);
     inline for (std.meta.fields(Config)) |field| {
@@ -1851,7 +1851,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 
     return try inlay_hints.writeRangeInlayHint(
         arena,
-        server.config,
+        &server.config,
         &analyser,
         handle,
         loc,
