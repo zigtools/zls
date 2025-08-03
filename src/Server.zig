@@ -899,8 +899,8 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
         const uri = try Uri.fromPath(arena, file_path);
 
         switch (change.type) {
-            .Created, .Changed, .Deleted => {
-                const did_update_file = try server.document_store.refreshDocumentFromFileSystem(uri);
+            .Created, .Changed, .Deleted => |kind| {
+                const did_update_file = try server.document_store.refreshDocumentFromFileSystem(uri, kind == .Deleted);
                 updated_files += @intFromBool(did_update_file);
             },
             else => {},

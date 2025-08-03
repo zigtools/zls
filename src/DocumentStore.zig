@@ -178,8 +178,6 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
-    /// Contains one entry for every import in the document
-    import_uris: std.ArrayListUnmanaged(Uri),
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle),
 
@@ -194,6 +192,7 @@ pub const Handle = struct {
         /// See `getLazy`
         lazy_condition: std.Thread.Condition = .{},
 
+        import_uris: ?[]Uri = null,
         document_scope: DocumentScope = undefined,
         zzoiir: ZirOrZoir = undefined,
 
@@ -230,7 +229,7 @@ pub const Handle = struct {
     const Status = packed struct(u32) {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
-        /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
+        /// or has been closed with `textDocument/didClose`.
         lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
@@ -245,7 +244,7 @@ pub const Handle = struct {
         _: u27 = 0,
     };
 
-    /// Takes ownership of `text` on success. The `import_uris` be initialized to `.empty`.
+    /// Takes ownership of `text` on success.
     pub fn init(
         allocator: std.mem.Allocator,
         uri: Uri,
@@ -263,7 +262,6 @@ pub const Handle = struct {
         return .{
             .uri = uri,
             .tree = tree,
-            .import_uris = .empty,
             .cimports = cimports,
             .impl = .{
                 .status = .init(@bitCast(Status{
@@ -291,8 +289,10 @@ pub const Handle = struct {
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
-        for (self.import_uris.items) |uri| allocator.free(uri);
-        self.import_uris.deinit(allocator);
+        if (self.impl.import_uris) |import_uris| {
+            for (import_uris) |uri| allocator.free(uri);
+            allocator.free(import_uris);
+        }
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
@@ -303,6 +303,42 @@ pub const Handle = struct {
         }
 
         self.* = undefined;
+    }
+
+    pub fn getImportUris(self: *Handle) error{OutOfMemory}![]const Uri {
+        self.impl.lock.lock();
+        defer self.impl.lock.unlock();
+
+        const allocator = self.impl.allocator;
+
+        if (self.impl.import_uris) |import_uris| return import_uris;
+
+        var imports = try analysis.collectImports(allocator, self.tree);
+
+        var i: usize = 0;
+        errdefer {
+            // only free the uris
+            for (imports.items[0..i]) |uri| allocator.free(uri);
+            imports.deinit(allocator);
+        }
+
+        // Convert to URIs
+        while (i < imports.items.len) {
+            const import_str = imports.items[i];
+            if (!std.mem.endsWith(u8, import_str, ".zig")) {
+                _ = imports.swapRemove(i);
+                continue;
+            }
+            // The raw import strings are owned by the document and do not need to be freed here.
+            imports.items[i] = try uriFromFileImportStr(allocator, self, import_str) orelse {
+                _ = imports.swapRemove(i);
+                continue;
+            };
+            i += 1;
+        }
+
+        self.impl.import_uris = try imports.toOwnedSlice(allocator);
+        return self.impl.import_uris.?;
     }
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
@@ -743,22 +779,17 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    // instead of destroying the handle here we just mark it not lsp synced
-    // and let it be destroy by the garbage collection code
-
-    const handle = self.handles.get(uri) orelse {
+    const kv = self.handles.fetchSwapRemove(uri) orelse {
         log.warn("Document not found: {s}", .{uri});
         return;
     };
-    if (!handle.setLspSynced(false)) {
+    if (!kv.value.isLspSynced()) {
         log.warn("Document already closed: {s}", .{uri});
     }
 
-    self.garbageCollectionImports() catch {};
-    if (supports_build_system) {
-        self.garbageCollectionCImports() catch {};
-        self.garbageCollectionBuildFiles() catch {};
-    }
+    self.allocator.free(kv.key);
+    kv.value.deinit();
+    self.allocator.destroy(kv.value);
 }
 
 /// Updates a document that is synced over the LSP protocol (`textDocument/didChange`).
@@ -781,19 +812,27 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
 /// **Not thread safe**
-pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_delete: bool) !bool {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const index = self.handles.getIndex(uri) orelse return false;
-    const handle = self.handles.values()[index];
-    if (handle.isLspSynced()) return false;
+    if (should_delete) {
+        const index = self.handles.getIndex(uri) orelse return false;
+        const handle = self.handles.values()[index];
+        if (handle.isLspSynced()) return false;
 
-    log.debug("Closing document {s}", .{handle.uri});
-    self.handles.swapRemoveAt(index);
-    handle.deinit();
-    self.allocator.destroy(handle);
-    self.allocator.free(handle.uri);
+        self.handles.swapRemoveAt(index);
+        handle.deinit();
+        self.allocator.destroy(handle);
+        self.allocator.free(handle.uri);
+    } else {
+        if (self.handles.get(uri)) |handle| {
+            if (handle.isLspSynced()) return false;
+        }
+        const file_contents = self.readFile(uri) orelse return false;
+        _ = try self.createAndStoreDocument(uri, file_contents, false);
+    }
+
     return true;
 }
 
@@ -981,150 +1020,6 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
                 },
             ) catch {};
         }
-    }
-}
-
-/// The `DocumentStore` represents a graph structure where every
-/// handle/document is a node and every `@import` and `@cImport` represent
-/// a directed edge.
-/// We can remove every document which cannot be reached from
-/// another document that is `lsp_sycned` (see `Handle.Status.lsp_sycned`)
-/// **Not thread safe** requires access to `DocumentStore.handles`, `DocumentStore.cimports` and `DocumentStore.build_files`
-fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var arena: std.heap.ArenaAllocator = .init(self.allocator);
-    defer arena.deinit();
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(arena.allocator(), self.handles.count());
-
-    var queue: std.ArrayListUnmanaged(Uri) = .empty;
-
-    for (self.handles.values(), 0..) |handle, handle_index| {
-        if (!handle.getStatus().lsp_synced) continue;
-        reachable.set(handle_index);
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    while (queue.pop()) |uri| {
-        const handle_index = self.handles.getIndex(uri) orelse continue;
-        if (reachable.isSet(handle_index)) continue;
-        reachable.set(handle_index);
-
-        const handle = self.handles.values()[handle_index];
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |handle_index| {
-        const handle = self.handles.values()[handle_index];
-        log.debug("Closing document {s}", .{handle.uri});
-        self.handles.swapRemoveAt(handle_index);
-        self.allocator.free(handle.uri);
-        handle.deinit();
-        self.allocator.destroy(handle);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.cimports`
-fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.cimports.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.cimports.count());
-    defer reachable.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.cimports.items(.hash)) |hash| {
-            const index = self.cimports.getIndex(hash) orelse continue;
-            reachable.set(index);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |cimport_index| {
-        var result = self.cimports.values()[cimport_index];
-        const message = switch (result) {
-            .failure => "",
-            .success => |uri| uri,
-        };
-        log.debug("Destroying cimport {s}", .{message});
-        self.cimports.swapRemoveAt(cimport_index);
-        result.deinit(self.allocator);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.build_files`
-fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.build_files.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.build_files.count());
-    defer reachable.deinit(self.allocator);
-
-    var queue: std.ArrayListUnmanaged(*BuildFile) = .empty;
-    defer queue.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.getReferencedBuildFiles()) |build_file| {
-            const build_file_index = self.build_files.getIndex(build_file.uri).?;
-            if (reachable.isSet(build_file_index)) continue;
-            try queue.append(self.allocator, build_file);
-        }
-
-        if (isBuildFile(handle.uri)) blk: {
-            const build_file_index = self.build_files.getIndex(handle.uri) orelse break :blk;
-            const build_file = self.build_files.values()[build_file_index];
-            if (reachable.isSet(build_file_index)) break :blk;
-            try queue.append(self.allocator, build_file);
-        }
-    }
-
-    while (queue.pop()) |build_file| {
-        const build_file_index = self.build_files.getIndex(build_file.uri).?;
-        if (reachable.isSet(build_file_index)) continue;
-        reachable.set(build_file_index);
-
-        const build_config = build_file.tryLockConfig() orelse continue;
-        defer build_file.unlockConfig();
-
-        try queue.ensureUnusedCapacity(self.allocator, build_config.deps_build_roots.len);
-        for (build_config.deps_build_roots) |dep_build_root| {
-            const dep_build_file_uri = try URI.fromPath(self.allocator, dep_build_root.path);
-            defer self.allocator.free(dep_build_file_uri);
-            const dep_build_file = self.build_files.get(dep_build_file_uri) orelse continue;
-            queue.appendAssumeCapacity(dep_build_file);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |build_file_index| {
-        const build_file = self.build_files.values()[build_file_index];
-        log.debug("Destroying build file {s}", .{build_file.uri});
-        self.build_files.swapRemoveAt(build_file_index);
-        build_file.deinit(self.allocator);
-        self.allocator.destroy(build_file);
     }
 }
 
@@ -1426,7 +1321,7 @@ fn uriInImports(
         return std.mem.eql(u8, associated_build_file_uri, build_file_uri);
     }
 
-    for (handle.import_uris.items) |import_uri| {
+    for (try handle.getImportUris()) |import_uri| {
         if (try self.uriInImports(checked_uris, build_file_uri, import_uri, uri))
             return true;
     }
@@ -1450,6 +1345,10 @@ fn createAndStoreDocument(
         return err;
     };
     errdefer new_handle.deinit();
+
+    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
+        _ = self.getOrLoadBuildFile(uri);
+    }
 
     self.lock.lock();
     defer self.lock.unlock();
@@ -1480,42 +1379,7 @@ fn createAndStoreDocument(
         gop.value_ptr.*.* = new_handle;
     }
 
-    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
-    }
-
     return gop.value_ptr.*;
-}
-
-/// Caller owns returned memory.
-/// **Thread safe** takes a shared lock
-fn collectImportUris(self: *DocumentStore, handle: *Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var imports = try analysis.collectImports(self.allocator, handle.tree);
-
-    var i: usize = 0;
-    errdefer {
-        // only free the uris
-        for (imports.items[0..i]) |uri| self.allocator.free(uri);
-        imports.deinit(self.allocator);
-    }
-
-    // Convert to URIs
-    while (i < imports.items.len) {
-        const maybe_uri = try self.uriFromImportStr(self.allocator, handle, imports.items[i]);
-
-        if (maybe_uri) |uri| {
-            // The raw import strings are owned by the document and do not need to be freed here.
-            imports.items[i] = uri;
-            i += 1;
-        } else {
-            _ = imports.swapRemove(i);
-        }
-    }
-
-    return imports;
 }
 
 pub const CImportHandle = struct {
@@ -1570,27 +1434,19 @@ pub fn collectDependencies(
     handle: *Handle,
     dependencies: *std.ArrayListUnmanaged(Uri),
 ) error{OutOfMemory}!void {
-    return store.collectDependenciesInternal(allocator, handle, dependencies, true);
-}
-
-fn collectDependenciesInternal(
-    store: *DocumentStore,
-    allocator: std.mem.Allocator,
-    handle: *Handle,
-    dependencies: *std.ArrayListUnmanaged(Uri),
-    lock: bool,
-) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (!supports_build_system) return;
 
     {
-        if (lock) store.lock.lockShared();
-        defer if (lock) store.lock.unlockShared();
+        store.lock.lockShared();
+        defer store.lock.unlockShared();
 
-        try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len + handle.cimports.len);
-        for (handle.import_uris.items) |uri| {
+        const import_uris = try handle.getImportUris();
+
+        try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
+        for (import_uris) |uri| {
             dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
         }
 
@@ -1604,16 +1460,8 @@ fn collectDependenciesInternal(
     }
 
     no_build_file: {
-        const build_file_uri = if (lock)
-            try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file
-        else
-            handle.getAssociatedBuildFileUriDontResolve() orelse break :no_build_file;
-
-        const build_file = if (lock)
-            store.getBuildFile(build_file_uri) orelse break :no_build_file
-        else
-            store.build_files.get(build_file_uri) orelse break :no_build_file;
-
+        const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
+        const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
         _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
     }
 }
@@ -1905,18 +1753,22 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        const base_path = URI.toFsPath(allocator, handle.uri) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => return null,
-        };
-        defer allocator.free(base_path);
-
-        const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => return null,
-        };
-        defer allocator.free(joined_path);
-
-        return try URI.fromPath(allocator, joined_path);
+        return try uriFromFileImportStr(allocator, handle, import_str);
     }
+}
+
+fn uriFromFileImportStr(allocator: std.mem.Allocator, handle: *Handle, import_str: []const u8) error{OutOfMemory}!?Uri {
+    const base_path = URI.toFsPath(allocator, handle.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer allocator.free(base_path);
+
+    const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer allocator.free(joined_path);
+
+    return try URI.fromPath(allocator, joined_path);
 }
