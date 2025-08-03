@@ -162,7 +162,9 @@ pub fn pushErrorBundle(
         }
     }
 
-    var owned_error_bundle = try new_error_bundle.toOwnedBundle("");
+    const compile_log_text = if (error_bundle.errorMessageCount() == 0) "" else error_bundle.getCompileLogOutput();
+
+    var owned_error_bundle = try new_error_bundle.toOwnedBundle(compile_log_text);
     errdefer owned_error_bundle.deinit(collection.allocator);
 
     const duped_error_bundle_src_base_path = if (src_base_path) |base_path| try collection.allocator.dupe(u8, base_path) else null;
@@ -366,17 +368,20 @@ fn convertErrorBundleToLSPDiangostics(
 
         var tags: std.ArrayList(lsp.types.DiagnosticTag) = .empty;
 
-        const diag_msg = eb.nullTerminatedString(err.msg);
+        var message: []const u8 = eb.nullTerminatedString(err.msg);
 
-        if (std.mem.startsWith(u8, diag_msg, "unused ")) {
+        if (std.mem.startsWith(u8, message, "unused ")) {
             try tags.append(arena, lsp.types.DiagnosticTag.Unnecessary);
+        }
+        if (std.mem.eql(u8, message, "found compile log statement")) {
+            message = try std.fmt.allocPrint(arena, "{s}\n\nCompile Log Output:\n{s}", .{ message, eb.getCompileLogOutput() });
         }
 
         try diagnostics.append(arena, .{
             .range = src_range,
             .severity = .Error,
             .source = "zls",
-            .message = eb.nullTerminatedString(err.msg),
+            .message = message,
             .tags = if (tags.items.len != 0) tags.items else null,
             .relatedInformation = relatedInformation,
         });
@@ -438,7 +443,7 @@ test errorBundleSourceLocationToRange {
                 .source_line = null,
             },
         },
-    });
+    }, "");
     defer eb.deinit(std.testing.allocator);
 
     const src_loc0 = eb.getSourceLocation(eb.getErrorMessage(eb.getMessages()[0]).src_loc);
@@ -466,11 +471,11 @@ test DiagnosticsCollection {
 
     try std.testing.expectEqual(0, collection.outdated_files.count());
 
-    var eb1 = try createTestingErrorBundle(&.{.{ .message = "Living For The City" }});
+    var eb1 = try createTestingErrorBundle(&.{.{ .message = "Living For The City" }}, "");
     defer eb1.deinit(std.testing.allocator);
-    var eb2 = try createTestingErrorBundle(&.{.{ .message = "You Haven't Done Nothin'" }});
+    var eb2 = try createTestingErrorBundle(&.{.{ .message = "You Haven't Done Nothin'" }}, "");
     defer eb2.deinit(std.testing.allocator);
-    var eb3 = try createTestingErrorBundle(&.{.{ .message = "As" }});
+    var eb3 = try createTestingErrorBundle(&.{.{ .message = "As" }}, "");
     defer eb3.deinit(std.testing.allocator);
 
     const uri = try URI.fromPath(std.testing.allocator, testing_src_path);
@@ -532,24 +537,61 @@ test DiagnosticsCollection {
     }
 }
 
+test "DiagnosticsCollection - compile_log_text" {
+    var collection: DiagnosticsCollection = .{ .allocator = std.testing.allocator };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{ .message = "found compile log statement" }}, "@as(comptime_int, 7)\n@as(comptime_int, 13)");
+    defer eb.deinit(std.testing.allocator);
+
+    const uri = try URI.fromPath(std.testing.allocator, testing_src_path);
+    defer std.testing.allocator.free(uri);
+
+    try collection.pushErrorBundle(.parse, 1, null, eb);
+    try std.testing.expectEqual(1, collection.outdated_files.count());
+    try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
+
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+    try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
+
+    try std.testing.expectEqual(1, diagnostics.items.len);
+    try std.testing.expectEqual(lsp.types.DiagnosticSeverity.Error, diagnostics.items[0].severity);
+    try std.testing.expectEqualStrings(
+        \\found compile log statement
+        \\
+        \\Compile Log Output:
+        \\@as(comptime_int, 7)
+        \\@as(comptime_int, 13)
+    , diagnostics.items[0].message);
+    try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
+}
+
 const testing_src_path = switch (@import("builtin").os.tag) {
     .windows => "C:\\sample.zig",
     else => "/sample.zig",
 };
 
-fn createTestingErrorBundle(messages: []const struct {
-    message: []const u8,
-    count: u32 = 1,
-    source_location: struct {
-        src_path: []const u8,
-        line: u32,
-        column: u32,
-        span_start: u32,
-        span_main: u32,
-        span_end: u32,
-        source_line: ?[]const u8,
-    } = .{ .src_path = testing_src_path, .line = 0, .column = 0, .span_start = 0, .span_main = 0, .span_end = 0, .source_line = "" },
-}) error{OutOfMemory}!std.zig.ErrorBundle {
+fn createTestingErrorBundle(
+    messages: []const struct {
+        message: []const u8,
+        count: u32 = 1,
+        source_location: struct {
+            src_path: []const u8,
+            line: u32,
+            column: u32,
+            span_start: u32,
+            span_main: u32,
+            span_end: u32,
+            source_line: ?[]const u8,
+        } = .{ .src_path = testing_src_path, .line = 0, .column = 0, .span_start = 0, .span_main = 0, .span_end = 0, .source_line = "" },
+    },
+    compile_log_text: []const u8,
+) error{OutOfMemory}!std.zig.ErrorBundle {
     var eb: std.zig.ErrorBundle.Wip = undefined;
     try eb.init(std.testing.allocator);
     errdefer eb.deinit();
@@ -570,5 +612,5 @@ fn createTestingErrorBundle(messages: []const struct {
         });
     }
 
-    return eb.toOwnedBundle("");
+    return eb.toOwnedBundle(compile_log_text);
 }
