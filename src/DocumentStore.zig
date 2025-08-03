@@ -178,8 +178,6 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
-    /// Contains one entry for every import in the document
-    import_uris: std.ArrayListUnmanaged(Uri),
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle),
 
@@ -194,6 +192,7 @@ pub const Handle = struct {
         /// See `getLazy`
         lazy_condition: std.Thread.Condition = .{},
 
+        import_uris: ?[]Uri = null,
         document_scope: DocumentScope = undefined,
         zzoiir: ZirOrZoir = undefined,
 
@@ -245,7 +244,7 @@ pub const Handle = struct {
         _: u27 = 0,
     };
 
-    /// Takes ownership of `text` on success. The `import_uris` be initialized to `.empty`.
+    /// Takes ownership of `text` on success.
     pub fn init(
         allocator: std.mem.Allocator,
         uri: Uri,
@@ -263,7 +262,6 @@ pub const Handle = struct {
         return .{
             .uri = uri,
             .tree = tree,
-            .import_uris = .empty,
             .cimports = cimports,
             .impl = .{
                 .status = .init(@bitCast(Status{
@@ -291,8 +289,10 @@ pub const Handle = struct {
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
-        for (self.import_uris.items) |uri| allocator.free(uri);
-        self.import_uris.deinit(allocator);
+        if (self.impl.import_uris) |import_uris| {
+            for (import_uris) |uri| allocator.free(uri);
+            allocator.free(import_uris);
+        }
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
@@ -303,6 +303,42 @@ pub const Handle = struct {
         }
 
         self.* = undefined;
+    }
+
+    pub fn getImportUris(self: *Handle) error{OutOfMemory}![]const Uri {
+        self.impl.lock.lock();
+        defer self.impl.lock.unlock();
+
+        const allocator = self.impl.allocator;
+
+        if (self.impl.import_uris) |import_uris| return import_uris;
+
+        var imports = try analysis.collectImports(allocator, self.tree);
+
+        var i: usize = 0;
+        errdefer {
+            // only free the uris
+            for (imports.items[0..i]) |uri| allocator.free(uri);
+            imports.deinit(allocator);
+        }
+
+        // Convert to URIs
+        while (i < imports.items.len) {
+            const import_str = imports.items[i];
+            if (!std.mem.endsWith(u8, import_str, ".zig")) {
+                _ = imports.swapRemove(i);
+                continue;
+            }
+            // The raw import strings are owned by the document and do not need to be freed here.
+            imports.items[i] = try uriFromFileImportStr(allocator, self, import_str) orelse {
+                _ = imports.swapRemove(i);
+                continue;
+            };
+            i += 1;
+        }
+
+        self.impl.import_uris = try imports.toOwnedSlice(allocator);
+        return self.impl.import_uris.?;
     }
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
@@ -1285,7 +1321,7 @@ fn uriInImports(
         return std.mem.eql(u8, associated_build_file_uri, build_file_uri);
     }
 
-    for (handle.import_uris.items) |import_uri| {
+    for (try handle.getImportUris()) |import_uri| {
         if (try self.uriInImports(checked_uris, build_file_uri, import_uri, uri))
             return true;
     }
@@ -1344,37 +1380,6 @@ fn createAndStoreDocument(
     }
 
     return gop.value_ptr.*;
-}
-
-/// Caller owns returned memory.
-/// **Thread safe** takes a shared lock
-fn collectImportUris(self: *DocumentStore, handle: *Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var imports = try analysis.collectImports(self.allocator, handle.tree);
-
-    var i: usize = 0;
-    errdefer {
-        // only free the uris
-        for (imports.items[0..i]) |uri| self.allocator.free(uri);
-        imports.deinit(self.allocator);
-    }
-
-    // Convert to URIs
-    while (i < imports.items.len) {
-        const maybe_uri = try self.uriFromImportStr(self.allocator, handle, imports.items[i]);
-
-        if (maybe_uri) |uri| {
-            // The raw import strings are owned by the document and do not need to be freed here.
-            imports.items[i] = uri;
-            i += 1;
-        } else {
-            _ = imports.swapRemove(i);
-        }
-    }
-
-    return imports;
 }
 
 pub const CImportHandle = struct {
@@ -1438,8 +1443,10 @@ pub fn collectDependencies(
         store.lock.lockShared();
         defer store.lock.unlockShared();
 
-        try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len + handle.cimports.len);
-        for (handle.import_uris.items) |uri| {
+        const import_uris = try handle.getImportUris();
+
+        try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
+        for (import_uris) |uri| {
             dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
         }
 
@@ -1746,18 +1753,22 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        const base_path = URI.toFsPath(allocator, handle.uri) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => return null,
-        };
-        defer allocator.free(base_path);
-
-        const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => return null,
-        };
-        defer allocator.free(joined_path);
-
-        return try URI.fromPath(allocator, joined_path);
+        return try uriFromFileImportStr(allocator, handle, import_str);
     }
+}
+
+fn uriFromFileImportStr(allocator: std.mem.Allocator, handle: *Handle, import_str: []const u8) error{OutOfMemory}!?Uri {
+    const base_path = URI.toFsPath(allocator, handle.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer allocator.free(base_path);
+
+    const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer allocator.free(joined_path);
+
+    return try URI.fromPath(allocator, joined_path);
 }
