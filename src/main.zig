@@ -436,16 +436,17 @@ fn parseArgs(allocator: std.mem.Allocator) ParseArgsError!ParseArgsResult {
 
     var arg_index: usize = 0;
     while (args_it.next()) |arg| : (arg_index += 1) {
-        if (arg_index == 0) {
-            if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) { // help
-                try std.fs.File.stderr().writeAll(usage);
-                std.process.exit(0);
-            } else if (std.mem.eql(u8, arg, "version") or std.mem.eql(u8, arg, "--version")) { // version
-                try std.fs.File.stdout().writeAll(zls.build_options.version_string ++ "\n");
-                std.process.exit(0);
-            } else if (std.mem.eql(u8, arg, "env")) { // env
-                try @"zls env"(allocator);
-            }
+        if ((arg_index == 0 and std.mem.eql(u8, arg, "help")) or
+            std.mem.eql(u8, arg, "-h") or
+            std.mem.eql(u8, arg, "--help"))
+        {
+            try std.fs.File.stderr().writeAll(usage);
+            std.process.exit(0);
+        } else if ((arg_index == 0 and std.mem.eql(u8, arg, "version")) or std.mem.eql(u8, arg, "--version")) {
+            try std.fs.File.stdout().writeAll(zls.build_options.version_string ++ "\n");
+            std.process.exit(0);
+        } else if (arg_index == 0 and std.mem.eql(u8, arg, "env")) {
+            try @"zls env"(allocator);
         }
 
         if (std.mem.eql(u8, arg, "--config-path")) { // --config-path
