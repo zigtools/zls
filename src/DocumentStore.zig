@@ -1346,6 +1346,10 @@ fn createAndStoreDocument(
     };
     errdefer new_handle.deinit();
 
+    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
+        _ = self.getOrLoadBuildFile(uri);
+    }
+
     self.lock.lock();
     defer self.lock.unlock();
 
@@ -1373,10 +1377,6 @@ fn createAndStoreDocument(
 
         new_handle.uri = gop.key_ptr.*;
         gop.value_ptr.*.* = new_handle;
-    }
-
-    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
     }
 
     return gop.value_ptr.*;
