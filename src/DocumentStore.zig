@@ -192,11 +192,11 @@ pub const Handle = struct {
         allocator: std.mem.Allocator,
 
         lock: std.Thread.Mutex = .{},
-        condition: std.Thread.Condition = .{},
+        /// See `getLazy`
+        lazy_condition: std.Thread.Condition = .{},
 
         document_scope: DocumentScope = undefined,
-        zir: std.zig.Zir = undefined,
-        zoir: std.zig.Zoir = undefined,
+        zzoiir: ZirOrZoir = undefined,
 
         associated_build_file: union(enum) {
             /// The Handle has no associated build file (build.zig).
@@ -221,6 +221,11 @@ pub const Handle = struct {
         } = .none,
     },
 
+    const ZirOrZoir = union(Ast.Mode) {
+        zig: std.zig.Zir,
+        zon: std.zig.Zoir,
+    };
+
     const Status = packed struct(u32) {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
@@ -231,25 +236,12 @@ pub const Handle = struct {
         has_document_scope_lock: bool = false,
         /// true if `handle.impl.document_scope` has been set
         has_document_scope: bool = false,
-        /// true if a thread has acquired the permission to compute the `std.zig.Zir`
-        has_zir_lock: bool = false,
-        /// all other threads will wait until the given thread has computed the `std.zig.Zir` before reading it.
+        /// true if a thread has acquired the permission to compute the `std.zig.Zir` or `std.zig.Zoir`
+        has_zzoiir_lock: bool = false,
+        /// all other threads will wait until the given thread has computed the `std.zig.Zir` or `std.zig.Zoir` before reading it.
         /// true if `handle.impl.zir` has been set
-        has_zir: bool = false,
-        zir_outdated: bool = undefined,
-        /// true if a thread has acquired the permission to compute the `std.zig.Zoir`
-        has_zoir_lock: bool = false,
-        /// all other threads will wait until the given thread has computed the `std.zig.Zoir` before reading it.
-        /// true if `handle.impl.zoir` has been set
-        has_zoir: bool = false,
-        zoir_outdated: bool = undefined,
-        _: u23 = undefined,
-    };
-
-    pub const ZirOrZoirStatus = enum {
-        none,
-        outdated,
-        done,
+        has_zzoiir: bool = false,
+        _: u27 = 0,
     };
 
     /// takes ownership of `text`
@@ -273,7 +265,19 @@ pub const Handle = struct {
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
         if (self.getStatus().has_document_scope) return self.impl.document_scope;
-        return try self.getDocumentScopeCold();
+        return try self.getLazy(DocumentScope, "document_scope", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
+                var document_scope: DocumentScope = try .init(allocator, handle.tree);
+                errdefer document_scope.deinit(allocator);
+
+                // remove unused capacity
+                document_scope.extra.shrinkAndFree(allocator, document_scope.extra.items.len);
+                try document_scope.declarations.setCapacity(allocator, document_scope.declarations.len);
+                try document_scope.scopes.setCapacity(allocator, document_scope.scopes.len);
+
+                return document_scope;
+            }
+        });
     }
 
     /// Asserts that `getDocumentScope` has been previously called on `handle`.
@@ -286,26 +290,46 @@ pub const Handle = struct {
 
     pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
         std.debug.assert(self.tree.mode == .zig);
-        if (self.getStatus().has_zir) return self.impl.zir;
-        return try self.getZirOrZoirCold(.zir);
-    }
-
-    pub fn getZirStatus(self: *const Handle) ZirOrZoirStatus {
-        const status = self.getStatus();
-        if (!status.has_zir) return .none;
-        return if (status.zir_outdated) .outdated else .done;
+        const zir_or_zoir = try self.getZirOrZoir();
+        return zir_or_zoir.zig;
     }
 
     pub fn getZoir(self: *Handle) error{OutOfMemory}!std.zig.Zoir {
         std.debug.assert(self.tree.mode == .zon);
-        if (self.getStatus().has_zoir) return self.impl.zoir;
-        return try self.getZirOrZoirCold(.zoir);
+        const zir_or_zoir = try self.getZirOrZoir();
+        return zir_or_zoir.zon;
     }
 
-    pub fn getZoirStatus(self: *const Handle) ZirOrZoirStatus {
-        const status = self.getStatus();
-        if (!status.has_zoir) return .none;
-        return if (status.zoir_outdated) .outdated else .done;
+    fn getZirOrZoir(self: *Handle) error{OutOfMemory}!ZirOrZoir {
+        if (self.getStatus().has_zzoiir) return self.impl.zzoiir;
+        return try self.getLazy(ZirOrZoir, "zzoiir", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!ZirOrZoir {
+                switch (handle.tree.mode) {
+                    .zig => {
+                        const tracy_zone = tracy.traceNamed(@src(), "AstGen.generate");
+                        defer tracy_zone.end();
+
+                        var zir = try std.zig.AstGen.generate(allocator, handle.tree);
+                        errdefer zir.deinit(allocator);
+
+                        // remove unused capacity
+                        var instructions = zir.instructions.toMultiArrayList();
+                        try instructions.setCapacity(allocator, instructions.len);
+                        zir.instructions = instructions.slice();
+
+                        return .{ .zig = zir };
+                    },
+                    .zon => {
+                        const tracy_zone = tracy.traceNamed(@src(), "ZonGen.generate");
+                        defer tracy_zone.end();
+
+                        const zoir = try std.zig.ZonGen.generate(allocator, handle.tree, .{});
+
+                        return .{ .zon = zoir };
+                    },
+                }
+            }
+        });
     }
 
     /// Returns the associated build file (build.zig) of the handle.
@@ -409,102 +433,40 @@ pub const Handle = struct {
         }
     }
 
-    fn getDocumentScopeCold(self: *Handle) error{OutOfMemory}!DocumentScope {
+    fn getLazy(
+        self: *Handle,
+        comptime T: type,
+        comptime name: []const u8,
+        comptime Context: type,
+    ) error{OutOfMemory}!T {
         @branchHint(.cold);
-        const tracy_zone = tracy.trace(@src());
+        const tracy_zone = tracy.traceNamed(@src(), "getLazy(" ++ name ++ ")");
         defer tracy_zone.end();
+
+        const has_data_field_name = "has_" ++ name;
+        const has_lock_field_name = "has_" ++ name ++ "_lock";
 
         self.impl.lock.lock();
         defer self.impl.lock.unlock();
         while (true) {
             const status = self.getStatus();
-            if (status.has_document_scope) break;
-            if (status.has_document_scope_lock or
-                self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope_lock"), .release) != 0)
+            if (@field(status, has_data_field_name)) break;
+            if (@field(status, has_lock_field_name) or
+                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field_name), .release) != 0)
             {
-                // another thread is currently computing the document scope
-                self.impl.condition.wait(&self.impl.lock);
+                // another thread is currently computing the data
+                self.impl.lazy_condition.wait(&self.impl.lock);
                 continue;
             }
-            defer self.impl.condition.broadcast();
+            defer self.impl.lazy_condition.broadcast();
 
-            self.impl.document_scope = blk: {
-                var document_scope: DocumentScope = try .init(self.impl.allocator, self.tree);
-                errdefer document_scope.deinit(self.impl.allocator);
+            @field(self.impl, name) = try Context.create(self, self.impl.allocator);
+            errdefer comptime unreachable;
 
-                // remove unused capacity
-                document_scope.extra.shrinkAndFree(self.impl.allocator, document_scope.extra.items.len);
-                try document_scope.declarations.setCapacity(self.impl.allocator, document_scope.declarations.len);
-                try document_scope.scopes.setCapacity(self.impl.allocator, document_scope.scopes.len);
-
-                break :blk document_scope;
-            };
-            const old_has_document_scope = self.impl.status.bitSet(@bitOffsetOf(Status, "has_document_scope"), .release); // atomically set has_document_scope
-            std.debug.assert(old_has_document_scope == 0); // race condition: another thread set `has_document_scope` even though we hold the lock
+            const old_has_data = self.impl.status.bitSet(@bitOffsetOf(Status, has_data_field_name), .release);
+            std.debug.assert(old_has_data == 0); // race condition
         }
-        return self.impl.document_scope;
-    }
-
-    fn getZirOrZoirCold(self: *Handle, comptime kind: enum { zir, zoir }) error{OutOfMemory}!switch (kind) {
-        .zir => std.zig.Zir,
-        .zoir => std.zig.Zoir,
-    } {
-        @branchHint(.cold);
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const has_field = "has_" ++ @tagName(kind);
-        const has_lock_field = "has_" ++ @tagName(kind) ++ "_lock";
-        const outdated_field = @tagName(kind) ++ "_outdated";
-
-        self.impl.lock.lock();
-        defer self.impl.lock.unlock();
-        while (true) {
-            const status = self.getStatus();
-            if (@field(status, has_field)) break;
-            if (@field(status, has_lock_field) or
-                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field), .release) != 0)
-            {
-                // another thread is currently computing the ZIR
-                self.impl.condition.wait(&self.impl.lock);
-                continue;
-            }
-            defer self.impl.condition.broadcast();
-
-            switch (kind) {
-                .zir => {
-                    const tracy_zone_inner = tracy.traceNamed(@src(), "AstGen.generate");
-                    defer tracy_zone_inner.end();
-
-                    var zir = try std.zig.AstGen.generate(self.impl.allocator, self.tree);
-                    errdefer zir.deinit(self.impl.allocator);
-
-                    // remove unused capacity
-                    var instructions = zir.instructions.toMultiArrayList();
-                    try instructions.setCapacity(self.impl.allocator, instructions.len);
-                    zir.instructions = instructions.slice();
-
-                    self.impl.zir = zir;
-                },
-                .zoir => {
-                    const tracy_zone_inner = tracy.traceNamed(@src(), "ZonGen.generate");
-                    defer tracy_zone_inner.end();
-
-                    var zoir = try std.zig.ZonGen.generate(self.impl.allocator, self.tree, .{});
-                    errdefer zoir.deinit(self.impl.allocator);
-
-                    self.impl.zoir = zoir;
-                },
-            }
-
-            _ = self.impl.status.bitReset(@bitOffsetOf(Status, outdated_field), .release); // atomically set [zir|zoir]_outdated
-            const old_has = self.impl.status.bitSet(@bitOffsetOf(Status, has_field), .release); // atomically set has_[zir|zoir]
-            std.debug.assert(old_has == 0); // race condition: another thread set Zir or Zoir even though we hold the lock
-        }
-        return switch (kind) {
-            .zir => self.impl.zir,
-            .zoir => self.impl.zoir,
-        };
+        return @field(self.impl, name);
     }
 
     fn getStatus(self: *const Handle) Status {
@@ -563,15 +525,13 @@ pub const Handle = struct {
         var old_import_uris = self.import_uris;
         var old_cimports = self.cimports;
         var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
-        var old_zir = if (old_status.has_zir) self.impl.zir else null;
-        var old_zoir = if (old_status.has_zoir) self.impl.zoir else null;
+        var old_zzoiir = if (old_status.has_zzoiir) self.impl.zzoiir else null;
 
         self.tree = new_tree;
         self.import_uris = .empty;
         self.cimports = .empty;
         self.impl.document_scope = undefined;
-        self.impl.zir = undefined;
-        self.impl.zoir = undefined;
+        self.impl.zzoiir = undefined;
 
         self.version += 1;
 
@@ -587,8 +547,10 @@ pub const Handle = struct {
         old_cimports.deinit(self.impl.allocator);
 
         if (old_document_scope) |*document_scope| document_scope.deinit(self.impl.allocator);
-        if (old_zir) |*zir| zir.deinit(self.impl.allocator);
-        if (old_zoir) |*zoir| zoir.deinit(self.impl.allocator);
+        if (old_zzoiir) |*zzoiir| switch (self.tree.mode) {
+            .zig => zzoiir.zig.deinit(self.impl.allocator),
+            .zon => zzoiir.zon.deinit(self.impl.allocator),
+        };
     }
 
     fn deinit(self: *Handle) void {
@@ -599,8 +561,10 @@ pub const Handle = struct {
 
         const allocator = self.impl.allocator;
 
-        if (status.has_zir) self.impl.zir.deinit(allocator);
-        if (status.has_zoir) self.impl.zoir.deinit(allocator);
+        if (status.has_zzoiir) switch (self.tree.mode) {
+            .zig => self.impl.zzoiir.zig.deinit(allocator),
+            .zon => self.impl.zzoiir.zon.deinit(allocator),
+        };
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
