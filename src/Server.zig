@@ -50,8 +50,7 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
 // private fields
-thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
-wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
+thread_pool: std.Thread.Pool,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = undefined,
@@ -1028,7 +1027,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
         server.client_capabilities.supports_publish_diagnostics)
     {
         for (server.document_store.handles.values()) |handle| {
-            if (!handle.isOpen()) continue;
+            if (!handle.isLspSynced()) continue;
             try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
         }
     }
@@ -1138,7 +1137,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
         return error.InternalError;
     }
 
-    try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
+    try server.document_store.openLspSyncedDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{
@@ -1158,10 +1157,11 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
             new_text.len,
             DocumentStore.max_document_size,
         });
+        server.allocator.free(new_text);
         return error.InternalError;
     }
 
-    try server.document_store.refreshDocument(handle.uri, new_text);
+    try server.document_store.refreshLspSyncedDocument(handle.uri, new_text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{
@@ -1203,7 +1203,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 }
 
 fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) error{}!void {
-    server.document_store.closeDocument(notification.textDocument.uri);
+    server.document_store.closeLspSyncedDocument(notification.textDocument.uri);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         // clear diagnostics on closed file
@@ -1624,7 +1624,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
     const allocator = options.allocator;
 
     const server = try allocator.create(Server);
-    errdefer server.destroy();
+    errdefer allocator.destroy(server);
 
     server.* = .{
         .allocator = allocator,
@@ -1632,27 +1632,23 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
         .document_store = .{
             .allocator = allocator,
             .config = undefined, // set below
-            .thread_pool = if (zig_builtin.single_threaded) {} else undefined, // set below
+            .thread_pool = &server.thread_pool,
             .diagnostics_collection = &server.diagnostics_collection,
         },
         .job_queue = .init(allocator),
         .thread_pool = undefined, // set below
-        .wait_group = if (zig_builtin.single_threaded) {} else .{},
         .diagnostics_collection = .{ .allocator = allocator },
     };
     server.document_store.config = createDocumentStoreConfig(&server.config_manager);
 
-    if (zig_builtin.single_threaded) {
-        server.thread_pool = {};
-    } else {
-        try server.thread_pool.init(.{
-            .allocator = allocator,
-            .n_jobs = @min(options.max_thread_count, std.Thread.getCpuCount() catch 1),
-        });
-        server.document_store.thread_pool = &server.thread_pool;
-    }
+    try server.thread_pool.init(.{
+        .allocator = allocator,
+        .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
+    });
+    errdefer server.thread_pool.deinit();
 
     server.ip = try InternPool.init(allocator);
+    errdefer server.ip.deinit(allocator);
 
     if (options.transport) |transport| {
         server.setTransport(transport);
@@ -1665,11 +1661,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
 }
 
 pub fn destroy(server: *Server) void {
-    if (!zig_builtin.single_threaded) {
-        server.wait_group.wait();
-        server.thread_pool.deinit();
-    }
-
+    server.thread_pool.deinit();
     while (server.job_queue.readItem()) |job| job.deinit(server.allocator);
     server.job_queue.deinit();
     server.document_store.deinit();
@@ -1697,15 +1689,10 @@ pub fn keepRunning(server: Server) bool {
     }
 }
 
-pub fn waitAndWork(server: *Server) void {
-    if (zig_builtin.single_threaded) return;
-    server.thread_pool.waitAndWork(&server.wait_group);
-    server.wait_group.reset();
-}
-
 /// The main loop of ZLS
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
+    var wait_group: std.Thread.WaitGroup = .{};
     while (server.keepRunning()) {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
@@ -1713,18 +1700,16 @@ pub fn loop(server: *Server) !void {
         try server.sendJsonMessage(json_message);
 
         while (server.job_queue.readItem()) |job| {
-            if (zig_builtin.single_threaded) {
-                server.processJob(job);
-                continue;
-            }
-
             switch (job.syncMode()) {
                 .exclusive => {
-                    server.waitAndWork();
+                    if (!zig_builtin.single_threaded) {
+                        server.thread_pool.waitAndWork(&wait_group);
+                        wait_group.reset();
+                    }
                     server.processJob(job);
                 },
                 .shared => {
-                    server.thread_pool.spawnWg(&server.wait_group, processJob, .{ server, job });
+                    server.thread_pool.spawnWg(&wait_group, processJob, .{ server, job });
                 },
             }
         }
