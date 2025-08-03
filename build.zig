@@ -160,6 +160,11 @@ pub fn build(b: *Build) !void {
                 .version_data = version_data_module,
             });
 
+            const known_folders_module = b.dependency("known_folders", .{
+                .target = release_target,
+                .optimize = optimize,
+            }).module("known-folders");
+
             const exe_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
                 .target = release_target,
@@ -169,7 +174,7 @@ pub fn build(b: *Build) !void {
                 .strip = strip,
                 .imports = &.{
                     .{ .name = "exe_options", .module = exe_options },
-                    .{ .name = "known-folders", .module = zls_release_module.import_table.get("known-folders").? },
+                    .{ .name = "known-folders", .module = known_folders_module },
                     .{ .name = "tracy", .module = zls_release_module.import_table.get("tracy").? },
                     .{ .name = "zls", .module = zls_release_module },
                 },
@@ -196,6 +201,11 @@ pub fn build(b: *Build) !void {
         .version_data = version_data_module,
     });
 
+    const known_folders_module = b.dependency("known_folders", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("known-folders");
+
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -205,7 +215,7 @@ pub fn build(b: *Build) !void {
         .strip = strip,
         .imports = &.{
             .{ .name = "exe_options", .module = exe_options },
-            .{ .name = "known-folders", .module = zls_module.import_table.get("known-folders").? },
+            .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "tracy", .module = zls_module.import_table.get("tracy").? },
             .{ .name = "zls", .module = zls_module },
         },
@@ -405,10 +415,6 @@ fn createZLSModule(
         version_data: *std.Build.Module,
     },
 ) *std.Build.Module {
-    const known_folders_module = b.dependency("known_folders", .{
-        .target = options.target,
-        .optimize = options.optimize,
-    }).module("known-folders");
     const diffz_module = b.dependency("diffz", .{
         .target = options.target,
         .optimize = options.optimize,
@@ -429,7 +435,6 @@ fn createZLSModule(
         .target = options.target,
         .optimize = options.optimize,
         .imports = &.{
-            .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "lsp", .module = lsp_module },
             .{ .name = "tracy", .module = tracy_module },

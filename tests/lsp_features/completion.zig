@@ -4275,9 +4275,9 @@ fn testCompletionWithOptions(
     ctx.server.client_capabilities.supports_completion_deprecated_old = true;
     ctx.server.client_capabilities.supports_completion_deprecated_tag = true;
 
-    ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
-    ctx.server.config.enable_snippets = options.enable_snippets;
-    ctx.server.config.completion_label_details = options.completion_label_details;
+    ctx.server.config_manager.config.enable_argument_placeholders = options.enable_argument_placeholders;
+    ctx.server.config_manager.config.enable_snippets = options.enable_snippets;
+    ctx.server.config_manager.config.completion_label_details = options.completion_label_details;
 
     const test_uri = try ctx.addDocument(.{ .source = text });
 
@@ -4512,8 +4512,8 @@ fn testCompletionTextEdit(
 
     ctx.server.client_capabilities.supports_snippets = true;
 
-    ctx.server.config.enable_argument_placeholders = options.enable_argument_placeholders;
-    ctx.server.config.enable_snippets = options.enable_snippets;
+    ctx.server.config_manager.config.enable_argument_placeholders = options.enable_argument_placeholders;
+    ctx.server.config_manager.config.enable_snippets = options.enable_snippets;
 
     const test_uri = try ctx.addDocument(.{ .source = text });
     const handle = ctx.server.document_store.getHandle(test_uri).?;

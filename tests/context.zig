@@ -3,13 +3,11 @@ const zls = @import("zls");
 const builtin = @import("builtin");
 const test_options = @import("test_options");
 
-const Config = zls.Config;
-const Server = zls.Server;
 const types = zls.lsp.types;
 
 const allocator = std.testing.allocator;
 
-const default_config: Config = .{
+const default_config: zls.configuration.UnresolvedConfig = .{
     .semantic_tokens = .full,
     .prefer_ast_check_as_child_process = false,
     .inlay_hints_exclude_single_argument = false,
@@ -17,19 +15,15 @@ const default_config: Config = .{
 };
 
 pub const Context = struct {
-    server: *Server,
+    server: *zls.Server,
     arena: std.heap.ArenaAllocator,
     file_id: u32 = 0,
 
-    var config_arena: std.heap.ArenaAllocator.State = .{};
-    var cached_config: ?Config = null;
-    var cached_resolved_config: ?@FieldType(Server, "resolved_config") = null;
+    var cached_config_arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    var cached_config_manager: ?zls.configuration.Manager = null;
 
     pub fn init() !Context {
-        const server = try Server.create(allocator);
-        errdefer server.destroy();
-
-        if (cached_config == null and cached_resolved_config == null) {
+        const config_manager = cached_config_manager orelse config_manager: {
             var config = default_config;
             defer if (builtin.target.os.tag != .wasi) {
                 if (config.zig_exe_path) |zig_exe_path| allocator.free(zig_exe_path);
@@ -44,19 +38,25 @@ pub const Context = struct {
                 config.global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
             }
 
-            try server.updateConfiguration2(config, .{ .leaky_config_arena = true });
-        } else {
-            // the configuration has previously been resolved and cached.
-            server.config_arena = config_arena;
-            server.config = cached_config.?;
-            server.resolved_config = cached_resolved_config.?;
+            var config_manager: zls.configuration.Manager = .init;
+            try config_manager.setConfiguration(cached_config_arena.allocator(), .frontend, &config);
+            _ = try config_manager.resolveConfiguration(cached_config_arena.allocator());
+            cached_config_manager = config_manager;
+            break :config_manager config_manager;
+        };
 
-            try server.updateConfiguration2(server.config, .{ .leaky_config_arena = true, .resolve = false });
-        }
+        const server: *zls.Server = try .create(.{
+            .allocator = allocator,
+            .transport = null,
+            .config = null,
+            .config_manager = config_manager,
+        });
+        errdefer server.destroy();
 
-        std.debug.assert(server.resolved_config.zig_lib_dir != null);
+        std.debug.assert(server.config_manager.zig_lib_dir != null);
         std.debug.assert(server.document_store.config.zig_lib_dir != null);
-        std.debug.assert(server.resolved_config.global_cache_dir != null);
+
+        std.debug.assert(server.config_manager.global_cache_dir != null);
         std.debug.assert(server.document_store.config.global_cache_dir != null);
 
         var context: Context = .{
@@ -71,13 +71,7 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        config_arena = self.server.config_arena;
-        cached_config = self.server.config;
-        cached_resolved_config = self.server.resolved_config;
-
-        self.server.config_arena = .{};
-        self.server.config = .{};
-        self.server.resolved_config = .unresolved;
+        self.server.config_manager = .init;
 
         _ = self.server.sendRequestSync(self.arena.allocator(), "shutdown", {}) catch unreachable;
         self.server.sendNotificationSync(self.arena.allocator(), "exit", {}) catch unreachable;

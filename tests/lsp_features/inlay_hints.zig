@@ -595,12 +595,12 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    ctx.server.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
-    ctx.server.config.inlay_hints_show_variable_type_hints = options.kind == .Type;
-    ctx.server.config.inlay_hints_show_builtin = options.show_builtin;
-    ctx.server.config.inlay_hints_exclude_single_argument = options.exclude_single_argument;
-    ctx.server.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
-    ctx.server.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
+    ctx.server.config_manager.config.inlay_hints_show_parameter_name = options.kind == .Parameter;
+    ctx.server.config_manager.config.inlay_hints_show_variable_type_hints = options.kind == .Type;
+    ctx.server.config_manager.config.inlay_hints_show_builtin = options.show_builtin;
+    ctx.server.config_manager.config.inlay_hints_exclude_single_argument = options.exclude_single_argument;
+    ctx.server.config_manager.config.inlay_hints_hide_redundant_param_names = options.hide_redundant_param_names;
+    ctx.server.config_manager.config.inlay_hints_hide_redundant_param_names_last_token = options.hide_redundant_param_names_last_token;
 
     const test_uri = try ctx.addDocument(.{ .source = phr.new_source });
 

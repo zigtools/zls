@@ -935,7 +935,7 @@ fn testDiagnostic(
 ) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
-    ctx.server.config.prefer_ast_check_as_child_process = !options.want_zir;
+    ctx.server.config_manager.config.prefer_ast_check_as_child_process = !options.want_zir;
 
     var phr = try helper.collectClearPlaceholders(allocator, before);
     defer phr.deinit(allocator);

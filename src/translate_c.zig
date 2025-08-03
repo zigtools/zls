@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const zig_builtin = @import("builtin");
-const Config = @import("DocumentStore.zig").Config;
+const DocumentStore = @import("DocumentStore.zig");
 const ast = @import("ast.zig");
 const tracy = @import("tracy");
 const Ast = std.zig.Ast;
@@ -108,7 +108,7 @@ pub const Result = union(enum) {
 /// Caller owns returned memory.
 pub fn translate(
     allocator: std.mem.Allocator,
-    config: Config,
+    config: DocumentStore.Config,
     include_dirs: []const []const u8,
     c_macros: []const []const u8,
     source: []const u8,

@@ -6,28 +6,12 @@ const test_options = @import("test_options");
 const allocator = std.testing.allocator;
 
 test "LSP lifecycle" {
-    var server = try zls.Server.create(allocator);
+    var server: *zls.Server = try .create(.{
+        .allocator = allocator,
+        .transport = null,
+        .config = null,
+    });
     defer server.destroy();
-
-    var zig_exe_path: ?[]const u8 = null;
-    var global_cache_path: ?[]const u8 = null;
-
-    defer if (builtin.target.os.tag != .wasi) {
-        if (zig_exe_path) |path| allocator.free(path);
-        if (global_cache_path) |path| allocator.free(path);
-    };
-    if (builtin.target.os.tag != .wasi) {
-        const cwd = try std.process.getCwdAlloc(allocator);
-        defer allocator.free(cwd);
-        zig_exe_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
-        global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
-    }
-
-    try server.updateConfiguration2(.{
-        .zig_exe_path = zig_exe_path,
-        .zig_lib_path = null,
-        .global_cache_path = global_cache_path,
-    }, .{});
 
     var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
     defer arena_allocator.deinit();
