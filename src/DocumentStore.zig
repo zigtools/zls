@@ -516,24 +516,6 @@ pub const Handle = struct {
         return .none;
     }
 
-    fn getAssociatedBuildFileUriDontResolve(self: *Handle) ?Uri {
-        self.impl.lock.lock();
-        defer self.impl.lock.unlock();
-
-        switch (self.impl.associated_build_file) {
-            .init, .none, .unresolved => return null,
-            .resolved => |build_file| return build_file.uri,
-        }
-    }
-
-    fn getReferencedBuildFiles(self: *Handle) []const *BuildFile {
-        switch (self.impl.associated_build_file) {
-            .init, .none => return &.{},
-            .unresolved => |unresolved| return unresolved.potential_build_files, // some of these could be removed because of `has_been_checked`
-            .resolved => |*build_file| return build_file[0..1],
-        }
-    }
-
     fn getLazy(
         self: *Handle,
         comptime T: type,
