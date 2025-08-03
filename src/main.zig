@@ -404,7 +404,7 @@ fn loadConfiguration(
         config.global_cache_path = try std.fs.path.join(config_arena.allocator(), &.{ cache_dir_path, "zls" });
     }
 
-    try server.updateConfiguration2(&config, .{ .resolve = false });
+    try server.config_manager.setConfiguration2(server.allocator, .frontend, &config);
 }
 
 const ParseArgsResult = struct {
@@ -546,9 +546,12 @@ pub fn main() !u8 {
         log.info("Log File:         none", .{});
     }
 
-    const server = try zls.Server.create(allocator);
+    const server: *zls.Server = try .create(.{
+        .allocator = allocator,
+        .transport = transport,
+        .config = null,
+    });
     defer server.destroy();
-    server.setTransport(transport);
 
     try loadConfiguration(allocator, server, result.config_path);
 

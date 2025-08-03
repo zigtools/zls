@@ -173,8 +173,8 @@ fn testDiagnostics(
         .source = source,
     });
 
-    context.server.config.warn_style = options.warn_style;
-    context.server.config.highlight_global_var_declarations = options.highlight_global_var_declarations;
+    context.server.config_manager.config.warn_style = options.warn_style;
+    context.server.config_manager.config.highlight_global_var_declarations = options.highlight_global_var_declarations;
     context.server.client_capabilities.supports_code_action_fixall = options.autofix;
     context.server.client_capabilities.supports_publish_diagnostics = true;
     try zls.diagnostics.generateDiagnostics(context.server, context.server.document_store.getHandle(uri).?);

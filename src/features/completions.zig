@@ -309,7 +309,8 @@ fn functionTypeCompletion(
 
     const info = func_ty.data.function;
 
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const config = &builder.server.config_manager.config;
+    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
@@ -322,7 +323,7 @@ fn functionTypeCompletion(
     const new_text = switch (new_text_format) {
         .only_name => func_name,
         .snippet => blk: {
-            if (use_snippets and builder.server.config.enable_argument_placeholders) {
+            if (use_snippets and config.enable_argument_placeholders) {
                 break :blk try builder.analyser.stringifyFunction(.{
                     .info = info,
                     .include_fn_keyword = false,
@@ -376,7 +377,7 @@ fn functionTypeCompletion(
             .include_fn_keyword = false,
             .include_name = false,
             .skip_first_param = has_self_param,
-            .parameters = if (builder.server.config.completion_label_details)
+            .parameters = if (config.completion_label_details)
                 .{ .show = .{
                     .include_modifiers = true,
                     .include_names = true,
@@ -444,7 +445,8 @@ fn completeLabel(builder: *Builder) error{OutOfMemory}!void {
 fn populateSnippedCompletions(builder: *Builder, snippets: []const snipped_data.Snipped) error{OutOfMemory}!void {
     try builder.completions.ensureUnusedCapacity(builder.arena, snippets.len);
 
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const config = &builder.server.config_manager.config;
+    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     for (snippets) |snipped| {
         if (!use_snippets and snipped.kind == .Snippet) continue;
 
@@ -464,7 +466,8 @@ const PrepareFunctionCompletionResult = struct { types.Range, types.Range, Funct
 fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult {
     if (builder.cached_prepare_function_completion_result) |result| return result;
 
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const config = &builder.server.config_manager.config;
+    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const source = builder.orig_handle.tree.source;
 
     var start_index = builder.source_index;
@@ -506,8 +509,9 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    const use_placeholders = use_snippets and builder.server.config.enable_argument_placeholders;
+    const config = &builder.server.config_manager.config;
+    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const use_placeholders = use_snippets and config.enable_argument_placeholders;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
@@ -1377,7 +1381,8 @@ fn collectContainerFields(
     const document_scope = try scope_handle.handle.getDocumentScope();
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
 
-    const use_snippets = builder.server.config.enable_snippets and builder.server.client_capabilities.supports_snippets;
+    const config = &builder.server.config_manager.config;
+    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;

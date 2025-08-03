@@ -26,6 +26,8 @@ pub fn generateDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const config = &server.config_manager.config;
+
     if (handle.tree.errors.len == 0) {
         const tracy_zone2 = tracy.traceNamed(@src(), "ast-check");
         defer tracy_zone2.end();
@@ -68,11 +70,11 @@ pub fn generateDiagnostics(
             try code_actions.collectAutoDiscardDiagnostics(&analyser, handle, arena, &diagnostics, server.offset_encoding);
         }
 
-        if (server.config.warn_style and handle.tree.mode == .zig) {
+        if (config.warn_style and handle.tree.mode == .zig) {
             try collectWarnStyleDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
         }
 
-        if (server.config.highlight_global_var_declarations and handle.tree.mode == .zig) {
+        if (config.highlight_global_var_declarations and handle.tree.mode == .zig) {
             try collectGlobalVarDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
         }
 
@@ -269,15 +271,16 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
     defer tracy_zone.end();
 
     std.debug.assert(handle.tree.errors.len == 0);
+    const config = &server.config_manager.config;
 
     if (std.process.can_spawn and
-        server.config.prefer_ast_check_as_child_process and
+        config.prefer_ast_check_as_child_process and
         handle.tree.mode == .zig and // TODO pass `--zon` if available
-        server.config.zig_exe_path != null)
+        config.zig_exe_path != null)
     {
         return getErrorBundleFromAstCheck(
             server.allocator,
-            server.config.zig_exe_path.?,
+            config.zig_exe_path.?,
             &server.zig_ast_check_lock,
             handle.tree.source,
         ) catch |err| {

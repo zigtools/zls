@@ -699,7 +699,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 decl,
                 server.offset_encoding,
                 include_decl,
-                server.config.skip_std_references,
+                server.config_manager.config.skip_std_references,
                 handle,
             ),
         };
