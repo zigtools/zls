@@ -230,7 +230,7 @@ pub const Handle = struct {
     const Status = packed struct(u32) {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
-        /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
+        /// or has been closed with `textDocument/didClose`.
         lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
@@ -743,22 +743,17 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    // instead of destroying the handle here we just mark it not lsp synced
-    // and let it be destroy by the garbage collection code
-
-    const handle = self.handles.get(uri) orelse {
+    const kv = self.handles.fetchSwapRemove(uri) orelse {
         log.warn("Document not found: {s}", .{uri});
         return;
     };
-    if (!handle.setLspSynced(false)) {
+    if (!kv.value.isLspSynced()) {
         log.warn("Document already closed: {s}", .{uri});
     }
 
-    self.garbageCollectionImports() catch {};
-    if (supports_build_system) {
-        self.garbageCollectionCImports() catch {};
-        self.garbageCollectionBuildFiles() catch {};
-    }
+    self.allocator.free(kv.key);
+    kv.value.deinit();
+    self.allocator.destroy(kv.value);
 }
 
 /// Updates a document that is synced over the LSP protocol (`textDocument/didChange`).
@@ -781,19 +776,27 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
 /// **Not thread safe**
-pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_delete: bool) !bool {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const index = self.handles.getIndex(uri) orelse return false;
-    const handle = self.handles.values()[index];
-    if (handle.isLspSynced()) return false;
+    if (should_delete) {
+        const index = self.handles.getIndex(uri) orelse return false;
+        const handle = self.handles.values()[index];
+        if (handle.isLspSynced()) return false;
 
-    log.debug("Closing document {s}", .{handle.uri});
-    self.handles.swapRemoveAt(index);
-    handle.deinit();
-    self.allocator.destroy(handle);
-    self.allocator.free(handle.uri);
+        self.handles.swapRemoveAt(index);
+        handle.deinit();
+        self.allocator.destroy(handle);
+        self.allocator.free(handle.uri);
+    } else {
+        if (self.handles.get(uri)) |handle| {
+            if (handle.isLspSynced()) return false;
+        }
+        const file_contents = self.readFile(uri) orelse return false;
+        _ = try self.createAndStoreDocument(uri, file_contents, false);
+    }
+
     return true;
 }
 
@@ -981,150 +984,6 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
                 },
             ) catch {};
         }
-    }
-}
-
-/// The `DocumentStore` represents a graph structure where every
-/// handle/document is a node and every `@import` and `@cImport` represent
-/// a directed edge.
-/// We can remove every document which cannot be reached from
-/// another document that is `lsp_sycned` (see `Handle.Status.lsp_sycned`)
-/// **Not thread safe** requires access to `DocumentStore.handles`, `DocumentStore.cimports` and `DocumentStore.build_files`
-fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var arena: std.heap.ArenaAllocator = .init(self.allocator);
-    defer arena.deinit();
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(arena.allocator(), self.handles.count());
-
-    var queue: std.ArrayListUnmanaged(Uri) = .empty;
-
-    for (self.handles.values(), 0..) |handle, handle_index| {
-        if (!handle.getStatus().lsp_synced) continue;
-        reachable.set(handle_index);
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    while (queue.pop()) |uri| {
-        const handle_index = self.handles.getIndex(uri) orelse continue;
-        if (reachable.isSet(handle_index)) continue;
-        reachable.set(handle_index);
-
-        const handle = self.handles.values()[handle_index];
-
-        try self.collectDependenciesInternal(arena.allocator(), handle, &queue, false);
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |handle_index| {
-        const handle = self.handles.values()[handle_index];
-        log.debug("Closing document {s}", .{handle.uri});
-        self.handles.swapRemoveAt(handle_index);
-        self.allocator.free(handle.uri);
-        handle.deinit();
-        self.allocator.destroy(handle);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.cimports`
-fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.cimports.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.cimports.count());
-    defer reachable.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.cimports.items(.hash)) |hash| {
-            const index = self.cimports.getIndex(hash) orelse continue;
-            reachable.set(index);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |cimport_index| {
-        var result = self.cimports.values()[cimport_index];
-        const message = switch (result) {
-            .failure => "",
-            .success => |uri| uri,
-        };
-        log.debug("Destroying cimport {s}", .{message});
-        self.cimports.swapRemoveAt(cimport_index);
-        result.deinit(self.allocator);
-    }
-}
-
-/// see `garbageCollectionImports`
-/// **Not thread safe** requires access to `DocumentStore.handles` and `DocumentStore.build_files`
-fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (self.build_files.count() == 0) return;
-
-    var reachable: std.DynamicBitSetUnmanaged = try .initEmpty(self.allocator, self.build_files.count());
-    defer reachable.deinit(self.allocator);
-
-    var queue: std.ArrayListUnmanaged(*BuildFile) = .empty;
-    defer queue.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        for (handle.getReferencedBuildFiles()) |build_file| {
-            const build_file_index = self.build_files.getIndex(build_file.uri).?;
-            if (reachable.isSet(build_file_index)) continue;
-            try queue.append(self.allocator, build_file);
-        }
-
-        if (isBuildFile(handle.uri)) blk: {
-            const build_file_index = self.build_files.getIndex(handle.uri) orelse break :blk;
-            const build_file = self.build_files.values()[build_file_index];
-            if (reachable.isSet(build_file_index)) break :blk;
-            try queue.append(self.allocator, build_file);
-        }
-    }
-
-    while (queue.pop()) |build_file| {
-        const build_file_index = self.build_files.getIndex(build_file.uri).?;
-        if (reachable.isSet(build_file_index)) continue;
-        reachable.set(build_file_index);
-
-        const build_config = build_file.tryLockConfig() orelse continue;
-        defer build_file.unlockConfig();
-
-        try queue.ensureUnusedCapacity(self.allocator, build_config.deps_build_roots.len);
-        for (build_config.deps_build_roots) |dep_build_root| {
-            const dep_build_file_uri = try URI.fromPath(self.allocator, dep_build_root.path);
-            defer self.allocator.free(dep_build_file_uri);
-            const dep_build_file = self.build_files.get(dep_build_file_uri) orelse continue;
-            queue.appendAssumeCapacity(dep_build_file);
-        }
-    }
-
-    var it = reachable.iterator(.{
-        .kind = .unset,
-        .direction = .reverse,
-    });
-
-    while (it.next()) |build_file_index| {
-        const build_file = self.build_files.values()[build_file_index];
-        log.debug("Destroying build file {s}", .{build_file.uri});
-        self.build_files.swapRemoveAt(build_file_index);
-        build_file.deinit(self.allocator);
-        self.allocator.destroy(build_file);
     }
 }
 
@@ -1570,24 +1429,14 @@ pub fn collectDependencies(
     handle: *Handle,
     dependencies: *std.ArrayListUnmanaged(Uri),
 ) error{OutOfMemory}!void {
-    return store.collectDependenciesInternal(allocator, handle, dependencies, true);
-}
-
-fn collectDependenciesInternal(
-    store: *DocumentStore,
-    allocator: std.mem.Allocator,
-    handle: *Handle,
-    dependencies: *std.ArrayListUnmanaged(Uri),
-    lock: bool,
-) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (!supports_build_system) return;
 
     {
-        if (lock) store.lock.lockShared();
-        defer if (lock) store.lock.unlockShared();
+        store.lock.lockShared();
+        defer store.lock.unlockShared();
 
         try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len + handle.cimports.len);
         for (handle.import_uris.items) |uri| {
@@ -1604,16 +1453,8 @@ fn collectDependenciesInternal(
     }
 
     no_build_file: {
-        const build_file_uri = if (lock)
-            try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file
-        else
-            handle.getAssociatedBuildFileUriDontResolve() orelse break :no_build_file;
-
-        const build_file = if (lock)
-            store.getBuildFile(build_file_uri) orelse break :no_build_file
-        else
-            store.build_files.get(build_file_uri) orelse break :no_build_file;
-
+        const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
+        const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
         _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
     }
 }
