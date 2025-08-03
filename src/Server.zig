@@ -1147,6 +1147,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
 }
 
 fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
+    if (notification.contentChanges.len == 0) return;
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
