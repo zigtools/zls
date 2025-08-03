@@ -177,17 +177,16 @@ pub const BuildFile = struct {
 /// Represents a Zig source file.
 pub const Handle = struct {
     uri: Uri,
-    version: u32 = 0,
     tree: Ast,
     /// Contains one entry for every import in the document
-    import_uris: std.ArrayListUnmanaged(Uri) = .empty,
+    import_uris: std.ArrayListUnmanaged(Uri),
     /// Contains one entry for every cimport in the document
-    cimports: std.MultiArrayList(CImportHandle) = .empty,
+    cimports: std.MultiArrayList(CImportHandle),
 
     /// private field
     impl: struct {
         /// @bitCast from/to `Status`
-        status: std.atomic.Value(u32) = .init(@bitCast(Status{})),
+        status: std.atomic.Value(u32),
         /// TODO can we avoid storing one allocator per Handle?
         allocator: std.mem.Allocator,
 
@@ -246,23 +245,64 @@ pub const Handle = struct {
         _: u27 = 0,
     };
 
-    /// takes ownership of `text`
-    pub fn init(allocator: std.mem.Allocator, uri: Uri, text: [:0]const u8) error{OutOfMemory}!Handle {
-        const duped_uri = try allocator.dupe(u8, uri);
-        errdefer allocator.free(duped_uri);
-
+    /// Takes ownership of `text` on success. The `import_uris` be initialized to `.empty`.
+    pub fn init(
+        allocator: std.mem.Allocator,
+        uri: Uri,
+        text: [:0]const u8,
+        lsp_synced: bool,
+    ) error{OutOfMemory}!Handle {
         const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(uri), ".zon")) .zon else .zig;
 
-        const tree = try parseTree(allocator, text, mode);
+        var tree = try parseTree(allocator, text, mode);
         errdefer tree.deinit(allocator);
 
+        var cimports = try collectCIncludes(allocator, tree);
+        errdefer cimports.deinit(allocator);
+
         return .{
-            .uri = duped_uri,
+            .uri = uri,
             .tree = tree,
+            .import_uris = .empty,
+            .cimports = cimports,
             .impl = .{
+                .status = .init(@bitCast(Status{
+                    .lsp_synced = lsp_synced,
+                })),
                 .allocator = allocator,
             },
         };
+    }
+
+    /// Caller must free `Handle.uri` if needed.
+    fn deinit(self: *Handle) void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const status = self.getStatus();
+
+        const allocator = self.impl.allocator;
+
+        if (status.has_zzoiir) switch (self.tree.mode) {
+            .zig => self.impl.zzoiir.zig.deinit(allocator),
+            .zon => self.impl.zzoiir.zon.deinit(allocator),
+        };
+        if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
+        allocator.free(self.tree.source);
+        self.tree.deinit(allocator);
+
+        for (self.import_uris.items) |uri| allocator.free(uri);
+        self.import_uris.deinit(allocator);
+
+        for (self.cimports.items(.source)) |source| allocator.free(source);
+        self.cimports.deinit(allocator);
+
+        switch (self.impl.associated_build_file) {
+            .init, .none, .resolved => {},
+            .unresolved => |*payload| payload.deinit(allocator),
+        }
+
+        self.* = undefined;
     }
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
@@ -529,85 +569,6 @@ pub const Handle = struct {
         tree.tokens = tokens.slice();
         return tree;
     }
-
-    /// Takes ownership of `new_text`.
-    fn setSource(self: *Handle, new_text: [:0]const u8) error{OutOfMemory}!void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const new_status: Handle.Status = .{
-            .lsp_synced = self.getStatus().lsp_synced,
-        };
-
-        const new_tree = try parseTree(self.impl.allocator, new_text, self.tree.mode);
-
-        self.impl.lock.lock();
-        errdefer @compileError("");
-
-        const old_status: Handle.Status = @bitCast(self.impl.status.swap(@bitCast(new_status), .acq_rel));
-
-        var old_tree = self.tree;
-        var old_import_uris = self.import_uris;
-        var old_cimports = self.cimports;
-        var old_document_scope = if (old_status.has_document_scope) self.impl.document_scope else null;
-        var old_zzoiir = if (old_status.has_zzoiir) self.impl.zzoiir else null;
-
-        self.tree = new_tree;
-        self.import_uris = .empty;
-        self.cimports = .empty;
-        self.impl.document_scope = undefined;
-        self.impl.zzoiir = undefined;
-
-        self.version += 1;
-
-        self.impl.lock.unlock();
-
-        self.impl.allocator.free(old_tree.source);
-        old_tree.deinit(self.impl.allocator);
-
-        for (old_import_uris.items) |uri| self.impl.allocator.free(uri);
-        old_import_uris.deinit(self.impl.allocator);
-
-        for (old_cimports.items(.source)) |source| self.impl.allocator.free(source);
-        old_cimports.deinit(self.impl.allocator);
-
-        if (old_document_scope) |*document_scope| document_scope.deinit(self.impl.allocator);
-        if (old_zzoiir) |*zzoiir| switch (self.tree.mode) {
-            .zig => zzoiir.zig.deinit(self.impl.allocator),
-            .zon => zzoiir.zon.deinit(self.impl.allocator),
-        };
-    }
-
-    fn deinit(self: *Handle) void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const status = self.getStatus();
-
-        const allocator = self.impl.allocator;
-
-        if (status.has_zzoiir) switch (self.tree.mode) {
-            .zig => self.impl.zzoiir.zig.deinit(allocator),
-            .zon => self.impl.zzoiir.zon.deinit(allocator),
-        };
-        if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
-        allocator.free(self.tree.source);
-        self.tree.deinit(allocator);
-        allocator.free(self.uri);
-
-        for (self.import_uris.items) |uri| allocator.free(uri);
-        self.import_uris.deinit(allocator);
-
-        for (self.cimports.items(.source)) |source| allocator.free(source);
-        self.cimports.deinit(allocator);
-
-        switch (self.impl.associated_build_file) {
-            .init, .none, .resolved => {},
-            .unresolved => |*payload| payload.deinit(allocator),
-        }
-
-        self.* = undefined;
-    }
 };
 
 pub const ErrorMessage = struct {
@@ -617,9 +578,10 @@ pub const ErrorMessage = struct {
 };
 
 pub fn deinit(self: *DocumentStore) void {
-    for (self.handles.values()) |handle| {
+    for (self.handles.keys(), self.handles.values()) |uri, handle| {
         handle.deinit();
         self.allocator.destroy(handle);
+        self.allocator.free(uri);
     }
     self.handles.deinit(self.allocator);
 
@@ -648,15 +610,9 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     return self.handles.get(uri);
 }
 
-/// Returns a handle to the given document
-/// Will load the document from disk if it hasn't been already
-/// **Thread safe** takes an exclusive lock
-/// This function does not protect against data races from modifying the Handle
-pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    if (self.getHandle(uri)) |handle| return handle;
 
     const file_path = URI.toFsPath(self.allocator, uri) catch |err| {
         log.err("failed to parse URI '{s}': {}", .{ uri, err });
@@ -689,7 +645,7 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         break :blk .{ std.fs.cwd(), file_path };
     };
 
-    const file_contents = dir.readFileAllocOptions(
+    return dir.readFileAllocOptions(
         self.allocator,
         sub_path,
         max_document_size,
@@ -700,9 +656,20 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
         log.err("failed to read document '{s}': {}", .{ file_path, err });
         return null;
     };
+}
 
-    return self.createAndStoreDocument(uri, file_contents) catch |err| {
-        log.err("failed to store document '{s}': {}", .{ file_path, err });
+/// Returns a handle to the given document
+/// Will load the document from disk if it hasn't been already
+/// **Thread safe** takes an exclusive lock
+/// This function does not protect against data races from modifying the Handle
+pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (self.getHandle(uri)) |handle| return handle;
+    const file_contents = self.readFile(uri) orelse return null;
+    return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
+        log.err("failed to store document '{s}': {}", .{ uri, err });
         return null;
     };
 }
@@ -754,60 +721,38 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
     return new_build_file;
 }
 
+/// Opens a document that is synced over the LSP protocol (`textDocument/didOpen`).
 /// **Not thread safe**
-/// Assumes that no other thread is currently accessing the given document
 pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle_ptr: *Handle = try self.allocator.create(Handle);
-    errdefer self.allocator.destroy(handle_ptr);
-
-    const duped_text = try self.allocator.dupeZ(u8, text);
-    handle_ptr.* = try self.createDocument(uri, duped_text, true);
-    errdefer handle_ptr.deinit();
-
-    const gop = try self.handles.getOrPut(self.allocator, handle_ptr.uri);
-    if (gop.found_existing) {
-        if (gop.value_ptr.*.isLspSynced()) {
+    if (self.handles.get(uri)) |handle| {
+        if (handle.isLspSynced()) {
             log.warn("Document already open: {s}", .{uri});
         }
-        std.mem.swap([]const u8, &gop.value_ptr.*.uri, &handle_ptr.uri);
-        gop.value_ptr.*.deinit();
-        self.allocator.destroy(gop.value_ptr.*);
     }
-    gop.value_ptr.* = handle_ptr;
 
-    if (isBuildFile(uri)) {
-        log.debug("Opened document '{s}' (build file)", .{uri});
-    } else {
-        log.debug("Opened document '{s}'", .{uri});
-    }
+    const duped_text = try self.allocator.dupeZ(u8, text);
+    _ = try self.createAndStoreDocument(uri, duped_text, true);
 }
 
-/// **Thread safe** takes a shared lock, takes an exclusive lock (with `tryLock`)
-/// Assumes that no other thread is currently accessing the given document
+/// Closes a document that has been synced over the LSP protocol (`textDocument/didClose`).
+/// **Not thread safe**
 pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
+    // instead of destroying the handle here we just mark it not lsp synced
+    // and let it be destroy by the garbage collection code
 
-        const handle = self.handles.get(uri) orelse {
-            log.warn("Document not found: {s}", .{uri});
-            return;
-        };
-        // instead of destroying the handle here we just mark it not lsp synced
-        // and let it be destroy by the garbage collection code
-        if (!handle.setLspSynced(false)) {
-            log.warn("Document already closed: {s}", .{uri});
-        }
+    const handle = self.handles.get(uri) orelse {
+        log.warn("Document not found: {s}", .{uri});
+        return;
+    };
+    if (!handle.setLspSynced(false)) {
+        log.warn("Document already closed: {s}", .{uri});
     }
-
-    if (!self.lock.tryLock()) return;
-    defer self.lock.unlock();
 
     self.garbageCollectionImports() catch {};
     if (supports_build_system) {
@@ -816,43 +761,40 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     }
 }
 
+/// Updates a document that is synced over the LSP protocol (`textDocument/didChange`).
 /// Takes ownership of `new_text` which has to be allocated with this DocumentStore's allocator.
-/// Assumes that a document with the given `uri` is in the DocumentStore.
-///
-/// **Thread safe** takes a shared lock when called on different documents
-/// **Not thread safe** when called on the same document
+/// **Not thread safe**
 pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = self.getHandle(uri).?;
-    if (!handle.isLspSynced()) {
+    if (self.handles.get(uri)) |old_handle| {
+        if (!old_handle.isLspSynced()) {
+            log.warn("Document modified without being opened: {s}", .{uri});
+        }
+    } else {
         log.warn("Document modified without being opened: {s}", .{uri});
     }
-    try handle.setSource(new_text);
-    handle.import_uris = try self.collectImportUris(handle);
-    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
+
+    _ = try self.createAndStoreDocument(uri, new_text, true);
 }
 
-/// Removes a document from the store, unless said document is lsp synced.
-/// **Thread safe** takes an exclusive lock when called on different documents
-/// **Not thread safe** when called on the same document
+/// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
+/// **Not thread safe**
 pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri) !bool {
-    {
-        const handle = self.getHandle(uri) orelse return false;
-        if (handle.getStatus().lsp_synced) return false;
-    }
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    {
-        self.lock.lock();
-        defer self.lock.unlock();
+    const index = self.handles.getIndex(uri) orelse return false;
+    const handle = self.handles.values()[index];
+    if (handle.isLspSynced()) return false;
 
-        const kv = self.handles.fetchSwapRemove(uri) orelse return false;
-        log.debug("Closing document {s}", .{kv.key});
-        kv.value.deinit();
-        self.allocator.destroy(kv.value);
-        return true;
-    }
+    log.debug("Closing document {s}", .{handle.uri});
+    self.handles.swapRemoveAt(index);
+    handle.deinit();
+    self.allocator.destroy(handle);
+    self.allocator.free(handle.uri);
+    return true;
 }
 
 /// Invalidates a build files.
@@ -1085,6 +1027,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
         const handle = self.handles.values()[handle_index];
         log.debug("Closing document {s}", .{handle.uri});
         self.handles.swapRemoveAt(handle_index);
+        self.allocator.free(handle.uri);
         handle.deinit();
         self.allocator.destroy(handle);
     }
@@ -1491,53 +1434,54 @@ fn uriInImports(
     return false;
 }
 
-/// invalidates any pointers into `DocumentStore.build_files`
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
-fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, lsp_synced: bool) error{OutOfMemory}!Handle {
+fn createAndStoreDocument(
+    self: *DocumentStore,
+    uri: Uri,
+    text: [:0]const u8,
+    lsp_synced: bool,
+) error{OutOfMemory}!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var handle: Handle = try .init(self.allocator, uri, text);
-    errdefer handle.deinit();
-
-    _ = handle.setLspSynced(lsp_synced);
-
-    if (supports_build_system and isBuildFile(handle.uri) and !isInStd(handle.uri)) {
-        _ = self.getOrLoadBuildFile(handle.uri);
-    }
-
-    handle.import_uris = try self.collectImportUris(&handle);
-    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
-
-    return handle;
-}
-
-/// takes ownership of the `text` passed in.
-/// invalidates any pointers into `DocumentStore.build_files`
-/// **Thread safe** takes an exclusive lock
-fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{OutOfMemory}!*Handle {
-    const handle_ptr: *Handle = try self.allocator.create(Handle);
-    errdefer self.allocator.destroy(handle_ptr);
-
-    handle_ptr.* = try self.createDocument(uri, text, false);
-    errdefer handle_ptr.deinit();
-
-    const gop = blk: {
-        self.lock.lock();
-        defer self.lock.unlock();
-        break :blk try self.handles.getOrPutValue(self.allocator, handle_ptr.uri, handle_ptr);
+    var new_handle = Handle.init(self.allocator, uri, text, lsp_synced) catch |err| {
+        self.allocator.free(text);
+        return err;
     };
+    errdefer new_handle.deinit();
+
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const gop = try self.handles.getOrPut(self.allocator, uri);
+    errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
 
     if (gop.found_existing) {
-        handle_ptr.deinit();
-        self.allocator.destroy(handle_ptr);
+        if (lsp_synced) {
+            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
+            gop.value_ptr.*.impl.associated_build_file = .init;
+
+            new_handle.uri = gop.key_ptr.*;
+            gop.value_ptr.*.deinit();
+            gop.value_ptr.*.* = new_handle;
+        } else {
+            // TODO prevent concurrent `createAndStoreDocument` invocations from racing each other
+            new_handle.deinit();
+        }
+    } else {
+        gop.key_ptr.* = try self.allocator.dupe(u8, uri);
+        errdefer self.allocator.free(gop.key_ptr.*);
+
+        gop.value_ptr.* = try self.allocator.create(Handle);
+        errdefer self.allocator.destroy(gop.value_ptr.*);
+
+        new_handle.uri = gop.key_ptr.*;
+        gop.value_ptr.*.* = new_handle;
     }
 
-    if (isBuildFile(gop.value_ptr.*.uri)) {
-        log.debug("Opened document '{s}' (build file)", .{gop.value_ptr.*.uri});
-    } else {
-        log.debug("Opened document '{s}'", .{gop.value_ptr.*.uri});
+    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
+        _ = self.getOrLoadBuildFile(uri);
     }
 
     return gop.value_ptr.*;
