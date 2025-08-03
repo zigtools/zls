@@ -183,7 +183,7 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
     };
     defer if (local_config_dir) |path| allocator.free(path);
 
-    var config_result = try zls.configuration.load(allocator);
+    var config_result = try loadConfigFromSystem(allocator);
     defer config_result.deinit(allocator);
 
     const config_file_path: ?[]const u8 = switch (config_result) {
@@ -218,6 +218,193 @@ fn @"zls env"(allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.fs.F
     writer.flush() catch return file_writer.err.?;
 
     std.process.exit(0);
+}
+
+const LoadConfigResult = union(enum) {
+    success: struct {
+        config: zls.Config,
+        config_arena: std.heap.ArenaAllocator.State,
+        /// file path of the config.json
+        path: []const u8,
+    },
+    failure: struct {
+        /// `null` indicates that the error has already been logged
+        error_bundle: ?std.zig.ErrorBundle,
+
+        pub fn toMessage(self: @This(), allocator: std.mem.Allocator) error{OutOfMemory}!?[]u8 {
+            const error_bundle = self.error_bundle orelse return null;
+            var aw: std.Io.Writer.Allocating = .init(allocator);
+            defer aw.deinit();
+            error_bundle.renderToWriter(.{ .ttyconf = .no_color }, &aw.writer) catch |err| switch (err) {
+                error.WriteFailed => return error.OutOfMemory,
+                error.Unexpected => unreachable, // no tty
+            };
+            return try aw.toOwnedSlice();
+        }
+    },
+    not_found,
+
+    pub fn deinit(self: *LoadConfigResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .success => |*config_with_path| {
+                config_with_path.config_arena.promote(allocator).deinit();
+                allocator.free(config_with_path.path);
+            },
+            .failure => |*payload| {
+                if (payload.error_bundle) |*error_bundle| error_bundle.deinit(allocator);
+            },
+            .not_found => {},
+        }
+    }
+};
+
+fn loadConfigFromFile(allocator: std.mem.Allocator, file_path: []const u8) error{OutOfMemory}!LoadConfigResult {
+    const file_buf = std.fs.cwd().readFileAlloc(allocator, file_path, 16 * 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return .not_found,
+        error.OutOfMemory => |e| return e,
+        else => {
+            log.warn("Error while reading configuration file: {}", .{err});
+            return .{ .failure = .{ .error_bundle = null } };
+        },
+    };
+    defer allocator.free(file_buf);
+
+    const parse_options: std.json.ParseOptions = .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    };
+    var parse_diagnostics: std.json.Diagnostics = .{};
+
+    var scanner: std.json.Scanner = .initCompleteInput(allocator, file_buf);
+    defer scanner.deinit();
+    scanner.enableDiagnostics(&parse_diagnostics);
+
+    var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
+    errdefer arena_allocator.deinit();
+
+    @setEvalBranchQuota(10000);
+    const config = std.json.parseFromTokenSourceLeaky(
+        zls.Config,
+        arena_allocator.allocator(),
+        &scanner,
+        parse_options,
+    ) catch |err| {
+        var eb: std.zig.ErrorBundle.Wip = undefined;
+        try eb.init(allocator);
+        errdefer eb.deinit();
+
+        const src_path = try eb.addString(file_path);
+        const msg = try eb.addString(@errorName(err));
+
+        const src_loc = try eb.addSourceLocation(.{
+            .src_path = src_path,
+            .line = @intCast(parse_diagnostics.getLine()),
+            .column = @intCast(parse_diagnostics.getColumn()),
+            .span_start = @intCast(parse_diagnostics.getByteOffset()),
+            .span_main = @intCast(parse_diagnostics.getByteOffset()),
+            .span_end = @intCast(parse_diagnostics.getByteOffset()),
+        });
+        try eb.addRootErrorMessage(.{
+            .msg = msg,
+            .src_loc = src_loc,
+        });
+
+        return .{ .failure = .{ .error_bundle = try eb.toOwnedBundle("") } };
+    };
+
+    return .{ .success = .{
+        .config = config,
+        .config_arena = arena_allocator.state,
+        .path = try allocator.dupe(u8, file_path),
+    } };
+}
+
+fn loadConfigFromSystem(allocator: std.mem.Allocator) error{OutOfMemory}!LoadConfigResult {
+    if (zig_builtin.target.os.tag == .wasi) return .not_found;
+
+    for (
+        [_]known_folders.KnownFolder{ .local_configuration, .global_configuration },
+        [_][]const u8{ "local", "global" },
+    ) |folder, name| {
+        const folder_path = known_folders.getPath(allocator, folder) catch |err| switch (err) {
+            error.ParseError => {
+                log.warn("failed to resolve {s} configuration path: {}", .{ name, err });
+                continue;
+            },
+            error.OutOfMemory => return error.OutOfMemory,
+        } orelse continue;
+        defer allocator.free(folder_path);
+
+        const config_path = try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
+        defer allocator.free(config_path);
+
+        const result = try loadConfigFromFile(allocator, config_path);
+        switch (result) {
+            .success, .failure => return result,
+            .not_found => continue,
+        }
+    }
+
+    return .not_found;
+}
+
+fn loadConfiguration(
+    allocator: std.mem.Allocator,
+    server: *zls.Server,
+    maybe_config_path: ?[]const u8,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var config_arena: std.heap.ArenaAllocator = .init(allocator);
+    defer config_arena.deinit();
+    var config: zls.Config = .{};
+
+    blk: {
+        var config_result = if (maybe_config_path) |config_path|
+            loadConfigFromFile(allocator, config_path) catch |err| {
+                log.err("failed to load configuration from '{s}': {}", .{ config_path, err });
+                break :blk;
+            }
+        else
+            loadConfigFromSystem(allocator) catch |err| {
+                log.err("failed to load configuration: {}", .{err});
+                break :blk;
+            };
+        defer config_result.deinit(allocator);
+
+        switch (config_result) {
+            .success => |*config_with_path| {
+                log.info("Loaded config:    {s}", .{config_with_path.path});
+                config = config_with_path.config;
+                config_arena.state = config_with_path.config_arena;
+                config_with_path.config_arena = .{};
+            },
+            .failure => |payload| {
+                const message = try payload.toMessage(allocator) orelse break :blk;
+                defer allocator.free(message);
+                server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
+            },
+            .not_found => {},
+        }
+    }
+
+    if (config.global_cache_path == null) blk: {
+        if (zig_builtin.target.os.tag == .wasi) {
+            // will default to `/cache`
+            break :blk;
+        }
+
+        const cache_dir_path = known_folders.getPath(allocator, .cache) catch null orelse {
+            server.showMessage(.Error, "Failed to resolve global cache directory", .{});
+            break :blk;
+        };
+        defer allocator.free(cache_dir_path);
+
+        config.global_cache_path = try std.fs.path.join(config_arena.allocator(), &.{ cache_dir_path, "zls" });
+    }
+
+    try server.updateConfiguration2(config, .{ .resolve = false });
 }
 
 const ParseArgsResult = struct {
@@ -362,7 +549,8 @@ pub fn main() !u8 {
     const server = try zls.Server.create(allocator);
     defer server.destroy();
     server.setTransport(transport);
-    server.config_path = result.config_path;
+
+    try loadConfiguration(allocator, server, result.config_path);
 
     try server.loop();
 

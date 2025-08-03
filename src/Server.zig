@@ -20,7 +20,6 @@ const diff = @import("diff.zig");
 const Uri = @import("uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
-const known_folders = @import("known-folders");
 const build_runner_shared = @import("build_runner/shared.zig");
 const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
@@ -46,8 +45,6 @@ const log = std.log.scoped(.server);
 allocator: std.mem.Allocator,
 /// use updateConfiguration or updateConfiguration2 for setting config options
 config: Config = .{},
-/// will default to lookup in the system and user configuration folder provided by known-folders.
-config_path: ?[]const u8 = null,
 document_store: DocumentStore,
 /// Use `setTransport` to set the Transport.
 transport: ?*lsp.Transport = null,
@@ -69,6 +66,8 @@ resolved_config: ResolvedConfiguration = .unresolved,
 /// This is unlikely to cause any big issues since the user is probably not going set settings
 /// often in one session,
 config_arena: std.heap.ArenaAllocator.State = .{},
+/// Stores messages that should be displayed with `window/showMessage` once the server has been initialized.
+pending_show_messages: std.ArrayListUnmanaged(types.ShowMessageParams) = .empty,
 client_capabilities: ClientCapabilities = .{},
 diagnostics_collection: DiagnosticsCollection,
 workspaces: std.ArrayListUnmanaged(Workspace) = .empty,
@@ -262,13 +261,14 @@ fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport
     return message_stringified;
 }
 
-fn showMessage(
+/// Send a `window/showMessage` notification to the client that will display a message in the user interface.
+pub fn showMessage(
     server: *Server,
     message_type: types.MessageType,
     comptime fmt: []const u8,
     args: anytype,
 ) void {
-    const message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
+    var message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
     defer server.allocator.free(message);
     switch (message_type) {
         .Error => log.err("{s}", .{message}),
@@ -278,10 +278,18 @@ fn showMessage(
         _ => log.debug("{s}", .{message}),
     }
     switch (server.status) {
+        .uninitialized => {
+            server.pending_show_messages.ensureUnusedCapacity(server.allocator, 1) catch return;
+            server.pending_show_messages.appendAssumeCapacity(.{
+                .type = message_type,
+                .message = message,
+            });
+            message = "";
+            return;
+        },
         .initializing,
         .initialized,
         => {},
-        .uninitialized,
         .shutdown,
         .exiting_success,
         .exiting_failure,
@@ -502,6 +510,18 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
     server.status = .initializing;
 
+    {
+        for (server.pending_show_messages.items) |params| {
+            if (server.sendToClientNotification("window/showMessage", params)) |json_message| {
+                server.allocator.free(json_message);
+            } else |err| {
+                log.warn("failed to show message: {}", .{err});
+            }
+        }
+        for (server.pending_show_messages.items) |params| server.allocator.free(params.message);
+        server.pending_show_messages.clearAndFree(server.allocator);
+    }
+
     if (request.initializationOptions) |initialization_options| {
         if (std.json.parseFromValueLeaky(Config, arena, initialization_options, .{
             .ignore_unknown_fields = true,
@@ -509,33 +529,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             try server.updateConfiguration2(new_cfg, .{});
         } else |err| {
             log.err("failed to read initialization_options: {}", .{err});
-        }
-    }
-
-    // TODO Instead of checking `is_test`, possible config paths should be provided by the main function.
-    if (!zig_builtin.is_test) {
-        var maybe_config_result = if (server.config_path) |config_path|
-            configuration.loadFromFile(server.allocator, config_path)
-        else
-            configuration.load(server.allocator);
-
-        if (maybe_config_result) |*config_result| {
-            defer config_result.deinit(server.allocator);
-            switch (config_result.*) {
-                .success => |config_with_path| {
-                    log.info("Loaded config:      {s}", .{config_with_path.path});
-                    try server.updateConfiguration2(config_with_path.config.value, .{});
-                },
-                .failure => |payload| blk: {
-                    try server.updateConfiguration(.{}, .{});
-                    const message = try payload.toMessage(server.allocator) orelse break :blk;
-                    defer server.allocator.free(message);
-                    server.showMessage(.Error, "Failed to load configuration options:\n{s}", .{message});
-                },
-                .not_found => try server.updateConfiguration(.{}, .{}),
-            }
-        } else |err| {
-            log.err("failed to load configuration: {}", .{err});
         }
     }
 
@@ -1433,19 +1426,6 @@ fn resolveConfiguration(
         }
     }
 
-    if (config.global_cache_path == null) blk: {
-        if (zig_builtin.target.os.tag == .wasi) break :blk;
-        if (zig_builtin.is_test) unreachable;
-
-        const cache_dir_path = known_folders.getPath(allocator, .cache) catch null orelse {
-            log.warn("Known-folders could not fetch the cache path", .{});
-            break :blk;
-        };
-        defer allocator.free(cache_dir_path);
-
-        config.global_cache_path = try std.fs.path.join(config_arena, &.{ cache_dir_path, "zls" });
-    }
-
     if (config.global_cache_path) |global_cache_path| blk: {
         if (zig_builtin.target.os.tag == .wasi) {
             log.warn("The 'global_cache_path' config option is ignored on WASI in favor of preopens.", .{});
@@ -2106,6 +2086,8 @@ pub fn destroy(server: *Server) void {
     server.client_capabilities.deinit(server.allocator);
     server.resolved_config.deinit(server.allocator);
     server.config_arena.promote(server.allocator).deinit();
+    for (server.pending_show_messages.items) |params| server.allocator.free(params.message);
+    server.pending_show_messages.deinit(server.allocator);
     server.allocator.destroy(server);
 }
 
