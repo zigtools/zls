@@ -693,21 +693,24 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         .array => |arr| blk: {
             if (arr.items.len != 1) {
                 log.err("Response to 'workspace/configuration' expects an array of size 1 but received {d}", .{arr.items.len});
-                return;
+                break :blk null;
             }
             break :blk switch (arr.items[0]) {
                 .object => arr.items[0],
-                .null => return,
+                .null => null,
                 else => {
                     log.err("Response to 'workspace/configuration' expects an array of objects but got an array of {t}.", .{json});
-                    return;
+                    break :blk null;
                 },
             };
         },
-        else => {
+        else => blk: {
             log.err("Response to 'workspace/configuration' expects an array but received {t}", .{json});
-            return;
+            break :blk null;
         },
+    } orelse {
+        try server.resolveConfiguration();
+        return;
     };
 
     var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
@@ -721,6 +724,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         .{ .ignore_unknown_fields = true },
     ) catch |err| {
         log.err("Failed to parse response from 'workspace/configuration': {}", .{err});
+        try server.resolveConfiguration();
         return;
     };
 
