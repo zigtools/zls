@@ -72,7 +72,7 @@ pub fn main() !void {
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var graph: std.Build.Graph = .{
+    var graph = structInitIgnoreUnknown(std.Build.Graph, .{
         .arena = arena,
         .cache = .{
             .gpa = arena,
@@ -86,7 +86,8 @@ pub fn main() !void {
             .query = .{},
             .result = try std.zig.system.resolveTargetQuery(.{}),
         },
-    };
+        .time_report = false,
+    });
 
     graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
     graph.cache.addPrefix(build_root_directory);
@@ -413,6 +414,7 @@ pub fn main() !void {
 
     rebuild: while (true) : (run.cycle += 1) {
         runSteps(
+            gpa,
             builder,
             &step_stack,
             main_progress_node,
@@ -598,6 +600,7 @@ fn prepare(
 }
 
 fn runSteps(
+    gpa: std.mem.Allocator,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     parent_prog_node: std.Progress.Node,
@@ -620,7 +623,7 @@ fn runSteps(
 
         wait_group.start();
         thread_pool.spawn(workerMakeOneStep, .{
-            &wait_group, b, steps_stack, step, step_prog, run,
+            &wait_group, gpa, b, steps_stack, step, step_prog, run,
         }) catch @panic("OOM");
     }
 
@@ -687,6 +690,7 @@ fn constructGraphAndCheckForDependencyLoop(
 
 fn workerMakeOneStep(
     wg: *std.Thread.WaitGroup,
+    gpa: std.mem.Allocator,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
@@ -746,11 +750,13 @@ fn workerMakeOneStep(
     var sub_prog_node = prog_node.start(s.name, 0);
     defer sub_prog_node.end();
 
-    const make_result = s.make(.{
+    const make_result = s.make(structInitIgnoreUnknown(std.Build.Step.MakeOptions, .{
         .progress_node = sub_prog_node,
         .thread_pool = thread_pool,
         .watch = true,
-    });
+        .gpa = gpa,
+        .web_server = null,
+    }));
 
     if (run.watch) {
         const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
@@ -775,7 +781,7 @@ fn workerMakeOneStep(
         for (s.dependants.items) |dep| {
             wg.start();
             thread_pool.spawn(workerMakeOneStep, .{
-                wg, b, steps_stack, dep, prog_node, run,
+                wg, gpa, b, steps_stack, dep, prog_node, run,
             }) catch @panic("OOM");
         }
     }
@@ -801,7 +807,7 @@ fn workerMakeOneStep(
 
                 wg.start();
                 thread_pool.spawn(workerMakeOneStep, .{
-                    wg, b, steps_stack, dep, prog_node, run,
+                    wg, gpa, b, steps_stack, dep, prog_node, run,
                 }) catch @panic("OOM");
             } else {
                 run.memory_blocked_steps.items[i] = dep;
@@ -1175,6 +1181,7 @@ fn extractBuildInformation(
 
     // run all steps that are dependencies
     try runSteps(
+        gpa,
         b,
         &step_dependencies,
         main_progress_node,
@@ -1487,4 +1494,25 @@ fn serveWatchErrorBundle(
         error_bundle.string_bytes,
     };
     writer.writeVecAll(&data) catch return file_writer.err.?;
+}
+
+/// Initialize a struct with provided values. Any values that are unrecognized
+/// will be ignored.
+fn structInitIgnoreUnknown(T: type, init: anytype) T {
+    var result: T = undefined;
+    inline for (@typeInfo(T).@"struct".fields) |field| {
+        if (@hasField(@TypeOf(init), field.name)) {
+            switch (@typeInfo(field.type)) {
+                .@"struct" => {
+                    @field(result, field.name) = structInitIgnoreUnknown(field.type, @field(init, field.name));
+                },
+                else => {
+                    @field(result, field.name) = @field(init, field.name);
+                },
+            }
+        } else {
+            @field(result, field.name) = comptime field.defaultValue() orelse @compileError("missing struct field: " ++ field.name);
+        }
+    }
+    return result;
 }
