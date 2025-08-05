@@ -779,20 +779,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         no_modules: {
             if (!DocumentStore.supports_build_system) break :no_modules;
 
-            if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| {
-                const build_file = store.getBuildFile(uri).?;
-                const build_config = build_file.tryLockConfig() orelse break :no_modules;
-                defer build_file.unlockConfig();
-
-                try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
-                for (build_config.packages) |pkg| {
-                    completions.putAssumeCapacity(.{
-                        .label = pkg.name,
-                        .kind = .Module,
-                        .detail = pkg.path,
-                    }, {});
-                }
-            } else if (DocumentStore.isBuildFile(builder.orig_handle.uri)) {
+            if (DocumentStore.isBuildFile(builder.orig_handle.uri)) {
                 const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :no_modules;
                 const build_config = build_file.tryLockConfig() orelse break :no_modules;
                 defer build_file.unlockConfig();
@@ -803,6 +790,19 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                         .label = dbr.name,
                         .kind = .Module,
                         .detail = dbr.path,
+                    }, {});
+                }
+            } else if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| {
+                const build_file = store.getBuildFile(uri).?;
+                const build_config = build_file.tryLockConfig() orelse break :no_modules;
+                defer build_file.unlockConfig();
+
+                try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
+                for (build_config.packages) |pkg| {
+                    completions.putAssumeCapacity(.{
+                        .label = pkg.name,
+                        .kind = .Module,
+                        .detail = pkg.path,
                     }, {});
                 }
             }
