@@ -100,7 +100,7 @@ fn logFn(
     }
 
     if (log_file) |file| {
-        var log_writer = file.writer(&.{});
+        var log_writer = file.writerStreaming(&.{});
         file.seekFromEnd(0) catch {};
         log_writer.interface.writeAll(writer.buffered()) catch {};
     }
