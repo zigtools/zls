@@ -50,8 +50,12 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Relevant log output
-      description: If applicable, include ZLS's log output [Guide](https://zigtools.org/zls/guides/view-logs/). This will be automatically formatted into monospace, so no need for backticks.
+      label: Log Output
+      description: Include ZLS's log output [Guide](https://zigtools.org/zls/guides/view-logs/), if applicable. This will be automatically formatted into monospace, so no need for backticks.
+      placeholder: "Should look similar to this:
+        info  ( main ): Starting ZLS      VERSION @ '/path/to/zls'
+        info  ( main ): Log File:         /path/to/zls.log (debug)
+        ..."
       render: shell
     validations:
       required: false
