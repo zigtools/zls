@@ -111,19 +111,20 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     var actual: std.ArrayListUnmanaged(u8) = .empty;
     defer actual.deinit(allocator);
 
-    var stack: std.BoundedArray([]const types.DocumentSymbol, 16) = .{};
+    var stack_buffer: [16][]const types.DocumentSymbol = undefined;
+    var stack: std.ArrayListUnmanaged([]const types.DocumentSymbol) = .initBuffer(&stack_buffer);
     stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
 
-    while (stack.len > 0) {
-        const depth = stack.len - 1;
-        const top = stack.get(depth);
+    while (stack.items.len > 0) {
+        const depth = stack.items.len - 1;
+        const top = stack.items[depth];
         if (top.len > 0) {
             try actual.appendNTimes(allocator, ' ', depth * 2);
             try actual.print(allocator, "{t} {s}\n", .{ top[0].kind, top[0].name });
             if (top[0].children) |children| {
-                try stack.append(children);
+                try stack.appendBounded(children);
             }
-            stack.set(depth, top[1..]);
+            stack.items[depth] = top[1..];
         } else {
             _ = stack.pop();
         }
