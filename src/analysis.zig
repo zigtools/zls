@@ -2489,7 +2489,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
 
-            var either: std.BoundedArray(Type.TypeWithDescriptor, 2) = .{};
+            var either_buffer: [2]Type.TypeWithDescriptor = undefined;
+            var either = std.ArrayListUnmanaged(Type.TypeWithDescriptor).initBuffer(&either_buffer);
 
             if (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) |t| {
                 either.appendAssumeCapacity(.{ .type = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
@@ -2499,7 +2500,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     either.appendAssumeCapacity(.{ .type = t, .descriptor = try std.fmt.allocPrint(analyser.arena, "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
                 }
             }
-            return Type.fromEither(analyser, either.constSlice());
+            return Type.fromEither(analyser, &either_buffer);
         },
         .@"switch",
         .switch_comma,
