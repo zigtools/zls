@@ -160,7 +160,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         if (exclusions.has(name)) return;
     }
 
-    var doc_comments: std.BoundedArray([]const u8, 2) = .{};
+    var doc_comments_buffer: [2][]const u8 = undefined;
+    var doc_comments: std.ArrayListUnmanaged([]const u8) = .initBuffer(&doc_comments_buffer);
     if (try decl_handle.docComments(builder.arena)) |docs| {
         doc_comments.appendAssumeCapacity(docs);
     }
@@ -176,7 +177,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
     const documentation: @FieldType(types.CompletionItem, "documentation") = .{
         .MarkupContent = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
-            .value = try std.mem.join(builder.arena, "\n\n", doc_comments.constSlice()),
+            .value = try std.mem.join(builder.arena, "\n\n", doc_comments.items),
         },
     };
 
