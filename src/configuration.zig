@@ -681,6 +681,24 @@ pub const DidConfigChange = blk: {
     });
 };
 
+fn getPathExtVar(allocator: std.mem.Allocator) error{ EnvironmentVariableNotFound, OutOfMemory }![]const u8 {
+    const ext_keys = [2][]const u8{ "PATH_EXT", "PATHEXT" };
+
+    for (ext_keys) |ext_key| {
+        const res = std.process.getEnvVarOwned(allocator, ext_key) catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => continue,
+            error.OutOfMemory => |e| return e,
+            error.InvalidWtf8 => {
+                log.err("failed to load '{s}' environment variable: {}", .{ ext_key, err });
+                continue;
+            },
+        };
+        return res;
+    }
+
+    return error.EnvironmentVariableNotFound;
+}
+
 pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;
 
@@ -694,15 +712,10 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     };
     defer allocator.free(env_path);
 
-    const env_path_ext = if (is_windows)
-        std.process.getEnvVarOwned(allocator, "PATH_EXT") catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => return null,
-            error.OutOfMemory => |e| return e,
-            error.InvalidWtf8 => |e| {
-                log.err("failed to load 'PATH' environment variable: {}", .{e});
-                return null;
-            },
-        };
+    const env_path_ext = if (is_windows) getPathExtVar(allocator) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return null,
+        error.OutOfMemory => |e| return e,
+    };
     defer if (is_windows) allocator.free(env_path_ext);
 
     var filename_buffer: std.ArrayListUnmanaged(u8) = .empty;
