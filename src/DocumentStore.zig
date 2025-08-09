@@ -804,9 +804,10 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
         if (handle.isLspSynced()) return false;
 
         self.handles.swapRemoveAt(index);
+        const handle_uri = handle.uri;
         handle.deinit();
         self.allocator.destroy(handle);
-        self.allocator.free(handle.uri);
+        self.allocator.free(handle_uri);
     } else {
         if (self.handles.get(uri)) |handle| {
             if (handle.isLspSynced()) return false;
