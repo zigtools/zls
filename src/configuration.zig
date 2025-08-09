@@ -695,7 +695,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     defer allocator.free(env_path);
 
     const env_path_ext = if (is_windows)
-        std.process.getEnvVarOwned(allocator, "PATH_EXT") catch |err| switch (err) {
+        std.process.getEnvVarOwned(allocator, "PATHEXT") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => return null,
             error.OutOfMemory => |e| return e,
             error.InvalidWtf8 => |e| {
