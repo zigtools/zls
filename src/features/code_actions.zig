@@ -967,7 +967,7 @@ fn detectIndentation(source: []const u8) []const u8 {
         if (source[i] == '\\') continue; // multi-line strings might as well.
         return source[i - space_count .. i];
     }
-    return " " ** 4; // recommended style
+    return "    "; // recommended style
 }
 
 // attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'

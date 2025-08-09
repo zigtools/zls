@@ -804,9 +804,10 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
         if (handle.isLspSynced()) return false;
 
         self.handles.swapRemoveAt(index);
+        const handle_uri = handle.uri;
         handle.deinit();
         self.allocator.destroy(handle);
-        self.allocator.free(handle.uri);
+        self.allocator.free(handle_uri);
     } else {
         if (self.handles.get(uri)) |handle| {
             if (handle.isLspSynced()) return false;
@@ -1419,19 +1420,16 @@ pub fn collectDependencies(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!supports_build_system) return;
+    const import_uris = try handle.getImportUris();
 
-    {
+    try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
+    for (import_uris) |uri| {
+        dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
+    }
+
+    if (supports_build_system) {
         store.lock.lockShared();
         defer store.lock.unlockShared();
-
-        const import_uris = try handle.getImportUris();
-
-        try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
-        for (import_uris) |uri| {
-            dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
-        }
-
         for (handle.cimports.items(.hash)) |hash| {
             const result = store.cimports.get(hash) orelse continue;
             switch (result) {
@@ -1441,7 +1439,7 @@ pub fn collectDependencies(
         }
     }
 
-    no_build_file: {
+    if (supports_build_system) no_build_file: {
         const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
         const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
         _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
@@ -1712,17 +1710,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (!supports_build_system) return null;
 
-        if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| blk: {
-            const build_file = self.getBuildFile(build_file_uri).?;
-            const build_config = build_file.tryLockConfig() orelse break :blk;
-            defer build_file.unlockConfig();
-
-            for (build_config.packages) |pkg| {
-                if (std.mem.eql(u8, import_str, pkg.name)) {
-                    return try URI.fromPath(allocator, pkg.path);
-                }
-            }
-        } else if (isBuildFile(handle.uri)) blk: {
+        if (isBuildFile(handle.uri)) blk: {
             const build_file = self.getBuildFile(handle.uri) orelse break :blk;
             const build_config = build_file.tryLockConfig() orelse break :blk;
             defer build_file.unlockConfig();
@@ -1730,6 +1718,16 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
             for (build_config.deps_build_roots) |dep_build_root| {
                 if (std.mem.eql(u8, import_str, dep_build_root.name)) {
                     return try URI.fromPath(allocator, dep_build_root.path);
+                }
+            }
+        } else if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| blk: {
+            const build_file = self.getBuildFile(build_file_uri).?;
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
+
+            for (build_config.packages) |pkg| {
+                if (std.mem.eql(u8, import_str, pkg.name)) {
+                    return try URI.fromPath(allocator, pkg.path);
                 }
             }
         }
