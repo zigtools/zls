@@ -1420,19 +1420,16 @@ pub fn collectDependencies(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!supports_build_system) return;
+    const import_uris = try handle.getImportUris();
 
-    {
+    try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
+    for (import_uris) |uri| {
+        dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
+    }
+
+    if (supports_build_system) {
         store.lock.lockShared();
         defer store.lock.unlockShared();
-
-        const import_uris = try handle.getImportUris();
-
-        try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
-        for (import_uris) |uri| {
-            dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
-        }
-
         for (handle.cimports.items(.hash)) |hash| {
             const result = store.cimports.get(hash) orelse continue;
             switch (result) {
@@ -1442,7 +1439,7 @@ pub fn collectDependencies(
         }
     }
 
-    no_build_file: {
+    if (supports_build_system) no_build_file: {
         const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
         const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
         _ = try build_file.collectBuildConfigPackageUris(allocator, dependencies);
