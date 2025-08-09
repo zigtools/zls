@@ -1116,7 +1116,7 @@ pub fn iterateChildren(
 ) Error!void {
     const ctx = struct {
         fn inner(ctx: *const anyopaque, t: Ast, n: Ast.Node.Index) anyerror!void {
-            return callback(@as(*const @TypeOf(context), @alignCast(@ptrCast(ctx))).*, t, n);
+            return callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, t, n);
         }
     };
     if (iterateChildrenTypeErased(tree, node, @ptrCast(&context), &ctx.inner)) |_| {
@@ -1567,7 +1567,7 @@ pub fn iterateChildrenRecursive(
     const RecursiveContext = struct {
         fn recursive_callback(ctx: *const anyopaque, ast: Ast, child_node: Ast.Node.Index) anyerror!void {
             std.debug.assert(child_node != .root);
-            try callback(@as(*const @TypeOf(context), @alignCast(@ptrCast(ctx))).*, ast, child_node);
+            try callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, ast, child_node);
             try iterateChildrenTypeErased(ast, child_node, ctx, recursive_callback);
         }
     };
