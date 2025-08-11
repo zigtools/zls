@@ -1720,6 +1720,7 @@ pub fn loop(server: *Server) !void {
                 },
             }
         }
+        server.job_queue.clearRetainingCapacity();
     }
 }
 
