@@ -51,7 +51,7 @@ status: Status = .uninitialized,
 
 // private fields
 thread_pool: std.Thread.Pool,
-job_queue: std.fifo.LinearFifo(Job, .Dynamic),
+job_queue: std.ArrayListUnmanaged(Job),
 job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
@@ -1640,7 +1640,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
             .thread_pool = &server.thread_pool,
             .diagnostics_collection = &server.diagnostics_collection,
         },
-        .job_queue = .init(allocator),
+        .job_queue = .empty,
         .thread_pool = undefined, // set below
         .diagnostics_collection = .{ .allocator = allocator },
     };
@@ -1667,8 +1667,10 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
 
 pub fn destroy(server: *Server) void {
     server.thread_pool.deinit();
-    while (server.job_queue.readItem()) |job| job.deinit(server.allocator);
-    server.job_queue.deinit();
+    for (server.job_queue.items) |job| {
+        job.deinit(server.allocator);
+    }
+    server.job_queue.deinit(server.allocator);
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
@@ -1704,7 +1706,7 @@ pub fn loop(server: *Server) !void {
 
         try server.sendJsonMessage(json_message);
 
-        while (server.job_queue.readItem()) |job| {
+        for (server.job_queue.items) |job| {
             switch (job.syncMode()) {
                 .exclusive => {
                     if (!zig_builtin.single_threaded) {
@@ -1979,7 +1981,7 @@ fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!
 fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     server.job_queue_lock.lock();
     defer server.job_queue_lock.unlock();
-    server.job_queue.writeItem(job) catch |err| {
+    server.job_queue.append(server.allocator, job) catch |err| {
         job.deinit(server.allocator);
         return err;
     };
