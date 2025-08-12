@@ -597,7 +597,7 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
         // `{ "watchers": [ { "globPattern": "**/*.{zig,zon}" } ] }`
         var watcher = std.json.ObjectMap.init(arena);
         try watcher.put("globPattern", .{ .string = "**/*.{zig,zon}" });
-        var watchers_arr = try std.ArrayList(std.json.Value).initCapacity(arena, 1);
+        var watchers_arr = try std.array_list.Managed(std.json.Value).initCapacity(arena, 1);
         watchers_arr.appendAssumeCapacity(.{ .object = watcher });
         var fs_watcher_obj: std.json.ObjectMap = std.json.ObjectMap.init(arena);
         try fs_watcher_obj.put("watchers", .{ .array = watchers_arr });
