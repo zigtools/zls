@@ -51,8 +51,7 @@ status: Status = .uninitialized,
 
 // private fields
 thread_pool: std.Thread.Pool,
-job_queue: std.fifo.LinearFifo(Job, .Dynamic),
-job_queue_lock: std.Thread.Mutex = .{},
+wait_group: std.Thread.WaitGroup = .{},
 ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
@@ -147,34 +146,6 @@ pub const Status = enum {
     exiting_success,
     /// the server is received a `exit` notification but has not been shutdown
     exiting_failure,
-};
-
-const Job = union(enum) {
-    incoming_message: std.json.Parsed(Message),
-    generate_diagnostics: DocumentStore.Uri,
-
-    fn deinit(self: Job, allocator: std.mem.Allocator) void {
-        switch (self) {
-            .incoming_message => |parsed_message| parsed_message.deinit(),
-            .generate_diagnostics => |uri| allocator.free(uri),
-        }
-    }
-
-    const SynchronizationMode = enum {
-        /// this `Job` requires exclusive access to `Server` and `DocumentStore`
-        /// all previous jobs will be awaited
-        exclusive,
-        /// this `Job` requires shared access to `Server` and `DocumentStore`
-        /// other non exclusive jobs can be processed in parallel
-        shared,
-    };
-
-    fn syncMode(self: Job) SynchronizationMode {
-        return switch (self) {
-            .incoming_message => |parsed_message| if (isBlockingMessage(parsed_message.value)) .exclusive else .shared,
-            .generate_diagnostics => .shared,
-        };
-    }
 };
 
 fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anytype) error{OutOfMemory}![]u8 {
@@ -352,6 +323,18 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
 
     defer builder.fixall_text_edits = .empty;
     return builder.fixall_text_edits;
+}
+
+fn generateDiagnostics(server: *Server, handle: *DocumentStore.Handle) void {
+    if (!server.client_capabilities.supports_publish_diagnostics) return;
+    const do = struct {
+        fn do(param_server: *Server, param_handle: *DocumentStore.Handle) void {
+            diagnostics_gen.generateDiagnostics(param_server, param_handle) catch |err| switch (err) {
+                error.OutOfMemory => {},
+            };
+        }
+    }.do;
+    server.thread_pool.spawnWg(&server.wait_group, do, .{ server, handle });
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -1032,7 +1015,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
     {
         for (server.document_store.handles.values()) |handle| {
             if (!handle.isLspSynced()) continue;
-            try server.pushJob(.{ .generate_diagnostics = try server.allocator.dupe(u8, handle.uri) });
+            server.generateDiagnostics(handle);
         }
     }
 
@@ -1142,12 +1125,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
     }
 
     try server.document_store.openLspSyncedDocument(notification.textDocument.uri, notification.textDocument.text);
-
-    if (server.client_capabilities.supports_publish_diagnostics) {
-        try server.pushJob(.{
-            .generate_diagnostics = try server.allocator.dupe(u8, notification.textDocument.uri),
-        });
-    }
+    server.generateDiagnostics(server.document_store.getHandle(notification.textDocument.uri).?);
 }
 
 fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
@@ -1167,12 +1145,7 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
     }
 
     try server.document_store.refreshLspSyncedDocument(handle.uri, new_text);
-
-    if (server.client_capabilities.supports_publish_diagnostics) {
-        try server.pushJob(.{
-            .generate_diagnostics = try server.allocator.dupe(u8, notification.textDocument.uri),
-        });
-    }
+    server.generateDiagnostics(handle);
 }
 
 fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidSaveTextDocumentParams) Error!void {
@@ -1640,7 +1613,6 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
             .thread_pool = &server.thread_pool,
             .diagnostics_collection = &server.diagnostics_collection,
         },
-        .job_queue = .init(allocator),
         .thread_pool = undefined, // set below
         .diagnostics_collection = .{ .allocator = allocator },
     };
@@ -1667,8 +1639,6 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
 
 pub fn destroy(server: *Server) void {
     server.thread_pool.deinit();
-    while (server.job_queue.readItem()) |job| job.deinit(server.allocator);
-    server.job_queue.deinit();
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
@@ -1697,40 +1667,38 @@ pub fn keepRunning(server: Server) bool {
 /// The main loop of ZLS
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
-    var wait_group: std.Thread.WaitGroup = .{};
     while (server.keepRunning()) {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
 
-        try server.sendJsonMessage(json_message);
+        var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
+        errdefer arena_allocator.deinit();
 
-        while (server.job_queue.readItem()) |job| {
-            switch (job.syncMode()) {
-                .exclusive => {
-                    if (!zig_builtin.single_threaded) {
-                        server.thread_pool.waitAndWork(&wait_group);
-                        wait_group.reset();
-                    }
-                    server.processJob(job);
-                },
-                .shared => {
-                    server.thread_pool.spawnWg(&wait_group, processJob, .{ server, job });
-                },
-            }
+        const message = message: {
+            const tracy_zone = tracy.traceNamed(@src(), "Message.parse");
+            defer tracy_zone.end();
+            break :message Message.parseFromSliceLeaky(
+                arena_allocator.allocator(),
+                json_message,
+                .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
+            ) catch return error.ParseError;
+        };
+
+        errdefer comptime unreachable;
+
+        if (zig_builtin.single_threaded) {
+            server.processMessageReportError(arena_allocator.state, message);
+            continue;
+        }
+
+        if (isBlockingMessage(message)) {
+            server.thread_pool.waitAndWork(&server.wait_group);
+            server.wait_group.reset();
+            server.processMessageReportError(arena_allocator.state, message);
+        } else {
+            server.thread_pool.spawnWg(&server.wait_group, processMessageReportError, .{ server, arena_allocator.state, message });
         }
     }
-}
-
-pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const parsed_message = Message.parseFromSlice(
-        server.allocator,
-        json_message,
-        .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
-    ) catch return error.ParseError;
-    try server.pushJob(.{ .incoming_message = parsed_message });
 }
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
@@ -1740,7 +1708,7 @@ pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u
         .{ .ignore_unknown_fields = true, .max_value_len = null, .allocate = .alloc_always },
     ) catch return error.ParseError;
     defer parsed_message.deinit();
-    return try server.processMessage(parsed_message.value);
+    return try server.processMessage(parsed_message.arena.allocator(), parsed_message.value);
 }
 
 pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: lsp.ParamsType(method)) Error!lsp.ResultType(method) {
@@ -1812,76 +1780,63 @@ pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime metho
     } else unreachable;
 }
 
-fn processMessage(server: *Server, message: Message) Error!?[]u8 {
+fn processMessage(server: *Server, arena: std.mem.Allocator, message: Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     try server.validateMessage(message);
 
-    var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
-    defer arena_allocator.deinit();
-
     switch (message) {
         .request => |request| switch (request.params) {
             .other => return try server.sendToClientResponse(request.id, @as(?void, null)),
             inline else => |params, method| {
-                const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
+                const result = try server.sendRequestSync(arena, @tagName(method), params);
                 return try server.sendToClientResponse(request.id, result);
             },
         },
         .notification => |notification| switch (notification.params) {
             .other => {},
-            inline else => |params, method| try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params),
+            inline else => |params, method| try server.sendNotificationSync(arena, @tagName(method), params),
         },
         .response => |response| try server.handleResponse(response),
     }
     return null;
 }
 
-fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
-    return server.processMessage(message) catch |err| {
+fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocator.State, message: Message) void {
+    var arena_allocator = arena_state.promote(server.allocator);
+    defer arena_allocator.deinit();
+
+    if (server.processMessage(arena_allocator.allocator(), message)) |json_message| {
+        server.allocator.free(json_message orelse return);
+    } else |err| {
         log.err("failed to process {f}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpStackTrace(trace.*);
         }
 
         switch (message) {
-            .request => |request| return server.sendToClientResponseError(request.id, .{
-                .code = @enumFromInt(switch (err) {
-                    error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
-                    error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
-                    error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
-                    error.MethodNotFound => @intFromEnum(types.ErrorCodes.MethodNotFound),
-                    error.InvalidParams => @intFromEnum(types.ErrorCodes.InvalidParams),
-                    error.InternalError => @intFromEnum(types.ErrorCodes.InternalError),
-                    error.ServerNotInitialized => @intFromEnum(types.ErrorCodes.ServerNotInitialized),
-                    error.RequestFailed => @intFromEnum(types.LSPErrorCodes.RequestFailed),
-                    error.ServerCancelled => @intFromEnum(types.LSPErrorCodes.ServerCancelled),
-                    error.ContentModified => @intFromEnum(types.LSPErrorCodes.ContentModified),
-                    error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
-                }),
-                .message = @errorName(err),
-            }) catch null,
-            .notification, .response => return null,
+            .request => |request| {
+                const json_message = server.sendToClientResponseError(request.id, .{
+                    .code = @enumFromInt(switch (err) {
+                        error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
+                        error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
+                        error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
+                        error.MethodNotFound => @intFromEnum(types.ErrorCodes.MethodNotFound),
+                        error.InvalidParams => @intFromEnum(types.ErrorCodes.InvalidParams),
+                        error.InternalError => @intFromEnum(types.ErrorCodes.InternalError),
+                        error.ServerNotInitialized => @intFromEnum(types.ErrorCodes.ServerNotInitialized),
+                        error.RequestFailed => @intFromEnum(types.LSPErrorCodes.RequestFailed),
+                        error.ServerCancelled => @intFromEnum(types.LSPErrorCodes.ServerCancelled),
+                        error.ContentModified => @intFromEnum(types.LSPErrorCodes.ContentModified),
+                        error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
+                    }),
+                    .message = @errorName(err),
+                }) catch return;
+                server.allocator.free(json_message);
+            },
+            .notification, .response => return,
         }
-    };
-}
-
-fn processJob(server: *Server, job: Job) void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-    tracy_zone.setName(@tagName(job));
-    defer job.deinit(server.allocator);
-
-    switch (job) {
-        .incoming_message => |parsed_message| {
-            const response = server.processMessageReportError(parsed_message.value) orelse return;
-            server.allocator.free(response);
-        },
-        .generate_diagnostics => |uri| {
-            const handle = server.document_store.getHandle(uri) orelse return;
-            diagnostics_gen.generateDiagnostics(server, handle) catch return;
-        },
     }
 }
 
@@ -1973,16 +1928,6 @@ fn handleResponse(server: *Server, response: lsp.JsonRPCMessage.Response) Error!
     } else {
         log.warn("received response from client with id '{s}' that has no handler!", .{id});
     }
-}
-
-/// takes ownership of `job`
-fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
-    server.job_queue_lock.lock();
-    defer server.job_queue_lock.unlock();
-    server.job_queue.writeItem(job) catch |err| {
-        job.deinit(server.allocator);
-        return err;
-    };
 }
 
 fn formatMessage(message: Message, writer: *std.Io.Writer) std.Io.Writer.Error!void {
