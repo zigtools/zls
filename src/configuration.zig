@@ -564,12 +564,18 @@ pub fn getZigEnv(
     switch (zig_env_result.term) {
         .Exited => |code| {
             if (code != 0) {
-                log.err("zig env failed with error_code: {}", .{code});
+                log.err("zig env command exited with error code {d}.", .{code});
+                if (zig_env_result.stderr.len != 0) {
+                    log.err("stderr: {s}", .{zig_env_result.stderr});
+                }
                 return null;
             }
         },
-        else => {
-            log.err("zig env invocation failed", .{});
+        .Signal, .Stopped, .Unknown => {
+            log.err("zig env command terminated unexpectedly.", .{});
+            if (zig_env_result.stderr.len != 0) {
+                log.err("stderr: {s}", .{zig_env_result.stderr});
+            }
             return null;
         },
     }
