@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.1425+7ee6dab3";
+const minimum_build_zig_version = "0.15.0-dev.1425+7ee6dab39";
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// std.Io.poll: update to new I/O API
