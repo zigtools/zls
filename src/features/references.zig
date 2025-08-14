@@ -17,7 +17,7 @@ fn labelReferences(
     decl: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
-) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+) error{OutOfMemory}!std.ArrayList(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -30,7 +30,7 @@ fn labelReferences(
     const first_tok = decl.decl.label.identifier;
     const last_tok = ast.lastToken(tree, decl.decl.label.block);
 
-    var locations: std.ArrayListUnmanaged(types.Location) = .empty;
+    var locations: std.ArrayList(types.Location) = .empty;
     errdefer locations.deinit(allocator);
 
     if (include_decl) {
@@ -62,7 +62,7 @@ fn labelReferences(
 
 const Builder = struct {
     allocator: std.mem.Allocator,
-    locations: std.ArrayListUnmanaged(types.Location) = .empty,
+    locations: std.ArrayList(types.Location) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
     /// the decl is local to a function, block, etc
@@ -242,7 +242,7 @@ fn gatherReferences(
                 continue;
         }
 
-        var handle_dependencies: std.ArrayListUnmanaged([]const u8) = .empty;
+        var handle_dependencies: std.ArrayList([]const u8) = .empty;
         defer handle_dependencies.deinit(allocator);
         try analyser.store.collectDependencies(allocator, handle, &handle_dependencies);
 
@@ -277,7 +277,7 @@ fn symbolReferences(
     /// exclude references from the std library
     skip_std_references: bool,
     curr_handle: *DocumentStore.Handle,
-) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+) error{OutOfMemory}!std.ArrayList(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -346,7 +346,7 @@ fn symbolReferences(
 
 const ControlFlowBuilder = struct {
     const Error = error{OutOfMemory};
-    locations: std.ArrayListUnmanaged(types.Location) = .empty,
+    locations: std.ArrayList(types.Location) = .empty,
     encoding: offsets.Encoding,
     token_handle: Analyser.TokenWithHandle,
     allocator: std.mem.Allocator,
@@ -412,7 +412,7 @@ fn controlFlowReferences(
     token_handle: Analyser.TokenWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
-) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+) error{OutOfMemory}!std.ArrayList(types.Location) {
     const handle = token_handle.handle;
     const tree = handle.tree;
     const kw_token = token_handle.token;
@@ -503,7 +503,7 @@ pub const Callsite = struct {
 
 const CallBuilder = struct {
     allocator: std.mem.Allocator,
-    callsites: std.ArrayListUnmanaged(Callsite) = .empty,
+    callsites: std.ArrayList(Callsite) = .empty,
     /// this is the declaration we are searching for
     decl_handle: Analyser.DeclWithHandle,
     analyser: *Analyser,
@@ -589,7 +589,7 @@ pub fn callsiteReferences(
     skip_std_references: bool,
     /// search other files for references
     workspace: bool,
-) error{OutOfMemory}!std.ArrayListUnmanaged(Callsite) {
+) error{OutOfMemory}!std.ArrayList(Callsite) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -708,7 +708,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     switch (request) {
         .rename => |rename| {
             const escaped_rename = try std.fmt.allocPrint(arena, "{f}", .{std.zig.fmtId(rename.newName)});
-            var changes: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)) = .{};
+            var changes: std.StringArrayHashMapUnmanaged(std.ArrayList(types.TextEdit)) = .{};
 
             for (locations.items) |loc| {
                 const gop = try changes.getOrPutValue(arena, loc.uri, .empty);
@@ -731,7 +731,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         },
         .references => return .{ .references = locations.items },
         .highlight => {
-            var highlights: std.ArrayListUnmanaged(types.DocumentHighlight) = try .initCapacity(arena, locations.items.len);
+            var highlights: std.ArrayList(types.DocumentHighlight) = try .initCapacity(arena, locations.items.len);
             const uri = handle.uri;
             for (locations.items) |loc| {
                 if (!std.mem.eql(u8, loc.uri, uri)) continue;

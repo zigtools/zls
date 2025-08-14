@@ -3,11 +3,11 @@
 
 map: std.AutoArrayHashMapUnmanaged(void, void),
 items: std.MultiArrayList(Item),
-extra: std.ArrayListUnmanaged(u32),
+extra: std.ArrayList(u32),
 string_pool: StringPool,
 lock: RwLock,
 
-limbs: std.ArrayListUnmanaged(usize),
+limbs: std.ArrayList(usize),
 
 decls: std.SegmentedList(InternPool.Decl, 0),
 structs: std.SegmentedList(InternPool.Struct, 0),
@@ -2699,7 +2699,7 @@ fn coerceInMemoryAllowedErrorSets(
     const src_set_names = try ip.indexToKey(src_ty).error_set_type.names.dupe(gpa, ip);
     defer gpa.free(src_set_names);
 
-    var missing_error_buf: std.ArrayListUnmanaged(String) = .empty;
+    var missing_error_buf: std.ArrayList(String) = .empty;
     defer missing_error_buf.deinit(gpa);
 
     for (src_set_names) |name| {

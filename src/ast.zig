@@ -1139,11 +1139,11 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
     );
     defer tree.deinit(allocator);
 
-    var children_tags: std.ArrayListUnmanaged(Ast.Node.Tag) = .empty;
+    var children_tags: std.ArrayList(Ast.Node.Tag) = .empty;
     defer children_tags.deinit(allocator);
 
     const Context = struct {
-        accumulator: *std.ArrayListUnmanaged(Ast.Node.Tag),
+        accumulator: *std.ArrayList(Ast.Node.Tag),
         ally: std.mem.Allocator,
 
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) !void {
@@ -1588,14 +1588,14 @@ pub fn iterateChildrenRecursive(
 pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         allocator: std.mem.Allocator,
-        children: *std.ArrayListUnmanaged(Ast.Node.Index),
+        children: *std.ArrayList(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
             try self.children.append(self.allocator, child_node);
         }
     };
 
-    var children: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
+    var children: std.ArrayList(Ast.Node.Index) = .empty;
     errdefer children.deinit(allocator);
     try iterateChildren(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
     return children.toOwnedSlice(allocator);
@@ -1630,14 +1630,14 @@ test nodeChildrenAlloc {
 pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         allocator: std.mem.Allocator,
-        children: *std.ArrayListUnmanaged(Ast.Node.Index),
+        children: *std.ArrayList(Ast.Node.Index),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
             try self.children.append(self.allocator, child_node);
         }
     };
 
-    var children: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
+    var children: std.ArrayList(Ast.Node.Index) = .empty;
     errdefer children.deinit(allocator);
     try iterateChildrenRecursive(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
     return children.toOwnedSlice(allocator);
@@ -1677,7 +1677,7 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usi
     const Context = struct {
         index: usize,
         allocator: std.mem.Allocator,
-        nodes: std.ArrayListUnmanaged(Ast.Node.Index) = .empty,
+        nodes: std.ArrayList(Ast.Node.Index) = .empty,
 
         pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
             std.debug.assert(node != .root);
@@ -1711,7 +1711,7 @@ pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, t
         }
     };
 
-    var node_locs: std.ArrayListUnmanaged(NodeLoc) = .empty;
+    var node_locs: std.ArrayList(NodeLoc) = .empty;
     defer node_locs.deinit(allocator);
     for (0..tree.nodes.len) |i| {
         const node: Ast.Node.Index = @enumFromInt(i);
@@ -1737,8 +1737,8 @@ pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) err
 
     const Context = struct {
         allocator: std.mem.Allocator,
-        nodes: std.ArrayListUnmanaged(Ast.Node.Index) = .empty,
-        locs: std.ArrayListUnmanaged(offsets.Loc) = .empty,
+        nodes: std.ArrayList(Ast.Node.Index) = .empty,
+        locs: std.ArrayList(offsets.Loc) = .empty,
 
         pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) !void {
             std.debug.assert(node != .root);

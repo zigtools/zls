@@ -22,7 +22,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const process = std.process;
 const ArrayListManaged = if (@hasDecl(std, "array_list")) std.array_list.Managed else std.ArrayList;
-const ArrayList = if (@hasDecl(std, "array_list")) std.ArrayList else std.ArrayListUnmanaged;
+const ArrayList = if (@hasDecl(std, "array_list")) std.ArrayList else std.ArrayList;
 const Step = std.Build.Step;
 const Allocator = std.mem.Allocator;
 

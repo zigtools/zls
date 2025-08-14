@@ -313,7 +313,7 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
 
 const File = struct {
     source: []const u8,
-    messages: std.ArrayListUnmanaged(MsgItem) = .empty,
+    messages: std.ArrayList(MsgItem) = .empty,
 };
 
 const MsgItem = struct {

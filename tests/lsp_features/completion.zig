@@ -446,7 +446,7 @@ test "std.ArrayList" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const array_list: std.ArrayListUnmanaged(S) = undefined;
+        \\const array_list: std.ArrayList(S) = undefined;
         \\const foo = array_list.items[0].<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
@@ -4422,7 +4422,7 @@ fn testCompletionWithOptions(
     }
 
     if (missing.count() != 0 or unexpected.count() != 0) {
-        var buffer: std.ArrayListUnmanaged(u8) = .empty;
+        var buffer: std.ArrayList(u8) = .empty;
         defer buffer.deinit(allocator);
 
         try printLabels(&buffer, found, "found");
@@ -4471,7 +4471,7 @@ fn set_difference(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHa
     return result;
 }
 
-fn printLabels(output: *std.ArrayListUnmanaged(u8), labels: std.StringArrayHashMapUnmanaged(void), name: []const u8) error{OutOfMemory}!void {
+fn printLabels(output: *std.ArrayList(u8), labels: std.StringArrayHashMapUnmanaged(void), name: []const u8) error{OutOfMemory}!void {
     if (labels.count() != 0) {
         try output.print(allocator, "{s}:\n", .{name});
         for (labels.keys()) |label| {

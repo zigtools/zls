@@ -141,7 +141,7 @@ pub const Manager = struct {
             }
         }
 
-        var messages: std.ArrayListUnmanaged([]const u8) = .empty;
+        var messages: std.ArrayList([]const u8) = .empty;
         defer {
             for (messages.items) |msg| allocator.free(msg);
             messages.deinit(allocator);
@@ -355,7 +355,7 @@ pub const Manager = struct {
     fn validateConfiguration(
         config: *Config,
         allocator: std.mem.Allocator,
-        messages: *std.ArrayListUnmanaged([]const u8),
+        messages: *std.ArrayList([]const u8),
     ) error{OutOfMemory}!void {
         if (builtin.os.tag == .wasi) return;
 
@@ -711,7 +711,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         };
     defer if (is_windows) allocator.free(env_path_ext);
 
-    var filename_buffer: std.ArrayListUnmanaged(u8) = .empty;
+    var filename_buffer: std.ArrayList(u8) = .empty;
     defer filename_buffer.deinit(allocator);
 
     var path_it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);

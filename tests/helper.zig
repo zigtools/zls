@@ -5,7 +5,7 @@ const offsets = zls.offsets;
 
 /// returns an array of all placeholder locations
 pub fn collectPlaceholderLocs(allocator: std.mem.Allocator, source: []const u8) ![]offsets.Loc {
-    var locations: std.ArrayListUnmanaged(offsets.Loc) = .empty;
+    var locations: std.ArrayList(offsets.Loc) = .empty;
     errdefer locations.deinit(allocator);
 
     var source_index: usize = 0;
@@ -25,7 +25,7 @@ pub fn collectPlaceholderLocs(allocator: std.mem.Allocator, source: []const u8) 
 
 /// returns `source` where every placeholder is replaced with `new_name`
 pub fn replacePlaceholders(allocator: std.mem.Allocator, source: []const u8, new_name: []const u8) ![]const u8 {
-    var output: std.ArrayListUnmanaged(u8) = .empty;
+    var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
 
     var source_index: usize = 0;
@@ -72,7 +72,7 @@ pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const 
     var locations: std.MultiArrayList(CollectPlaceholdersResult.LocPair) = .empty;
     errdefer locations.deinit(allocator);
 
-    var new_source: std.ArrayListUnmanaged(u8) = .empty;
+    var new_source: std.ArrayList(u8) = .empty;
     errdefer new_source.deinit(allocator);
 
     var source_index: usize = 0;
@@ -190,7 +190,7 @@ pub fn collectAnnotatedSourceLocations(
     allocator: std.mem.Allocator,
     source: []const u8,
 ) error{ OutOfMemory, InvalidSourceLoc }![]AnnotatedSourceLoc {
-    var items: std.ArrayListUnmanaged(AnnotatedSourceLoc) = .empty;
+    var items: std.ArrayList(AnnotatedSourceLoc) = .empty;
     errdefer items.deinit(allocator);
 
     var i: usize = 0;

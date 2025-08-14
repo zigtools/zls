@@ -179,7 +179,7 @@ fn testDiagnostics(
     context.server.client_capabilities.supports_publish_diagnostics = true;
     try zls.diagnostics.generateDiagnostics(context.server, context.server.document_store.getHandle(uri).?);
 
-    var actual_diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
+    var actual_diagnostics: std.ArrayList(types.Diagnostic) = .empty;
 
     try context.server.diagnostics_collection.collectLspDiagnosticsForDocumentTesting(
         uri,

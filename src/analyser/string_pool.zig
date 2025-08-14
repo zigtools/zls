@@ -168,7 +168,7 @@ pub fn StringPool(comptime config: Config) type {
         }
 
         mutex: MutexType,
-        bytes: std.ArrayListUnmanaged(u8),
+        bytes: std.ArrayList(u8),
         map: std.HashMapUnmanaged(u32, void, std.hash_map.StringIndexContext, std.hash_map.default_max_load_percentage),
 
         pub const empty: Pool = .{
@@ -210,7 +210,7 @@ pub fn StringPool(comptime config: Config) type {
 
 /// same as `std.hash_map.StringIndexAdapter` but the hash of the adapted key is precomputed
 const PrecomputedStringIndexAdapter = struct {
-    bytes: *const std.ArrayListUnmanaged(u8),
+    bytes: *const std.ArrayList(u8),
     adapted_key: []const u8,
     precomputed_key_hash: u64,
 

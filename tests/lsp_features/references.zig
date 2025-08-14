@@ -605,7 +605,7 @@ fn testSimpleReferences(source: []const u8) !void {
     defer phr.deinit(allocator);
 
     std.debug.assert(phr.locations.len % 2 == 1);
-    var expected_locations: std.ArrayListUnmanaged(offsets.Loc) = try .initCapacity(allocator, phr.locations.len / 2);
+    var expected_locations: std.ArrayList(offsets.Loc) = try .initCapacity(allocator, phr.locations.len / 2);
     defer expected_locations.deinit(allocator);
 
     const cursor_index = for (phr.locations.items(.old), phr.locations.items(.new), 0..) |old, new, i| {

@@ -19,7 +19,7 @@ fn hoverSymbol(
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?[]const u8 {
-    var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    var doc_strings: std.ArrayList([]const u8) = .empty;
     return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings, null);
 }
 
@@ -28,7 +28,7 @@ fn hoverSymbolRecursive(
     arena: std.mem.Allocator,
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
-    doc_strings: *std.ArrayListUnmanaged([]const u8),
+    doc_strings: *std.ArrayList([]const u8),
     resolved_type_maybe: ?Analyser.Type,
 ) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
@@ -117,11 +117,11 @@ fn hoverSymbolResolvedType(
     arena: std.mem.Allocator,
     def_str: []const u8,
     markup_kind: types.MarkupKind,
-    doc_strings: *std.ArrayListUnmanaged([]const u8),
+    doc_strings: *std.ArrayList([]const u8),
     resolved_type_maybe: ?Analyser.Type,
 ) error{OutOfMemory}!?[]const u8 {
     var referenced: Analyser.ReferencedType.Set = .empty;
-    var resolved_type_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    var resolved_type_strings: std.ArrayList([]const u8) = .empty;
     var has_more = false;
     if (resolved_type_maybe) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
@@ -160,7 +160,7 @@ fn hoverSymbolResolved(
     has_more: bool,
     referenced_types: []const Analyser.ReferencedType,
 ) error{OutOfMemory}![]const u8 {
-    var output: std.ArrayListUnmanaged(u8) = .empty;
+    var output: std.ArrayList(u8) = .empty;
 
     if (markup_kind == .markdown) {
         try output.print(arena, "```zig\n{s}\n```", .{def_str});
@@ -241,7 +241,7 @@ fn hoverDefinitionBuiltin(
 
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-    var contents: std.ArrayListUnmanaged(u8) = .empty;
+    var contents: std.ArrayList(u8) = .empty;
 
     if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
@@ -354,7 +354,7 @@ fn hoverDefinitionStructInit(
 
     const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
 
-    var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+    var doc_strings: std.ArrayList([]const u8) = .empty;
     if (try resolved_type.docComments(arena)) |doc|
         try doc_strings.append(arena, doc);
 
@@ -416,18 +416,18 @@ fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
-    var tys: std.ArrayListUnmanaged(Analyser.Type) = .empty;
+    var decls: std.ArrayList(Analyser.DeclWithHandle) = .empty;
+    var tys: std.ArrayList(Analyser.Type) = .empty;
     const highlight_loc = try analyser.getSymbolFieldAccessesHighlight(arena, handle, source_index, loc, &decls, &tys) orelse return null;
 
-    var content: std.ArrayListUnmanaged([]const u8) = try .initCapacity(arena, decls.items.len + tys.items.len);
+    var content: std.ArrayList([]const u8) = try .initCapacity(arena, decls.items.len + tys.items.len);
 
     for (decls.items) |decl| {
         content.appendAssumeCapacity(try hoverSymbol(analyser, arena, decl, markup_kind) orelse continue);
     }
     for (tys.items) |ty| {
         const def_str = offsets.locToSlice(handle.tree.source, highlight_loc);
-        var doc_strings: std.ArrayListUnmanaged([]const u8) = .empty;
+        var doc_strings: std.ArrayList([]const u8) = .empty;
         content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, def_str, markup_kind, &doc_strings, ty) orelse continue);
     }
 

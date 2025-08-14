@@ -12,7 +12,7 @@ fn fromPathWithOs(
     path: []const u8,
     comptime is_windows: bool,
 ) error{OutOfMemory}![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, path.len + 8);
+    var buf: std.ArrayList(u8) = try .initCapacity(allocator, path.len + 8);
     errdefer buf.deinit(allocator);
 
     buf.appendSliceAssumeCapacity("file://");

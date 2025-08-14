@@ -57,10 +57,10 @@ ip: InternPool = undefined,
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
 /// Stores messages that should be displayed with `window/showMessage` once the server has been initialized.
-pending_show_messages: std.ArrayListUnmanaged(types.ShowMessageParams) = .empty,
+pending_show_messages: std.ArrayList(types.ShowMessageParams) = .empty,
 client_capabilities: ClientCapabilities = .{},
 diagnostics_collection: DiagnosticsCollection,
-workspaces: std.ArrayListUnmanaged(Workspace) = .empty,
+workspaces: std.ArrayList(Workspace) = .empty,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -295,7 +295,7 @@ pub fn autofixWorkaround(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayList(types.TextEdit) {
     if (handle.tree.errors.len != 0) return .empty;
     if (handle.tree.mode == .zon) return .empty;
 

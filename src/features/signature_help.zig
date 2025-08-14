@@ -40,7 +40,7 @@ fn fnProtoToSignatureInfo(
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
-    var params: std.ArrayListUnmanaged(types.ParameterInformation) = .empty;
+    var params: std.ArrayList(types.ParameterInformation) = .empty;
     for (info.parameters) |param| {
         const param_label = try analyser.stringifyParameter(.{
             .info = param,
@@ -131,9 +131,9 @@ pub fn getSignatureInfo(
             };
         }
     };
-    var symbol_stack: std.ArrayListUnmanaged(StackSymbol) = try .initCapacity(arena, 8);
+    var symbol_stack: std.ArrayList(StackSymbol) = try .initCapacity(arena, 8);
     var curr_commas: u32 = 0;
-    var comma_stack: std.ArrayListUnmanaged(u32) = try .initCapacity(arena, 4);
+    var comma_stack: std.ArrayList(u32) = try .initCapacity(arena, 4);
     var curr_token = last_token;
     while (curr_token >= first_token and curr_token != 0) : (curr_token -= 1) {
         switch (tree.tokenTag(curr_token)) {

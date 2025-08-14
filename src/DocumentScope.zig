@@ -12,7 +12,7 @@ scopes: std.MultiArrayList(Scope),
 declarations: std.MultiArrayList(Declaration),
 /// used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap,
-extra: std.ArrayListUnmanaged(u32),
+extra: std.ArrayList(u32),
 /// All identifier token that are in error sets.
 /// When there are multiple error sets that contain the same error, only one of them is stored.
 /// A token that has a doc comment takes priority.
@@ -343,8 +343,8 @@ const ScopeContext = struct {
     doc_scope: *DocumentScope,
 
     current_scope: Scope.OptionalIndex = .none,
-    child_scopes_scratch: std.ArrayListUnmanaged(Scope.Index) = .empty,
-    child_declarations_scratch: std.ArrayListUnmanaged(Declaration.Index) = .empty,
+    child_scopes_scratch: std.ArrayList(Scope.Index) = .empty,
+    child_declarations_scratch: std.ArrayList(Declaration.Index) = .empty,
 
     fn deinit(context: *ScopeContext) void {
         context.child_scopes_scratch.deinit(context.allocator);
