@@ -105,7 +105,7 @@ pub const BuildFile = struct {
 
     /// Usage example:
     /// ```zig
-    /// const package_uris: std.ArrayListUnmanaged([]const u8) = .empty;
+    /// const package_uris: std.ArrayList([]const u8) = .empty;
     /// defer {
     ///     for (package_uris) |uri| allocator.free(uri);
     ///     package_uris.deinit(allocator);
@@ -115,7 +115,7 @@ pub const BuildFile = struct {
     pub fn collectBuildConfigPackageUris(
         self: *BuildFile,
         allocator: std.mem.Allocator,
-        package_uris: *std.ArrayListUnmanaged(Uri),
+        package_uris: *std.ArrayList(Uri),
     ) error{OutOfMemory}!bool {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
@@ -132,7 +132,7 @@ pub const BuildFile = struct {
 
     /// Usage example:
     /// ```zig
-    /// const include_paths: std.ArrayListUnmanaged([]u8) = .empty;
+    /// const include_paths: std.ArrayList([]u8) = .empty;
     /// defer {
     ///     for (include_paths) |path| allocator.free(path);
     ///     include_paths.deinit(allocator);
@@ -142,7 +142,7 @@ pub const BuildFile = struct {
     pub fn collectBuildConfigIncludePaths(
         self: *BuildFile,
         allocator: std.mem.Allocator,
-        include_paths: *std.ArrayListUnmanaged([]const u8),
+        include_paths: *std.ArrayList([]const u8),
     ) !bool {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
@@ -1057,7 +1057,7 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: []const u8) ![][
         self.config.zig_lib_dir.?.path orelse ".",
     };
 
-    var args: std.ArrayListUnmanaged([]const u8) = try .initCapacity(self.allocator, base_args.len);
+    var args: std.ArrayList([]const u8) = try .initCapacity(self.allocator, base_args.len);
     errdefer {
         for (args.items) |arg| self.allocator.free(arg);
         args.deinit(self.allocator);
@@ -1184,7 +1184,7 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) ![]*BuildFile {
     if (isInStd(uri)) return &.{};
 
-    var potential_build_files: std.ArrayListUnmanaged(*BuildFile) = .empty;
+    var potential_build_files: std.ArrayList(*BuildFile) = .empty;
     errdefer potential_build_files.deinit(self.allocator);
 
     const path = try URI.toFsPath(self.allocator, uri);
@@ -1262,7 +1262,7 @@ fn uriAssociatedWithBuild(
     var checked_uris: std.StringHashMapUnmanaged(void) = .empty;
     defer checked_uris.deinit(self.allocator);
 
-    var package_uris: std.ArrayListUnmanaged(Uri) = .empty;
+    var package_uris: std.ArrayList(Uri) = .empty;
     defer {
         for (package_uris.items) |package_uri| self.allocator.free(package_uri);
         package_uris.deinit(self.allocator);
@@ -1415,7 +1415,7 @@ pub fn collectDependencies(
     store: *DocumentStore,
     allocator: std.mem.Allocator,
     handle: *Handle,
-    dependencies: *std.ArrayListUnmanaged(Uri),
+    dependencies: *std.ArrayList(Uri),
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1453,7 +1453,7 @@ pub fn collectIncludeDirs(
     store: *DocumentStore,
     allocator: std.mem.Allocator,
     handle: *Handle,
-    include_dirs: *std.ArrayListUnmanaged([]const u8),
+    include_dirs: *std.ArrayList([]const u8),
 ) !bool {
     comptime std.debug.assert(supports_build_system);
 
@@ -1494,7 +1494,7 @@ pub fn collectCMacros(
     store: *DocumentStore,
     allocator: std.mem.Allocator,
     handle: *Handle,
-    c_macros: *std.ArrayListUnmanaged([]const u8),
+    c_macros: *std.ArrayList([]const u8),
 ) !bool {
     comptime std.debug.assert(supports_build_system);
 
@@ -1548,7 +1548,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         }
     }
 
-    var include_dirs: std.ArrayListUnmanaged([]const u8) = .empty;
+    var include_dirs: std.ArrayList([]const u8) = .empty;
     defer {
         for (include_dirs.items) |path| {
             self.allocator.free(path);
@@ -1561,7 +1561,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         return null;
     };
 
-    var c_macros: std.ArrayListUnmanaged([]const u8) = .empty;
+    var c_macros: std.ArrayList([]const u8) = .empty;
     defer {
         for (c_macros.items) |c_macro| {
             self.allocator.free(c_macro);

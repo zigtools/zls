@@ -108,11 +108,11 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var actual: std.ArrayListUnmanaged(u8) = .empty;
+    var actual: std.ArrayList(u8) = .empty;
     defer actual.deinit(allocator);
 
     var stack_buffer: [16][]const types.DocumentSymbol = undefined;
-    var stack: std.ArrayListUnmanaged([]const types.DocumentSymbol) = .initBuffer(&stack_buffer);
+    var stack: std.ArrayList([]const types.DocumentSymbol) = .initBuffer(&stack_buffer);
     stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
 
     while (stack.items.len > 0) {

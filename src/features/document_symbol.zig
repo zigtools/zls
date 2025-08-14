@@ -15,7 +15,7 @@ const Symbol = struct {
     kind: types.SymbolKind,
     loc: offsets.Loc,
     selection_loc: offsets.Loc,
-    children: std.ArrayListUnmanaged(Symbol),
+    children: std.ArrayList(Symbol),
 };
 
 const Context = struct {
@@ -23,7 +23,7 @@ const Context = struct {
     last_var_decl_name: ?[]const u8,
     parent_container: Ast.Node.Index,
     parent_node: Ast.Node.Index,
-    parent_symbols: *std.ArrayListUnmanaged(Symbol),
+    parent_symbols: *std.ArrayList(Symbol),
     total_symbol_count: *usize,
 };
 
@@ -176,13 +176,13 @@ fn convertSymbols(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var symbol_buffer: std.ArrayListUnmanaged(types.DocumentSymbol) = .empty;
+    var symbol_buffer: std.ArrayList(types.DocumentSymbol) = .empty;
     try symbol_buffer.ensureTotalCapacityPrecise(arena, total_symbol_count);
 
     // instead of converting every `offsets.Loc` to `types.Range` by calling `offsets.locToRange`
     // we instead store a mapping from source indices to their desired position, sort them by their source index
     // and then iterate through them which avoids having to re-iterate through the source file to find out the line number
-    var mappings: std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping) = .empty;
+    var mappings: std.ArrayList(offsets.multiple.IndexToPositionMapping) = .empty;
     try mappings.ensureTotalCapacityPrecise(arena, total_symbol_count * 4);
 
     const result = convertSymbolsInternal(from, &symbol_buffer, &mappings);
@@ -194,8 +194,8 @@ fn convertSymbols(
 
 fn convertSymbolsInternal(
     from: []const Symbol,
-    symbol_buffer: *std.ArrayListUnmanaged(types.DocumentSymbol),
-    mappings: *std.ArrayListUnmanaged(offsets.multiple.IndexToPositionMapping),
+    symbol_buffer: *std.ArrayList(types.DocumentSymbol),
+    mappings: *std.ArrayList(offsets.multiple.IndexToPositionMapping),
 ) []types.DocumentSymbol {
     // acquire storage for exactly `from.len` symbols
     const prev_len = symbol_buffer.items.len;
@@ -228,7 +228,7 @@ pub fn getDocumentSymbols(
     tree: Ast,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.DocumentSymbol {
-    var root_symbols: std.ArrayListUnmanaged(Symbol) = .empty;
+    var root_symbols: std.ArrayList(Symbol) = .empty;
     var total_symbol_count: usize = 0;
 
     var ctx: Context = .{

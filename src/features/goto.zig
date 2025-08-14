@@ -202,7 +202,7 @@ fn gotoDefinitionFieldAccess(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
-    var locs: std.ArrayListUnmanaged(types.DefinitionLink) = .empty;
+    var locs: std.ArrayList(types.DefinitionLink) = .empty;
 
     for (accesses) |access| {
         if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
@@ -239,7 +239,7 @@ fn gotoDefinitionString(
                 if (!DocumentStore.supports_build_system) return null;
 
                 if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
-                var include_dirs: std.ArrayListUnmanaged([]const u8) = .empty;
+                var include_dirs: std.ArrayList([]const u8) = .empty;
                 _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
                     log.err("failed to resolve include paths: {}", .{err});
                     return null;

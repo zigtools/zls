@@ -51,7 +51,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var got: std.ArrayListUnmanaged([]const u8) = .empty;
+    var got: std.ArrayList([]const u8) = .empty;
     defer got.deinit(allocator);
 
     var it: ?*const types.SelectionRange = &selectionRanges[0];

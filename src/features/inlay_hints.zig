@@ -154,7 +154,7 @@ const Builder = struct {
     analyser: *Analyser,
     config: *const Config,
     handle: *DocumentStore.Handle,
-    hints: std.ArrayListUnmanaged(InlayHint) = .empty,
+    hints: std.ArrayList(InlayHint) = .empty,
     hover_kind: types.MarkupKind,
 
     fn appendParameterHint(

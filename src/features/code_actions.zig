@@ -19,8 +19,8 @@ pub const Builder = struct {
     offset_encoding: offsets.Encoding,
     only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
 
-    actions: std.ArrayListUnmanaged(types.CodeAction) = .empty,
-    fixall_text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty,
+    actions: std.ArrayList(types.CodeAction) = .empty,
+    fixall_text_edits: std.ArrayList(types.TextEdit) = .empty,
 
     pub fn generateCodeAction(
         builder: *Builder,
@@ -162,7 +162,7 @@ pub fn generateStringLiteralCodeActions(
     if (!std.unicode.utf8ValidateSlice(parsed)) return;
     const with_slashes = try std.mem.replaceOwned(u8, builder.arena, parsed, "\n", "\n    \\\\"); // Hardcoded 4 spaces
 
-    var result: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, with_slashes.len + 3);
+    var result: std.ArrayList(u8) = try .initCapacity(builder.arena, with_slashes.len + 3);
     result.appendSliceAssumeCapacity("\\\\");
     result.appendSliceAssumeCapacity(with_slashes);
     result.appendAssumeCapacity('\n');
@@ -193,7 +193,7 @@ pub fn generateMultilineStringCodeActions(
 
     // collect the text in the literal
     const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
-    var str_escaped: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, 2 * (loc.end - loc.start));
+    var str_escaped: std.ArrayList(u8) = try .initCapacity(builder.arena, 2 * (loc.end - loc.start));
     str_escaped.appendAssumeCapacity('"');
     for (start..end) |i| {
         std.debug.assert(tree.tokenTag(@intCast(i)) == .multiline_string_literal_line);
@@ -247,7 +247,7 @@ pub fn collectAutoDiscardDiagnostics(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -638,11 +638,11 @@ fn handleUnorganizedImport(builder: *Builder) !void {
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
 
-    var edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
+    var edits: std.ArrayList(types.TextEdit) = .empty;
 
     // add sorted imports
     {
-        var new_text: std.ArrayListUnmanaged(u8) = .empty;
+        var new_text: std.ArrayList(u8) = .empty;
 
         if (placement == .bottom) {
             try new_text.append(builder.arena, '\n');
@@ -978,7 +978,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
     const num_separators = std.mem.count(u8, trimmed_identifier, "_");
 
     const new_text_len = trimmed_identifier.len - num_separators;
-    var new_text: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, new_text_len);
+    var new_text: std.ArrayList(u8) = try .initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
 
     var idx: usize = 0;
@@ -1042,7 +1042,7 @@ fn createDiscardText(
         identifier_name.len +
         "; // autofix".len +
         if (add_suffix_newline) 1 + indent.len else 0;
-    var new_text: std.ArrayListUnmanaged(u8) = try .initCapacity(builder.arena, new_text_len);
+    var new_text: std.ArrayList(u8) = try .initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
     new_text.appendSliceAssumeCapacity(indent);

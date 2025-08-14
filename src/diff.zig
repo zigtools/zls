@@ -15,7 +15,7 @@ pub fn edits(
     before: []const u8,
     after: []const u8,
     encoding: offsets.Encoding,
-) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+) error{OutOfMemory}!std.ArrayList(types.TextEdit) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -31,7 +31,7 @@ pub fn edits(
         }
     }
 
-    var eds: std.ArrayListUnmanaged(types.TextEdit) = try .initCapacity(allocator, edit_count);
+    var eds: std.ArrayList(types.TextEdit) = try .initCapacity(allocator, edit_count);
     errdefer {
         for (eds.items) |edit| allocator.free(edit.newText);
         eds.deinit(allocator);
@@ -84,7 +84,7 @@ pub fn applyContentChanges(
         break :blk .{ null, text };
     };
 
-    var text_array: std.ArrayListUnmanaged(u8) = .empty;
+    var text_array: std.ArrayList(u8) = .empty;
     errdefer text_array.deinit(allocator);
 
     try text_array.appendSlice(allocator, last_full_text);
@@ -123,7 +123,7 @@ pub fn applyTextEdits(
 
     std.mem.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);
 
-    var final_text: std.ArrayListUnmanaged(u8) = .empty;
+    var final_text: std.ArrayList(u8) = .empty;
     errdefer final_text.deinit(allocator);
 
     var last: usize = 0;

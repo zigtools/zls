@@ -22,7 +22,7 @@ const Inclusivity = enum {
 
 const Builder = struct {
     allocator: std.mem.Allocator,
-    locations: std.ArrayListUnmanaged(FoldingRange),
+    locations: std.ArrayList(FoldingRange),
     tree: Ast,
     encoding: offsets.Encoding,
 
@@ -286,7 +286,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     }
 
     // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
-    var stack: std.ArrayListUnmanaged(usize) = .empty;
+    var stack: std.ArrayList(usize) = .empty;
     defer stack.deinit(allocator);
 
     var i: usize = 0;

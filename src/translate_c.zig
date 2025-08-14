@@ -35,7 +35,7 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     std.debug.assert(ast.isBuiltinCall(tree, node));
     std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, tree.nodeMainToken(node)), "@cImport"));
 
-    var output: std.ArrayListUnmanaged(u8) = .empty;
+    var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
@@ -50,7 +50,7 @@ fn convertCIncludeInternal(
     allocator: std.mem.Allocator,
     tree: Ast,
     node: Ast.Node.Index,
-    output: *std.ArrayListUnmanaged(u8),
+    output: *std.ArrayList(u8),
 ) error{ OutOfMemory, Unsupported }!void {
     var buffer: [2]Ast.Node.Index = undefined;
     if (tree.blockStatements(&buffer, node)) |statements| {
@@ -157,7 +157,7 @@ pub fn translate(
     };
 
     const argc = base_args.len + 2 * include_dirs.len + c_macros.len + 1;
-    var argv: std.ArrayListUnmanaged([]const u8) = try .initCapacity(allocator, argc);
+    var argv: std.ArrayList([]const u8) = try .initCapacity(allocator, argc);
     defer argv.deinit(allocator);
 
     argv.appendSliceAssumeCapacity(base_args);

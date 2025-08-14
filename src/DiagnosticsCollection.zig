@@ -257,7 +257,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
 
             _ = arena_allocator.reset(.retain_capacity);
 
-            var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+            var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
             try collection.collectLspDiagnosticsForDocument(document_uri, collection.offset_encoding, arena_allocator.allocator(), &diagnostics);
 
             const notification: lsp.TypedJsonRPCNotification(lsp.types.PublishDiagnosticsParams) = .{
@@ -282,7 +282,7 @@ fn collectLspDiagnosticsForDocument(
     document_uri: []const u8,
     offset_encoding: offsets.Encoding,
     arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(lsp.types.Diagnostic),
+    diagnostics: *std.ArrayList(lsp.types.Diagnostic),
 ) error{OutOfMemory}!void {
     for (collection.tag_set.values()) |entry| {
         if (entry.diagnostics_set.get(document_uri)) |per_document| {
@@ -319,7 +319,7 @@ fn convertErrorBundleToLSPDiangostics(
     document_uri: []const u8,
     offset_encoding: offsets.Encoding,
     arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(lsp.types.Diagnostic),
+    diagnostics: *std.ArrayList(lsp.types.Diagnostic),
     is_single_document: bool,
 ) error{OutOfMemory}!void {
     if (eb.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
@@ -364,7 +364,7 @@ fn convertErrorBundleToLSPDiangostics(
             break :blk lsp_notes;
         };
 
-        var tags: std.ArrayListUnmanaged(lsp.types.DiagnosticTag) = .empty;
+        var tags: std.ArrayList(lsp.types.DiagnosticTag) = .empty;
 
         const diag_msg = eb.nullTerminatedString(err.msg);
 
@@ -481,7 +481,7 @@ test DiagnosticsCollection {
         try std.testing.expectEqual(1, collection.outdated_files.count());
         try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -493,7 +493,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 0, null, eb2);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -503,7 +503,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 2, null, eb2);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
@@ -513,7 +513,7 @@ test DiagnosticsCollection {
     {
         try collection.pushErrorBundle(.parse, 3, null, .empty);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(0, diagnostics.items.len);
@@ -523,7 +523,7 @@ test DiagnosticsCollection {
         try collection.pushErrorBundle(@enumFromInt(16), 4, null, eb2);
         try collection.pushErrorBundle(@enumFromInt(17), 4, null, eb3);
 
-        var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(2, diagnostics.items.len);

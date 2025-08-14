@@ -24,7 +24,7 @@ const Builder = struct {
     arena: std.mem.Allocator,
     orig_handle: *DocumentStore.Handle,
     source_index: usize,
-    completions: std.ArrayListUnmanaged(types.CompletionItem),
+    completions: std.ArrayList(types.CompletionItem),
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
 };
 
@@ -109,7 +109,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
             });
         },
         .container => {
-            var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
+            var decls: std.ArrayList(Analyser.DeclWithHandle) = .empty;
             try builder.analyser.collectDeclarationsOfContainer(ty, builder.orig_handle, !ty.is_type_val, &decls);
 
             for (decls.items) |decl_with_handle| {
@@ -161,7 +161,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
     }
 
     var doc_comments_buffer: [2][]const u8 = undefined;
-    var doc_comments: std.ArrayListUnmanaged([]const u8) = .initBuffer(&doc_comments_buffer);
+    var doc_comments: std.ArrayList([]const u8) = .initBuffer(&doc_comments_buffer);
     if (try decl_handle.docComments(builder.arena)) |docs| {
         doc_comments.appendAssumeCapacity(docs);
     }
@@ -552,7 +552,7 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var decls: std.ArrayListUnmanaged(Analyser.DeclWithHandle) = .empty;
+    var decls: std.ArrayList(Analyser.DeclWithHandle) = .empty;
     try builder.analyser.collectAllSymbolsAtSourceIndex(builder.orig_handle, builder.source_index, &decls);
     for (decls.items) |decl_with_handle| {
         try declToCompletion(builder, decl_with_handle);
@@ -711,7 +711,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
     const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_separator_index orelse string_content_loc.start });
 
-    var search_paths: std.ArrayListUnmanaged([]const u8) = .empty;
+    var search_paths: std.ArrayList([]const u8) = .empty;
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
@@ -968,7 +968,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
 
     const store = &builder.server.document_store;
 
-    var dependencies: std.ArrayListUnmanaged(DocumentStore.Uri) = .empty;
+    var dependencies: std.ArrayList(DocumentStore.Uri) = .empty;
     try dependencies.append(builder.arena, builder.orig_handle.uri);
     try store.collectDependencies(builder.arena, builder.orig_handle, &dependencies);
 

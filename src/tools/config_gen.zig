@@ -428,7 +428,7 @@ const Tokenizer = struct {
 const Builtin = struct {
     name: []const u8,
     signature: []const u8,
-    documentation: std.ArrayListUnmanaged(u8),
+    documentation: std.ArrayList(u8),
 };
 
 /// parses a `langref.html.in` file and extracts builtins from this section: `https://ziglang.org/documentation/master/#Builtin-Functions`
@@ -451,7 +451,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
     };
     var state: State = .searching;
 
-    var builtins: std.ArrayListUnmanaged(Builtin) = .empty;
+    var builtins: std.ArrayList(Builtin) = .empty;
     errdefer {
         for (builtins.items) |*builtin| {
             builtin.documentation.deinit(allocator);
@@ -788,7 +788,7 @@ const Parameter = struct {
 /// and outputs its parameters and return type:
 /// `comptime DestType: type`, `integer: anytype`, `DestType`
 fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}!struct { []Parameter, []const u8 } {
-    var parameters: std.ArrayListUnmanaged(Parameter) = .empty;
+    var parameters: std.ArrayList(Parameter) = .empty;
     defer parameters.deinit(allocator);
 
     var argument_start: usize = 0;
@@ -827,7 +827,7 @@ fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, sig
 /// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
 /// and outputs a snippet: `@intToEnum(${1:comptime DestType: type}, ${2:integer: anytype})`
 fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}![]const u8 {
-    var snippet: std.ArrayListUnmanaged(u8) = .empty;
+    var snippet: std.ArrayList(u8) = .empty;
     defer snippet.deinit(allocator);
 
     const start_index = 1 + std.mem.indexOfScalar(u8, signature, '(').?;

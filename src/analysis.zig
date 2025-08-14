@@ -124,7 +124,7 @@ pub fn getDocCommentTokenIndex(tree: *const Ast, base_token: Ast.TokenIndex) ?As
 }
 
 pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, container_doc: bool) error{OutOfMemory}![]const u8 {
-    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    var lines: std.ArrayList([]const u8) = .empty;
     defer lines.deinit(allocator);
 
     var lines_start_with_space = true;
@@ -476,7 +476,7 @@ pub fn getVariableSignature(
                 break :end_token ast.lastToken(tree, init_node);
             }
 
-            var members_source: std.ArrayListUnmanaged(u8) = .empty;
+            var members_source: std.ArrayList(u8) = .empty;
 
             for (container_decl.ast.members) |member| {
                 const member_line_start = offsets.lineLocUntilIndex(tree.source, tree.tokenStart(tree.firstToken(member))).start;
@@ -527,7 +527,7 @@ fn trimCommonIndentation(allocator: std.mem.Allocator, str: []const u8, preserve
     if (common_indent == 0) return try allocator.dupe(u8, str);
 
     const capacity = str.len - non_empty_lines * common_indent;
-    var output: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, capacity);
+    var output: std.ArrayList(u8) = try .initCapacity(allocator, capacity);
     std.debug.assert(capacity == output.capacity);
     errdefer @compileError("error would leak here");
 
@@ -1698,7 +1698,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
     // TODO: Set `workspace` to true; current problems
     // - we gather dependencies, not dependents
 
-    var possible: std.ArrayListUnmanaged(Type.TypeWithDescriptor) = .empty;
+    var possible: std.ArrayList(Type.TypeWithDescriptor) = .empty;
 
     for (refs.items) |ref| {
         const handle = analyser.store.getOrLoadHandle(ref.uri).?;
@@ -1797,7 +1797,7 @@ const FindBreaks = struct {
     label: ?[]const u8,
     allow_unlabeled: bool,
     allocator: std.mem.Allocator,
-    break_operands: std.ArrayListUnmanaged(Ast.Node.Index) = .empty,
+    break_operands: std.ArrayList(Ast.Node.Index) = .empty,
 
     fn deinit(context: *FindBreaks) void {
         context.break_operands.deinit(context.allocator);
@@ -2113,7 +2113,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
 
         .error_set_decl => {
             const lbrace, const rbrace = tree.nodeData(node).token_and_token;
-            var strings: std.ArrayListUnmanaged(InternPool.String) = .empty;
+            var strings: std.ArrayList(InternPool.String) = .empty;
             defer strings.deinit(analyser.gpa);
             var i: usize = 0;
             for (lbrace + 1..rbrace) |tok_i| {
@@ -2395,7 +2395,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const doc_comments = try getDocComments(analyser.arena, tree, node);
             const name = if (fn_proto.name_token) |t| tree.tokenSlice(t) else null;
 
-            var parameters: std.ArrayListUnmanaged(Type.Data.Parameter) = .empty;
+            var parameters: std.ArrayList(Type.Data.Parameter) = .empty;
             var has_varargs = false;
 
             var it = fn_proto.iterate(&tree);
@@ -2490,7 +2490,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const if_node = ast.fullIf(tree, node).?;
 
             var either_buffer: [2]Type.TypeWithDescriptor = undefined;
-            var either: std.ArrayListUnmanaged(Type.TypeWithDescriptor) = .initBuffer(&either_buffer);
+            var either: std.ArrayList(Type.TypeWithDescriptor) = .initBuffer(&either_buffer);
 
             if (try analyser.resolveTypeOfNodeInternal(.of(if_node.ast.then_expr, handle))) |t| {
                 either.appendAssumeCapacity(.{ .type = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
@@ -2507,10 +2507,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {
             const switch_node = tree.switchFull(node);
 
-            var either: std.ArrayListUnmanaged(Type.TypeWithDescriptor) = .empty;
+            var either: std.ArrayList(Type.TypeWithDescriptor) = .empty;
             for (switch_node.ast.cases) |case| {
                 const switch_case = tree.fullSwitchCase(case).?;
-                var descriptor: std.ArrayListUnmanaged(u8) = .empty;
+                var descriptor: std.ArrayList(u8) = .empty;
 
                 for (switch_case.ast.values, 0..) |values, index| {
                     try descriptor.appendSlice(analyser.arena, offsets.nodeToSlice(tree, values));
@@ -4437,11 +4437,11 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
+pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayList([]const u8) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var imports: std.ArrayListUnmanaged([]const u8) = .empty;
+    var imports: std.ArrayList([]const u8) = .empty;
     errdefer imports.deinit(allocator);
 
     for (0..tree.tokens.len) |i| {
@@ -4464,7 +4464,7 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var import_nodes: std.ArrayListUnmanaged(Ast.Node.Index) = .empty;
+    var import_nodes: std.ArrayList(Ast.Node.Index) = .empty;
     errdefer import_nodes.deinit(allocator);
 
     const node_tags = tree.nodes.items(.tag);
@@ -4831,7 +4831,7 @@ const StackState = struct {
 
 const StackId = enum { paren, bracket, global };
 
-fn peek(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(StackState)) !*StackState {
+fn peek(allocator: std.mem.Allocator, arr: *std.ArrayList(StackState)) !*StackState {
     if (arr.items.len == 0) {
         try arr.append(allocator, .{ .ctx = .empty, .stack_id = .global });
     }
@@ -4889,7 +4889,7 @@ pub fn getPositionContext(
         break;
     }
 
-    var stack: std.ArrayListUnmanaged(StackState) = try .initCapacity(allocator, 8);
+    var stack: std.ArrayList(StackState) = try .initCapacity(allocator, 8);
     defer stack.deinit(allocator);
     var should_do_lookahead = lookahead;
 
@@ -5521,7 +5521,7 @@ pub fn collectDeclarationsOfContainer(
     /// ```
     instance_access: bool,
     /// allocated with `analyser.arena`
-    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
+    decl_collection: *std.ArrayList(DeclWithHandle),
 ) error{OutOfMemory}!void {
     const info = switch (container_type.data) {
         .container => |info| info,
@@ -5606,7 +5606,7 @@ pub fn collectAllSymbolsAtSourceIndex(
     /// a byte-index into `handle.tree.source`
     source_index: usize,
     /// allocated with `analyser.arena`
-    decl_collection: *std.ArrayListUnmanaged(DeclWithHandle),
+    decl_collection: *std.ArrayList(DeclWithHandle),
 ) error{OutOfMemory}!void {
     std.debug.assert(source_index <= handle.tree.source.len);
 
@@ -6285,8 +6285,8 @@ pub fn getSymbolFieldAccesses(
     held_loc: offsets.Loc,
     name: []const u8,
 ) error{OutOfMemory}!?[]const DeclWithHandle {
-    var decls_with_handles: std.ArrayListUnmanaged(DeclWithHandle) = .empty;
-    var property_types: std.ArrayListUnmanaged(Type) = .empty;
+    var decls_with_handles: std.ArrayList(DeclWithHandle) = .empty;
+    var property_types: std.ArrayList(Type) = .empty;
     try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls_with_handles, &property_types);
     return try decls_with_handles.toOwnedSlice(arena);
 }
@@ -6298,8 +6298,8 @@ pub fn getSymbolFieldAccessesArrayList(
     source_index: usize,
     held_loc: offsets.Loc,
     name: []const u8,
-    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
-    property_types: *std.ArrayListUnmanaged(Type),
+    decls_with_handles: *std.ArrayList(DeclWithHandle),
+    property_types: *std.ArrayList(Type),
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -6324,8 +6324,8 @@ pub fn getSymbolFieldAccessesHighlight(
     handle: *DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-    decls_with_handles: *std.ArrayListUnmanaged(DeclWithHandle),
-    property_types: *std.ArrayListUnmanaged(Type),
+    decls_with_handles: *std.ArrayList(DeclWithHandle),
+    property_types: *std.ArrayList(Type),
 ) !?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
         const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {

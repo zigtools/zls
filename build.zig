@@ -306,7 +306,7 @@ pub fn build(b: *Build) !void {
         if (!coverage) break :blk;
 
         // Collect all run steps into one ArrayList
-        var run_test_steps: std.ArrayListUnmanaged(*std.Build.Step.Run) = .empty;
+        var run_test_steps: std.ArrayList(*std.Build.Step.Run) = .empty;
         run_test_steps.append(b.allocator, run_tests) catch @panic("OOM");
         run_test_steps.append(b.allocator, run_src_tests) catch @panic("OOM");
         for (test_build_runner_step.dependencies.items) |step| {

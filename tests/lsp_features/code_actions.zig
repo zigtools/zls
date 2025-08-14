@@ -972,7 +972,7 @@ fn testDiagnostic(
         return error.InvalidResponse;
     };
 
-    var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .empty;
+    var text_edits: std.ArrayList(types.TextEdit) = .empty;
     defer text_edits.deinit(allocator);
 
     for (response) |action| {

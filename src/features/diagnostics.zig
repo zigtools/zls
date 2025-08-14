@@ -62,7 +62,7 @@ pub fn generateDiagnostics(
         errdefer arena_allocator.deinit();
         const arena = arena_allocator.allocator();
 
-        var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .empty;
+        var diagnostics: std.ArrayList(types.Diagnostic) = .empty;
 
         if (handle.tree.mode == .zig) {
             var analyser = server.initAnalyser(arena, handle);
@@ -102,7 +102,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
-    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
+    var notes: std.ArrayList(std.zig.ErrorBundle.MessageIndex) = .empty;
     defer notes.deinit(allocator);
 
     const current_error = tree.errors[0];
@@ -152,7 +152,7 @@ fn errorBundleSourceLocationFromToken(
 fn collectWarnStyleDiagnostics(
     tree: Ast,
     arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -233,7 +233,7 @@ fn collectWarnStyleDiagnostics(
 fn collectGlobalVarDiagnostics(
     tree: Ast,
     arena: std.mem.Allocator,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+    diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -365,7 +365,7 @@ pub fn getErrorBundleFromStderr(
     if (stderr_bytes.len == 0) return .empty;
 
     var last_error_message: ?std.zig.ErrorBundle.ErrorMessage = null;
-    var notes: std.ArrayListUnmanaged(std.zig.ErrorBundle.MessageIndex) = .empty;
+    var notes: std.ArrayList(std.zig.ErrorBundle.MessageIndex) = .empty;
     defer notes.deinit(allocator);
 
     var error_bundle: std.zig.ErrorBundle.Wip = undefined;
@@ -492,7 +492,7 @@ pub const BuildOnSave = struct {
             options.zig_lib_path,
             "--watch",
         };
-        var argv: std.ArrayListUnmanaged([]const u8) = try .initCapacity(
+        var argv: std.ArrayList([]const u8) = try .initCapacity(
             options.allocator,
             base_args.len + options.build_on_save_args.len + @intFromBool(options.check_step_only),
         );

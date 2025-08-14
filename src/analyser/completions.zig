@@ -9,7 +9,7 @@ const types = @import("lsp").types;
 /// the given `index` must belong to the given InternPool
 pub fn dotCompletions(
     arena: std.mem.Allocator,
-    completions: *std.ArrayListUnmanaged(types.CompletionItem),
+    completions: *std.ArrayList(types.CompletionItem),
     ip: *InternPool,
     index: InternPool.Index,
 ) error{OutOfMemory}!void {
@@ -433,7 +433,7 @@ fn testCompletion(
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
-    var completions: std.ArrayListUnmanaged(types.CompletionItem) = .empty;
+    var completions: std.ArrayList(types.CompletionItem) = .empty;
 
     try dotCompletions(arena, &completions, ip, index);
 
