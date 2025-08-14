@@ -218,8 +218,8 @@ fn MapUnmanaged(Context: type) type {
     };
 }
 
-const some_list: std.ArrayListUnmanaged(u8) = .empty;
-//    ^^^^^^^^^ (ArrayListAlignedUnmanaged(u8))()
+const some_list: std.ArrayList(u8) = .empty;
+//    ^^^^^^^^^ (Aligned(u8))()
 
 const some_list_items = some_list.items;
 //    ^^^^^^^^^^^^^^^ ([]u8)()
