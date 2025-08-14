@@ -1129,7 +1129,7 @@ pub fn iterateChildren(
 test "iterateChildren - fn_proto_* inside of fn_proto" {
     const allocator = std.testing.allocator;
 
-    var tree = try std.zig.Ast.parse(
+    var tree: std.zig.Ast = try .parse(
         allocator,
         \\pub fn nextAge(age: u32) u32 {
         \\  return age + 1;
@@ -1139,13 +1139,15 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
     );
     defer tree.deinit(allocator);
 
-    var children_tags = std.ArrayList(Ast.Node.Tag).init(allocator);
-    defer children_tags.deinit();
+    var children_tags: std.ArrayListUnmanaged(Ast.Node.Tag) = .empty;
+    defer children_tags.deinit(allocator);
 
     const Context = struct {
-        accumulator: *std.ArrayList(Ast.Node.Tag),
+        accumulator: *std.ArrayListUnmanaged(Ast.Node.Tag),
+        ally: std.mem.Allocator,
+
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) !void {
-            try self.accumulator.append(ast.nodeTag(child_node));
+            try self.accumulator.append(self.ally, ast.nodeTag(child_node));
         }
     };
 
@@ -1153,7 +1155,7 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
     try iterateChildren(
         tree,
         fn_decl,
-        Context{ .accumulator = &children_tags },
+        Context{ .accumulator = &children_tags, .ally = allocator },
         error{OutOfMemory},
         Context.callback,
     );
