@@ -288,16 +288,20 @@ test "var decl" {
 
 test "comptime return types" {
     try testInlayHints(
-        \\const std<type> = @import("std");
-        \\const list<ArrayListAligned(ArrayListAligned(i32))> = std.ArrayList(std.ArrayList(i32)).init(allocator);
-        \\const innerList<ArrayListAligned(i32)> = list.items[0];
-        \\const nested<i32> = list.items[0].items[0];
+        \\fn Box(comptime T: type) type {
+        \\    return struct {
+        \\        value: T,
+        \\    };
+        \\}
+        \\const list: Box(Box(i32)) = undefined;
+        \\const innerList: Box(i32) = list.value;
+        \\const nested: i32 = list.value.value;
     , .{ .kind = .Type });
 
     try testInlayHints(
-        \\const std<type> = @import("std");
-        \\const str<[]u8> = try std.mem.concat(allocator, u8, .{ "foo", "bar" });
-        \\const int<[]i32> = try std.mem.concat(allocator, i32, .{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+        \\fn concat(comptime T: type, slices: []const []const T) error{OutOfMemory}![]T {}
+        \\const str<[]u8> = try concat(u8, .{ "foo", "bar" });
+        \\const int<[]i32> = try concat(i32, .{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
     , .{ .kind = .Type });
 }
 

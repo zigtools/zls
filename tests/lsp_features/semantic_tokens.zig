@@ -378,15 +378,6 @@ test "field access with @import" {
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
         \\const std = @import("std");
-    , &.{
-        .{ "const", .keyword, .{} },
-        .{ "std", .namespace, .{ .declaration = true } },
-        .{ "=", .operator, .{} },
-        .{ "@import", .builtin, .{} },
-        .{ "\"std\"", .string, .{} },
-    });
-    try testSemanticTokens(
-        \\const std = @import("std");
         \\const Ast = std.zig.Ast;
     , &.{
         .{ "const", .keyword, .{} },
