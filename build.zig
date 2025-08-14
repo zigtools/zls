@@ -26,8 +26,7 @@ const minimum_runtime_zig_version = "0.15.0-dev.1219+b8955a2e0";
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
-    // https://github.com/ziglang/zig/issues/24263
-    // .{ .cpu_arch = .aarch64, .os_tag = .windows },
+    .{ .cpu_arch = .aarch64, .os_tag = .windows },
     .{ .cpu_arch = .arm, .os_tag = .linux },
     .{ .cpu_arch = .loongarch64, .os_tag = .linux },
     .{ .cpu_arch = .riscv64, .os_tag = .linux },
