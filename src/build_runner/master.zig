@@ -21,7 +21,10 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 const process = std.process;
-const ArrayList = std.ArrayList;
+
+const ArrayListManaged = std.array_list.Managed;
+const ArrayListUnmanaged = std.ArrayList;
+
 const Step = std.Build.Step;
 const Allocator = std.mem.Allocator;
 
@@ -102,8 +105,8 @@ pub fn main() !void {
         dependencies.root_deps,
     );
 
-    var targets = ArrayList([]const u8).init(arena);
-    var debug_log_scopes = ArrayList([]const u8).init(arena);
+    var targets = ArrayListManaged([]const u8).init(arena);
+    var debug_log_scopes = ArrayListManaged([]const u8).init(arena);
     var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
 
     var install_prefix: ?[]const u8 = null;
@@ -317,7 +320,7 @@ pub fn main() !void {
     }
 
     if (graph.needed_lazy_dependencies.entries.len != 0) {
-        var buffer: std.ArrayListUnmanaged(u8) = .{};
+        var buffer: ArrayListUnmanaged(u8) = .{};
         for (graph.needed_lazy_dependencies.keys()) |k| {
             try buffer.appendSlice(arena, k);
             try buffer.append(arena, '\n');
@@ -349,7 +352,7 @@ pub fn main() !void {
         .max_rss_is_default = false,
         .max_rss_mutex = .{},
         .skip_oom_steps = skip_oom_steps,
-        .memory_blocked_steps = std.ArrayList(*Step).init(arena),
+        .memory_blocked_steps = ArrayListManaged(*Step).init(arena),
         .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
@@ -514,7 +517,7 @@ const Run = struct {
     max_rss_is_default: bool,
     max_rss_mutex: std.Thread.Mutex,
     skip_oom_steps: bool,
-    memory_blocked_steps: std.ArrayList(*Step),
+    memory_blocked_steps: ArrayListManaged(*Step),
     thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
@@ -978,7 +981,7 @@ const Packages = struct {
     }
 
     pub fn toPackageList(self: *Packages) ![]BuildConfig.Package {
-        var result: std.ArrayListUnmanaged(BuildConfig.Package) = .{};
+        var result: ArrayListUnmanaged(BuildConfig.Package) = .{};
         errdefer result.deinit(self.allocator);
 
         const Context = struct {
@@ -1021,7 +1024,7 @@ fn extractBuildInformation(
 
     // collect the set of all steps
     {
-        var stack: std.ArrayListUnmanaged(*Step) = .{};
+        var stack: ArrayListUnmanaged(*Step) = .{};
         defer stack.deinit(gpa);
 
         try stack.ensureUnusedCapacity(gpa, b.top_level_steps.count());
@@ -1235,7 +1238,7 @@ fn extractBuildInformation(
     //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
     // };
 
-    var deps_build_roots: std.ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
+    var deps_build_roots: ArrayListUnmanaged(BuildConfig.DepsBuildRoots) = .{};
     for (dependencies.root_deps) |root_dep| {
         inline for (comptime std.meta.declarations(dependencies.packages)) |package| blk: {
             if (std.mem.eql(u8, package.name, root_dep[1])) {
@@ -1384,7 +1387,7 @@ const copied_from_zig = struct {
             else => return err,
         };
 
-        var zig_args = ArrayList([]const u8).init(b.allocator);
+        var zig_args = ArrayListManaged([]const u8).init(b.allocator);
         defer zig_args.deinit();
 
         var it = mem.tokenizeAny(u8, stdout, " \r\n\t");
@@ -1419,7 +1422,7 @@ const copied_from_zig = struct {
 
     fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
         const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .Ignore);
-        var list = ArrayList(std.Build.PkgConfigPkg).init(self.allocator);
+        var list = ArrayListManaged(std.Build.PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
         while (line_it.next()) |line| {

@@ -39,6 +39,9 @@ const diagnostics_gen = @import("features/diagnostics.zig");
 const BuildOnSave = diagnostics_gen.BuildOnSave;
 const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
 
+const ArrayListManaged = std.array_list.Managed;
+const ArrayListUnmanaged = std.ArrayList;
+
 const log = std.log.scoped(.server);
 
 // public fields
@@ -57,10 +60,10 @@ ip: InternPool = undefined,
 /// See https://github.com/ziglang/zig/issues/16369
 zig_ast_check_lock: std.Thread.Mutex = .{},
 /// Stores messages that should be displayed with `window/showMessage` once the server has been initialized.
-pending_show_messages: std.ArrayListUnmanaged(types.ShowMessageParams) = .empty,
+pending_show_messages: ArrayListUnmanaged(types.ShowMessageParams) = .empty,
 client_capabilities: ClientCapabilities = .{},
 diagnostics_collection: DiagnosticsCollection,
-workspaces: std.ArrayListUnmanaged(Workspace) = .empty,
+workspaces: ArrayListUnmanaged(Workspace) = .empty,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -295,7 +298,7 @@ pub fn autofixWorkaround(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!ArrayListUnmanaged(types.TextEdit) {
     if (handle.tree.errors.len != 0) return .empty;
     if (handle.tree.mode == .zon) return .empty;
 
@@ -597,7 +600,7 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
         // `{ "watchers": [ { "globPattern": "**/*.{zig,zon}" } ] }`
         var watcher = std.json.ObjectMap.init(arena);
         try watcher.put("globPattern", .{ .string = "**/*.{zig,zon}" });
-        var watchers_arr = try std.ArrayList(std.json.Value).initCapacity(arena, 1);
+        var watchers_arr = try ArrayListManaged(std.json.Value).initCapacity(arena, 1);
         watchers_arr.appendAssumeCapacity(.{ .object = watcher });
         var fs_watcher_obj: std.json.ObjectMap = std.json.ObjectMap.init(arena);
         try fs_watcher_obj.put("watchers", .{ .array = watchers_arr });
