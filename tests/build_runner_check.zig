@@ -31,7 +31,7 @@ pub fn main() !u8 {
         try std.json.Stringify.encodeJsonStringChars(&.{std.fs.path.sep}, .{}, &aw.writer);
 
         // The build runner will produce absolute paths in the output so we remove them here.
-        const actual = try std.mem.replaceOwned(u8, gpa, actual_unsanitized, aw.getWritten(), "");
+        const actual = try std.mem.replaceOwned(u8, gpa, actual_unsanitized, aw.written(), "");
 
         // We also convert windows style '\\' path separators to posix style '/'.
         switch (std.fs.path.sep) {
