@@ -35,6 +35,7 @@ const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const BuildOnSave = diagnostics_gen.BuildOnSave;
 const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
@@ -556,7 +557,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -841,7 +842,6 @@ const Workspace = struct {
 fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
-    log.info("added Workspace Folder: {s}", .{uri});
 
     if (BuildOnSaveSupport.isSupportedComptime() and
         // Don't initialize build on save until initialization finished.
@@ -854,6 +854,16 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
             .restart = false,
         });
     }
+
+    const file_count = server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
+        error.UnsupportedScheme => return,
+        else => {
+            log.err("failed to load files in workspace '{s}': {}", .{ uri, err });
+            return;
+        },
+    };
+
+    log.info("added Workspace Folder: {s} ({d} files)", .{ uri, file_count });
 }
 
 fn removeWorkspace(server: *Server, uri: types.URI) void {
@@ -1497,6 +1507,71 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) Error!lsp.ResultType("workspace/symbol") {
+    if (request.query.len < 3) return null;
+
+    const handles = try server.document_store.loadTrigramStores();
+    defer server.document_store.allocator.free(handles);
+
+    var symbols: std.ArrayListUnmanaged(types.WorkspaceSymbol) = .empty;
+    var declaration_buffer: std.ArrayListUnmanaged(TrigramStore.Declaration.Index) = .empty;
+
+    for (handles) |handle| {
+        const trigram_store = handle.getTrigramStoreCached();
+
+        declaration_buffer.clearRetainingCapacity();
+        try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
+
+        const SortContext = struct {
+            names: []const std.zig.Ast.TokenIndex,
+            fn lessThan(ctx: @This(), lhs: TrigramStore.Declaration.Index, rhs: TrigramStore.Declaration.Index) bool {
+                return ctx.names[@intFromEnum(lhs)] < ctx.names[@intFromEnum(rhs)];
+            }
+        };
+
+        std.mem.sortUnstable(
+            TrigramStore.Declaration.Index,
+            declaration_buffer.items,
+            SortContext{ .names = trigram_store.declarations.items(.name) },
+            SortContext.lessThan,
+        );
+
+        const slice = trigram_store.declarations.slice();
+        const names = slice.items(.name);
+
+        var last_index: usize = 0;
+        var last_position: offsets.Position = .{ .line = 0, .character = 0 };
+
+        try symbols.ensureUnusedCapacity(arena, declaration_buffer.items.len);
+        for (declaration_buffer.items) |declaration| {
+            const name_token = names[@intFromEnum(declaration)];
+            const loc = offsets.identifierTokenToNameLoc(handle.tree, name_token);
+            const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+
+            const start_position = offsets.advancePosition(handle.tree.source, last_position, last_index, loc.start, server.offset_encoding);
+            const end_position = offsets.advancePosition(handle.tree.source, start_position, loc.start, loc.end, server.offset_encoding);
+            last_index = loc.end;
+            last_position = end_position;
+
+            symbols.appendAssumeCapacity(.{
+                .name = name,
+                .kind = .Variable,
+                .location = .{
+                    .Location = .{
+                        .uri = handle.uri,
+                        .range = .{
+                            .start = start_position,
+                            .end = end_position,
+                        },
+                    },
+                },
+            });
+        }
+    }
+
+    return .{ .array_of_WorkspaceSymbol = symbols.items };
+}
+
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1520,6 +1595,7 @@ const HandledRequestParams = union(enum) {
     @"textDocument/codeAction": types.CodeActionParams,
     @"textDocument/foldingRange": types.FoldingRangeParams,
     @"textDocument/selectionRange": types.SelectionRangeParams,
+    @"workspace/symbol": types.WorkspaceSymbolParams,
     other: lsp.MethodWithParams,
 };
 
@@ -1564,6 +1640,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
             .other => return false,
         },
@@ -1743,6 +1820,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
         .other => return null,
     };
 }
