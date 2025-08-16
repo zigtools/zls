@@ -951,7 +951,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         writeMarkdownFromHtml(html, &markdown.writer) catch return error.OutOfMemory;
 
         try writer.writeAll("            .documentation =\n");
-        var line_it = std.mem.splitScalar(u8, std.mem.trim(u8, markdown.getWritten(), "\n"), '\n');
+        var line_it = std.mem.splitScalar(u8, std.mem.trim(u8, markdown.written(), "\n"), '\n');
         while (line_it.next()) |line| {
             try writer.print("            \\\\{s}\n", .{std.mem.trimRight(u8, line, " ")});
         }

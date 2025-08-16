@@ -60,7 +60,7 @@ pub fn main() !void {
         std.process.fatal("response {s} ({d}): {s}", .{
             result.status.phrase() orelse "",
             @intFromEnum(result.status),
-            aw.getWritten(),
+            aw.written(),
         });
     }
 }

@@ -913,7 +913,7 @@ test PrintAst {
         \\    }, // :2:5
         \\};
         \\
-    , aw.getWritten());
+    , aw.written());
 
     // The output itself is syntactically valid Zig code.
 
