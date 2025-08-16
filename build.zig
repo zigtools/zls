@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.0-dev.1425+7ee6dab3";
+const minimum_build_zig_version = "0.15.0-dev.1425+7ee6dab39";
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// std.Io.poll: update to new I/O API
@@ -26,8 +26,7 @@ const minimum_runtime_zig_version = "0.15.0-dev.1219+b8955a2e0";
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
-    // https://github.com/ziglang/zig/issues/24263
-    // .{ .cpu_arch = .aarch64, .os_tag = .windows },
+    .{ .cpu_arch = .aarch64, .os_tag = .windows },
     .{ .cpu_arch = .arm, .os_tag = .linux },
     .{ .cpu_arch = .loongarch64, .os_tag = .linux },
     .{ .cpu_arch = .riscv64, .os_tag = .linux },
