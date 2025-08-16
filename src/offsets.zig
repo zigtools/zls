@@ -322,7 +322,6 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
         .index = start,
     };
 
-    // Maybe combine multi-line tokens?
     const token = tokenizer.next();
     // A failure would indicate a corrupted tree.source
     std.debug.assert(token.tag == tag);
