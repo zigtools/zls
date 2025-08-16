@@ -1139,11 +1139,11 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
     );
     defer tree.deinit(allocator);
 
-    var children_tags = std.ArrayList(Ast.Node.Tag).init(allocator);
+    var children_tags = std.array_list.Managed(Ast.Node.Tag).init(allocator);
     defer children_tags.deinit();
 
     const Context = struct {
-        accumulator: *std.ArrayList(Ast.Node.Tag),
+        accumulator: *std.array_list.Managed(Ast.Node.Tag),
         fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) !void {
             try self.accumulator.append(ast.nodeTag(child_node));
         }

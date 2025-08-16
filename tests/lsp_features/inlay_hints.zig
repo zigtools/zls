@@ -289,8 +289,8 @@ test "var decl" {
 test "comptime return types" {
     try testInlayHints(
         \\const std<type> = @import("std");
-        \\const list<ArrayListAligned(ArrayListAligned(i32))> = std.ArrayList(std.ArrayList(i32)).init(allocator);
-        \\const innerList<ArrayListAligned(i32)> = list.items[0];
+        \\const list<AlignedManaged(AlignedManaged(i32))> = std.array_list.Managed(std.array_list.Managed(i32)).init(allocator);
+        \\const innerList<AlignedManaged(i32)> = list.items[0];
         \\const nested<i32> = list.items[0].items[0];
     , .{ .kind = .Type });
 

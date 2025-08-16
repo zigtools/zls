@@ -21,7 +21,6 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 const process = std.process;
-const ArrayList = std.ArrayList;
 const Step = std.Build.Step;
 const Allocator = std.mem.Allocator;
 
@@ -102,8 +101,8 @@ pub fn main() !void {
         dependencies.root_deps,
     );
 
-    var targets = ArrayList([]const u8).init(arena);
-    var debug_log_scopes = ArrayList([]const u8).init(arena);
+    var targets = std.array_list.Managed([]const u8).init(arena);
+    var debug_log_scopes = std.array_list.Managed([]const u8).init(arena);
     var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
 
     var install_prefix: ?[]const u8 = null;
@@ -349,7 +348,7 @@ pub fn main() !void {
         .max_rss_is_default = false,
         .max_rss_mutex = .{},
         .skip_oom_steps = skip_oom_steps,
-        .memory_blocked_steps = std.ArrayList(*Step).init(arena),
+        .memory_blocked_steps = std.array_list.Managed(*Step).init(arena),
         .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
@@ -514,7 +513,7 @@ const Run = struct {
     max_rss_is_default: bool,
     max_rss_mutex: std.Thread.Mutex,
     skip_oom_steps: bool,
-    memory_blocked_steps: std.ArrayList(*Step),
+    memory_blocked_steps: std.array_list.Managed(*Step),
     thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
@@ -1384,7 +1383,7 @@ const copied_from_zig = struct {
             else => return err,
         };
 
-        var zig_args = ArrayList([]const u8).init(b.allocator);
+        var zig_args = std.array_list.Managed([]const u8).init(b.allocator);
         defer zig_args.deinit();
 
         var it = mem.tokenizeAny(u8, stdout, " \r\n\t");
@@ -1419,7 +1418,7 @@ const copied_from_zig = struct {
 
     fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
         const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .Ignore);
-        var list = ArrayList(std.Build.PkgConfigPkg).init(self.allocator);
+        var list = std.array_list.Managed(std.Build.PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
         while (line_it.next()) |line| {

@@ -41,31 +41,28 @@ pub fn main() !void {
     defer client.deinit();
     try client.initDefaultProxies(arena);
 
-    var server_header_buffer: [16 * 1024]u8 = undefined;
-    var request = try client.open(.POST, uri, .{
+    var aw: std.Io.Writer.Allocating = .init(arena);
+    defer aw.deinit();
+
+    const result = try client.fetch(.{
+        .response_writer = &aw.writer,
+        .location = .{ .uri = uri },
+        .method = .POST,
+        .payload = body,
         .keep_alive = false,
-        .server_header_buffer = &server_header_buffer,
         .headers = .{
             .content_type = .{ .override = "application/json" },
             .authorization = authorization,
         },
     });
-    defer request.deinit();
-    request.transfer_encoding = .{ .content_length = body.len };
 
-    try request.send();
-    try request.writeAll(body);
-    try request.finish();
-    try request.wait();
-
-    if (request.response.status.class() == .success) return;
-
-    std.log.err("response {s} ({d}): {s}", .{
-        request.response.status.phrase() orelse "",
-        @intFromEnum(request.response.status),
-        try request.reader().readAllAlloc(arena, 1024 * 1024),
-    });
-    std.process.exit(1);
+    if (result.status.class() != .success) {
+        std.process.fatal("response {s} ({d}): {s}", .{
+            result.status.phrase() orelse "",
+            @intFromEnum(result.status),
+            aw.getWritten(),
+        });
+    }
 }
 
 fn createRequestBody(
