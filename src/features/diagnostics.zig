@@ -112,7 +112,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
         aw.clearRetainingCapacity();
         tree.renderError(err, &aw.writer) catch return error.OutOfMemory;
         try notes.append(allocator, try eb.addErrorMessage(.{
-            .msg = try eb.addString(aw.getWritten()),
+            .msg = try eb.addString(aw.written()),
             .src_loc = try errorBundleSourceLocationFromToken(tree, eb, err.token),
         }));
     }
@@ -120,7 +120,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
     aw.clearRetainingCapacity();
     tree.renderError(current_error, &aw.writer) catch return error.OutOfMemory;
     try eb.addRootErrorMessage(.{
-        .msg = try eb.addString(aw.getWritten()),
+        .msg = try eb.addString(aw.written()),
         .src_loc = try errorBundleSourceLocationFromToken(tree, eb, current_error.token),
         .notes_len = @intCast(notes.items.len),
     });
