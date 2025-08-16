@@ -122,7 +122,7 @@ pub fn build(b: *Build) !void {
         gen_version_data_cmd.addArg("--generate-version-data");
         const version_data_path = gen_version_data_cmd.addOutputFileArg("version_data.zig");
 
-        break :blk b.addModule("version_data", .{ .root_source_file = version_data_path });
+        break :blk b.createModule(.{ .root_source_file = version_data_path });
     };
 
     { // zig build gen
@@ -199,6 +199,7 @@ pub fn build(b: *Build) !void {
         .build_options = build_options,
         .version_data = version_data_module,
     });
+    b.modules.put("zls", zls_module) catch @panic("OOM");
 
     const known_folders_module = b.dependency("known_folders", .{
         .target = target,
@@ -426,7 +427,7 @@ fn createZLSModule(
         .tracy_options = options.tracy_options,
     });
 
-    const zls_module = b.addModule("zls", .{
+    const zls_module = b.createModule(.{
         .root_source_file = b.path("src/zls.zig"),
         .target = options.target,
         .optimize = options.optimize,
@@ -455,7 +456,7 @@ fn createTracyModule(
         tracy_options: *std.Build.Module,
     },
 ) *Build.Module {
-    const tracy_module = b.addModule("tracy", .{
+    const tracy_module = b.createModule(.{
         .root_source_file = b.path("src/tracy.zig"),
         .target = options.target,
         .optimize = options.optimize,
