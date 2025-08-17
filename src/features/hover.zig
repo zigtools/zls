@@ -16,80 +16,59 @@ const data = @import("version_data");
 fn hoverSymbol(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    decl_handle: Analyser.DeclWithHandle,
+    param_decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
-) error{OutOfMemory}!?[]const u8 {
-    var doc_strings: std.ArrayList([]const u8) = .empty;
-    return hoverSymbolRecursive(analyser, arena, decl_handle, markup_kind, &doc_strings, null);
-}
-
-fn hoverSymbolRecursive(
-    analyser: *Analyser,
-    arena: std.mem.Allocator,
-    decl_handle: Analyser.DeclWithHandle,
-    markup_kind: types.MarkupKind,
-    doc_strings: *std.ArrayList([]const u8),
-    resolved_type_maybe: ?Analyser.Type,
 ) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = decl_handle.handle;
-    const tree = handle.tree;
-    const resolved_type = resolved_type_maybe orelse try decl_handle.resolveType(analyser);
+    var doc_strings: std.ArrayList([]const u8) = .empty;
 
-    if (try decl_handle.docComments(arena)) |doc|
-        try doc_strings.append(arena, doc);
+    var decl_handle: Analyser.DeclWithHandle = param_decl_handle;
+    var maybe_resolved_type = try param_decl_handle.resolveType(analyser);
 
+    while (true) {
+        if (try decl_handle.docComments(arena)) |doc_string| {
+            try doc_strings.append(arena, doc_string);
+        }
+        if (decl_handle.decl != .ast_node) break;
+        decl_handle = try analyser.resolveVarDeclAlias(.{
+            .node_handle = .of(decl_handle.decl.ast_node, decl_handle.handle),
+            .container_type = decl_handle.container_type,
+        }) orelse break;
+        maybe_resolved_type = maybe_resolved_type orelse try decl_handle.resolveType(analyser);
+    }
+
+    const tree = decl_handle.handle.tree;
     const def_str = switch (decl_handle.decl) {
-        .ast_node => |node| def: {
-            if (try analyser.resolveVarDeclAlias(.{
-                .node_handle = .of(node, handle),
-                .container_type = decl_handle.container_type,
-            })) |result| {
-                return try hoverSymbolRecursive(analyser, arena, result, markup_kind, doc_strings, resolved_type);
-            }
-
-            switch (tree.nodeTag(node)) {
-                .global_var_decl,
-                .local_var_decl,
-                .aligned_var_decl,
-                .simple_var_decl,
-                => {
-                    const var_decl = tree.fullVarDecl(node).?;
-                    break :def try Analyser.getVariableSignature(arena, tree, var_decl, true);
-                },
-                .container_field,
-                .container_field_init,
-                .container_field_align,
-                => {
-                    const field = tree.fullContainerField(node).?;
-                    break :def Analyser.getContainerFieldSignature(tree, field) orelse return null;
-                },
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => {
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const fn_proto = tree.fullFnProto(&buf, node).?;
-                    break :def Analyser.getFunctionSignature(tree, fn_proto);
-                },
-                .test_decl => {
-                    const test_name_token, const test_name = ast.testDeclNameAndToken(tree, node) orelse return null;
-                    _ = test_name_token;
-                    break :def test_name;
-                },
-                else => {
-                    return null;
-                },
-            }
+        .ast_node => |node| switch (tree.nodeTag(node)) {
+            .global_var_decl,
+            .local_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => try Analyser.getVariableSignature(
+                arena,
+                tree,
+                tree.fullVarDecl(node).?,
+                true,
+            ),
+            .container_field,
+            .container_field_init,
+            .container_field_align,
+            => Analyser.getContainerFieldSignature(tree, tree.fullContainerField(node).?) orelse return null,
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            .fn_decl,
+            => def: {
+                var buf: [1]Ast.Node.Index = undefined;
+                const fn_proto = tree.fullFnProto(&buf, node).?;
+                break :def Analyser.getFunctionSignature(tree, fn_proto);
+            },
+            else => unreachable,
         },
-        .function_parameter => |pay| def: {
-            const param = pay.get(tree).?;
-            break :def ast.paramSlice(tree, param, false);
-        },
+        .function_parameter => |payload| ast.paramSlice(tree, payload.get(tree).?, false),
         .optional_payload,
         .error_union_payload,
         .error_union_error,
@@ -107,8 +86,8 @@ fn hoverSymbolRecursive(
         arena,
         def_str,
         markup_kind,
-        doc_strings,
-        resolved_type,
+        &doc_strings,
+        maybe_resolved_type,
     );
 }
 
