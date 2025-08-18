@@ -730,7 +730,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         var cont = true;
         while (cont) : (cont = is_windows) {
             const filename = if (!is_windows) "zig" else filename: {
-                const ext = ext_it.next() orelse continue;
+                const ext = ext_it.next() orelse break;
 
                 filename_buffer.clearRetainingCapacity();
                 try filename_buffer.ensureTotalCapacity(allocator, "zig".len + ext.len);
