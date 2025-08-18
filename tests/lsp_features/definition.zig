@@ -193,7 +193,7 @@ test "different cursor position" {
     try testDefinition(
         \\const <def><decl>foo</decl></def> = 5;
         \\comptime {
-        \\    _ = 
+        \\    _ =
         \\<>foo;
         \\}
     );
@@ -322,6 +322,14 @@ test "type definition unwraps error unions, optionals, pointers" {
     try testDefinition(
         \\const S = <tdef>struct</tdef> {};
         \\const <>foo: error{}!?*const S = &.{};
+    );
+}
+
+test "builtins" {
+    try testDefinition(
+        \\const S = <def><decl>struct</decl></def> {
+        \\    const Self = <>@This();
+        \\};
     );
 }
 
