@@ -1,0 +1,15 @@
+{
+  "dependencies": {},
+  "modules": {
+    ".zig-local-cache/generated.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    }
+  },
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}
