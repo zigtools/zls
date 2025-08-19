@@ -1152,6 +1152,11 @@ fn extractBuildInformation(
         var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .empty;
         defer modules.deinit(gpa);
 
+        try modules.ensureUnusedCapacity(gpa, b.modules.count());
+        for (b.modules.values()) |root_module| {
+            modules.putAssumeCapacity(root_module, {});
+        }
+
         // collect all modules of `Step.Compile`
         for (all_steps.keys()) |step| {
             const compile = step.cast(Step.Compile) orelse continue;
