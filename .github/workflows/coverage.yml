@@ -15,9 +15,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: master
-
-      - run: zig env
+          version: 0.15.1
 
       - name: Install kcov
         run: |
