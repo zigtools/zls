@@ -27,6 +27,7 @@ jobs:
           #   build-runner-file: master.zig
           # Zig master is handled by 'zig build test' in the main CI
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
