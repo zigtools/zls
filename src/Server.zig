@@ -21,7 +21,6 @@ const Uri = @import("uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const build_runner_shared = @import("build_runner/shared.zig");
-const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -1038,9 +1037,9 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
     check: {
         if (server.status != .initialized) break :check;
 
-        switch (server.config_manager.build_runner_version) {
-            .resolved, .unresolved_dont_error => break :check,
-            .unresolved => {},
+        switch (server.config_manager.build_runner_supported) {
+            .yes, .no_dont_error => break :check,
+            .no => {},
         }
 
         const zig_version = server.config_manager.zig_exe.?.version;
@@ -1078,7 +1077,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
             log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-        } else if (server.status == .initialized and server.config_manager.build_runner_version == .unresolved and server.config_manager.config.build_runner_path == null) {
+        } else if (server.status == .initialized and server.config_manager.build_runner_supported == .no and server.config_manager.config.build_runner_path == null) {
             log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
         } else if (server.status == .initialized and server.config_manager.zig_exe != null) {
             switch (BuildOnSaveSupport.isSupportedRuntime(server.config_manager.zig_exe.?.version)) {

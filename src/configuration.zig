@@ -4,7 +4,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Config = @import("Config.zig");
-const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
 const log = std.log.scoped(.config);
 
@@ -18,13 +17,13 @@ pub const Manager = struct {
     },
     zig_lib_dir: ?std.Build.Cache.Directory,
     global_cache_dir: ?std.Build.Cache.Directory,
-    build_runner_version: union(enum) {
+    build_runner_supported: union(enum) {
         /// If returned, guarantees `zig_exe != null`.
-        resolved: BuildRunnerVersion,
+        yes,
         /// no suitable build runner could be resolved based on the `zig_exe`
         /// If returned, guarantees `zig_exe != null`.
-        unresolved,
-        unresolved_dont_error,
+        no,
+        no_dont_error,
     },
     impl: struct {
         configs: std.EnumArray(Tag, UnresolvedConfig),
@@ -43,7 +42,7 @@ pub const Manager = struct {
         .zig_exe = null,
         .zig_lib_dir = null,
         .global_cache_dir = null,
-        .build_runner_version = .unresolved_dont_error,
+        .build_runner_supported = .no_dont_error,
         .config = .{},
         .impl = .{
             .configs = .initFill(.{}),
@@ -250,11 +249,12 @@ pub const Manager = struct {
             const zig_exe = manager.zig_exe orelse break :blk;
             const global_cache_dir = manager.global_cache_dir orelse break :blk;
 
-            const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(zig_exe.version) orelse {
-                manager.build_runner_version = .unresolved;
+            if (!@import("build_runner/check.zig").isBuildRunnerSupported(zig_exe.version)) {
+                manager.build_runner_supported = .no;
                 break :blk;
-            };
-            const build_runner_source = build_runner_version.getBuildRunnerFile();
+            }
+
+            const build_runner_source = @embedFile("build_runner/build_runner.zig");
             const build_runner_config_source = @embedFile("build_runner/shared.zig");
 
             const build_runner_hash = get_hash: {
@@ -295,7 +295,7 @@ pub const Manager = struct {
             };
 
             config.build_runner_path = try std.fs.path.join(arena, &.{ cache_path, "build_runner.zig" });
-            manager.build_runner_version = .{ .resolved = build_runner_version };
+            manager.build_runner_supported = .yes;
         }
 
         if (config.builtin_path == null) blk: {

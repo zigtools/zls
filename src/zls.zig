@@ -36,4 +36,7 @@ pub const signature_help = @import("features/signature_help.zig");
 comptime {
     const std = @import("std");
     std.testing.refAllDecls(@This());
+
+    std.testing.refAllDecls(@import("build_runner/check.zig"));
+    std.testing.refAllDecls(@import("build_runner/shared.zig"));
 }
