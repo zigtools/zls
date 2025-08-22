@@ -404,7 +404,7 @@ fn loadConfiguration(
         config.global_cache_path = try std.fs.path.join(config_arena.allocator(), &.{ cache_dir_path, "zls" });
     }
 
-    try server.config_manager.setConfiguration2(server.allocator, .frontend, &config);
+    try server.config_manager.setConfiguration2(.frontend, &config);
 }
 
 const ParseArgsResult = struct {

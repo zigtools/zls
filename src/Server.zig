@@ -79,8 +79,11 @@ const ClientCapabilities = struct {
     /// deprecated can be marked through the `CompletionItem.tags` field
     supports_completion_deprecated_tag: bool = false,
     label_details_support: bool = false,
+    /// The client supports `workspace/configuration` requests.
     supports_configuration: bool = false,
+    /// The client supports dynamically registering for the `workspace/didChangeConfiguration` notification.
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
+    /// The client supports dynamically registering for the `workspace/didChangeWatchedFiles` notification.
     supports_workspace_did_change_watched_files: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
     /// The detail entries for big structs such as std.zig.CrossTarget were
@@ -499,7 +502,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
         if (std.json.parseFromValueLeaky(configuration.UnresolvedConfig, arena, initialization_options, .{
             .ignore_unknown_fields = true,
         })) |*new_cfg| {
-            try server.config_manager.setConfiguration(server.allocator, .lsp_initialization, new_cfg);
+            try server.config_manager.setConfiguration(.lsp_initialization, new_cfg);
             if (server.client_capabilities.supports_configuration) {
                 // Do not resolve configuration until we received `workspace/configuration`.
             } else {
@@ -606,7 +609,14 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
     }
 
     if (server.client_capabilities.supports_configuration) {
+        // We defer calling `server.resolveConfiguration()` until after workspace configuration has been received.
         try server.requestConfiguration();
+    } else {
+        // The client does not support the `workspace/configuration` (pull model) request
+        // and it is unknown whether the client will use the
+        // `workspace/didChangeConfiguration` (push model) notification instead.
+        // In case they don't, we resolve configuration early and re-resolve if push model is used.
+        try server.resolveConfiguration();
     }
 
     if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
@@ -739,7 +749,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    try server.config_manager.setConfiguration(server.allocator, .lsp_configuration, &new_config);
+    try server.config_manager.setConfiguration(.lsp_configuration, &new_config);
     try server.resolveConfiguration();
 }
 
@@ -944,7 +954,7 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    try server.config_manager.setConfiguration(server.allocator, .lsp_configuration, &new_config);
+    try server.config_manager.setConfiguration(.lsp_configuration, &new_config);
     try server.resolveConfiguration();
 }
 
@@ -1605,7 +1615,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
 
     server.* = .{
         .allocator = allocator,
-        .config_manager = options.config_manager orelse .init,
+        .config_manager = options.config_manager orelse .init(allocator),
         .document_store = .{
             .allocator = allocator,
             .config = undefined, // set below
@@ -1630,7 +1640,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
         server.setTransport(transport);
     }
     if (options.config) |config| {
-        try server.config_manager.setConfiguration2(server.allocator, .frontend, config);
+        try server.config_manager.setConfiguration2(.frontend, config);
     }
 
     return server;
@@ -1644,7 +1654,7 @@ pub fn destroy(server: *Server) void {
     server.workspaces.deinit(server.allocator);
     server.diagnostics_collection.deinit();
     server.client_capabilities.deinit(server.allocator);
-    server.config_manager.deinit(server.allocator);
+    server.config_manager.deinit();
     for (server.pending_show_messages.items) |params| server.allocator.free(params.message);
     server.pending_show_messages.deinit(server.allocator);
     server.allocator.destroy(server);

@@ -8,6 +8,7 @@ const Config = @import("Config.zig");
 const log = std.log.scoped(.config);
 
 pub const Manager = struct {
+    allocator: std.mem.Allocator,
     config: Config,
     zig_exe: ?struct {
         /// Same as `Manager.config.zig_exe_path.?`
@@ -26,6 +27,7 @@ pub const Manager = struct {
         no_dont_error,
     },
     impl: struct {
+        is_dirty: bool,
         configs: std.EnumArray(Tag, UnresolvedConfig),
         /// Every changed configuration will increase the amount of memory
         /// allocated by the arena. This is unlikely to cause high memory
@@ -38,23 +40,28 @@ pub const Manager = struct {
         },
     },
 
-    pub const init: Manager = .{
-        .zig_exe = null,
-        .zig_lib_dir = null,
-        .global_cache_dir = null,
-        .build_runner_supported = .no_dont_error,
-        .config = .{},
-        .impl = .{
-            .configs = .initFill(.{}),
-            .arena = .{},
-            .cached_wasi_preopens = switch (builtin.os.tag) {
-                .wasi => null,
-                else => {},
+    pub fn init(allocator: std.mem.Allocator) Manager {
+        return .{
+            .allocator = allocator,
+            .zig_exe = null,
+            .zig_lib_dir = null,
+            .global_cache_dir = null,
+            .build_runner_supported = .no_dont_error,
+            .config = .{},
+            .impl = .{
+                .is_dirty = true,
+                .configs = .initFill(.{}),
+                .arena = .{},
+                .cached_wasi_preopens = switch (builtin.os.tag) {
+                    .wasi => null,
+                    else => {},
+                },
             },
-        },
-    };
+        };
+    }
 
-    pub fn deinit(manager: *Manager, allocator: std.mem.Allocator) void {
+    pub fn deinit(manager: *Manager) void {
+        const allocator = manager.allocator;
         switch (builtin.os.tag) {
             .wasi => {
                 if (manager.impl.cached_wasi_preopens) |wasi_preopens| {
@@ -84,11 +91,10 @@ pub const Manager = struct {
     /// Does not resolve or validate config options until `resolveConfiguration` has been called.
     pub fn setConfiguration(
         manager: *Manager,
-        allocator: std.mem.Allocator,
         tag: Tag,
         config: *const UnresolvedConfig,
     ) error{OutOfMemory}!void {
-        var arena_allocator: std.heap.ArenaAllocator = manager.impl.arena.promote(allocator);
+        var arena_allocator: std.heap.ArenaAllocator = manager.impl.arena.promote(manager.allocator);
         defer manager.impl.arena = arena_allocator.state;
 
         var duped: UnresolvedConfig = .{};
@@ -96,12 +102,12 @@ pub const Manager = struct {
             @field(duped, field.name) = try option.dupe(field.type, @field(config, field.name), arena_allocator.allocator());
         }
         manager.impl.configs.set(tag, duped);
+        manager.impl.is_dirty = true;
     }
 
     /// Does not resolve or validate config options until `resolveConfiguration` has been called.
     pub fn setConfiguration2(
         manager: *Manager,
-        allocator: std.mem.Allocator,
         tag: Tag,
         config: *const Config,
     ) error{OutOfMemory}!void {
@@ -109,7 +115,7 @@ pub const Manager = struct {
         inline for (std.meta.fields(Config)) |field| {
             @field(cfg, field.name) = @field(config, field.name);
         }
-        try manager.setConfiguration(allocator, tag, &cfg);
+        try manager.setConfiguration(tag, &cfg);
     }
 
     pub const ResolveConfigurationResult = struct {
@@ -123,8 +129,18 @@ pub const Manager = struct {
         }
     };
 
-    pub fn resolveConfiguration(manager: *Manager, allocator: std.mem.Allocator) error{OutOfMemory}!ResolveConfigurationResult {
-        var arena_allocator: std.heap.ArenaAllocator = manager.impl.arena.promote(allocator);
+    pub fn resolveConfiguration(
+        manager: *Manager,
+        result_allocator: std.mem.Allocator,
+    ) error{OutOfMemory}!ResolveConfigurationResult {
+        if (!manager.impl.is_dirty) {
+            return .{
+                .did_change = .{},
+                .messages = &.{},
+            };
+        }
+
+        var arena_allocator: std.heap.ArenaAllocator = manager.impl.arena.promote(manager.allocator);
         const arena = arena_allocator.allocator();
         defer manager.impl.arena = arena_allocator.state;
 
@@ -142,23 +158,23 @@ pub const Manager = struct {
 
         var messages: std.ArrayList([]const u8) = .empty;
         defer {
-            for (messages.items) |msg| allocator.free(msg);
-            messages.deinit(allocator);
+            for (messages.items) |msg| result_allocator.free(msg);
+            messages.deinit(result_allocator);
         }
 
-        try validateConfiguration(&config, allocator, &messages);
+        try validateConfiguration(&config, result_allocator, &messages);
 
         if (config.zig_exe_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
-            const zig_exe_path = try findZig(allocator) orelse break :blk;
-            defer allocator.free(zig_exe_path);
+            const zig_exe_path = try findZig(manager.allocator) orelse break :blk;
+            defer manager.allocator.free(zig_exe_path);
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         }
 
         if (config.zig_exe_path) |exe_path| unresolved_zig: {
             if (!std.process.can_spawn) break :unresolved_zig;
 
-            const zig_env = try getZigEnv(allocator, arena, exe_path) orelse break :unresolved_zig;
+            const zig_env = try getZigEnv(manager.allocator, arena, exe_path) orelse break :unresolved_zig;
 
             const zig_version = std.SemanticVersion.parse(zig_env.version) catch |err| {
                 log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
@@ -180,21 +196,21 @@ pub const Manager = struct {
             if (std.fs.path.isAbsolute(zig_lib_dir)) {
                 config.zig_lib_path = try arena.dupe(u8, zig_lib_dir);
             } else {
-                const cwd = std.process.getCwdAlloc(allocator) catch |err| switch (err) {
+                const cwd = std.process.getCwdAlloc(manager.allocator) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => |e| {
                         log.err("failed to resolve current working directory: {}", .{e});
                         break :blk;
                     },
                 };
-                defer allocator.free(cwd);
+                defer manager.allocator.free(cwd);
                 config.zig_lib_path = try std.fs.path.join(arena, &.{ cwd, zig_lib_dir });
             }
         }
 
         const wasi_preopens = switch (builtin.os.tag) {
             .wasi => manager.impl.cached_wasi_preopens orelse wasi_preopens: {
-                manager.impl.cached_wasi_preopens = try std.fs.wasi.preopensAlloc(allocator);
+                manager.impl.cached_wasi_preopens = try std.fs.wasi.preopensAlloc(manager.allocator);
                 break :wasi_preopens manager.impl.cached_wasi_preopens.?;
             },
             else => {},
@@ -266,8 +282,8 @@ pub const Manager = struct {
                 break :get_hash hasher.finalResult();
             };
 
-            const cache_path = try global_cache_dir.join(allocator, &.{ "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
-            defer allocator.free(cache_path);
+            const cache_path = try global_cache_dir.join(manager.allocator, &.{ "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
+            defer manager.allocator.free(cache_path);
 
             std.debug.assert(std.fs.path.isAbsolute(cache_path));
             var cache_dir = std.fs.cwd().makeOpenPath(cache_path, .{}) catch |err| {
@@ -310,16 +326,16 @@ pub const Manager = struct {
             };
 
             const run_result = std.process.Child.run(.{
-                .allocator = allocator,
+                .allocator = manager.allocator,
                 .argv = &argv,
                 .max_output_bytes = 16 * 1024 * 1024,
             }) catch |err| {
-                const args = std.mem.join(allocator, " ", &argv) catch break :blk;
+                const args = std.mem.join(manager.allocator, " ", &argv) catch break :blk;
                 log.err("failed to run command '{s}': {}", .{ args, err });
                 break :blk;
             };
-            defer allocator.free(run_result.stdout);
-            defer allocator.free(run_result.stderr);
+            defer manager.allocator.free(run_result.stdout);
+            defer manager.allocator.free(run_result.stderr);
 
             global_cache_dir.handle.writeFile(.{
                 .sub_path = "builtin.zig",
@@ -346,9 +362,10 @@ pub const Manager = struct {
             }
         }
 
+        manager.impl.is_dirty = false;
         return .{
             .did_change = did_change,
-            .messages = try messages.toOwnedSlice(allocator),
+            .messages = try messages.toOwnedSlice(result_allocator),
         };
     }
 
