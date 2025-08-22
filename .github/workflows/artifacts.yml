@@ -71,6 +71,6 @@ jobs:
 
       - name: Publish release
         if: env.SKIP_DEPLOY != 'true'
-        run: zig run .github/workflows/prepare_release_payload.zig | curl --request POST --user admin:${ZLS_WORKER_API_TOKEN} --json @- https://releases.zigtools.org/v1/zls/publish
+        run: zig run .github/workflows/prepare_release_payload.zig | curl --request POST --user admin:${ZLS_WORKER_API_TOKEN} --header "Content-Type: application/json" --data @- https://releases.zigtools.org/v1/zls/publish
         env:
           ZLS_WORKER_API_TOKEN: ${{ secrets.ZLS_WORKER_API_TOKEN }}
