@@ -16,65 +16,20 @@ pub fn main() !void {
     const artifacts_dir = try std.fs.cwd().openDir("zig-out/artifacts", .{ .iterate = true });
     const metadata = try std.json.parseFromSliceLeaky(Metadata, arena, metadata_source, .{});
 
-    const env_map = try std.process.getEnvMap(arena);
-
-    const uri: std.Uri = if (env_map.get("ZLS_WORKER_ENDPOINT")) |endpoint| blk: {
-        var uri = std.Uri.parse(endpoint) catch std.debug.panic("invalid URI: '{s}'", .{endpoint});
-        if (!uri.path.isEmpty()) std.debug.panic("ZLS_WORKER_ENDPOINT URI must have no path component: '{s}'", .{endpoint});
-        uri.path = .{ .raw = "/v1/zls/publish" };
-        break :blk uri;
-    } else .{
-        .scheme = "https",
-        .host = .{ .raw = "releases.zigtools.org" },
-        .path = .{ .raw = "/v1/zls/publish" },
-    };
-
-    const authorization: std.http.Client.Request.Headers.Value = authorization: {
-        const zls_worker_api_token = env_map.get("ZLS_WORKER_API_TOKEN") orelse "amogus";
-        const usename_password = try std.fmt.allocPrint(arena, "admin:{s}", .{zls_worker_api_token});
-        break :authorization .{ .override = try std.fmt.allocPrint(arena, "Basic {b64}", .{usename_password}) };
-    };
-
-    const body = try createRequestBody(arena, artifacts_dir, metadata, "full");
-
-    var client: std.http.Client = .{ .allocator = arena };
-    defer client.deinit();
-    try client.initDefaultProxies(arena);
-
-    var aw: std.Io.Writer.Allocating = .init(arena);
-    defer aw.deinit();
-
-    const result = try client.fetch(.{
-        .response_writer = &aw.writer,
-        .location = .{ .uri = uri },
-        .method = .POST,
-        .payload = body,
-        .keep_alive = false,
-        .headers = .{
-            .content_type = .{ .override = "application/json" },
-            .authorization = authorization,
-        },
-    });
-
-    if (result.status.class() != .success) {
-        std.process.fatal("response {s} ({d}): {s}", .{
-            result.status.phrase() orelse "",
-            @intFromEnum(result.status),
-            aw.written(),
-        });
-    }
+    var buffer: [4096]u8 = undefined;
+    var file_writer = std.fs.File.stdout().writer(&buffer);
+    try createRequestBody(&file_writer.interface, artifacts_dir, metadata, "full");
+    try file_writer.interface.flush();
 }
 
 fn createRequestBody(
-    arena: std.mem.Allocator,
+    writer: *std.Io.Writer,
     artifacts_dir: std.fs.Dir,
     metadata: Metadata,
     compatibility: []const u8,
-) ![]const u8 {
-    var aw: std.Io.Writer.Allocating = .init(arena);
-
+) !void {
     var write_stream: std.json.Stringify = .{
-        .writer = &aw.writer,
+        .writer = writer,
         .options = .{ .whitespace = .indent_2 },
     };
 
@@ -128,12 +83,4 @@ fn createRequestBody(
 
     try write_stream.endObject();
     try write_stream.endObject();
-
-    return try aw.toOwnedSlice();
-}
-
-fn nextArg(args: []const [:0]const u8, i: *usize) ?[:0]const u8 {
-    if (i.* >= args.len) return null;
-    defer i.* += 1;
-    return args[i.*];
 }
