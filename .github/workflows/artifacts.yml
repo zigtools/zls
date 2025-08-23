@@ -3,6 +3,9 @@ name: Deploy release artifacts
 on:
   schedule:
     - cron: "0 0 * * *"
+  push:
+    tags:
+      - "*"
   workflow_dispatch:
   # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/v1/zls/publish`.
 
