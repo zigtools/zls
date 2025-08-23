@@ -535,7 +535,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
             compress_cmd.clearEnvironment();
             compress_cmd.step.max_rss = switch (extension) {
                 .zip => 160 * 1024 * 1024, // 160 MiB
-                .@"tar.xz" => 512 * 1024 * 1024, // 512 MiB
+                .@"tar.xz" => 768 * 1024 * 1024, // 512 MiB
                 .@"tar.gz" => 16 * 1024 * 1024, // 12 MiB
             };
             switch (extension) {
