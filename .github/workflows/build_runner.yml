@@ -15,8 +15,6 @@ on:
 
 jobs:
   check_build_runner:
-    # re-enable once there is a tagged release or mach nominated version that the build runner supports
-    if: false
     strategy:
       fail-fast: false
       matrix:

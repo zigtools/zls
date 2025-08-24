@@ -20,7 +20,7 @@
       (
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
-          zig = zig-overlay.packages.${system}."0.15.1";
+          zig = zig-overlay.packages.${system}.master;
           gitignoreSource = gitignore.lib.gitignoreSource;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
           revision = self;
@@ -30,7 +30,7 @@
             default = zls;
             zls = pkgs.stdenvNoCC.mkDerivation {
               name = "zls";
-              version = "0.15.0";
+              version = "master";
               meta.mainProgram = "zls";
               src = gitignoreSource ./.;
               nativeBuildInputs = [zig];
