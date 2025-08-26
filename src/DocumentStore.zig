@@ -1134,7 +1134,12 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
             .{ cwd, joined, zig_run_result.stderr },
         );
 
-        var error_bundle = try @import("features/diagnostics.zig").getErrorBundleFromStderr(self.allocator, zig_run_result.stderr, false, null);
+        var error_bundle = try @import("features/diagnostics.zig").getErrorBundleFromStderr(
+            self.allocator,
+            zig_run_result.stderr,
+            false,
+            .{ .dynamic = .{ .document_store = self, .base_path = cwd } },
+        );
         defer error_bundle.deinit(self.allocator);
 
         try self.diagnostics_collection.pushErrorBundle(diagnostic_tag, build_file_version, cwd, error_bundle);
