@@ -40,21 +40,21 @@
       "inputs": {
         "gitignore": "gitignore",
         "nixpkgs": "nixpkgs",
-        "zig": "zig"
+        "zig-flake": "zig-flake"
       }
     },
-    "zig": {
+    "zig-flake": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1755873160,
-        "narHash": "sha256-5tQdhrjbusTUapJsUQwLbfnDA9G25gp0yRJYcwZyGmw=",
+        "lastModified": 1756330304,
+        "narHash": "sha256-3cFWHqCb5PjqU/KQH37PBUhlkSZcF/sIU9wXA4FBr0c=",
         "owner": "silversquirl",
         "repo": "zig-flake",
-        "rev": "37868f0ea9491837df2c685fb63e6a545ac9810a",
+        "rev": "a3a96f86e0a5c218ae40e4e822a235a0ef7d6052",
         "type": "github"
       },
       "original": {
