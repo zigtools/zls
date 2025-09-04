@@ -20,9 +20,7 @@ jobs:
       matrix:
         include:
           - zig-version: 0.15.1
-            build-runner-file: master.zig
           # - zig-version: mach-latest
-          #   build-runner-file: master.zig
           # Zig master is handled by 'zig build test' in the main CI
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -43,4 +41,4 @@ jobs:
       - name: Check build_runner builds
         run: |
           cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
-          zig build --build-runner $GITHUB_WORKSPACE/src/build_runner/${{ matrix.build-runner-file }}
+          zig build --build-runner $GITHUB_WORKSPACE/src/build_runner/build_runner.zig

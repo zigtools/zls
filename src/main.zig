@@ -259,7 +259,7 @@ const LoadConfigResult = union(enum) {
 };
 
 fn loadConfigFromFile(allocator: std.mem.Allocator, file_path: []const u8) error{OutOfMemory}!LoadConfigResult {
-    const file_buf = std.fs.cwd().readFileAlloc(allocator, file_path, 16 * 1024 * 1024) catch |err| switch (err) {
+    const file_buf = std.fs.cwd().readFileAlloc(file_path, allocator, .limited(16 * 1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => return .not_found,
         error.OutOfMemory => |e| return e,
         else => {

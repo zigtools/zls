@@ -4,7 +4,7 @@
     .version = "0.16.0-dev",
     // Must be kept in line with the `minimum_build_zig_version` in `build.zig`.
     // Should be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0-dev.168+d51d18c98",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
@@ -21,8 +21,8 @@
             .hash = "diffz-0.0.1-G2tlIQrOAQCfH15jdyaLyrMgV8eGPouFhkCeYFTmJaLk",
         },
         .lsp_kit = .{
-            .url = "https://github.com/zigtools/lsp-kit/archive/576e9405b1ab22c17c0f9318feed3278aa66b0ea.tar.gz",
-            .hash = "lsp_kit-0.1.0-bi_PL04yCgAxLsF0hH2a5sZKT84MGQaKXouw2jvCE8Nl",
+            .url = "https://github.com/zigtools/lsp-kit/archive/fe98e895ca3bd1b39965ab30f0f252f7b7e83ee6.tar.gz",
+            .hash = "lsp_kit-0.1.0-bi_PLzAyCgClDh8_M0U9Q50ysdsQBuRuBTZfwg6rZPd6",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",

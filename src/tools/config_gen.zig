@@ -879,7 +879,7 @@ fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
 /// Output example: https://github.com/zigtools/zls/blob/0.11.0/src/data/master.zig
 fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, output_path: []const u8, langref_path: []const u8) !void {
     // const langref_source: []const u8 = @embedFile("langref.html.in");
-    const langref_source = try std.fs.cwd().readFileAlloc(allocator, langref_path, std.math.maxInt(u32));
+    const langref_source = try std.fs.cwd().readFileAlloc(langref_path, allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(langref_source);
 
     const builtins = try collectBuiltinData(allocator, version, langref_source);

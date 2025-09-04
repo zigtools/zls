@@ -15,11 +15,11 @@ pub fn main() !u8 {
 
     if (args.len != 4) @panic("invalid arguments");
 
-    const expected = std.fs.cwd().readFileAlloc(gpa, args[1], std.math.maxInt(u32)) catch |err|
+    const expected = std.fs.cwd().readFileAlloc(args[1], gpa, .limited(16 * 1024 * 1024)) catch |err|
         std.debug.panic("could no open/read file '{s}': {}", .{ args[1], err });
     defer gpa.free(expected);
 
-    const actual_unsanitized = std.fs.cwd().readFileAlloc(gpa, args[2], std.math.maxInt(u32)) catch |err|
+    const actual_unsanitized = std.fs.cwd().readFileAlloc(args[2], gpa, .limited(16 * 1024 * 1024)) catch |err|
         std.debug.panic("could no open/read file '{s}': {}", .{ args[2], err });
     defer gpa.free(actual_unsanitized);
 

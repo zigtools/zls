@@ -614,7 +614,7 @@ pub fn getZigEnv(
         const source = try allocator.dupeZ(u8, zig_env_result.stdout);
         defer allocator.free(source);
 
-        return std.zon.parse.fromSlice(
+        return std.zon.parse.fromSliceAlloc(
             Env,
             result_arena,
             source,
