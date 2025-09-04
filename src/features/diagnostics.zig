@@ -343,7 +343,7 @@ fn getErrorBundleFromAstCheck(
 
         process.stdin = null;
 
-        stderr_bytes = try process.stderr.?.readToEndAlloc(allocator, 16 * 1024 * 1024);
+        stderr_bytes = try readToEndAlloc(process.stderr.?, allocator, .limited(16 * 1024 * 1024));
 
         const term = process.wait() catch |err| {
             log.warn("Failed to await zig ast-check process, error: {}", .{err});
@@ -638,7 +638,7 @@ pub const BuildOnSave = struct {
         log.debug("zig build runner process has exited", .{});
 
         const stderr = if (child_process.stderr) |stderr|
-            stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+            readToEndAlloc(stderr, allocator, .limited(16 * 1024 * 1024)) catch ""
         else
             "";
         defer allocator.free(stderr);
@@ -697,7 +697,7 @@ fn terminateChildProcessReportError(
     kind: enum { wait, kill },
 ) bool {
     const stderr = if (child_process.stderr) |stderr|
-        stderr.readToEndAlloc(allocator, 16 * 1024 * 1024) catch ""
+        readToEndAlloc(stderr, allocator, .limited(16 * 1024 * 1024)) catch ""
     else
         "";
     defer allocator.free(stderr);
@@ -728,4 +728,17 @@ fn terminateChildProcessReportError(
     }
 
     return true;
+}
+
+fn readToEndAlloc(
+    file: std.fs.File,
+    allocator: std.mem.Allocator,
+    limit: std.Io.Limit,
+) (std.fs.File.ReadError || error{ OutOfMemory, StreamTooLong })![]u8 {
+    var buffer: [1024]u8 = undefined;
+    var file_reader = file.readerStreaming(&buffer);
+    return file_reader.interface.allocRemaining(allocator, limit) catch |err| switch (err) {
+        error.ReadFailed => return file_reader.err.?,
+        error.OutOfMemory, error.StreamTooLong => |e| return e,
+    };
 }

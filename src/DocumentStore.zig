@@ -664,10 +664,9 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
     };
 
     return dir.readFileAllocOptions(
-        self.allocator,
         sub_path,
-        max_document_size,
-        null,
+        self.allocator,
+        .limited(max_document_size),
         .of(u8),
         0,
     ) catch |err| {
@@ -1030,10 +1029,11 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
 
-    var config_file = try std.fs.cwd().openFile(config_file_path, .{});
-    defer config_file.close();
-
-    const file_buf = try config_file.readToEndAlloc(allocator, 16 * 1024 * 1024);
+    const file_buf = try std.fs.cwd().readFileAlloc(
+        config_file_path,
+        allocator,
+        .limited(16 * 1024 * 1024),
+    );
     defer allocator.free(file_buf);
 
     return try std.json.parseFromSlice(

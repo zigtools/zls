@@ -126,10 +126,7 @@ pub fn main() Error!void {
         std.process.exit(1);
     };
 
-    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| std.debug.panic("failed to open {s}: {}", .{ file_path, err });
-    defer file.close();
-
-    const source = file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .of(u8), 0) catch |err|
+    const source = std.fs.cwd().readFileAllocOptions(file_path, gpa, .limited(16 * 1024 * 1024), .of(u8), 0) catch |err|
         std.debug.panic("failed to read from {s}: {}", .{ file_path, err });
     defer gpa.free(source);
 

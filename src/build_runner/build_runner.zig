@@ -1,18 +1,18 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
 //! This build runner is targeting compatibility with the following Zig versions:
-//!   - 0.15.0-dev.936+fc2c1883b or later
+//!   - 0.15.1 or later
 //!
 //! Handling multiple Zig versions can be achieved with one of the following strategies:
 //!   - use `@hasDecl` or `@hasField` (recommended)
 //!   - use `builtin.zig_version`
 //!
 //! You can test out the build runner on ZLS's `build.zig` with the following command:
-//! `zig build --build-runner src/build_runner/master.zig`
+//! `zig build --build-runner src/build_runner/build_runner.zig`
 //!
 //! You can also test the build runner on any other `build.zig` with the following command:
-//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/master.zig`
-//! `zig build --build-runner /path/to/zls/src/build_runner/master.zig` (if the cwd contains build.zig)
+//! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/build_runner.zig`
+//! `zig build --build-runner /path/to/zls/src/build_runner/build_runner.zig` (if the cwd contains build.zig)
 //!
 
 const root = @import("@build");

@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Release 0.15.1
+/// std.Io: delete GenericReader, AnyReader, FixedBufferStream; and related API breakage
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.15.1";
+const minimum_build_zig_version = "0.16.0-dev.156+b7104231a";
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// Release 0.15.1
