@@ -3,16 +3,15 @@
 [![CI](https://github.com/zigtools/zls/actions/workflows/main.yml/badge.svg)](https://github.com/zigtools/zls/actions/workflows/main.yml)
 [![codecov](https://codecov.io/github/zigtools/zls/graph/badge.svg?token=WE18MPF00W)](https://codecov.io/github/zigtools/zls)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-**Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
+[![Discord](https://discord.com/api/guilds/997174129532866701/widget.png?style=shield)](https://discord.gg/5m5U3qpUhk)
 
 ZLS is a non-official implementation of the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) for [Zig](https://ziglang.org/) in Zig. It provides developers with IDE [features](#features) in their editor.
 
 ## Installation
 
-### See the [Installation Guide](https://zigtools.org/zls/install/) for editor and binary installation instructions.
+The complete installation guide is available on the [Zigtools website](https://zigtools.org/zls/install/). It covers editor setup, prebuilt binaries and additional documentation.
 
-### From Source
+### Build From Source
 
 Building ZLS requires [a build of Zig master](https://ziglang.org/download/).
 
@@ -21,6 +20,8 @@ git clone https://github.com/zigtools/zls
 cd zls
 zig build -Doptimize=ReleaseSafe
 ```
+
+When upgrading Zig, make sure to update ZLS too keep them in sync.
 
 ## Features
 
