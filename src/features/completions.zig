@@ -859,15 +859,6 @@ pub fn completionAtIndex(
     };
     const source = handle.tree.source;
 
-    // Provide `top_level_decl_data` only if `offsets.lineSliceUntilIndex(handle.tree.source, source_index).len` is
-    // 0 => Empty new line, manually triggered
-    // 1 => This is the very first char on a given line
-    const at_line_start = offsets.lineSliceUntilIndex(source, source_index).len < 2;
-    if (at_line_start) {
-        try populateSnippedCompletions(&builder, &snipped_data.top_level_decl_data);
-        return .{ .isIncomplete = false, .items = builder.completions.items };
-    }
-
     const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, false);
 
     switch (pos_context) {
