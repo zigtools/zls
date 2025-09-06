@@ -393,7 +393,7 @@ pub fn getErrorBundleFromStderr(
 
         const src_loc = if (single_file_source) |source| src_loc: {
             const source_index = offsets.positionToIndex(source, utf8_position, .@"utf-8");
-            const source_line = offsets.lineSliceAtIndex(source, source_index);
+            const source_loc = offsets.lineLocAtIndex(source, source_index);
 
             var loc: offsets.Loc = .{ .start = source_index, .end = source_index };
 
@@ -405,10 +405,11 @@ pub fn getErrorBundleFromStderr(
                 .src_path = eb_src_path,
                 .line = utf8_position.line,
                 .column = utf8_position.character,
-                .span_start = @intCast(loc.start),
+                // span_start <= span_main <= span_end <= source_loc.end
+                .span_start = @intCast(@min(source_index, loc.start)),
                 .span_main = @intCast(source_index),
-                .span_end = @intCast(loc.end),
-                .source_line = try error_bundle.addString(source_line),
+                .span_end = @intCast(@min(@max(source_index, loc.end), source_loc.end)),
+                .source_line = try error_bundle.addString(offsets.locToSlice(source, source_loc)),
             });
         } else src_loc: {
             break :src_loc try error_bundle.addSourceLocation(.{
