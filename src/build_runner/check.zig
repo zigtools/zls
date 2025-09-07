@@ -51,11 +51,8 @@ fn isBuildRunnerSupportedInternal(
             };
             return zig_version.order(next_minor_release) == .lt;
         } else {
-            if (zig_version.patch == 0) {
-                return zig_version.minor == 1 + minimum_zig_version.minor;
-            } else {
-                return zig_version.minor == minimum_zig_version.minor and zig_version.patch - 1 >= minimum_zig_version.patch;
-            }
+            std.debug.assert(zig_version.patch == 0);
+            return zig_version.minor == 1 + minimum_zig_version.minor;
         }
     } else {
         if (version_is_tagged) return false;
