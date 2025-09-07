@@ -11,6 +11,64 @@ nodes: Ast.NodeList,
 extra_data: std.ArrayListUnmanaged(u32),
 scratch: std.ArrayListUnmanaged(Node.Index),
 
+pub fn parse(gpa: Allocator, source: [:0]const u8, mode: std.zig.Ast.Mode) Allocator.Error!std.zig.Ast {
+    var tokens = std.zig.Ast.TokenList{};
+    defer tokens.deinit(gpa);
+
+    // Empirically, the zig std lib has an 8:1 ratio of source bytes to token count.
+    const estimated_token_count = source.len / 8;
+    try tokens.ensureTotalCapacity(gpa, estimated_token_count);
+
+    var tokenizer = std.zig.Tokenizer.init(source);
+    while (true) {
+        const token = tokenizer.next();
+        try tokens.append(gpa, .{
+            .tag = token.tag,
+            .start = @intCast(token.loc.start),
+        });
+        if (token.tag == .eof) break;
+    }
+
+    var parser: Parse = .{
+        .source = source,
+        .gpa = gpa,
+        .tokens = tokens.slice(),
+        .errors = .{},
+        .nodes = .{},
+        .extra_data = .{},
+        .scratch = .{},
+        .tok_i = 0,
+    };
+    defer parser.errors.deinit(gpa);
+    defer parser.nodes.deinit(gpa);
+    defer parser.extra_data.deinit(gpa);
+    defer parser.scratch.deinit(gpa);
+
+    // Empirically, Zig source code has a 2:1 ratio of tokens to AST nodes.
+    // Make sure at least 1 so we can use appendAssumeCapacity on the root node below.
+    const estimated_node_count = (tokens.len + 2) / 2;
+    try parser.nodes.ensureTotalCapacity(gpa, estimated_node_count);
+
+    switch (mode) {
+        .zig => try parser.parseRoot(),
+        .zon => try parser.parseZon(),
+    }
+
+    const extra_data = try parser.extra_data.toOwnedSlice(gpa);
+    errdefer gpa.free(extra_data);
+    const errors = try parser.errors.toOwnedSlice(gpa);
+    errdefer gpa.free(errors);
+
+    return .{
+        .source = source,
+        .mode = mode,
+        .tokens = tokens.toOwnedSlice(),
+        .nodes = parser.nodes.toOwnedSlice(),
+        .extra_data = extra_data,
+        .errors = errors,
+    };
+}
+
 fn tokenTag(p: *const Parse, token_index: TokenIndex) Token.Tag {
     return p.tokens.items(.tag)[token_index];
 }
@@ -3806,7 +3864,7 @@ const Parse = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const Ast = @import("Ast.zig");
+const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const AstError = Ast.Error;
 const TokenIndex = Ast.TokenIndex;
