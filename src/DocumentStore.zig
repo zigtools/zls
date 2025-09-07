@@ -8,6 +8,7 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.store);
 const lsp = @import("lsp");
 const Ast = std.zig.Ast;
+const CustomAst = @import("stage2/Ast.zig");
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("build_runner/shared.zig").BuildConfig;
 const tracy = @import("tracy");
@@ -573,19 +574,10 @@ pub const Handle = struct {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
 
-        var tree = try Ast.parse(allocator, new_text, mode);
-        errdefer tree.deinit(allocator);
+        var custom_ast = try CustomAst.parse(allocator, new_text, mode);
+        errdefer custom_ast.deinit(allocator);
 
-        // remove unused capacity
-        var nodes = tree.nodes.toMultiArrayList();
-        try nodes.setCapacity(allocator, nodes.len);
-        tree.nodes = nodes.slice();
-
-        // remove unused capacity
-        var tokens = tree.tokens.toMultiArrayList();
-        try tokens.setCapacity(allocator, tokens.len);
-        tree.tokens = tokens.slice();
-        return tree;
+        return custom_ast.toStdAst();
     }
 };
 
