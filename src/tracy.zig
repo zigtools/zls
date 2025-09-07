@@ -154,56 +154,54 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         }
 
         fn allocFn(ptr: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+            std.debug.assert(len > 0);
             const self: *Self = @ptrCast(@alignCast(ptr));
             const new_memory = self.parent_allocator.rawAlloc(len, alignment, ret_addr) orelse {
                 messageColor("allocation failed", 0xFF0000);
                 return null;
             };
-            if (len != 0) {
-                if (name) |n| {
-                    allocNamed(new_memory, len, n);
-                } else {
-                    alloc(new_memory, len);
-                }
+            if (name) |n| {
+                allocNamed(new_memory, len, n);
+            } else {
+                alloc(new_memory, len);
             }
             return new_memory;
         }
 
         fn resizeFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+            std.debug.assert(memory.len > 0 and new_len.len > 0);
             const self: *Self = @ptrCast(@alignCast(ptr));
             if (!self.parent_allocator.rawResize(memory, alignment, new_len, ret_addr)) return false;
             if (name) |n| {
-                if (memory.len != 0) freeNamed(memory.ptr, n);
-                if (new_len != 0) allocNamed(memory.ptr, new_len, n);
+                freeNamed(memory.ptr, n);
+                allocNamed(memory.ptr, new_len, n);
             } else {
-                if (memory.len != 0) free(memory.ptr);
-                if (new_len != 0) alloc(memory.ptr, new_len);
+                free(memory.ptr);
+                alloc(memory.ptr, new_len);
             }
             return true;
         }
 
         fn remapFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            std.debug.assert(memory.len > 0 and new_len.len > 0);
             const self: *Self = @ptrCast(@alignCast(ptr));
             const new_memory = self.parent_allocator.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
             if (name) |n| {
-                if (memory.len != 0) freeNamed(memory.ptr, n);
-                if (new_len != 0) allocNamed(new_memory, new_len, n);
+                freeNamed(memory.ptr, n);
+                allocNamed(new_memory, new_len, n);
             } else {
-                if (memory.len != 0) free(memory.ptr);
-                if (new_len != 0) alloc(new_memory, new_len);
+                free(memory.ptr);
+                alloc(new_memory, new_len);
             }
             return new_memory;
         }
 
         fn freeFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
-            // this condition is to handle free being called on an empty slice that was never even allocated
-            // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
-            if (memory.len != 0) {
-                if (name) |n| {
-                    freeNamed(memory.ptr, n);
-                } else {
-                    free(memory.ptr);
-                }
+            std.debug.assert(memory.len > 0);
+            if (name) |n| {
+                freeNamed(memory.ptr, n);
+            } else {
+                free(memory.ptr);
             }
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.parent_allocator.rawFree(memory, alignment, ret_addr);
