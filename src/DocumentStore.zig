@@ -1077,7 +1077,10 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
     }
 }
 
-pub fn loadTrigramStores(store: *DocumentStore) error{OutOfMemory}![]*DocumentStore.Handle {
+pub fn loadTrigramStores(
+    store: *DocumentStore,
+    filter_paths: []const []const u8,
+) error{OutOfMemory}![]*DocumentStore.Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1085,8 +1088,17 @@ pub fn loadTrigramStores(store: *DocumentStore) error{OutOfMemory}![]*DocumentSt
     errdefer handles.deinit(store.allocator);
 
     for (store.handles.values()) |handle| {
-        // TODO check if the handle is in a workspace folder instead
-        if (isInStd(handle.uri)) continue;
+        if (URI.toFsPath(store.allocator, handle.uri)) |path| {
+            defer store.allocator.free(path);
+            for (filter_paths) |filter_path| {
+                if (std.mem.startsWith(u8, path, filter_path)) break;
+            } else break;
+        } else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                // The URI is either invalid or not a `file` scheme. Either way, we should include it.
+            },
+        }
         handles.appendAssumeCapacity(handle);
     }
 
