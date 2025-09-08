@@ -52,6 +52,7 @@ pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.Workspa
 
         const slice = trigram_store.declarations.slice();
         const names = slice.items(.name);
+        const kinds = slice.items(.kind);
 
         var last_index: usize = 0;
         var last_position: offsets.Position = .{ .line = 0, .character = 0 };
@@ -59,6 +60,8 @@ pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.Workspa
         try symbols.ensureUnusedCapacity(arena, declaration_buffer.items.len);
         for (declaration_buffer.items) |declaration| {
             const name_token = names[@intFromEnum(declaration)];
+            const kind = kinds[@intFromEnum(declaration)];
+
             const loc = offsets.identifierTokenToNameLoc(handle.tree, name_token);
             const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
 
@@ -69,7 +72,12 @@ pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.Workspa
 
             symbols.appendAssumeCapacity(.{
                 .name = name,
-                .kind = .Variable,
+                .kind = switch (kind) {
+                    .variable => .Variable,
+                    .constant => .Constant,
+                    .function => .Function,
+                    .test_function => .Method, // there is no SymbolKind that represents a tests,
+                },
                 .location = .{
                     .Location = .{
                         .uri = handle.uri,

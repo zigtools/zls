@@ -13,14 +13,22 @@ pub const Trigram = [3]u8;
 pub const Declaration = struct {
     pub const Index = enum(u32) { _ };
 
+    pub const Kind = enum {
+        variable,
+        constant,
+        function,
+        test_function,
+    };
+
+    /// Either `.identifier` or `.string_literal`.
     name: Ast.TokenIndex,
+    kind: Kind,
 };
 
 has_filter: bool,
 filter_buckets: std.ArrayListUnmanaged(CuckooFilter.Bucket),
 trigram_to_declarations: std.AutoArrayHashMapUnmanaged(Trigram, std.ArrayListUnmanaged(Declaration.Index)),
 declarations: std.MultiArrayList(Declaration),
-names: std.ArrayListUnmanaged(u8),
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -31,7 +39,6 @@ pub fn init(
         .filter_buckets = .empty,
         .trigram_to_declarations = .empty,
         .declarations = .empty,
-        .names = .empty,
     };
     errdefer store.deinit(allocator);
 
@@ -45,7 +52,6 @@ pub fn init(
             const old_in_function = context.in_function;
             defer context.in_function = old_in_function;
 
-            var name_token_maybe: ?Ast.TokenIndex = null;
             switch (cb_tree.nodeTag(node)) {
                 .fn_proto,
                 .fn_proto_multi,
@@ -57,7 +63,12 @@ pub fn init(
                     const fn_token = cb_tree.nodeMainToken(node);
                     if (cb_tree.tokenTag(fn_token + 1) != .identifier) break :skip;
 
-                    name_token_maybe = fn_token + 1;
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        offsets.identifierTokenToNameSlice(cb_tree, fn_token + 1),
+                        fn_token + 1,
+                        .function,
+                    );
                 },
                 .root => unreachable,
                 .container_decl,
@@ -80,17 +91,34 @@ pub fn init(
                 .aligned_var_decl,
                 => skip: {
                     if (context.in_function) break :skip;
-                    name_token_maybe = cb_tree.nodeMainToken(node) + 1;
+
+                    const main_token = cb_tree.nodeMainToken(node);
+
+                    const kind: Declaration.Kind = switch (cb_tree.tokenTag(main_token)) {
+                        .keyword_var => .variable,
+                        .keyword_const => .constant,
+                        else => unreachable,
+                    };
+
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        offsets.identifierTokenToNameSlice(cb_tree, main_token + 1),
+                        main_token + 1,
+                        kind,
+                    );
+                },
+
+                .test_decl => skip: {
+                    const test_name_token, const test_name = ast.testDeclNameAndToken(cb_tree, node) orelse break :skip;
+
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        test_name,
+                        test_name_token,
+                        .test_function,
+                    );
                 },
                 else => {},
-            }
-
-            if (name_token_maybe) |name_token| {
-                try context.store.appendDeclaration(
-                    context.allocator,
-                    cb_tree,
-                    name_token,
-                );
             }
 
             try ast.iterateChildren(cb_tree, node, context, Error, callback);
@@ -149,23 +177,21 @@ pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
     }
     store.trigram_to_declarations.deinit(allocator);
     store.declarations.deinit(allocator);
-    store.names.deinit(allocator);
     store.* = undefined;
 }
 
-/// Caller must not submit name.len < 3.
 fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
-    tree: Ast,
+    name: []const u8,
     name_token: Ast.TokenIndex,
+    kind: Declaration.Kind,
 ) error{OutOfMemory}!void {
-    const loc = offsets.identifierTokenToNameLoc(tree, name_token);
-    const name = offsets.locToSlice(tree.source, loc);
     if (name.len < 3) return;
 
     try store.declarations.append(allocator, .{
         .name = name_token,
+        .kind = kind,
     });
 
     for (0..name.len - 2) |index| {
