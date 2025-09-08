@@ -9,11 +9,22 @@ const DocumentStore = @import("../DocumentStore.zig");
 const offsets = @import("../offsets.zig");
 const Server = @import("../Server.zig");
 const TrigramStore = @import("../TrigramStore.zig");
+const URI = @import("../uri.zig");
 
 pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.WorkspaceSymbolParams) error{OutOfMemory}!lsp.ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    const handles = try server.document_store.loadTrigramStores();
+    var workspace_paths: std.ArrayList([]const u8) = try .initCapacity(arena, server.workspaces.items.len);
+    for (server.workspaces.items) |workspace| {
+        const path = URI.toFsPath(arena, workspace.uri) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UnsupportedScheme => continue,
+            else => continue,
+        };
+        workspace_paths.appendAssumeCapacity(path);
+    }
+
+    const handles = try server.document_store.loadTrigramStores(workspace_paths.items);
     defer server.document_store.allocator.free(handles);
 
     var symbols: std.ArrayListUnmanaged(lsp.types.WorkspaceSymbol) = .empty;
