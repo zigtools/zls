@@ -93,6 +93,24 @@ test "nested struct with self" {
     );
 }
 
+test "decl names that are empty or contain whitespace return non-empty document symbol" {
+    try testDocumentSymbol(
+        \\test "" {}
+        \\test "          " {}
+        \\test " a " {}
+        \\const @"" = 0;
+        \\const @"   " = 0;
+        \\const @" a " = 0;
+    ,
+        \\Method ""
+        \\Method "          "
+        \\Method " a "
+        \\Constant @""
+        \\Constant @"   "
+        \\Constant @" a "
+    );
+}
+
 fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();

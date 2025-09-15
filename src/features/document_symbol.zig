@@ -10,7 +10,7 @@ const analysis = @import("../analysis.zig");
 const tracy = @import("tracy");
 
 const Symbol = struct {
-    name: []const u8,
+    name_token: Ast.TokenIndex,
     detail: ?[]const u8 = null,
     kind: types.SymbolKind,
     loc: offsets.Loc,
@@ -26,6 +26,26 @@ const Context = struct {
     parent_symbols: *std.ArrayList(Symbol),
     total_symbol_count: *usize,
 };
+
+fn tokenNameMaybeQuotes(tree: *const Ast, token: Ast.TokenIndex) []const u8 {
+    const token_slice = tree.tokenSlice(token);
+    switch (tree.tokenTag(token)) {
+        .identifier => return token_slice,
+        .string_literal => {
+            const name = token_slice[1 .. token_slice.len - 1];
+            const trimmed = std.mem.trim(u8, name, &std.ascii.whitespace);
+            // LSP spec requires that a symbol name not be empty or consisting only of whitespace,
+            // don't trim the quotes in that case so there's something to present.
+            // Leading and trailing whitespace might cause ambiguity depending on how the client shows symbols
+            // so compensate for that as well
+            if (name.len == 0 or name.len != trimmed.len)
+                return token_slice;
+
+            return name;
+        },
+        else => unreachable,
+    }
+}
 
 fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
     std.debug.assert(node != .root);
@@ -52,7 +72,7 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
             };
 
             break :blk .{
-                .name = var_decl_name,
+                .name_token = var_decl_name_token,
                 .detail = null,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
@@ -62,10 +82,10 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
         },
 
         .test_decl => blk: {
-            const test_name_token, const test_name = ast.testDeclNameAndToken(tree, node) orelse break :blk null;
+            const test_name_token = tree.nodeData(node).opt_token_and_node[0].unwrap() orelse break :blk null;
 
             break :blk .{
-                .name = test_name,
+                .name_token = test_name_token,
                 .kind = .Method, // there is no SymbolKind that represents a tests
                 .loc = offsets.nodeToLoc(tree, node),
                 .selection_loc = offsets.tokenToLoc(tree, test_name_token),
@@ -79,7 +99,7 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
             const name_token = fn_info.name_token orelse break :blk null;
 
             break :blk .{
-                .name = offsets.identifierTokenToNameSlice(tree, name_token),
+                .name_token = name_token,
                 .detail = analysis.getFunctionSignature(tree, fn_info),
                 .kind = .Function,
                 .loc = offsets.nodeToLoc(tree, node),
@@ -124,10 +144,9 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
             if (is_struct and container_field.ast.tuple_like) break :blk null;
 
             const decl_name_token = container_field.ast.main_token;
-            const decl_name = offsets.tokenToSlice(tree, decl_name_token);
 
             break :blk .{
-                .name = decl_name,
+                .name_token = decl_name_token,
                 .detail = ctx.last_var_decl_name,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
@@ -185,7 +204,7 @@ fn convertSymbols(
     var mappings: std.ArrayList(offsets.multiple.IndexToPositionMapping) = .empty;
     try mappings.ensureTotalCapacityPrecise(arena, total_symbol_count * 4);
 
-    const result = convertSymbolsInternal(from, &symbol_buffer, &mappings);
+    const result = convertSymbolsInternal(tree, from, &symbol_buffer, &mappings);
 
     offsets.multiple.indexToPositionWithMappings(tree.source, mappings.items, encoding);
 
@@ -193,6 +212,7 @@ fn convertSymbols(
 }
 
 fn convertSymbolsInternal(
+    tree: *const Ast,
     from: []const Symbol,
     symbol_buffer: *std.ArrayList(types.DocumentSymbol),
     mappings: *std.ArrayList(offsets.multiple.IndexToPositionMapping),
@@ -204,13 +224,13 @@ fn convertSymbolsInternal(
 
     for (from, to) |symbol, *out| {
         out.* = .{
-            .name = symbol.name,
+            .name = tokenNameMaybeQuotes(tree, symbol.name_token),
             .detail = symbol.detail,
             .kind = symbol.kind,
             // will be set later through the mapping below
             .range = undefined,
             .selectionRange = undefined,
-            .children = convertSymbolsInternal(symbol.children.items, symbol_buffer, mappings),
+            .children = convertSymbolsInternal(tree, symbol.children.items, symbol_buffer, mappings),
         };
         mappings.appendSliceAssumeCapacity(&.{
             .{ .output = &out.range.start, .source_index = symbol.loc.start },
