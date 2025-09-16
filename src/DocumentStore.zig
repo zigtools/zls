@@ -749,6 +749,8 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     }
 
     defer {
+        self.lock.lock();
+        defer self.lock.unlock();
         std.debug.assert(self.currently_loading_uris.swapRemove(uri));
         self.wait_for_currently_loading_uri.broadcast();
     }
