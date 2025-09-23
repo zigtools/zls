@@ -58,7 +58,7 @@ pub fn addCases(
         build_cmd.addArg("--zig-lib-dir");
         build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
 
-        const actual_build_config_json = build_cmd.captureStdOut();
+        const actual_build_config_json = build_cmd.captureStdOut(.{});
 
         const run_diff = b.addRunArtifact(check_exe);
         run_diff.setName(b.fmt("run {s} ({s})", .{ check_exe.name, entry.name }));
