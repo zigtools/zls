@@ -9,10 +9,10 @@ lock: RwLock,
 
 limbs: std.ArrayList(usize),
 
-decls: std.SegmentedList(InternPool.Decl, 0),
-structs: std.SegmentedList(InternPool.Struct, 0),
-enums: std.SegmentedList(InternPool.Enum, 0),
-unions: std.SegmentedList(InternPool.Union, 0),
+decls: SegmentedList(InternPool.Decl, 0),
+structs: SegmentedList(InternPool.Struct, 0),
+enums: SegmentedList(InternPool.Enum, 0),
+unions: SegmentedList(InternPool.Union, 0),
 
 const InternPool = @This();
 const std = @import("std");
@@ -25,6 +25,7 @@ const expectFmt = std.testing.expectFmt;
 pub const StringPool = @import("string_pool.zig").StringPool(.{});
 pub const String = StringPool.String;
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
+const SegmentedList = @import("segmented_list.zig").SegmentedList;
 
 pub const RwLock = if (builtin.single_threaded)
     std.Thread.RwLock.SingleThreadedRwLock
