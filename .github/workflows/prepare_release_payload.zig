@@ -12,7 +12,7 @@ pub fn main() !void {
     var arena_allocator: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     const arena = arena_allocator.allocator();
 
-    const metadata_source = try std.fs.cwd().readFileAlloc(arena, "zig-out/release.json", std.math.maxInt(u32));
+    const metadata_source = try std.fs.cwd().readFileAlloc("zig-out/release.json", arena, .limited(std.math.maxInt(u32)));
     const artifacts_dir = try std.fs.cwd().openDir("zig-out/artifacts", .{ .iterate = true });
     const metadata = try std.json.parseFromSliceLeaky(Metadata, arena, metadata_source, .{});
 
