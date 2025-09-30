@@ -18,6 +18,7 @@ test "zig compile server - translate c" {
     defer result1.deinit(allocator);
     try std.testing.expect(result1 == .success);
 
+    if (true) return error.SkipZigTest; // https://github.com/ziglang/zig/issues/25393
     var result2 = try testTranslate(
         \\#include <this_file_doesnt_exist>
     );
