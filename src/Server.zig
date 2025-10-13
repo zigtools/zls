@@ -1821,7 +1821,7 @@ fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocat
     } else |err| {
         log.err("failed to process {f}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
+            std.debug.dumpStackTrace(trace);
         }
 
         switch (message) {

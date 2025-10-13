@@ -5035,13 +5035,15 @@ pub fn getPositionContext(
             },
             .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
             .r_paren => {
-                _ = stack.pop();
+                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
+                if (stack.items.len != 0) stack.items.len -= 1;
                 if (curr_ctx.stack_id != .paren) {
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
             .r_bracket => {
-                _ = stack.pop();
+                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
+                if (stack.items.len != 0) stack.items.len -= 1;
                 if (curr_ctx.stack_id != .bracket) {
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
