@@ -4,24 +4,20 @@
 
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
-
-    gitignore.url = "github:hercules-ci/gitignore.nix";
-    gitignore.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
     self,
     nixpkgs,
     zig-overlay,
-    gitignore,
   }:
     builtins.foldl' nixpkgs.lib.recursiveUpdate {} (
       builtins.map
       (
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
+          fs = pkgs.lib.fileset;
           zig = zig-overlay.packages.${system}.master;
-          gitignoreSource = gitignore.lib.gitignoreSource;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
           revision = self;
         in {
@@ -32,7 +28,18 @@
               name = "zls";
               version = "master";
               meta.mainProgram = "zls";
-              src = gitignoreSource ./.;
+              src = fs.toSource {
+                root = ./.;
+                fileset = fs.intersection (fs.fromSource (pkgs.lib.sources.cleanSource ./.)) (
+                  fs.unions [
+                    ./src
+                    ./tests
+                    ./build.zig
+                    ./build.zig.zon
+                    ./deps.nix
+                  ]
+                );
+              };
               nativeBuildInputs = [zig];
               dontInstall = true;
               doCheck = true;
