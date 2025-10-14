@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0, .pre = "dev" };
 
 /// Specify the minimum Zig version that is required to compile and test ZLS:
-/// std.Build.Step.Run: Enable passing (generated) file content as args
+/// Add error bundle support to `translate-c`, unify `cmdTranslateC` and `cImport`
 ///
 /// If you do not use Nix, a ZLS maintainer can take care of this.
 /// Whenever this version is increased, run the following command:
@@ -15,7 +15,7 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.16.0-dev.313+be571f32c";
+const minimum_build_zig_version = "0.16.0-dev.722+c17e18647";
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// Release 0.15.1
