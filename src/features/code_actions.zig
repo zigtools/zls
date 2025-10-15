@@ -332,9 +332,10 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
 
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
-    const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
-
     const tree = builder.handle.tree;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, &tree) orelse return;
+    const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
+    const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -373,7 +374,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
 
     const insert_token = tree.nodeMainToken(block);
     const add_suffix_newline = is_last_param and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     if (builder.wantKind(.@"source.fixAll")) {
         try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
@@ -397,9 +398,10 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
 
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
-    const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
-
     const tree = builder.handle.tree;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, &tree) orelse return;
+    const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
+    const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
     const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
@@ -418,7 +420,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
     if (insert_token >= tree.tokens.len) return;
     if (tree.tokenTag(insert_token) != .semicolon) return;
 
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, false, false);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, false, false);
 
     if (builder.wantKind(.@"source.fixAll")) {
         try builder.fixall_text_edits.append(builder.arena, builder.createTextEditPos(insert_index, new_text));
@@ -446,20 +448,16 @@ fn handleUnusedCapture(
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const tree = builder.handle.tree;
-
-    const source = tree.source;
-
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.identifier}, &tree) orelse return;
-    if (tree.tokenTag(identifier_token) != .identifier) return;
-
-    const identifier_name = offsets.locToSlice(source, loc);
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, &tree) orelse return;
+    const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
+    const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
     // Zig can report incorrect "unused capture" errors
     // https://github.com/ziglang/zig/pull/22209
     if (std.mem.eql(u8, identifier_name, "_")) return;
 
     if (builder.wantKind(.quickfix)) {
-        const capture_loc = getCaptureLoc(source, loc) orelse return;
+        const capture_loc = getCaptureLoc(tree.source, loc) orelse return;
 
         const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
 
@@ -531,7 +529,7 @@ fn handleUnusedCapture(
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
     const add_suffix_newline = is_last_capture and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
-    const insert_index, const new_text = try createDiscardText(builder, identifier_name, insert_token, true, add_suffix_newline);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
 }
@@ -542,7 +540,7 @@ fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
 
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
-    const edit_loc = getDiscardLoc(builder.handle.tree.source, loc) orelse return;
+    const edit_loc = getDiscardLoc(builder.handle.tree, loc) orelse return;
 
     if (builder.wantKind(.@"source.fixAll")) {
         try builder.fixall_text_edits.append(builder.arena, builder.createTextEditLoc(edit_loc, ""));
@@ -566,23 +564,18 @@ fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
 
     if (!builder.wantKind(.quickfix)) return;
 
-    const source = builder.handle.tree.source;
-
-    const var_keyword_end = 1 + (std.mem.lastIndexOfNone(u8, source[0..loc.start], &std.ascii.whitespace) orelse return);
-
-    const var_keyword_loc: offsets.Loc = .{
-        .start = var_keyword_end -| "var".len,
-        .end = var_keyword_end,
-    };
-
-    if (!std.mem.eql(u8, offsets.locToSlice(source, var_keyword_loc), "var")) return;
+    const tree = builder.handle.tree;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, &tree) orelse return;
+    if (identifier_token == 0) return;
+    const var_token = identifier_token - 1;
+    if (tree.tokenTag(var_token) != .keyword_var) return;
 
     try builder.actions.append(builder.arena, .{
         .title = "use 'const'",
         .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{
-            builder.createTextEditLoc(var_keyword_loc, "const"),
+            builder.createTextEditLoc(offsets.tokenToLoc(tree, var_token), "const"),
         }),
     });
 }
@@ -1157,61 +1150,39 @@ const DiagnosticKind = union(enum) {
 
 /// takes the location of an identifier which is part of a discard `_ = location_here;`
 /// and returns the location from '_' until ';' or null on failure
-fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
-    // check of the loc points to a valid identifier
-    for (offsets.locToSlice(text, loc)) |c| {
-        if (!Analyser.isSymbolChar(c)) return null;
-    }
+fn getDiscardLoc(tree: Ast, loc: offsets.Loc) ?offsets.Loc {
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, &tree) orelse return null;
 
-    // check if the identifier is followed by a colon
-    const colon_position = found: {
-        var i = loc.end;
-        while (i < text.len) : (i += 1) {
-            switch (text[i]) {
-                ' ' => continue,
-                ';' => break :found i,
-                else => return null,
-            }
-        }
-        return null;
-    };
-
-    // check if the colon is followed by the autofix comment
-    const autofix_comment_start = std.mem.indexOfNonePos(u8, text, colon_position + ";".len, " ") orelse return null;
-    if (!std.mem.startsWith(u8, text[autofix_comment_start..], "//")) return null;
-    const autofix_str_start = std.mem.indexOfNonePos(u8, text, autofix_comment_start + "//".len, " ") orelse return null;
-    if (!std.mem.startsWith(u8, text[autofix_str_start..], "autofix")) return null;
-    const autofix_comment_end = std.mem.indexOfNonePos(u8, text, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
+    // check if the identifier is followed by a semicolon
+    const semicolon_token = identifier_token + 1;
+    if (semicolon_token >= tree.tokens.len) return null;
+    if (tree.tokenTag(semicolon_token) != .semicolon) return null;
 
     // check if the identifier is precede by a equal sign and then an underscore
-    var i: usize = loc.start - 1;
-    var found_equal_sign = false;
-    const underscore_position = found: {
-        while (true) : (i -= 1) {
-            if (i == 0) return null;
-            switch (text[i]) {
-                ' ' => {},
-                '=' => {
-                    if (found_equal_sign) return null;
-                    found_equal_sign = true;
-                },
-                '_' => if (found_equal_sign) break :found i else return null,
-                else => return null,
-            }
-        }
-    };
+    if (identifier_token < 2) return null;
+    const equal_token = identifier_token - 1;
+    const underscore_token = identifier_token - 2;
+    if (tree.tokenTag(equal_token) != .equal) return null;
+    if (tree.tokenTag(underscore_token) != .identifier or !std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) return null;
+
+    // check if the colon is followed by the autofix comment
+    const colon_end_index = tree.tokenStart(semicolon_token) + 1;
+    const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, colon_end_index, " ") orelse return null;
+    if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) return null;
+    const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse return null;
+    if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) return null;
+    const autofix_comment_end = std.mem.indexOfNonePos(u8, tree.source, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
 
     // move backwards until we find a newline
-    i = underscore_position - 1;
     const start_position = found: {
-        while (true) : (i -= 1) {
-            if (i == 0) break :found underscore_position;
-            switch (text[i]) {
+        var i = tree.tokenStart(underscore_token);
+        while (i > 0) : (i -= 1) {
+            switch (tree.source[i - 1]) {
                 ' ', '\t' => {},
-                '\n' => break :found i,
-                else => break :found underscore_position,
+                '\n' => break :found i - 1,
+                else => break :found i - 1,
             }
-        }
+        } else break :found i;
     };
 
     return .{
