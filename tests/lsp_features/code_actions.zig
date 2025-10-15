@@ -58,6 +58,25 @@ test "discard value with comments" {
     );
 }
 
+test "discard value with escaped identifier" {
+    try testAutofix(
+        \\test {
+        \\    var @"struct" = {};
+        \\    const bar, var @"union" = .{ 1, 2 };
+        \\}
+        \\
+    ,
+        \\test {
+        \\    var @"struct" = {};
+        \\    _ = @"struct"; // autofix
+        \\    const bar, var @"union" = .{ 1, 2 };
+        \\    _ = @"union"; // autofix
+        \\    _ = bar; // autofix
+        \\}
+        \\
+    );
+}
+
 test "discard function parameter" {
     try testAutofix(
         \\fn foo(a: void, b: void, c: void) void {}
@@ -111,7 +130,7 @@ test "discard function parameter with comments" {
 test "discard captures" {
     try testAutofix(
         \\test {
-        \\    for (0..10, 0..10, 0..10) |i, j, k| {}
+        \\    for (0..10, 0..10, 0..10) |i, @"test", k| {}
         \\    switch (union(enum) {}{}) {
         \\        inline .a => |cap, tag| {},
         \\    }
@@ -123,9 +142,9 @@ test "discard captures" {
         \\
     ,
         \\test {
-        \\    for (0..10, 0..10, 0..10) |i, j, k| {
+        \\    for (0..10, 0..10, 0..10) |i, @"test", k| {
         \\        _ = i; // autofix
-        \\        _ = j; // autofix
+        \\        _ = @"test"; // autofix
         \\        _ = k; // autofix
         \\    }
         \\    switch (union(enum) {}{}) {
@@ -284,9 +303,9 @@ test "remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
         \\    _ = a; // autofix
-        \\    const b: ?u32 = a;
-        \\    _ = b; // autofix
-        \\    const c = b;
+        \\    const @"struct": ?u32 = a;
+        \\    _ = @"struct"; // autofix
+        \\    const c = @"struct";
         \\    _ = c; // autofix
         \\    if (c) |d| {
         \\        _ = d; // autofix
@@ -297,8 +316,8 @@ test "remove pointless discard" {
         \\
     ,
         \\fn foo(a: u32) u32 {
-        \\    const b: ?u32 = a;
-        \\    const c = b;
+        \\    const @"struct": ?u32 = a;
+        \\    const c = @"struct";
         \\    if (c) |d| {
         \\        return d;
         \\    }
@@ -312,6 +331,16 @@ test "remove discard of unknown identifier" {
     try testAutofix(
         \\fn foo() void {
         \\    _ = a; // autofix
+        \\}
+        \\
+    ,
+        \\fn foo() void {
+        \\}
+        \\
+    );
+    try testAutofix(
+        \\fn foo() void {
+        \\    _ = @"struct"; // autofix
         \\}
         \\
     ,
@@ -354,7 +383,7 @@ test "ignore autofix comment whitespace" {
     );
     try testAutofix(
         \\fn foo() void {
-        \\    _ = a;   //   autofix
+        \\    _ = @"struct";   //   autofix
         \\}
         \\
     ,
@@ -372,7 +401,7 @@ test "remove function parameter" {
     , .{ .filter_title = "remove function parameter" });
     try testDiagnostic(
         \\fn foo(
-        \\    alpha: u32,
+        \\    @"struct": u32,
         \\) void {}
     ,
         \\fn foo() void {}
@@ -389,6 +418,17 @@ test "variable never mutated" {
         \\test {
         \\    const foo = 5;
         \\    _ = foo;
+        \\}
+    , .{ .filter_title = "use 'const'" });
+    try testDiagnostic(
+        \\test {
+        \\    var @"struct" = 5;
+        \\    _ = @"struct";
+        \\}
+    ,
+        \\test {
+        \\    const @"struct" = 5;
+        \\    _ = @"struct";
         \\}
     , .{ .filter_title = "use 'const'" });
 }
@@ -998,5 +1038,5 @@ fn testDiagnostic(
     defer allocator.free(actual);
     try ctx.server.document_store.refreshLspSyncedDocument(uri, try allocator.dupeZ(u8, actual));
 
-    try std.testing.expectEqualStrings(after, handle.tree.source);
+    try zls.testing.expectEqualStrings(after, handle.tree.source);
 }

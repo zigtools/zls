@@ -65,6 +65,22 @@ pub const SourceIndexToTokenIndexResult = union(enum) {
         right: Ast.TokenIndex,
     },
 
+    pub fn pickTokenTag(
+        result: SourceIndexToTokenIndexResult,
+        wanted_token_tag: std.zig.Token.Tag,
+        tree: *const Ast,
+    ) ?Ast.TokenIndex {
+        switch (result) {
+            .none => return null,
+            .one => |token| return if (tree.tokenTag(token) == wanted_token_tag) token else null,
+            .between => |data| {
+                if (tree.tokenTag(data.left) == wanted_token_tag) return data.left;
+                if (tree.tokenTag(data.right) == wanted_token_tag) return data.right;
+                return null;
+            },
+        }
+    }
+
     pub fn pickPreferred(
         result: SourceIndexToTokenIndexResult,
         preferred_tags: []const std.zig.Token.Tag,
