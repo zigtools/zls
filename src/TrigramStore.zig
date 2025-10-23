@@ -148,7 +148,7 @@ pub fn init(
     if (trigrams.len > 0) {
         var prng = std.Random.DefaultPrng.init(0);
 
-        const filter_capacity = CuckooFilter.capacityForCount(store.trigram_to_declarations.count()) catch unreachable;
+        const filter_capacity = CuckooFilter.capacityForCount(@intCast(store.trigram_to_declarations.count())) catch unreachable;
         try store.filter_buckets.ensureTotalCapacityPrecise(allocator, filter_capacity);
         store.filter_buckets.items.len = filter_capacity;
 
@@ -279,44 +279,53 @@ fn mergeIntersection(
     return out_idx;
 }
 
-// TODO: The pow2 requirement is quite inefficient: explore ideas posted in
-// https://databasearchitects.blogspot.com/2019/07/cuckoo-filters-with-arbitrarily-sized.html
-// (rocksdb even-odd scheme from comments looks interesting).
+fn parity(integer: anytype) enum(u1) { even, odd } {
+    return @enumFromInt(integer & 1);
+}
+
 pub const CuckooFilter = struct {
-    /// len must be a power of 2.
-    ///
-    /// ### Pathological case with buckets.len power of 2
-    ///
-    /// - `BucketIndex(alias_0)` -> `bucket_1`, `BucketIndex(alias_0).alternate()` -> `bucket_2`
-    /// - `BucketIndex(alias_1)` -> `bucket_1`, `BucketIndex(alias_1).alternate()` -> `bucket_2`
-    ///
-    /// Our alternate mappings hold and `contains()` will not return false negatives.
-    ///
-    /// ### Pathological case with buckets.len NOT power of 2:
-    ///
-    /// - `BucketIndex(alias_0)` -> `bucket_1`, `BucketIndex(alias_0).alternate()` -> `bucket_3`
-    /// - `BucketIndex(alias_1)` -> `bucket_2`, `BucketIndex(alias_1).alternate()` -> `bucket_4`
-    ///
-    /// Our alternate mappings do not hold and `contains()` can return false negatives. This is not
-    /// acceptable as the entire point of an AMQ datastructure is the presence of false positives
-    /// but not false negatives.
     buckets: []Bucket,
 
     pub const Fingerprint = enum(u8) {
         none = std.math.maxInt(u8),
         _,
 
-        pub fn hash(fingerprint: Fingerprint) u32 {
-            return @truncate(std.hash.Murmur2_64.hash(&.{@intFromEnum(fingerprint)}));
+        const precomputed_odd_hashes = blk: {
+            var table: [255]u32 = undefined;
+
+            for (&table, 0..) |*h, index| {
+                h.* = @truncate(std.hash.Murmur2_64.hash(&.{index}) | 1);
+            }
+
+            break :blk table;
+        };
+
+        pub fn oddHash(fingerprint: Fingerprint) u32 {
+            assert(fingerprint != .none);
+            return precomputed_odd_hashes[@intFromEnum(fingerprint)];
         }
     };
+
     pub const Bucket = [4]Fingerprint;
     pub const BucketIndex = enum(u32) {
         _,
 
-        pub fn alternate(index: BucketIndex, fingerprint: Fingerprint) BucketIndex {
+        pub fn alternate(index: BucketIndex, fingerprint: Fingerprint, len: u32) BucketIndex {
+            assert(@intFromEnum(index) < len);
             assert(fingerprint != .none);
-            return @enumFromInt(@intFromEnum(index) ^ fingerprint.hash());
+
+            const signed_index: i64 = @intFromEnum(index);
+            const odd_hash: i64 = fingerprint.oddHash();
+
+            const unbounded = switch (parity(signed_index)) {
+                .even => signed_index + odd_hash,
+                .odd => signed_index - odd_hash,
+            };
+            const bounded: u32 = @intCast(@mod(unbounded, len));
+
+            assert(parity(signed_index) != parity(bounded));
+
+            return @enumFromInt(bounded);
         }
     };
 
@@ -325,41 +334,46 @@ pub const CuckooFilter = struct {
         index_1: BucketIndex,
         index_2: BucketIndex,
 
-        pub fn initFromTrigram(trigram: Trigram) Triplet {
+        pub fn initFromTrigram(trigram: Trigram, len: u32) Triplet {
             const split: packed struct {
                 fingerprint: Fingerprint,
                 padding: u24,
-                index_1: BucketIndex,
+                index_1: u32,
             } = @bitCast(std.hash.Murmur2_64.hash(&trigram));
 
+            const index_1: BucketIndex = @enumFromInt(split.index_1 % len);
+
             const fingerprint: Fingerprint = if (split.fingerprint == .none)
-                @enumFromInt(0)
+                @enumFromInt(1)
             else
                 split.fingerprint;
 
             const triplet: Triplet = .{
                 .fingerprint = fingerprint,
-                .index_1 = split.index_1,
-                .index_2 = split.index_1.alternate(fingerprint),
+                .index_1 = index_1,
+                .index_2 = index_1.alternate(fingerprint, len),
             };
-            assert(triplet.index_2.alternate(fingerprint) == triplet.index_1);
+            assert(triplet.index_2.alternate(fingerprint, len) == index_1);
 
             return triplet;
         }
     };
 
+    pub fn init(buckets: []Bucket) CuckooFilter {
+        assert(parity(buckets.len) == .even);
+        return .{ .buckets = buckets };
+    }
+
     pub fn reset(filter: CuckooFilter) void {
-        @memset(filter.buckets, [1]Fingerprint{.none} ** 4);
+        @memset(filter.buckets, [1]Fingerprint{.none} ** @typeInfo(Bucket).array.len);
     }
 
-    pub fn capacityForCount(count: usize) error{Overflow}!usize {
-        const fill_rate = 0.95;
-        return try std.math.ceilPowerOfTwo(usize, @intFromFloat(@ceil(@as(f32, @floatFromInt(count)) / fill_rate)));
+    pub fn capacityForCount(count: u32) error{Overflow}!u32 {
+        return count + (count & 1);
     }
 
-    // Use a hash (fnv) for randomness.
     pub fn append(filter: CuckooFilter, random: std.Random, trigram: Trigram) error{EvictionFailed}!void {
-        const triplet: Triplet = .initFromTrigram(trigram);
+        const triplet: Triplet = .initFromTrigram(trigram, @intCast(filter.buckets.len));
 
         if (filter.appendToBucket(triplet.index_1, triplet.fingerprint) or
             filter.appendToBucket(triplet.index_2, triplet.fingerprint))
@@ -371,7 +385,7 @@ pub const CuckooFilter = struct {
         var index = if (random.boolean()) triplet.index_1 else triplet.index_2;
         for (0..500) |_| {
             fingerprint = filter.swapFromBucket(random, index, fingerprint);
-            index = index.alternate(fingerprint);
+            index = index.alternate(fingerprint, @intCast(filter.buckets.len));
 
             if (filter.appendToBucket(index, fingerprint)) {
                 return;
@@ -382,8 +396,7 @@ pub const CuckooFilter = struct {
     }
 
     fn bucketAt(filter: CuckooFilter, index: BucketIndex) *Bucket {
-        assert(std.math.isPowerOfTwo(filter.buckets.len));
-        return &filter.buckets[@intFromEnum(index) & (filter.buckets.len - 1)];
+        return &filter.buckets[@intFromEnum(index)];
     }
 
     fn appendToBucket(filter: CuckooFilter, index: BucketIndex, fingerprint: Fingerprint) bool {
@@ -408,6 +421,7 @@ pub const CuckooFilter = struct {
     ) Fingerprint {
         assert(fingerprint != .none);
 
+        comptime assert(@typeInfo(Bucket).array.len == 4);
         const target = &filter.bucketAt(index)[random.int(u2)];
 
         const old_fingerprint = target.*;
@@ -419,7 +433,7 @@ pub const CuckooFilter = struct {
     }
 
     pub fn contains(filter: CuckooFilter, trigram: Trigram) bool {
-        const triplet: Triplet = .initFromTrigram(trigram);
+        const triplet: Triplet = .initFromTrigram(trigram, @intCast(filter.buckets.len));
 
         return filter.containsInBucket(triplet.index_1, triplet.fingerprint) or
             filter.containsInBucket(triplet.index_2, triplet.fingerprint);
@@ -443,16 +457,15 @@ pub const CuckooFilter = struct {
 test CuckooFilter {
     const allocator = std.testing.allocator;
 
-    const element_count = 486;
+    const element_count = 499;
     const filter_size = comptime CuckooFilter.capacityForCount(element_count) catch unreachable;
-    try std.testing.expectEqual(512, filter_size);
 
     var entries: std.AutoArrayHashMapUnmanaged(Trigram, void) = .empty;
     defer entries.deinit(allocator);
     try entries.ensureTotalCapacity(allocator, element_count);
 
     var buckets: [filter_size]CuckooFilter.Bucket = undefined;
-    var filter: CuckooFilter = .{ .buckets = &buckets };
+    var filter: CuckooFilter = .init(&buckets);
     var filter_prng: std.Random.DefaultPrng = .init(42);
 
     for (0..2_500) |gen_prng_seed| {
