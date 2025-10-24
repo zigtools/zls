@@ -130,7 +130,7 @@ pub fn main() Error!void {
         std.debug.panic("failed to read from {s}: {}", .{ file_path, err });
     defer gpa.free(source);
 
-    const handle_uri = try zls.URI.fromPath(arena, file_path);
+    const handle_uri: zls.Uri = try .fromPath(arena, file_path);
     try document_store.openLspSyncedDocument(handle_uri, source);
     const handle: *zls.DocumentStore.Handle = document_store.handles.get(handle_uri).?;
 

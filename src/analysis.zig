@@ -12,7 +12,7 @@ const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
 const offsets = @import("offsets.zig");
-const URI = @import("uri.zig");
+const Uri = @import("Uri.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const tracy = @import("tracy");
@@ -1666,7 +1666,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
     };
 
     const tree = decl_handle.handle.tree;
-    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
+    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
 
     if (is_cimport or !analyser.collect_callsite_references) return null;
 
@@ -1735,7 +1735,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
         const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
         try possible.append(analyser.arena, .{
             .type = ty,
-            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
+            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri.raw, loc.line + 1, loc.character + 1 }),
         });
     }
 
@@ -3211,7 +3211,7 @@ pub const Type = struct {
                 },
                 .function => |info| {
                     std.hash.autoHash(hasher, info.fn_token);
-                    hasher.update(info.handle.uri);
+                    hasher.update(info.handle.uri.raw);
                     info.container_type.hashWithHasher(hasher);
                     for (info.parameters) |param| {
                         param.type.hashWithHasher(hasher);
@@ -3220,7 +3220,7 @@ pub const Type = struct {
                 },
                 .compile_error => |node_handle| {
                     std.hash.autoHash(hasher, node_handle.node);
-                    hasher.update(node_handle.handle.uri);
+                    hasher.update(node_handle.handle.uri.raw);
                 },
                 .type_parameter => |token_handle| token_handle.hashWithHasher(hasher),
                 .anytype_parameter => |info| {
@@ -3291,7 +3291,7 @@ pub const Type = struct {
                 .function => |a_info| {
                     const b_info = b.function;
                     if (a_info.fn_token != b_info.fn_token) return false;
-                    if (!std.mem.eql(u8, a_info.handle.uri, b_info.handle.uri)) return false;
+                    if (!a_info.handle.uri.eql(b_info.handle.uri)) return false;
                     if (!a_info.container_type.eql(b_info.container_type.*)) return false;
                     if (a_info.parameters.len != b_info.parameters.len) return false;
                     for (a_info.parameters, b_info.parameters) |a_param, b_param| {
@@ -4253,7 +4253,7 @@ pub const Type = struct {
 
                 switch (handle.tree.nodeTag(node)) {
                     .root => {
-                        const path = URI.toFsPath(analyser.arena, handle.uri) catch handle.uri;
+                        const path = handle.uri.toFsPath(analyser.arena) catch handle.uri.raw;
                         const str = std.fs.path.stem(path);
                         try writer.writeAll(str);
                         if (referenced) |r| try r.put(analyser.arena, .of(str, handle, tree.firstToken(node)), {});
@@ -4407,13 +4407,13 @@ pub const ScopeWithHandle = struct {
     }
 
     pub fn hashWithHasher(scope_handle: ScopeWithHandle, hasher: anytype) void {
-        hasher.update(scope_handle.handle.uri);
+        hasher.update(scope_handle.handle.uri.raw);
         std.hash.autoHash(hasher, scope_handle.scope);
     }
 
     pub fn eql(a: ScopeWithHandle, b: ScopeWithHandle) bool {
         if (a.scope != b.scope) return false;
-        if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
+        if (!a.handle.uri.eql(b.handle.uri)) return false;
         return true;
     }
 };
@@ -4423,7 +4423,7 @@ pub const ScopeWithHandle = struct {
 pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Type {
     const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
     const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "builtin.zig" });
-    const builtin_uri = try URI.fromPath(analyser.arena, builtin_path);
+    const builtin_uri: Uri = try .fromPath(analyser.arena, builtin_path);
 
     const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
     const builtin_root_struct_type: Type = .{
@@ -4490,21 +4490,21 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
 
 pub const NodeWithUri = struct {
     node: Ast.Node.Index,
-    uri: []const u8,
+    uri: Uri,
 
     const Context = struct {
         pub fn hash(self: Context, item: NodeWithUri) u64 {
             _ = self;
             var hasher: std.hash.Wyhash = .init(0);
             std.hash.autoHash(&hasher, item.node);
-            hasher.update(item.uri);
+            hasher.update(item.uri.raw);
             return hasher.final();
         }
 
         pub fn eql(self: Context, a: NodeWithUri, b: NodeWithUri) bool {
             _ = self;
             if (a.node != b.node) return false;
-            return std.mem.eql(u8, a.uri, b.uri);
+            return a.uri.eql(b.uri);
         }
     };
 };
@@ -4519,7 +4519,7 @@ pub const NodeWithHandle = struct {
 
     pub fn eql(a: NodeWithHandle, b: NodeWithHandle) bool {
         if (a.node != b.node) return false;
-        return std.mem.eql(u8, a.handle.uri, b.handle.uri);
+        return a.handle.uri.eql(b.handle.uri);
     }
 };
 
@@ -4685,8 +4685,8 @@ pub fn getFieldAccessType(
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
-                    const uri = try analyser.store.uriFromImportStr(analyser.arena, handle, import_str) orelse return null;
-                    const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
+                    const import_uri = try analyser.store.uriFromImportStr(analyser.arena, handle, import_str) orelse return null;
+                    const node_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
                     current_type = .{
                         .data = .{ .container = .root(node_handle) },
                         .is_type_val = true,
@@ -5113,12 +5113,12 @@ pub const TokenWithHandle = struct {
 
     pub fn hashWithHasher(token_handle: TokenWithHandle, hasher: anytype) void {
         std.hash.autoHash(hasher, token_handle.token);
-        hasher.update(token_handle.handle.uri);
+        hasher.update(token_handle.handle.uri.raw);
     }
 
     pub fn eql(a: TokenWithHandle, b: TokenWithHandle) bool {
         if (a.token != b.token) return false;
-        if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
+        if (!a.handle.uri.eql(b.handle.uri)) return false;
         return true;
     }
 
@@ -5144,7 +5144,7 @@ pub const DeclWithHandle = struct {
     container_type: ?Type = null,
 
     pub fn eql(a: DeclWithHandle, b: DeclWithHandle) bool {
-        return a.decl.eql(b.decl) and std.mem.eql(u8, a.handle.uri, b.handle.uri);
+        return a.decl.eql(b.decl) and a.handle.uri.eql(b.handle.uri);
     }
 
     /// Returns a `.identifier` or `.builtin` token.
@@ -6373,7 +6373,7 @@ pub const ReferencedType = struct {
             _ = self;
             var hasher: std.hash.Wyhash = .init(0);
             hasher.update(item.str);
-            hasher.update(item.handle.uri);
+            hasher.update(item.handle.uri.raw);
             hasher.update(&std.mem.toBytes(item.token));
             return @truncate(hasher.final());
         }
@@ -6382,7 +6382,7 @@ pub const ReferencedType = struct {
             _ = self;
             _ = b_index;
             return std.mem.eql(u8, a.str, b.str) and
-                std.mem.eql(u8, a.handle.uri, b.handle.uri) and
+                a.handle.uri.eql(b.handle.uri) and
                 a.token == b.token;
         }
     };

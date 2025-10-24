@@ -1262,7 +1262,7 @@ test "namespace" {
         \\const bar = foo.<cursor>;
     , &.{
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: test-0) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: Untitled-0) void" },
     });
 }
 
@@ -1362,7 +1362,7 @@ test "struct" {
     , &.{
         .{ .label = "alpha", .kind = .Function, .detail = "fn () void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn (_: anytype) void" },
-        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: test-0) void" },
+        .{ .label = "gamma", .kind = .Function, .detail = "fn (_: Untitled-0) void" },
         .{ .label = "Self", .kind = .Struct },
         .{ .label = "bar", .kind = .Struct },
     });
@@ -4282,7 +4282,7 @@ fn testCompletionWithOptions(
     const test_uri = try ctx.addDocument(.{ .source = text });
 
     const params: types.CompletionParams = .{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = test_uri.raw },
         .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
     };
 
@@ -4314,7 +4314,7 @@ fn testCompletionWithOptions(
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(test_uri, text);
+    try error_builder.addFile(test_uri.raw, text);
 
     for (found.keys()) |label| {
         const actual_completion: types.CompletionItem = blk: {
@@ -4332,7 +4332,7 @@ fn testCompletionWithOptions(
         };
 
         if (actual_completion.kind == null or expected_completion.kind != actual_completion.kind.?) {
-            try error_builder.msgAtIndex("completion item '{s}' should be of kind '{t}' but was '{?t}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should be of kind '{t}' but was '{?t}'!", test_uri.raw, cursor_idx, .err, .{
                 label,
                 expected_completion.kind,
                 if (actual_completion.kind) |kind| kind else null,
@@ -4349,7 +4349,7 @@ fn testCompletionWithOptions(
 
             if (actual_doc != null and std.mem.eql(u8, expected_doc, actual_doc.?)) break :doc_blk;
 
-            try error_builder.msgAtIndex("completion item '{s}' should have doc '{f}' but was '{?f}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should have doc '{f}' but was '{?f}'!", test_uri.raw, cursor_idx, .err, .{
                 label,
                 std.zig.fmtString(expected_doc),
                 if (actual_doc) |str| std.zig.fmtString(str) else null,
@@ -4366,7 +4366,7 @@ fn testCompletionWithOptions(
         if (expected_completion.detail) |expected_detail| blk: {
             if (actual_completion.detail != null and std.mem.eql(u8, expected_detail, actual_completion.detail.?)) break :blk;
 
-            try error_builder.msgAtIndex("completion item '{s}' should have detail '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should have detail '{s}' but was '{?s}'!", test_uri.raw, cursor_idx, .err, .{
                 label,
                 expected_detail,
                 actual_completion.detail,
@@ -4376,14 +4376,14 @@ fn testCompletionWithOptions(
 
         if (expected_completion.labelDetails) |expected_label_details| {
             const actual_label_details = actual_completion.labelDetails orelse {
-                try error_builder.msgAtIndex("expected label details on completion item '{s}'!", test_uri, cursor_idx, .err, .{label});
+                try error_builder.msgAtIndex("expected label details on completion item '{s}'!", test_uri.raw, cursor_idx, .err, .{label});
                 return error.InvalidCompletionLabelDetails;
             };
             const detail_ok = (expected_label_details.detail == null and actual_label_details.detail == null) or
                 (expected_label_details.detail != null and actual_label_details.detail != null and std.mem.eql(u8, expected_label_details.detail.?, actual_label_details.detail.?));
 
             if (!detail_ok) {
-                try error_builder.msgAtIndex("completion item '{s}' should have label detail '{?s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                try error_builder.msgAtIndex("completion item '{s}' should have label detail '{?s}' but was '{?s}'!", test_uri.raw, cursor_idx, .err, .{
                     label,
                     expected_label_details.detail,
                     actual_label_details.detail,
@@ -4395,7 +4395,7 @@ fn testCompletionWithOptions(
                 (expected_label_details.description != null and actual_label_details.description != null and std.mem.eql(u8, expected_label_details.description.?, actual_label_details.description.?));
 
             if (!description_ok) {
-                try error_builder.msgAtIndex("completion item '{s}' should have label detail description '{?s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
+                try error_builder.msgAtIndex("completion item '{s}' should have label detail description '{?s}' but was '{?s}'!", test_uri.raw, cursor_idx, .err, .{
                     label,
                     expected_label_details.description,
                     actual_label_details.description,
@@ -4412,7 +4412,7 @@ fn testCompletionWithOptions(
             std.debug.assert(actual_deprecated == (actual_completion.deprecated orelse false));
             if (expected_completion.deprecated == actual_deprecated) break :blk;
 
-            try error_builder.msgAtIndex("completion item '{s}' should {s} be marked as deprecated but {s}!", test_uri, cursor_idx, .err, .{
+            try error_builder.msgAtIndex("completion item '{s}' should {s} be marked as deprecated but {s}!", test_uri.raw, cursor_idx, .err, .{
                 label,
                 if (expected_completion.deprecated) "" else "not",
                 if (actual_deprecated) "was" else "wasn't",
@@ -4428,7 +4428,7 @@ fn testCompletionWithOptions(
         try printLabels(&buffer, found, "found");
         try printLabels(&buffer, missing, "missing");
         try printLabels(&buffer, unexpected, "unexpected");
-        try error_builder.msgAtIndex("invalid completions\n{s}", test_uri, cursor_idx, .err, .{buffer.items});
+        try error_builder.msgAtIndex("invalid completions\n{s}", test_uri.raw, cursor_idx, .err, .{buffer.items});
         return error.MissingOrUnexpectedCompletions;
     }
 }
@@ -4520,7 +4520,7 @@ fn testCompletionTextEdit(
 
     const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);
     const params: types.CompletionParams = .{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = test_uri.raw },
         .position = cursor_position,
     };
 

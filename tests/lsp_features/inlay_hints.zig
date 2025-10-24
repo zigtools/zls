@@ -614,7 +614,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     };
 
     const params: types.InlayHintParams = .{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = test_uri.raw },
         .range = range,
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/inlayHint", params);
@@ -631,7 +631,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(test_uri, phr.new_source);
+    try error_builder.addFile(test_uri.raw, phr.new_source);
 
     outer: for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
         const expected_name = offsets.locToSlice(source, old_loc);
@@ -644,7 +644,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
             try std.testing.expectEqual(options.kind, hint.kind.?);
 
             if (visited.isSet(i)) {
-                try error_builder.msgAtIndex("duplicate inlay hint here!", test_uri, new_loc.start, .err, .{});
+                try error_builder.msgAtIndex("duplicate inlay hint here!", test_uri.raw, new_loc.start, .err, .{});
                 continue :outer;
             } else {
                 visited.set(i);
@@ -653,14 +653,14 @@ fn testInlayHints(source: []const u8, options: Options) !void {
             const actual_label = switch (options.kind) {
                 .Parameter => blk: {
                     if (!std.mem.endsWith(u8, hint.label.string, ":")) {
-                        try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label.string});
+                        try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri.raw, new_loc, .err, .{hint.label.string});
                         continue :outer;
                     }
                     break :blk hint.label.string[0 .. hint.label.string.len - 1];
                 },
                 .Type => blk: {
                     if (!std.mem.startsWith(u8, hint.label.string, ": ")) {
-                        try error_builder.msgAtLoc("label `{s}` must start with \": \"!", test_uri, new_loc, .err, .{hint.label.string});
+                        try error_builder.msgAtLoc("label `{s}` must start with \": \"!", test_uri.raw, new_loc, .err, .{hint.label.string});
                         continue :outer;
                     }
                     break :blk hint.label.string[2..hint.label.string.len];
@@ -669,12 +669,12 @@ fn testInlayHints(source: []const u8, options: Options) !void {
             };
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
-                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", test_uri, new_loc, .err, .{ expected_label, actual_label });
+                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", test_uri.raw, new_loc, .err, .{ expected_label, actual_label });
             }
 
             continue :outer;
         }
-        try error_builder.msgAtLoc("expected hint `{s}` here", test_uri, new_loc, .err, .{expected_label});
+        try error_builder.msgAtLoc("expected hint `{s}` here", test_uri.raw, new_loc, .err, .{expected_label});
     }
 
     var it = visited.iterator(.{ .kind = .unset });
@@ -682,7 +682,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
         const hint = hints[index];
         try std.testing.expectEqual(options.kind, hint.kind.?);
         const source_index = offsets.positionToIndex(phr.new_source, hint.position, ctx.server.offset_encoding);
-        try error_builder.msgAtIndex("unexpected inlay hint `{s}` here!", test_uri, source_index, .err, .{hint.label.string});
+        try error_builder.msgAtIndex("unexpected inlay hint `{s}` here!", test_uri.raw, source_index, .err, .{hint.label.string});
     }
 
     if (error_builder.hasMessages()) return error.InvalidResponse;

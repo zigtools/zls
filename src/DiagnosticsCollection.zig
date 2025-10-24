@@ -2,7 +2,7 @@ const std = @import("std");
 const lsp = @import("lsp");
 const tracy = @import("tracy");
 const offsets = @import("offsets.zig");
-const URI = @import("uri.zig");
+const Uri = @import("Uri.zig");
 
 allocator: std.mem.Allocator,
 mutex: std.Thread.Mutex = .{},
@@ -12,13 +12,13 @@ tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
     /// Used to store diagnostics from `pushErrorBundle`
     error_bundle: std.zig.ErrorBundle = .empty,
     /// Used to store diagnostics from `pushSingleDocumentDiagnostics`
-    diagnostics_set: std.StringArrayHashMapUnmanaged(struct {
+    diagnostics_set: Uri.ArrayHashMap(struct {
         arena: std.heap.ArenaAllocator.State = .{},
         diagnostics: []lsp.types.Diagnostic = &.{},
         error_bundle: std.zig.ErrorBundle = .empty,
     }) = .empty,
 }) = .empty,
-outdated_files: std.StringArrayHashMapUnmanaged(void) = .empty,
+outdated_files: Uri.ArrayHashMap(void) = .empty,
 transport: ?*lsp.Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
 
@@ -44,14 +44,14 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
         entry.error_bundle.deinit(collection.allocator);
         if (entry.error_bundle_src_base_path) |src_path| collection.allocator.free(src_path);
         for (entry.diagnostics_set.keys(), entry.diagnostics_set.values()) |uri, *lsp_diagnostic| {
-            collection.allocator.free(uri);
+            uri.deinit(collection.allocator);
             lsp_diagnostic.arena.promote(collection.allocator).deinit();
             lsp_diagnostic.error_bundle.deinit(collection.allocator);
         }
         entry.diagnostics_set.deinit(collection.allocator);
     }
     collection.tag_set.deinit(collection.allocator);
-    for (collection.outdated_files.keys()) |uri| collection.allocator.free(uri);
+    for (collection.outdated_files.keys()) |uri| uri.deinit(collection.allocator);
     collection.outdated_files.deinit(collection.allocator);
     collection.* = undefined;
 }
@@ -59,7 +59,7 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
 pub fn pushSingleDocumentDiagnostics(
     collection: *DiagnosticsCollection,
     tag: Tag,
-    document_uri: []const u8,
+    document_uri: Uri,
     /// LSP and ErrorBundle will not override each other.
     ///
     /// Takes ownership on success.
@@ -81,15 +81,15 @@ pub fn pushSingleDocumentDiagnostics(
 
     {
         try collection.outdated_files.ensureUnusedCapacity(collection.allocator, 1);
-        const duped_uri = try collection.allocator.dupe(u8, document_uri);
-        if (collection.outdated_files.fetchPutAssumeCapacity(duped_uri, {})) |_| collection.allocator.free(duped_uri);
+        const duped_uri = try document_uri.dupe(collection.allocator);
+        if (collection.outdated_files.fetchPutAssumeCapacity(duped_uri, {})) |_| duped_uri.deinit(collection.allocator);
     }
 
     try gop_tag.value_ptr.diagnostics_set.ensureUnusedCapacity(collection.allocator, 1);
-    const duped_uri = try collection.allocator.dupe(u8, document_uri);
+    const duped_uri = try document_uri.dupe(collection.allocator);
     const gop_file = gop_tag.value_ptr.diagnostics_set.getOrPutAssumeCapacity(duped_uri);
     if (gop_file.found_existing) {
-        collection.allocator.free(duped_uri);
+        duped_uri.deinit(collection.allocator);
     } else {
         gop_file.value_ptr.* = .{};
     }
@@ -214,7 +214,7 @@ fn collectUrisFromErrorBundle(
     allocator: std.mem.Allocator,
     error_bundle: std.zig.ErrorBundle,
     src_base_path: ?[]const u8,
-    uri_set: *std.StringArrayHashMapUnmanaged(void),
+    uri_set: *Uri.ArrayHashMap(void),
 ) error{OutOfMemory}!void {
     if (error_bundle.errorMessageCount() == 0) return;
     for (error_bundle.getMessages()) |msg_index| {
@@ -226,20 +226,20 @@ fn collectUrisFromErrorBundle(
         try uri_set.ensureUnusedCapacity(allocator, 1);
         const uri = try pathToUri(allocator, src_base_path, src_path) orelse continue;
         if (uri_set.fetchPutAssumeCapacity(uri, {})) |_| {
-            allocator.free(uri);
+            uri.deinit(allocator);
         }
     }
 }
 
-fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []const u8) error{OutOfMemory}!?[]const u8 {
+fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []const u8) error{OutOfMemory}!?Uri {
     if (std.fs.path.isAbsolute(src_path)) {
-        return try URI.fromPath(allocator, src_path);
+        return try .fromPath(allocator, src_path);
     }
     const base = base_path orelse return null;
     const absolute_src_path = try std.fs.path.join(allocator, &.{ base, src_path });
     defer allocator.free(absolute_src_path);
 
-    return try URI.fromPath(allocator, absolute_src_path);
+    return try .fromPath(allocator, absolute_src_path);
 }
 
 pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || std.posix.WriteError)!void {
@@ -254,8 +254,8 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             defer collection.mutex.unlock();
 
             const entry = collection.outdated_files.pop() orelse break;
-            defer collection.allocator.free(entry.key);
-            const document_uri = entry.key;
+            defer entry.key.deinit(collection.allocator);
+            const document_uri: Uri = entry.key;
 
             _ = arena_allocator.reset(.retain_capacity);
 
@@ -265,7 +265,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             const notification: lsp.TypedJsonRPCNotification(lsp.types.PublishDiagnosticsParams) = .{
                 .method = "textDocument/publishDiagnostics",
                 .params = .{
-                    .uri = document_uri,
+                    .uri = document_uri.raw,
                     .diagnostics = diagnostics.items,
                 },
             };
@@ -281,7 +281,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
 
 fn collectLspDiagnosticsForDocument(
     collection: *DiagnosticsCollection,
-    document_uri: []const u8,
+    document_uri: Uri,
     offset_encoding: offsets.Encoding,
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(lsp.types.Diagnostic),
@@ -318,7 +318,7 @@ pub const collectLspDiagnosticsForDocumentTesting = if (@import("builtin").is_te
 fn convertErrorBundleToLSPDiangostics(
     eb: std.zig.ErrorBundle,
     error_bundle_src_base_path: ?[]const u8,
-    document_uri: []const u8,
+    document_uri: Uri,
     offset_encoding: offsets.Encoding,
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(lsp.types.Diagnostic),
@@ -333,8 +333,8 @@ fn convertErrorBundleToLSPDiangostics(
         const src_path = eb.nullTerminatedString(src_loc.src_path);
 
         if (!is_single_document) {
-            const uri = try pathToUri(arena, error_bundle_src_base_path, src_path) orelse continue;
-            if (!std.mem.eql(u8, document_uri, uri)) continue;
+            const src_uri = try pathToUri(arena, error_bundle_src_base_path, src_path) orelse continue;
+            if (!document_uri.eql(src_uri)) continue;
         }
 
         const src_range = errorBundleSourceLocationToRange(eb, src_loc, offset_encoding);
@@ -350,14 +350,14 @@ fn convertErrorBundleToLSPDiangostics(
                 const note_src_path = eb.nullTerminatedString(note_src_loc.src_path);
                 const note_src_range = errorBundleSourceLocationToRange(eb, note_src_loc, offset_encoding);
 
-                const note_uri = if (is_single_document)
+                const note_uri: Uri = if (is_single_document)
                     document_uri
                 else
                     try pathToUri(arena, error_bundle_src_base_path, note_src_path) orelse continue;
 
                 lsp_note.* = .{
                     .location = .{
-                        .uri = note_uri,
+                        .uri = note_uri.raw,
                         .range = note_src_range,
                     },
                     .message = eb.nullTerminatedString(eb_note.msg),
@@ -478,13 +478,13 @@ test DiagnosticsCollection {
     var eb3 = try createTestingErrorBundle(&.{.{ .message = "As" }}, "");
     defer eb3.deinit(std.testing.allocator);
 
-    const uri = try URI.fromPath(std.testing.allocator, testing_src_path);
-    defer std.testing.allocator.free(uri);
+    const uri: Uri = try .fromPath(std.testing.allocator, testing_src_path);
+    defer uri.deinit(std.testing.allocator);
 
     {
         try collection.pushErrorBundle(.parse, 1, null, eb1);
         try std.testing.expectEqual(1, collection.outdated_files.count());
-        try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
+        try std.testing.expect(uri.eql(collection.outdated_files.keys()[0]));
 
         var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
@@ -544,20 +544,20 @@ test "DiagnosticsCollection - compile_log_text" {
     var eb = try createTestingErrorBundle(&.{.{ .message = "found compile log statement" }}, "@as(comptime_int, 7)\n@as(comptime_int, 13)");
     defer eb.deinit(std.testing.allocator);
 
-    const uri = try URI.fromPath(std.testing.allocator, testing_src_path);
-    defer std.testing.allocator.free(uri);
+    const src_uri: Uri = try .fromPath(std.testing.allocator, testing_src_path);
+    defer src_uri.deinit(std.testing.allocator);
 
     try collection.pushErrorBundle(.parse, 1, null, eb);
     try std.testing.expectEqual(1, collection.outdated_files.count());
-    try std.testing.expectEqualStrings(uri, collection.outdated_files.keys()[0]);
+    try std.testing.expect(src_uri.eql(collection.outdated_files.keys()[0]));
 
     var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
 
-    var diagnostics: std.ArrayListUnmanaged(lsp.types.Diagnostic) = .empty;
-    try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
+    var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+    try collection.collectLspDiagnosticsForDocument(src_uri, .@"utf-8", arena, &diagnostics);
 
     try std.testing.expectEqual(1, diagnostics.items.len);
     try std.testing.expectEqual(lsp.types.DiagnosticSeverity.Error, diagnostics.items[0].severity);
