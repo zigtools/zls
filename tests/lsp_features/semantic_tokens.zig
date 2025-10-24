@@ -2111,7 +2111,7 @@ fn testSemanticTokensOptions(
     });
 
     const params: types.SemanticTokensParams = .{
-        .textDocument = .{ .uri = uri },
+        .textDocument = .{ .uri = uri.raw },
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/semanticTokens/full", params) orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
@@ -2125,14 +2125,14 @@ fn testSemanticTokensOptions(
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(uri, source);
+    try error_builder.addFile(uri.raw, source);
 
     var token_it: TokenIterator = .init(source, actual);
     var last_token_index: usize = 0; // should only be used for error messages
 
     for (expected_tokens) |expected_token| {
         const token = token_it.next() orelse {
-            try error_builder.msgAtIndex("expected a `{s}` token here", uri, last_token_index, .err, .{expected_token.@"0"});
+            try error_builder.msgAtIndex("expected a `{s}` token here", uri.raw, last_token_index, .err, .{expected_token.@"0"});
             return error.ExpectedToken;
         };
         last_token_index = if (options.overlapping_token_support) token.loc.start else token.loc.end;
@@ -2144,19 +2144,19 @@ fn testSemanticTokensOptions(
         const expected_token_modifiers = expected_token.@"2";
 
         if (!std.mem.eql(u8, expected_token_source, token_source)) {
-            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri, token.loc, .err, .{ expected_token_source, token_source });
+            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri.raw, token.loc, .err, .{ expected_token_source, token_source });
             return error.UnexpectedTokenContent;
         } else if (expected_token_type != token.type) {
-            try error_builder.msgAtLoc("expected token type `{t}` but got `{t}`", uri, token.loc, .err, .{ expected_token_type, token.type });
+            try error_builder.msgAtLoc("expected token type `{t}` but got `{t}`", uri.raw, token.loc, .err, .{ expected_token_type, token.type });
             return error.UnexpectedTokenType;
         } else if (!std.meta.eql(expected_token_modifiers, token.modifiers)) {
-            try error_builder.msgAtLoc("expected token modifiers `{f}` but got `{f}`", uri, token.loc, .err, .{ expected_token_modifiers, token.modifiers });
+            try error_builder.msgAtLoc("expected token modifiers `{f}` but got `{f}`", uri.raw, token.loc, .err, .{ expected_token_modifiers, token.modifiers });
             return error.UnexpectedTokenModifiers;
         }
     }
 
     if (token_it.next()) |unexpected_token| {
-        try error_builder.msgAtLoc("unexpected `{}` token here", uri, unexpected_token.loc, .err, .{unexpected_token.type});
+        try error_builder.msgAtLoc("unexpected `{}` token here", uri.raw, unexpected_token.loc, .err, .{unexpected_token.type});
         return error.UnexpectedToken;
     }
 }

@@ -100,7 +100,7 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     const test_uri = try ctx.addDocument(.{ .source = source });
 
     const params: types.DocumentSymbolParams = .{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = test_uri.raw },
     };
 
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/documentSymbol", params) orelse {

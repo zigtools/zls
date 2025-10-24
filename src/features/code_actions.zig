@@ -127,7 +127,7 @@ pub const Builder = struct {
 
     pub fn createWorkspaceEdit(self: *Builder, edits: []const types.TextEdit) error{OutOfMemory}!types.WorkspaceEdit {
         var workspace_edit: types.WorkspaceEdit = .{ .changes = .{} };
-        try workspace_edit.changes.?.map.putNoClobber(self.arena, self.handle.uri, try self.arena.dupe(types.TextEdit, edits));
+        try workspace_edit.changes.?.map.putNoClobber(self.arena, self.handle.uri.raw, try self.arena.dupe(types.TextEdit, edits));
 
         return workspace_edit;
     }
@@ -288,7 +288,7 @@ pub fn collectAutoDiscardDiagnostics(
             const range = offsets.tokenToRange(tree, def.token, offset_encoding);
             break :blk try arena.dupe(types.DiagnosticRelatedInformation, &.{.{
                 .location = .{
-                    .uri = handle.uri,
+                    .uri = handle.uri.raw,
                     .range = range,
                 },
                 .message = "variable declared here",

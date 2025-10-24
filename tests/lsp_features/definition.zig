@@ -354,7 +354,7 @@ fn testDefinition(source: []const u8) !void {
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(test_uri, phr.new_source);
+    try error_builder.addFile(test_uri.raw, phr.new_source);
     try error_builder.addFile("old_source", source);
     try error_builder.addFile("new_source", phr.new_source);
 
@@ -410,9 +410,9 @@ fn testDefinition(source: []const u8) !void {
 
     const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 
-    const declaration_params: types.DeclarationParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
-    const definition_params: types.DefinitionParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
-    const type_definition_params: types.TypeDefinitionParams = .{ .textDocument = .{ .uri = test_uri }, .position = cursor_position };
+    const declaration_params: types.DeclarationParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
+    const definition_params: types.DefinitionParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
+    const type_definition_params: types.TypeDefinitionParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
 
     const maybe_declaration_response = if (declaration_loc != null)
         try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params)
@@ -432,71 +432,71 @@ fn testDefinition(source: []const u8) !void {
     if (maybe_declaration_response) |response| {
         try std.testing.expect(response == .array_of_DeclarationLink);
         try std.testing.expect(response.array_of_DeclarationLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri, response.array_of_DeclarationLink[0].targetUri);
+        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DeclarationLink[0].targetUri);
         const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DeclarationLink[0].targetSelectionRange, ctx.server.offset_encoding);
         if (declaration_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
-                try error_builder.msgAtLoc("expected declaration here!", test_uri, expected_loc, .err, .{});
-                try error_builder.msgAtLoc("actual declaration here", test_uri, actual_loc, .err, .{});
+                try error_builder.msgAtLoc("expected declaration here!", test_uri.raw, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual declaration here", test_uri.raw, actual_loc, .err, .{});
             }
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DeclarationLink[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
-                try error_builder.msgAtLoc("expected declaration origin here!", test_uri, expected_origin_loc, .err, .{});
-                try error_builder.msgAtLoc("actual declaration origin here", test_uri, actual_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("expected declaration origin here!", test_uri.raw, expected_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("actual declaration origin here", test_uri.raw, actual_origin_loc, .err, .{});
             }
         }
     } else if (declaration_loc) |expected_loc| {
-        try error_builder.msgAtLoc("expected declaration here but got no result instead!", test_uri, expected_loc, .err, .{});
+        try error_builder.msgAtLoc("expected declaration here but got no result instead!", test_uri.raw, expected_loc, .err, .{});
     }
 
     if (maybe_definition_response) |response| {
         try std.testing.expect(response == .array_of_DefinitionLink);
         try std.testing.expect(response.array_of_DefinitionLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri, response.array_of_DefinitionLink[0].targetUri);
+        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DefinitionLink[0].targetUri);
         const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].targetSelectionRange, ctx.server.offset_encoding);
         if (definition_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
-                try error_builder.msgAtLoc("expected definition here!", test_uri, expected_loc, .err, .{});
-                try error_builder.msgAtLoc("actual definition here", test_uri, actual_loc, .err, .{});
+                try error_builder.msgAtLoc("expected definition here!", test_uri.raw, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual definition here", test_uri.raw, actual_loc, .err, .{});
             }
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
-                try error_builder.msgAtLoc("expected definition origin here!", test_uri, expected_origin_loc, .err, .{});
-                try error_builder.msgAtLoc("actual definition origin here", test_uri, actual_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("expected definition origin here!", test_uri.raw, expected_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("actual definition origin here", test_uri.raw, actual_origin_loc, .err, .{});
             }
         }
     } else if (definition_loc) |expected_loc| {
-        try error_builder.msgAtLoc("expected definition here but got no result instead!", test_uri, expected_loc, .err, .{});
+        try error_builder.msgAtLoc("expected definition here but got no result instead!", test_uri.raw, expected_loc, .err, .{});
     }
 
     if (maybe_type_definition_response) |response| {
         try std.testing.expect(response == .array_of_DefinitionLink);
         try std.testing.expect(response.array_of_DefinitionLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri, response.array_of_DefinitionLink[0].targetUri);
+        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DefinitionLink[0].targetUri);
         const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].targetSelectionRange, ctx.server.offset_encoding);
         if (type_definition_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
-                try error_builder.msgAtLoc("expected type definition here!", test_uri, expected_loc, .err, .{});
-                try error_builder.msgAtLoc("actual type definition here", test_uri, actual_loc, .err, .{});
+                try error_builder.msgAtLoc("expected type definition here!", test_uri.raw, expected_loc, .err, .{});
+                try error_builder.msgAtLoc("actual type definition here", test_uri.raw, actual_loc, .err, .{});
             }
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
-                try error_builder.msgAtLoc("expected type definition origin here!", test_uri, expected_origin_loc, .err, .{});
-                try error_builder.msgAtLoc("actual type definition origin here", test_uri, actual_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("expected type definition origin here!", test_uri.raw, expected_origin_loc, .err, .{});
+                try error_builder.msgAtLoc("actual type definition origin here", test_uri.raw, actual_origin_loc, .err, .{});
             }
         }
     } else if (type_definition_loc) |expected_loc| {
-        try error_builder.msgAtLoc("expected type definition here but got no result instead!", test_uri, expected_loc, .err, .{});
+        try error_builder.msgAtLoc("expected type definition here but got no result instead!", test_uri.raw, expected_loc, .err, .{});
     }
 
     if (error_builder.hasMessages()) {
-        try error_builder.msgAtIndex("cursor position here", test_uri, cursor_index, .info, .{});
+        try error_builder.msgAtIndex("cursor position here", test_uri.raw, cursor_index, .info, .{});
         return error.InvalidResponse;
     }
 }

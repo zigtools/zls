@@ -12,7 +12,7 @@ const types = lsp.types;
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
-const URI = @import("../uri.zig");
+const Uri = @import("../Uri.zig");
 const code_actions = @import("code_actions.zig");
 const tracy = @import("tracy");
 const DiagnosticsCollection = @import("../DiagnosticsCollection.zig");
@@ -403,8 +403,8 @@ pub fn getErrorBundleFromStderr(
             .dynamic => |dynamic| source: {
                 const file_path = try std.fs.path.resolve(allocator, &.{ dynamic.base_path, src_path });
                 defer allocator.free(file_path);
-                const file_uri = try URI.fromPath(allocator, file_path);
-                defer allocator.free(file_uri);
+                const file_uri: Uri = try .fromPath(allocator, file_path);
+                defer file_uri.deinit(allocator);
                 const handle = dynamic.document_store.getOrLoadHandle(file_uri) orelse break :source null;
                 break :source handle.tree.source;
             },

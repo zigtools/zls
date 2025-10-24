@@ -8,6 +8,7 @@ const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const lsp = @import("lsp");
 const types = lsp.types;
+const Uri = @import("../Uri.zig");
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const tracy = @import("tracy");
@@ -36,7 +37,7 @@ fn labelReferences(
     if (include_decl) {
         // The first token is always going to be the label
         try locations.append(allocator, .{
-            .uri = handle.uri,
+            .uri = handle.uri.raw,
             .range = offsets.tokenToRange(handle.tree, first_tok, encoding),
         });
     }
@@ -52,7 +53,7 @@ fn labelReferences(
         if (!std.mem.eql(u8, tree.tokenSlice(curr_tok + 2), tree.tokenSlice(first_tok))) continue;
 
         try locations.append(allocator, .{
-            .uri = handle.uri,
+            .uri = handle.uri.raw,
             .range = offsets.tokenToRange(handle.tree, curr_tok + 2, encoding),
         });
     }
@@ -89,7 +90,7 @@ const Builder = struct {
             self.did_add_decl_handle = true;
         }
         try self.locations.append(self.allocator, .{
-            .uri = handle.uri,
+            .uri = handle.uri.raw,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
         });
     }
@@ -228,21 +229,21 @@ fn gatherReferences(
     builder: anytype,
     handle_behavior: enum { get, get_or_load },
 ) !void {
-    var dependencies: std.StringArrayHashMapUnmanaged(void) = .empty;
+    var dependencies: Uri.ArrayHashMap(void) = .empty;
     defer {
         for (dependencies.keys()) |uri| {
-            allocator.free(uri);
+            uri.deinit(allocator);
         }
         dependencies.deinit(allocator);
     }
 
     for (analyser.store.handles.values()) |handle| {
-        if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-            if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
+        if (skip_std_references and DocumentStore.isInStd(handle.uri)) {
+            if (!include_decl or !handle.uri.eql(curr_handle.uri))
                 continue;
         }
 
-        var handle_dependencies: std.ArrayList([]const u8) = .empty;
+        var handle_dependencies: std.ArrayList(Uri) = .empty;
         defer handle_dependencies.deinit(allocator);
         try analyser.store.collectDependencies(allocator, handle, &handle_dependencies);
 
@@ -250,13 +251,13 @@ fn gatherReferences(
         for (handle_dependencies.items) |uri| {
             const gop = dependencies.getOrPutAssumeCapacity(uri);
             if (gop.found_existing) {
-                allocator.free(uri);
+                uri.deinit(allocator);
             }
         }
     }
 
     for (dependencies.keys()) |uri| {
-        if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
+        if (uri.eql(curr_handle.uri)) continue;
         const handle = switch (handle_behavior) {
             .get => analyser.store.getHandle(uri),
             .get_or_load => analyser.store.getOrLoadHandle(uri),
@@ -397,7 +398,7 @@ const ControlFlowBuilder = struct {
     fn add(builder: *ControlFlowBuilder, token_index: Ast.TokenIndex) Error!void {
         const handle = builder.token_handle.handle;
         try builder.locations.append(builder.allocator, .{
-            .uri = handle.uri,
+            .uri = handle.uri.raw,
             .range = offsets.tokenToRange(handle.tree, token_index, builder.encoding),
         });
     }
@@ -497,7 +498,7 @@ fn controlFlowReferences(
 }
 
 pub const Callsite = struct {
-    uri: []const u8,
+    uri: Uri,
     call_node: Ast.Node.Index,
 };
 
@@ -645,7 +646,11 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = server.document_store.getHandle(request.uri()) orelse return null;
+    const uri = Uri.parse(arena, request.uri()) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
@@ -732,9 +737,12 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         .references => return .{ .references = locations.items },
         .highlight => {
             var highlights: std.ArrayList(types.DocumentHighlight) = try .initCapacity(arena, locations.items.len);
-            const uri = handle.uri;
             for (locations.items) |loc| {
-                if (!std.mem.eql(u8, loc.uri, uri)) continue;
+                const loc_uri = Uri.parse(arena, loc.uri) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => return error.InvalidParams,
+                };
+                if (!loc_uri.eql(handle.uri)) continue;
                 highlights.appendAssumeCapacity(.{
                     .range = loc.range,
                     .kind = .Text,

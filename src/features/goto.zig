@@ -11,7 +11,7 @@ const Server = @import("../Server.zig");
 const lsp = @import("lsp");
 const types = lsp.types;
 const offsets = @import("../offsets.zig");
-const URI = @import("../uri.zig");
+const Uri = @import("../Uri.zig");
 const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
@@ -52,7 +52,7 @@ fn gotoDefinitionSymbol(
             const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
             return .{
                 .originSelectionRange = name_range,
-                .targetUri = type_declaration.handle.uri,
+                .targetUri = type_declaration.handle.uri.raw,
                 .targetRange = target_range,
                 .targetSelectionRange = target_range,
             };
@@ -62,7 +62,7 @@ fn gotoDefinitionSymbol(
 
     return .{
         .originSelectionRange = name_range,
-        .targetUri = token_handle.handle.uri,
+        .targetUri = token_handle.handle.uri.raw,
         .targetRange = target_range,
         .targetSelectionRange = target_range,
     };
@@ -122,7 +122,7 @@ fn gotoDefinitionStructInit(
     const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);
     return .{
         .originSelectionRange = offsets.tokenToRange(handle.tree, token, offset_encoding),
-        .targetUri = token_handle.handle.uri,
+        .targetUri = token_handle.handle.uri.raw,
         .targetRange = target_range,
         .targetSelectionRange = target_range,
     };
@@ -176,7 +176,7 @@ fn gotoDefinitionBuiltin(
             .failure => return null,
             .success => |uri| return .{
                 .originSelectionRange = offsets.locToRange(tree.source, name_loc, offset_encoding),
-                .targetUri = uri,
+                .targetUri = uri.raw,
                 .targetRange = target_range,
                 .targetSelectionRange = target_range,
             },
@@ -188,7 +188,7 @@ fn gotoDefinitionBuiltin(
         const target_range = offsets.locToRange(tree.source, token_loc, offset_encoding);
         return .{
             .originSelectionRange = offsets.locToRange(tree.source, name_loc, offset_encoding),
-            .targetUri = handle.uri,
+            .targetUri = handle.uri.raw,
             .targetRange = target_range,
             .targetSelectionRange = target_range,
         };
@@ -240,29 +240,26 @@ fn gotoDefinitionString(
     if (loc.start == loc.end) return null;
     const import_str = offsets.locToSlice(handle.tree.source, loc);
 
-    const uri = switch (pos_context) {
+    const uri: ?Uri = switch (pos_context) {
         .import_string_literal,
         .embedfile_string_literal,
         => try document_store.uriFromImportStr(arena, handle, import_str),
-        .cinclude_string_literal => try URI.fromPath(
-            arena,
-            blk: {
-                if (!DocumentStore.supports_build_system) return null;
+        .cinclude_string_literal => blk: {
+            if (!DocumentStore.supports_build_system) return null;
 
-                if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
-                var include_dirs: std.ArrayList([]const u8) = .empty;
-                _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
-                    log.err("failed to resolve include paths: {}", .{err});
-                    return null;
-                };
-                for (include_dirs.items) |dir| {
-                    const path = try std.fs.path.join(arena, &.{ dir, import_str });
-                    std.fs.accessAbsolute(path, .{}) catch continue;
-                    break :blk path;
-                }
+            if (std.fs.path.isAbsolute(import_str)) break :blk try Uri.fromPath(arena, import_str);
+            var include_dirs: std.ArrayList([]const u8) = .empty;
+            _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
+                log.err("failed to resolve include paths: {}", .{err});
                 return null;
-            },
-        ),
+            };
+            for (include_dirs.items) |dir| {
+                const path = try std.fs.path.join(arena, &.{ dir, import_str });
+                std.fs.accessAbsolute(path, .{}) catch continue;
+                break :blk try Uri.fromPath(arena, path);
+            }
+            return null;
+        },
         else => unreachable,
     };
 
@@ -272,7 +269,7 @@ fn gotoDefinitionString(
     };
     return .{
         .originSelectionRange = offsets.locToRange(handle.tree.source, loc, offset_encoding),
-        .targetUri = uri orelse return null,
+        .targetUri = if (uri) |u| u.raw else return null,
         .targetRange = target_range,
         .targetSelectionRange = target_range,
     };
@@ -284,7 +281,11 @@ pub fn gotoHandler(
     kind: GotoKind,
     request: types.DefinitionParams,
 ) Server.Error!lsp.ResultType("textDocument/definition") {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
     var analyser = server.initAnalyser(arena, handle);

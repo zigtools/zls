@@ -307,7 +307,7 @@ test "cross-file reference" {
         // for now this only tests the ability to find references within a file to a decl from another file
         \\pub const placeholder = struct {};
         ,
-        \\const file = @import("test-0.zig");
+        \\const file = @import("Untitled-0.zig");
         \\const first = file.<0>;
         \\const second = file.<0>;
         ,
@@ -318,7 +318,7 @@ fn testSymbolReferences(source: []const u8) !void {
     return testMultiFileSymbolReferences(&.{source}, true);
 }
 
-/// source files have the following name pattern: `test-{d}.zig`
+/// source files have the following name pattern: `untitled-{d}.zig`
 fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool) !void {
     const placeholder_name = "placeholder";
 
@@ -345,8 +345,11 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
         var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
         defer phr.deinit(allocator);
 
-        const uri = try ctx.addDocument(.{ .source = phr.new_source });
-        files.putAssumeCapacityNoClobber(uri, .{ .source = source, .new_source = phr.new_source });
+        const uri = try ctx.addDocument(.{
+            .use_file_scheme = sources.len > 1, // use 'file:/' scheme when testing with multiple files so that they can import each other
+            .source = phr.new_source,
+        });
+        files.putAssumeCapacityNoClobber(uri.raw, .{ .source = source, .new_source = phr.new_source });
         phr.new_source = ""; // `files` takes ownership of `new_source` from `phr`
 
         for (phr.locations.items(.old), phr.locations.items(.new)) |old, new| {
@@ -638,11 +641,11 @@ fn testSimpleReferences(source: []const u8) !void {
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(file_uri, phr.new_source);
-    try error_builder.msgAtIndex("requested references here", file_uri, cursor_index, .info, .{});
+    try error_builder.addFile(file_uri.raw, phr.new_source);
+    try error_builder.msgAtIndex("requested references here", file_uri.raw, cursor_index, .info, .{});
 
     const params: types.ReferenceParams = .{
-        .textDocument = .{ .uri = file_uri },
+        .textDocument = .{ .uri = file_uri.raw },
         .position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding),
         .context = .{ .includeDeclaration = false },
     };
@@ -657,7 +660,7 @@ fn testSimpleReferences(source: []const u8) !void {
     defer visited.deinit(allocator);
 
     for (actual_locations) |response_location| {
-        std.debug.assert(std.mem.eql(u8, response_location.uri, file_uri));
+        std.debug.assert(std.mem.eql(u8, response_location.uri, file_uri.raw));
         const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
 
         const index = found_index: {
@@ -666,12 +669,12 @@ fn testSimpleReferences(source: []const u8) !void {
                 if (expected_loc.end != actual_loc.end) continue;
                 break :found_index idx;
             }
-            try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
+            try error_builder.msgAtLoc("server returned unexpected reference!", file_uri.raw, actual_loc, .err, .{});
             return error.UnexpectedReference;
         };
 
         if (visited.isSet(index)) {
-            try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
+            try error_builder.msgAtLoc("server returned duplicate reference!", file_uri.raw, actual_loc, .err, .{});
             return error.DuplicateReference;
         } else {
             visited.set(index);
@@ -682,7 +685,7 @@ fn testSimpleReferences(source: []const u8) !void {
     var unvisited_it = visited.iterator(.{ .kind = .unset });
     while (unvisited_it.next()) |index| {
         const unvisited_loc = expected_locations.items[index];
-        try error_builder.msgAtLoc("expected reference here!", file_uri, unvisited_loc, .err, .{});
+        try error_builder.msgAtLoc("expected reference here!", file_uri.raw, unvisited_loc, .err, .{});
         has_unvisited = true;
     }
 

@@ -17,7 +17,7 @@ const Analyser = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const diff = @import("diff.zig");
-const Uri = @import("uri.zig");
+const Uri = @import("Uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const build_runner_shared = @import("build_runner/shared.zig");
@@ -480,7 +480,11 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
 
     if (request.workspaceFolders) |workspace_folders| {
         for (workspace_folders) |src| {
-            try server.addWorkspace(src.uri);
+            const uri = Uri.parse(arena, src.uri) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return error.InvalidParams,
+            };
+            try server.addWorkspace(uri);
         }
     }
 
@@ -662,7 +666,7 @@ fn requestConfiguration(server: *Server) Error!void {
     const configuration_items: [1]types.ConfigurationItem = .{
         .{
             .section = "zls",
-            .scopeUri = if (server.workspaces.items.len == 1) server.workspaces.items[0].uri else null,
+            .scopeUri = if (server.workspaces.items.len == 1) server.workspaces.items[0].uri.raw else null,
         },
     };
 
@@ -722,10 +726,9 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
     const maybe_root_dir: ?[]const u8 = dir: {
         if (server.workspaces.items.len != 1) break :dir null;
-        break :dir Uri.toFsPath(arena, server.workspaces.items[0].uri) catch |err| {
-            log.err("failed to parse root uri for workspace {s}: {}", .{
-                server.workspaces.items[0].uri, err,
-            });
+        const workspace = server.workspaces.items[0];
+        break :dir workspace.uri.toFsPath(arena) catch |err| {
+            log.err("failed to parse root uri for workspace {s}: {}", .{ workspace.uri.raw, err });
             break :dir null;
         };
     };
@@ -754,13 +757,13 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 }
 
 const Workspace = struct {
-    uri: types.URI,
+    uri: Uri,
     build_on_save: if (BuildOnSaveSupport.isSupportedComptime()) ?BuildOnSave else void,
     build_on_save_mode: if (BuildOnSaveSupport.isSupportedComptime()) ?enum { watch, manual } else void,
 
-    fn init(server: *Server, uri: types.URI) error{OutOfMemory}!Workspace {
-        const duped_uri = try server.allocator.dupe(u8, uri);
-        errdefer server.allocator.free(duped_uri);
+    fn init(server: *Server, uri: Uri) error{OutOfMemory}!Workspace {
+        const duped_uri = try uri.dupe(server.allocator);
+        errdefer duped_uri.deinit(server.allocator);
 
         return .{
             .uri = duped_uri,
@@ -773,7 +776,7 @@ const Workspace = struct {
         if (BuildOnSaveSupport.isSupportedComptime()) {
             if (workspace.build_on_save) |*build_on_save| build_on_save.deinit();
         }
-        allocator.free(workspace.uri);
+        workspace.uri.deinit(allocator);
     }
 
     fn sendManualWatchUpdate(workspace: *Workspace) void {
@@ -811,7 +814,7 @@ const Workspace = struct {
 
         if (workspace.build_on_save) |*build_on_save| {
             if (enable and !args.restart) return;
-            log.debug("stopped Build-On-Save for '{s}'", .{workspace.uri});
+            log.debug("stopped Build-On-Save for '{s}'", .{workspace.uri.raw});
             build_on_save.deinit();
             workspace.build_on_save = null;
         }
@@ -822,9 +825,9 @@ const Workspace = struct {
         const zig_lib_path = config.zig_lib_path orelse return;
         const build_runner_path = config.build_runner_path orelse return;
 
-        const workspace_path = Uri.toFsPath(args.server.allocator, workspace.uri) catch |err| {
-            log.err("failed to parse URI '{s}': {}", .{ workspace.uri, err });
-            return;
+        const workspace_path = workspace.uri.toFsPath(args.server.allocator) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UnsupportedScheme => return,
         };
         defer args.server.allocator.free(workspace_path);
 
@@ -839,18 +842,18 @@ const Workspace = struct {
             .build_runner_path = build_runner_path,
             .collection = &args.server.diagnostics_collection,
         }) catch |err| {
-            log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri, err });
+            log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri.raw, err });
             return;
         };
 
-        log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri});
+        log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri.raw});
     }
 };
 
-fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
+fn addWorkspace(server: *Server, uri: Uri) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
-    log.info("added Workspace Folder: {s}", .{uri});
+    log.info("added Workspace Folder: {s}", .{uri.raw});
 
     if (BuildOnSaveSupport.isSupportedComptime() and
         // Don't initialize build on save until initialization finished.
@@ -865,34 +868,28 @@ fn addWorkspace(server: *Server, uri: types.URI) error{OutOfMemory}!void {
     }
 }
 
-fn removeWorkspace(server: *Server, uri: types.URI) void {
+fn removeWorkspace(server: *Server, uri: Uri) void {
     for (server.workspaces.items, 0..) |workspace, i| {
-        if (std.mem.eql(u8, workspace.uri, uri)) {
+        if (workspace.uri.eql(uri)) {
             var removed_workspace = server.workspaces.swapRemove(i);
             removed_workspace.deinit(server.allocator);
-            log.info("removed Workspace Folder: {s}", .{uri});
+            log.info("removed Workspace Folder: {s}", .{uri.raw});
             break;
         }
     } else {
-        log.warn("could not remove Workspace Folder: {s}", .{uri});
+        log.warn("could not remove Workspace Folder: {s}", .{uri.raw});
     }
 }
 
 fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWatchedFilesParams) Error!void {
     var updated_files: usize = 0;
     for (notification.changes) |change| {
-        const file_path = Uri.toFsPath(arena, change.uri) catch |err| switch (err) {
-            error.UnsupportedScheme => continue,
-            else => {
-                log.err("failed to parse URI '{s}': {}", .{ change.uri, err });
-                continue;
-            },
+        const uri = Uri.parse(arena, change.uri) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidParams,
         };
-        const file_extension = std.fs.path.extension(file_path);
+        const file_extension = std.fs.path.extension(uri.raw);
         if (!std.mem.eql(u8, file_extension, ".zig") and !std.mem.eql(u8, file_extension, ".zon")) continue;
-
-        // very inefficient way of achieving some basic URI normalization
-        const uri = try Uri.fromPath(arena, file_path);
 
         switch (change.type) {
             .Created, .Changed, .Deleted => |kind| {
@@ -908,14 +905,20 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
 }
 
 fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {
-    _ = arena;
-
     for (notification.event.added) |folder| {
-        try server.addWorkspace(folder.uri);
+        const uri = Uri.parse(arena, folder.uri) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidParams,
+        };
+        try server.addWorkspace(uri);
     }
 
     for (notification.event.removed) |folder| {
-        server.removeWorkspace(folder.uri);
+        const uri = Uri.parse(arena, folder.uri) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidParams,
+        };
+        server.removeWorkspace(uri);
     }
 }
 
@@ -1123,7 +1126,7 @@ fn createDocumentStoreConfig(config_manager: *const configuration.Manager) Docum
     };
 }
 
-fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
+fn openDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
     if (notification.textDocument.text.len > DocumentStore.max_document_size) {
         log.err("open document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
             notification.textDocument.uri,
@@ -1133,19 +1136,27 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
         return error.InternalError;
     }
 
-    try server.document_store.openLspSyncedDocument(notification.textDocument.uri, notification.textDocument.text);
-    server.generateDiagnostics(server.document_store.getHandle(notification.textDocument.uri).?);
+    const document_uri = Uri.parse(arena, notification.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    try server.document_store.openLspSyncedDocument(document_uri, notification.textDocument.text);
+    server.generateDiagnostics(server.document_store.getHandle(document_uri).?);
 }
 
-fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
+fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
     if (notification.contentChanges.len == 0) return;
-    const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
+    const document_uri = Uri.parse(arena, notification.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
 
     if (new_text.len > DocumentStore.max_document_size) {
         log.err("change document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
-            notification.textDocument.uri,
+            document_uri.raw,
             new_text.len,
             DocumentStore.max_document_size,
         });
@@ -1158,18 +1169,21 @@ fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: ty
 }
 
 fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidSaveTextDocumentParams) Error!void {
-    const uri = notification.textDocument.uri;
+    const document_uri = Uri.parse(arena, notification.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
 
-    if (std.process.can_spawn and DocumentStore.isBuildFile(uri)) {
-        server.document_store.invalidateBuildFile(uri);
+    if (std.process.can_spawn and DocumentStore.isBuildFile(document_uri)) {
+        server.document_store.invalidateBuildFile(document_uri);
     }
 
     if (server.autofixWorkaround() == .on_save) {
-        const handle = server.document_store.getHandle(uri) orelse return;
+        const handle = server.document_store.getHandle(document_uri) orelse return;
         var text_edits = try server.autofix(arena, handle);
 
         var workspace_edit: types.WorkspaceEdit = .{ .changes = .{} };
-        try workspace_edit.changes.?.map.putNoClobber(arena, uri, try text_edits.toOwnedSlice(arena));
+        try workspace_edit.changes.?.map.putNoClobber(arena, document_uri.raw, try text_edits.toOwnedSlice(arena));
 
         const json_message = try server.sendToClientRequest(
             .{ .string = "apply_edit" },
@@ -1189,13 +1203,17 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
     }
 }
 
-fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) error{}!void {
-    server.document_store.closeLspSyncedDocument(notification.textDocument.uri);
+fn closeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) Error!void {
+    const document_uri = Uri.parse(arena, notification.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    server.document_store.closeLspSyncedDocument(document_uri);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         // clear diagnostics on closed file
         const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-            .uri = notification.textDocument.uri,
+            .uri = document_uri,
             .diagnostics = &.{},
         }) catch return;
         server.allocator.free(json_message);
@@ -1213,7 +1231,11 @@ fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: 
         _ => return null,
     }
 
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     var text_edits = try server.autofix(arena, handle);
 
@@ -1223,7 +1245,11 @@ fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: 
 fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request: types.SemanticTokensParams) Error!?types.SemanticTokens {
     if (server.config_manager.config.semantic_tokens == .none) return null;
 
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
     if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
@@ -1248,7 +1274,11 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.SemanticTokensRangeParams) Error!?types.SemanticTokens {
     if (server.config_manager.config.semantic_tokens == .none) return null;
 
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
     if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
@@ -1273,7 +1303,11 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
 }
 
 fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!lsp.ResultType("textDocument/completion") {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
@@ -1287,7 +1321,11 @@ fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 }
 
 fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
@@ -1363,7 +1401,11 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
 }
 
 fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
@@ -1383,7 +1425,11 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
 }
 
 fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!lsp.ResultType("textDocument/documentSymbol") {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
     return .{
         .array_of_DocumentSymbol = try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding),
@@ -1391,7 +1437,11 @@ fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: ty
 }
 
 fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     if (handle.tree.errors.len != 0) return null;
 
@@ -1408,8 +1458,12 @@ fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.Renam
     return if (response) |rep| rep.rename else null;
 }
 
-fn prepareRenameHandler(server: *Server, request: types.PrepareRenameParams) ?types.PrepareRenameResult {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+fn prepareRenameHandler(server: *Server, arena: std.mem.Allocator, request: types.PrepareRenameParams) Error!?types.PrepareRenameResult {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
     const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -1432,7 +1486,11 @@ fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: 
 }
 
 fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.InlayHintParams) Error!?[]types.InlayHint {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
     if (handle.tree.mode == .zon) return null;
 
     // The Language Server Specification does not provide a client capabilities that allows the client to specify the MarkupKind of inlay hints.
@@ -1454,7 +1512,11 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 }
 
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!lsp.ResultType("textDocument/codeAction") {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     // as of right now, only ast-check errors may get a code action
     if (handle.tree.errors.len != 0) return null;
@@ -1495,13 +1557,21 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
 }
 
 fn foldingRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     return try folding_range.generateFoldingRanges(arena, handle.tree, server.offset_encoding);
 }
 
 fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.SelectionRangeParams) Error!?[]types.SelectionRange {
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
 
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
@@ -1746,7 +1816,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/documentSymbol" => try server.documentSymbolsHandler(arena, params),
         .@"textDocument/formatting" => try server.formattingHandler(arena, params),
         .@"textDocument/rename" => try server.renameHandler(arena, params),
-        .@"textDocument/prepareRename" => server.prepareRenameHandler(params),
+        .@"textDocument/prepareRename" => try server.prepareRenameHandler(arena, params),
         .@"textDocument/references" => try server.referencesHandler(arena, params),
         .@"textDocument/documentHighlight" => try server.documentHighlightHandler(arena, params),
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),

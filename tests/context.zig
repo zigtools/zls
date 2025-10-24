@@ -82,34 +82,32 @@ pub const Context = struct {
 
     // helper
     pub fn addDocument(self: *Context, options: struct {
-        uri: ?[]const u8 = null,
+        use_file_scheme: bool = false,
         source: []const u8,
         mode: std.zig.Ast.Mode = .zig,
-    }) ![]const u8 {
+    }) !zls.Uri {
         const fmt = switch (builtin.os.tag) {
-            .windows => "c:/nonexistent/test-{d}.{t}",
-            else => "/nonexistent/test-{d}.{t}",
+            .windows => "file:/c:/Untitled-{d}.{t}",
+            else => "file:/Untitled-{d}.{t}",
         };
 
-        const uri = options.uri orelse uri: {
-            const path = try std.fmt.allocPrint(
-                self.arena.allocator(),
-                fmt,
-                .{ self.file_id, options.mode },
-            );
-            break :uri try zls.URI.fromPath(self.arena.allocator(), path);
-        };
+        const arena = self.arena.allocator();
+        const path = if (options.use_file_scheme)
+            try std.fmt.allocPrint(arena, fmt, .{ self.file_id, options.mode })
+        else
+            try std.fmt.allocPrint(arena, "untitled:/Untitled-{d}.{t}", .{ self.file_id, options.mode });
+        const uri: zls.Uri = try .parse(arena, path);
 
         const params: types.DidOpenTextDocumentParams = .{
             .textDocument = .{
-                .uri = uri,
+                .uri = uri.raw,
                 .languageId = "zig",
                 .version = 420,
                 .text = options.source,
             },
         };
 
-        _ = try self.server.sendNotificationSync(self.arena.allocator(), "textDocument/didOpen", params);
+        _ = try self.server.sendNotificationSync(arena, "textDocument/didOpen", params);
 
         self.file_id += 1;
         return uri;
