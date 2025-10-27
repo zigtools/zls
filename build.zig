@@ -3,14 +3,6 @@ const builtin = @import("builtin");
 
 const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) catch unreachable;
 
-/// Specify the minimum Zig version that is required to compile and test ZLS:
-/// Add error bundle support to `translate-c`, unify `cmdTranslateC` and `cImport`
-///
-/// If you do not use Nix, a ZLS maintainer can take care of this.
-/// Whenever this version is increased, run the following command:
-/// ```bash
-/// nix flake update --commit-lock-file
-/// ```
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
 /// Specify the minimum Zig version that is usable with ZLS:
@@ -646,7 +638,7 @@ const Build = blk: {
                 \\          ZLS version: {[current_version]s}
                 \\  minimum Zig version: {[minimum_version]s}
                 \\
-                \\This is a developer error. Set `minimum_build_zig_version` in `build.zig` and `minimum_zig_version` in `build.zig.zon` to {[current_version]s}.
+                \\This is a developer error. Set `minimum_zig_version` in `build.zig.zon` to {[current_version]s}.
             , .{ .current_version = zls_version_simple_str, .minimum_version = minimum_build_zig_version });
             @compileError(message);
         }

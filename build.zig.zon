@@ -1,10 +1,15 @@
 .{
     .name = .zls,
-    // Used by build.zig.
     // Remove `-dev` when tagging a new ZLS release and add it back on the next development cycle.
     .version = "0.16.0-dev",
-    // Used by build.zig.
-    // Should be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
+    // Specifies the minimum Zig version that is required to compile and test ZLS.
+    // Must be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
+    //
+    // Whenever this version is increased, run the following command:
+    // ```bash
+    // nix flake update --commit-lock-file
+    // ```
+    // If you do not use Nix, a ZLS maintainer can take care of this.
     .minimum_zig_version = "0.16.0-dev.728+87c18945c",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
