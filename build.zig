@@ -5,6 +5,11 @@ const builtin = @import("builtin");
 /// Remove `.pre` when tagging a new ZLS release and add it back on the next development cycle.
 const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0, .pre = "dev" };
 
+comptime {
+    const version_in_build_zig_zon = std.SemanticVersion.parse(@import("build.zig.zon").version) catch unreachable;
+    std.debug.assert(zls_version.order(version_in_build_zig_zon) == .eq);
+}
+
 /// Specify the minimum Zig version that is required to compile and test ZLS:
 /// Add error bundle support to `translate-c`, unify `cmdTranslateC` and `cImport`
 ///
@@ -15,7 +20,13 @@ const zls_version: std.SemanticVersion = .{ .major = 0, .minor = 16, .patch = 0,
 /// ```
 ///
 /// Also update the `minimum_zig_version` in `build.zig.zon`.
-const minimum_build_zig_version = "0.16.0-dev.722+c17e18647";
+const minimum_build_zig_version = "0.16.0-dev.728+87c18945c";
+
+comptime {
+    const parsed_minimum_build_zig_version = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
+    const version_in_build_zig_zon = std.SemanticVersion.parse(@import("build.zig.zon").minimum_zig_version) catch unreachable;
+    std.debug.assert(parsed_minimum_build_zig_version.order(version_in_build_zig_zon) == .eq);
+}
 
 /// Specify the minimum Zig version that is usable with ZLS:
 /// Release 0.15.1
