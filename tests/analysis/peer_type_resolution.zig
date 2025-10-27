@@ -1,167 +1,220 @@
+// Also see:
+// - pointer.zig
+
 const S = struct {
     int: i64,
     float: f32,
 };
+
 const s: S = .{
     .int = 0,
     .float = 1.2,
 };
 
-pub fn main() !void {
-    var runtime_bool: bool = true;
+const E = enum {
+    foo,
+    bar,
+    baz,
+};
 
-    const widened_int_0 = if (runtime_bool) @as(i8, 0) else @as(i16, 0);
-    _ = widened_int_0;
-    //  ^^^^^^^^^^^^^ (i16)()
+const e: E = .bar;
 
-    const widened_int_1 = if (runtime_bool) @as(i16, 0) else @as(i8, 0);
-    _ = widened_int_1;
-    //  ^^^^^^^^^^^^^ (i16)()
+const T = union(E) {
+    foo: void,
+    bar: void,
+    baz: u16,
+};
 
-    const optional_0 = if (runtime_bool) s else @as(?S, s);
-    _ = optional_0;
-    //  ^^^^^^^^^^ (?S)()
+const t: T = .{ .baz = 3 };
 
-    const optional_1 = if (runtime_bool) @as(?S, s) else s;
-    _ = optional_1;
-    //  ^^^^^^^^^^ (?S)()
+const U = union {
+    foo: void,
+    bar: void,
+    baz: void,
+};
 
-    const optional_2 = if (runtime_bool) null else s;
-    _ = optional_2;
-    //  ^^^^^^^^^^ (?S)()
+const u: U = .{ .baz = {} };
 
-    const optional_3 = if (runtime_bool) s else null;
-    _ = optional_3;
-    //  ^^^^^^^^^^ (?S)()
+var runtime_bool: bool = true;
 
-    const optional_4 = if (runtime_bool) null else @as(?S, s);
-    _ = optional_4;
-    //  ^^^^^^^^^^ (?S)()
+const widened_int_0 = if (runtime_bool) @as(i8, 0) else @as(i16, 0);
+//    ^^^^^^^^^^^^^ (i16)()
 
-    const optional_5 = if (runtime_bool) @as(?S, s) else null;
-    _ = optional_5;
-    //  ^^^^^^^^^^ (?S)()
+const widened_int_1 = if (runtime_bool) @as(i16, 0) else @as(i8, 0);
+//    ^^^^^^^^^^^^^ (i16)()
 
-    const error_set_0 = if (runtime_bool) error.A else @as(error{ A, B }, error.A);
-    _ = error_set_0 catch {};
-    //  ^^^^^^^^^^^ (error{A,B})()
+const u8_and_comptime_int = if (runtime_bool) @as(u8, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^ (u8)()
 
-    const error_set_1 = if (runtime_bool) @as(error{ A, B }, error.A) else error.A;
-    _ = error_set_1 catch {};
-    //  ^^^^^^^^^^^ (error{A,B})()
+const comptime_int_and_u8 = if (runtime_bool) 0 else @as(u8, 0);
+//    ^^^^^^^^^^^^^^^^^^^ (u8)()
 
-    const error_set_2 = if (runtime_bool) error.B else error.A;
-    _ = error_set_2 catch {};
-    //  ^^^^^^^^^^^ (error{B,A})()
+const widened_float_0 = if (runtime_bool) @as(f16, 0) else @as(f32, 0);
+//    ^^^^^^^^^^^^^^^ (f32)()
 
-    const error_set_3 = if (runtime_bool) error.A else error.B;
-    _ = error_set_3 catch {};
-    //  ^^^^^^^^^^^ (error{A,B})()
+const widened_float_1 = if (runtime_bool) @as(f32, 0) else @as(f16, 0);
+//    ^^^^^^^^^^^^^^^ (f32)()
 
-    const error_set_4 = if (runtime_bool) @as(error{ B, C }, error.B) else @as(error{ A, B }, error.A);
-    _ = error_set_4 catch {};
-    //  ^^^^^^^^^^^ (error{B,C,A})()
+const f64_and_comptime_int = if (runtime_bool) @as(f64, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^^ (f64)()
 
-    const error_set_5 = if (runtime_bool) @as(error{ A, B }, error.A) else @as(error{ B, C }, error.B);
-    _ = error_set_5 catch {};
-    //  ^^^^^^^^^^^ (error{A,B,C})()
+const comptime_int_and_f64 = if (runtime_bool) 0 else @as(f64, 0);
+//    ^^^^^^^^^^^^^^^^^^^^ (f64)()
 
-    const error_union_0 = if (runtime_bool) s else @as(error{A}!S, s);
-    _ = error_union_0 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!S)()
+const f64_and_comptime_float = if (runtime_bool) @as(f64, 0) else 0.1;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (f64)()
 
-    const error_union_1 = if (runtime_bool) @as(error{A}!S, s) else s;
-    _ = error_union_1 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!S)()
+const comptime_float_and_f64 = if (runtime_bool) 0.1 else @as(f64, 0);
+//    ^^^^^^^^^^^^^^^^^^^^^^ (f64)()
 
-    const error_union_2 = if (runtime_bool) @as(?S, s) else @as(error{A}!S, s);
-    _ = error_union_2 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const optional_0 = if (runtime_bool) s else @as(?S, s);
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_3 = if (runtime_bool) @as(error{A}!S, s) else @as(?S, s);
-    _ = error_union_3 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const optional_1 = if (runtime_bool) @as(?S, s) else s;
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_4 = if (runtime_bool) null else @as(error{A}!S, s);
-    _ = error_union_4 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const optional_2 = if (runtime_bool) null else s;
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_5 = if (runtime_bool) @as(error{A}!S, s) else null;
-    _ = error_union_5 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const optional_3 = if (runtime_bool) s else null;
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_6 = if (runtime_bool) @as(error{B}!S, s) else @as(error{A}!S, s);
-    _ = error_union_6 catch {};
-    //  ^^^^^^^^^^^^^ (error{B,A}!S)()
+const optional_4 = if (runtime_bool) null else @as(?S, s);
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_7 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!S, s);
-    _ = error_union_7 catch {};
-    //  ^^^^^^^^^^^^^ (error{A,B}!S)()
+const optional_5 = if (runtime_bool) @as(?S, s) else null;
+//    ^^^^^^^^^^ (?S)()
 
-    const error_union_8 = if (runtime_bool) @as(error{A}!?S, s) else @as(error{A}!S, s);
-    _ = error_union_8 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const error_set_0 = if (runtime_bool) error.A else @as(error{ A, B }, error.A);
+//    ^^^^^^^^^^^ (error{A,B})()
 
-    const error_union_9 = if (runtime_bool) @as(error{A}!S, s) else @as(error{A}!?S, s);
-    _ = error_union_9 catch {};
-    //  ^^^^^^^^^^^^^ (error{A}!?S)()
+const error_set_1 = if (runtime_bool) @as(error{ A, B }, error.A) else error.A;
+//    ^^^^^^^^^^^ (error{A,B})()
 
-    const error_union_10 = if (runtime_bool) @as(error{B}!?S, s) else @as(error{A}!S, s);
-    _ = error_union_10 catch {};
-    //  ^^^^^^^^^^^^^^ (error{B,A}!?S)()
+const error_set_2 = if (runtime_bool) error.B else error.A;
+//    ^^^^^^^^^^^ (error{B,A})()
 
-    const error_union_11 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!?S, s);
-    _ = error_union_11 catch {};
-    //  ^^^^^^^^^^^^^^ (error{A,B}!?S)()
+const error_set_3 = if (runtime_bool) error.A else error.B;
+//    ^^^^^^^^^^^ (error{A,B})()
 
-    const error_union_12 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!?S, s);
-    _ = try try error_union_12;
-    //          ^^^^^^^^^^^^^^ (error{B,A}!error{A}!?S)()
+const error_set_4 = if (runtime_bool) @as(error{ B, C }, error.B) else @as(error{ A, B }, error.A);
+//    ^^^^^^^^^^^ (error{B,C,A})()
 
-    const error_union_13 = if (runtime_bool) @as(error{A}!?S, s) else @as(error{B}!error{A}!S, s);
-    _ = try try error_union_13;
-    //          ^^^^^^^^^^^^^^ (error{A,B}!error{A}!?S)()
+const error_set_5 = if (runtime_bool) @as(error{ A, B }, error.A) else @as(error{ B, C }, error.B);
+//    ^^^^^^^^^^^ (error{A,B,C})()
 
-    const error_union_14 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!error{B}!?S, s);
-    _ = try try error_union_14;
-    //          ^^^^^^^^^^^^^^ (error{B,A}!error{A,B}!?S)()
+const error_union_0 = if (runtime_bool) s else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^ (error{A}!S)()
 
-    const error_union_15 = if (runtime_bool) @as(error{A}!error{B}!?S, s) else @as(error{B}!error{A}!S, s);
-    _ = try try error_union_15;
-    //          ^^^^^^^^^^^^^^ (error{A,B}!error{B,A}!?S)()
+const error_union_1 = if (runtime_bool) @as(error{A}!S, s) else s;
+//    ^^^^^^^^^^^^^ (error{A}!S)()
 
-    const error_union_16 = if (runtime_bool) error.A else s;
-    _ = error_union_16;
-    //  ^^^^^^^^^^^^^^ (error{A}!S)()
+const error_union_2 = if (runtime_bool) @as(?S, s) else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
-    const error_union_17 = if (runtime_bool) s else error.A;
-    _ = error_union_17;
-    //  ^^^^^^^^^^^^^^ (error{A}!S)()
+const error_union_3 = if (runtime_bool) @as(error{A}!S, s) else @as(?S, s);
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
-    const error_union_18 = if (runtime_bool) error.A else @as(i32, 0);
-    _ = error_union_18;
-    //  ^^^^^^^^^^^^^^ (error{A}!i32)()
+const error_union_4 = if (runtime_bool) null else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
-    const error_union_19 = if (runtime_bool) @as(i32, 0) else error.A;
-    _ = error_union_19;
-    //  ^^^^^^^^^^^^^^ (error{A}!i32)()
+const error_union_5 = if (runtime_bool) @as(error{A}!S, s) else null;
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
-    const error_union_20 = if (runtime_bool) error.A else @as(error{B}!S, s);
-    _ = error_union_20;
-    //  ^^^^^^^^^^^^^^ (error{A,B}!S)()
+const error_union_6 = if (runtime_bool) @as(error{B}!S, s) else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^ (error{B,A}!S)()
 
-    const error_union_21 = if (runtime_bool) @as(error{B}!S, s) else error.A;
-    _ = error_union_21;
-    //  ^^^^^^^^^^^^^^ (error{A,B}!S)()
+const error_union_7 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!S, s);
+//    ^^^^^^^^^^^^^ (error{A,B}!S)()
 
-    const error_union_22 = if (runtime_bool) error.A else @as(error{B}!i32, 0);
-    _ = error_union_22;
-    //  ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+const error_union_8 = if (runtime_bool) @as(error{A}!?S, s) else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
-    const error_union_23 = if (runtime_bool) @as(error{B}!i32, 0) else error.A;
-    _ = error_union_23;
-    //  ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+const error_union_9 = if (runtime_bool) @as(error{A}!S, s) else @as(error{A}!?S, s);
+//    ^^^^^^^^^^^^^ (error{A}!?S)()
 
+const error_union_10 = if (runtime_bool) @as(error{B}!?S, s) else @as(error{A}!S, s);
+//    ^^^^^^^^^^^^^^ (error{B,A}!?S)()
+
+const error_union_11 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!?S, s);
+//    ^^^^^^^^^^^^^^ (error{A,B}!?S)()
+
+const error_union_12 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!?S, s);
+//    ^^^^^^^^^^^^^^ (error{B,A}!error{A}!?S)()
+
+const error_union_13 = if (runtime_bool) @as(error{A}!?S, s) else @as(error{B}!error{A}!S, s);
+//    ^^^^^^^^^^^^^^ (error{A,B}!error{A}!?S)()
+
+const error_union_14 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!error{B}!?S, s);
+//    ^^^^^^^^^^^^^^ (error{B,A}!error{A,B}!?S)()
+
+const error_union_15 = if (runtime_bool) @as(error{A}!error{B}!?S, s) else @as(error{B}!error{A}!S, s);
+//    ^^^^^^^^^^^^^^ (error{A,B}!error{B,A}!?S)()
+
+const error_union_16 = if (runtime_bool) error.A else s;
+//    ^^^^^^^^^^^^^^ (error{A}!S)()
+
+const error_union_17 = if (runtime_bool) s else error.A;
+//    ^^^^^^^^^^^^^^ (error{A}!S)()
+
+const error_union_18 = if (runtime_bool) error.A else @as(i32, 0);
+//    ^^^^^^^^^^^^^^ (error{A}!i32)()
+
+const error_union_19 = if (runtime_bool) @as(i32, 0) else error.A;
+//    ^^^^^^^^^^^^^^ (error{A}!i32)()
+
+const error_union_20 = if (runtime_bool) error.A else @as(error{B}!S, s);
+//    ^^^^^^^^^^^^^^ (error{A,B}!S)()
+
+const error_union_21 = if (runtime_bool) @as(error{B}!S, s) else error.A;
+//    ^^^^^^^^^^^^^^ (error{B,A}!S)()
+
+const error_union_22 = if (runtime_bool) error.A else @as(error{B}!i32, 0);
+//    ^^^^^^^^^^^^^^ (error{A,B}!i32)()
+
+const error_union_23 = if (runtime_bool) @as(error{B}!i32, 0) else error.A;
+//    ^^^^^^^^^^^^^^ (error{B,A}!i32)()
+
+const error_union_24 = if (runtime_bool) @as(error{A}!?S, null) else s;
+//    ^^^^^^^^^^^^^^ (error{A}!?S)()
+
+const error_union_25 = if (runtime_bool) s else @as(error{A}!?S, null);
+//    ^^^^^^^^^^^^^^ (error{A}!?S)()
+
+const error_union_26 = if (runtime_bool) @as(error{A}!i8, 0) else @as(i16, 0);
+//    ^^^^^^^^^^^^^^ (error{A}!i16)()
+
+const error_union_27 = if (runtime_bool) @as(i16, 0) else @as(error{A}!i8, 0);
+//    ^^^^^^^^^^^^^^ (error{A}!i16)()
+
+const FnCoerce = struct {
+    fn errorsA() [2]error{A} {
+        return .{ error.A, error.A };
+    }
+    fn errorsAB() [2]error{ A, B } {
+        return .{ error.A, error.A };
+    }
+    fn pointers() [2]*const S {
+        return .{ &s, &s };
+    }
+    fn optionalPointers() [2]?*const S {
+        return .{ &s, null };
+    }
+};
+
+const fn_coerce_0 = if (runtime_bool) &FnCoerce.errorsA else &FnCoerce.errorsAB;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+const fn_coerce_1 = if (runtime_bool) &FnCoerce.errorsAB else &FnCoerce.errorsA;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]error{A,B}`
+
+const fn_coerce_2 = if (runtime_bool) &FnCoerce.pointers else &FnCoerce.optionalPointers;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
+const fn_coerce_3 = if (runtime_bool) &FnCoerce.optionalPointers else &FnCoerce.pointers;
+//    ^^^^^^^^^^^ (either type)() TODO this should be `*const fn () [2]?*const S`
+
+test "noreturn" {
     const noreturn_0 = if (runtime_bool) s else return;
     _ = noreturn_0;
     //  ^^^^^^^^^^ (S)()
@@ -169,17 +222,95 @@ pub fn main() !void {
     const noreturn_1 = if (runtime_bool) return else s;
     _ = noreturn_1;
     //  ^^^^^^^^^^ (S)()
-
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(error_union_0);
-
-    _ = &runtime_bool;
 }
 
 const comptime_bool: bool = true;
 
 const comptime_int_and_void = if (comptime_bool) 0 else {};
 //    ^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const optional_comptime_int = if (comptime_bool) @as(?comptime_int, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^^^ (?comptime_int)()
+
+const optional_comptime_float = if (comptime_bool) @as(?comptime_float, 0) else 0;
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (?comptime_float)()
+
+const null_error_union = if (comptime_bool) @as(error{A}!@TypeOf(null), null) else null;
+//    ^^^^^^^^^^^^^^^^ (error{A}!@TypeOf(null))()
+
+fn void_fn() void {}
+
+const optional_fn = if (comptime_bool) @as(?fn () void, void_fn) else void_fn;
+//    ^^^^^^^^^^^ (?fn () void)()
+
+const optional_enum_literal = if (comptime_bool) @as(?@Type(.enum_literal), .foo) else .bar;
+//    ^^^^^^^^^^^^^^^^^^^^^ (?@Type(.enum_literal))()
+
+const enum_literal_and_enum_literal = if (comptime_bool) .foo else .bar;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (@Type(.enum_literal))()
+
+const enum_literal_and_enum = if (comptime_bool) .foo else e;
+//    ^^^^^^^^^^^^^^^^^^^^^ (E)()
+
+const enum_literal_and_union = if (comptime_bool) .foo else u;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const enum_literal_and_tagged_union = if (comptime_bool) .foo else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const enum_and_enum_literal = if (comptime_bool) e else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^ (E)()
+
+const enum_and_enum = if (comptime_bool) e else e;
+//    ^^^^^^^^^^^^^ (E)()
+
+const enum_and_union = if (comptime_bool) e else u;
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const enum_and_tagged_union = if (comptime_bool) e else t;
+//    ^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const union_and_enum_literal = if (comptime_bool) u else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const union_and_enum = if (comptime_bool) u else e;
+//    ^^^^^^^^^^^^^^ (either type)()
+
+const union_and_union = if (comptime_bool) u else u;
+//    ^^^^^^^^^^^^^^^ (U)()
+
+const union_and_tagged_union = if (comptime_bool) u else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tagged_union_and_enum_literal = if (comptime_bool) t else .foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const tagged_union_and_enum = if (comptime_bool) t else e;
+//    ^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const tagged_union_and_union = if (comptime_bool) t else u;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tagged_union_and_tagged_union = if (comptime_bool) t else t;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (T)()
+
+const f32_and_u32 = if (comptime_bool) @as(f32, 0) else @as(i32, 0);
+//    ^^^^^^^^^^^ (either type)()
+
+const u32_and_f32 = if (comptime_bool) @as(u32, 0) else @as(f32, 0);
+//    ^^^^^^^^^^^ (either type)()
+
+const array_2_and_array_3 = if (comptime_bool) [2]S{ s, s } else [3]S{ s, s, s };
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const tuple_2_and_array_3 = if (comptime_bool) @as(struct { S, S }, .{ s, s }) else [3]S{ s, s, s };
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_3_and_tuple_2 = if (comptime_bool) [3]S{ s, s, s } else @as(struct { S, S }, .{ s, s });
+//    ^^^^^^^^^^^^^^^^^^^ (either type)()
+
+const array_3_and_tuple_3 = if (comptime_bool) [3]S{ s, s, s } else @as(struct { S, S, S }, .{ s, s, s });
+//    ^^^^^^^^^^^^^^^^^^^ ([3]S)()
 
 const compile_error_0 = if (comptime_bool) s else @compileError("Foo");
 //    ^^^^^^^^^^^^^^^ (S)()
