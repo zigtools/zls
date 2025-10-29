@@ -30,6 +30,131 @@ filter_buckets: std.ArrayListUnmanaged(CuckooFilter.Bucket),
 trigram_to_declarations: std.AutoArrayHashMapUnmanaged(Trigram, std.ArrayListUnmanaged(Declaration.Index)),
 declarations: std.MultiArrayList(Declaration),
 
+pub const TrigramIterator = struct {
+    buffer: []const u8,
+    index: usize,
+    boundary: Boundary,
+
+    pub fn init(buffer: []const u8) TrigramIterator {
+        assert(buffer.len != 0);
+        return .{ .buffer = buffer, .index = 0, .boundary = .calculate(buffer, 0) };
+    }
+
+    pub const Boundary = struct {
+        end: usize,
+        next_start: ?usize,
+
+        pub fn calculate(buffer: []const u8, index: usize) Boundary {
+            assert(buffer[index..].len > 0);
+
+            if (std.ascii.isLower(buffer[index])) {
+                // First character lowercase
+                for (buffer[index + 1 ..], index + 1..) |c, i| {
+                    if (!std.ascii.isLower(c)) {
+                        return .{
+                            .end = i,
+                            .next_start = i,
+                        };
+                    }
+                }
+            } else {
+                if (index + 1 >= buffer.len) {
+                    return .{
+                        .end = buffer.len,
+                        .next_start = null,
+                    };
+                }
+
+                if (std.ascii.isLower(buffer[index + 1])) {
+                    // First char is uppercase, second char is lowercase
+                    for (buffer[index + 2 ..], index + 2..) |c, i| {
+                        if (!std.ascii.isLower(c)) {
+                            return .{
+                                .end = i,
+                                .next_start = i,
+                            };
+                        }
+                    }
+                } else {
+                    // First and second chars are uppercase
+                    for (buffer[index + 2 ..], index + 2..) |c, i| {
+                        if (!std.ascii.isUpper(c)) {
+                            return .{
+                                .end = i,
+                                .next_start = i,
+                            };
+                        }
+                    }
+                }
+            }
+
+            return .{
+                .end = buffer.len,
+                .next_start = null,
+            };
+        }
+    };
+
+    pub fn next(ti: *TrigramIterator) ?Trigram {
+        if (ti.index == ti.buffer.len) return null;
+        assert(ti.index < ti.boundary.end);
+
+        var trigram: [3]u8 = @splat(0);
+        const unpadded = ti.buffer[ti.index..@min(ti.index + 3, ti.boundary.end)];
+        _ = std.ascii.lowerString(&trigram, unpadded);
+
+        if (unpadded.len < 3 or ti.index + 3 >= ti.boundary.end) {
+            ti.index = ti.boundary.next_start orelse {
+                ti.index = ti.buffer.len;
+                return trigram;
+            };
+            ti.boundary = .calculate(ti.buffer, ti.index);
+        } else {
+            ti.index += 1;
+        }
+
+        return trigram;
+    }
+};
+
+test "TrigramIterator.Boundary.calculate" {
+    var boundary: TrigramIterator.Boundary = .calculate("helloWORLD", 0);
+    try std.testing.expectEqual(5, boundary.end);
+    try std.testing.expectEqual(5, boundary.next_start.?);
+
+    boundary = .calculate("helloWORLD", 5);
+    try std.testing.expectEqual(10, boundary.end);
+    try std.testing.expectEqual(null, boundary.next_start);
+}
+
+test TrigramIterator {
+    const allocator = std.testing.allocator;
+
+    const matrix: []const struct { []const u8, []const Trigram } = &.{
+        .{ "a", &.{"a\x00\x00".*} },
+        .{ "ab", &.{"ab\x00".*} },
+        .{ "helloWORLD", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
+        .{ "HelloWORLD", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
+        .{ "HelloWorld", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
+    };
+
+    var actual: std.ArrayList(Trigram) = .empty;
+    defer actual.deinit(allocator);
+
+    for (matrix) |entry| {
+        const input, const expected = entry;
+
+        actual.clearRetainingCapacity();
+
+        var it: TrigramIterator = .init(input);
+        while (it.next()) |trigram| {
+            try actual.append(allocator, trigram);
+        }
+
+        try @import("testing.zig").expectEqual(expected, actual.items);
+    }
+}
+
 pub fn init(
     allocator: std.mem.Allocator,
     tree: Ast,
