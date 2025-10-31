@@ -757,6 +757,7 @@ fn workerMakeOneStep(
         .watch = true,
         .gpa = gpa,
         .web_server = null,
+        .unit_test_timeout_ns = null,
     }));
 
     if (run.watch) {
