@@ -203,8 +203,11 @@ fn convertSymbolsInternal(
     const to: []types.DocumentSymbol = symbol_buffer.items[prev_len..];
 
     for (from, to) |symbol, *out| {
+        // LSP spec requires that a symbol name is not empty or consisting only of whitespace
+        const name_is_empty = symbol.name.len == 0 or
+            std.mem.indexOfNone(u8, symbol.name, &std.ascii.whitespace) == null;
         out.* = .{
-            .name = symbol.name,
+            .name = if (name_is_empty) "<unnamed>" else symbol.name,
             .detail = symbol.detail,
             .kind = symbol.kind,
             // will be set later through the mapping below

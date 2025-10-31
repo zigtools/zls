@@ -93,6 +93,20 @@ test "nested struct with self" {
     );
 }
 
+test "empty decl names return non-empty document symbol" {
+    try testDocumentSymbol(
+        \\test "" {}
+        \\test "          " {}
+        \\const @"" = 0;
+        \\const @"   " = 0;
+    ,
+        \\Method <unnamed>
+        \\Method <unnamed>
+        \\Constant <unnamed>
+        \\Constant <unnamed>
+    );
+}
+
 fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
