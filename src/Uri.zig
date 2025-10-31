@@ -151,9 +151,8 @@ pub fn eql(a: Uri, b: Uri) bool {
     return std.mem.eql(u8, a.raw, b.raw);
 }
 
-pub fn format(_: Uri, _: *std.Io.Writer) std.Io.Writer.Error!void {
-    @compileError("Cannot format @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
-}
+pub const format = @compileError("Cannot format @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
+pub const jsonStringify = @compileError("Cannot stringify @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
 
 pub fn ArrayHashMap(comptime V: type) type {
     return std.ArrayHashMapUnmanaged(Uri, V, Context, true);

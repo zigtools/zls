@@ -1211,12 +1211,10 @@ fn closeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification:
     server.document_store.closeLspSyncedDocument(document_uri);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
-        // clear diagnostics on closed file
-        const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
-            .uri = document_uri,
-            .diagnostics = &.{},
-        }) catch return;
-        server.allocator.free(json_message);
+        server.diagnostics_collection.clearSingleDocumentDiagnostics(document_uri);
+        server.diagnostics_collection.publishDiagnostics() catch |err| {
+            std.log.err("failed to publish diagnostics: {}", .{err});
+        };
     }
 }
 
