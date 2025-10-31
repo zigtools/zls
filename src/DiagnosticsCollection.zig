@@ -210,6 +210,26 @@ pub fn clearErrorBundle(collection: *DiagnosticsCollection, tag: Tag) void {
     item.error_bundle = .empty;
 }
 
+pub fn clearSingleDocumentDiagnostics(collection: *DiagnosticsCollection, document_uri: Uri) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    collection.mutex.lock();
+    defer collection.mutex.unlock();
+
+    for (collection.tag_set.values()) |*item| {
+        var kv = item.diagnostics_set.fetchSwapRemove(document_uri) orelse continue;
+        kv.value.arena.promote(collection.allocator).deinit();
+        kv.value.error_bundle.deinit(collection.allocator);
+
+        const gop = collection.outdated_files.getOrPut(collection.allocator, kv.key) catch {
+            kv.key.deinit(collection.allocator);
+            continue;
+        };
+        if (gop.found_existing) kv.key.deinit(collection.allocator);
+    }
+}
+
 fn collectUrisFromErrorBundle(
     allocator: std.mem.Allocator,
     error_bundle: std.zig.ErrorBundle,
