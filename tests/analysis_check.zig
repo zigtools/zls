@@ -30,6 +30,10 @@ pub fn main() Error!void {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
+    var threaded: std.Io.Threaded = .init(gpa);
+    defer threaded.deinit();
+    const io = threaded.io();
+
     var arg_it = std.process.argsWithAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
     defer arg_it.deinit();
 
@@ -114,6 +118,7 @@ pub fn main() Error!void {
     defer diagnostics_collection.deinit();
 
     var document_store: zls.DocumentStore = .{
+        .io = io,
         .allocator = gpa,
         .config = config,
         .thread_pool = &thread_pool,

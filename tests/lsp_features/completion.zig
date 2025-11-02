@@ -4597,7 +4597,7 @@ fn searchCompletionItemWithLabel(completion_list: types.CompletionList, label: [
         if (std.mem.eql(u8, item.label, label)) return item;
     }
 
-    const stderr = std.debug.lockStderrWriter(&.{});
+    const stderr, _ = std.debug.lockStderrWriter(&.{});
     defer std.debug.unlockStderrWriter();
 
     try stderr.print(

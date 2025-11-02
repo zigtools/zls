@@ -5,6 +5,7 @@ const test_options = @import("test_options");
 
 const types = zls.lsp.types;
 
+const io = std.testing.io;
 const allocator = std.testing.allocator;
 
 const default_config: zls.configuration.UnresolvedConfig = .{
@@ -46,6 +47,7 @@ pub const Context = struct {
         };
 
         const server: *zls.Server = try .create(.{
+            .io = io,
             .allocator = allocator,
             .transport = null,
             .config = null,
