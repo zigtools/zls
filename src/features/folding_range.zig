@@ -88,20 +88,21 @@ const Builder = struct {
 
         offsets.multiple.indexToPositionWithMappings(builder.tree.source, mappings, builder.encoding);
 
-        const result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
-        errdefer builder.allocator.free(result_locations);
+        var result_locations: std.ArrayList(types.FoldingRange) = try .initCapacity(builder.allocator, builder.locations.items.len);
+        errdefer result_locations.deinit(builder.allocator);
 
-        for (builder.locations.items, result_ranges, result_locations) |folding_range, range, *result| {
-            result.* = .{
+        for (builder.locations.items, result_ranges) |folding_range, range| {
+            if (range.start.line == range.end.line) continue;
+            result_locations.appendAssumeCapacity(.{
                 .startLine = range.start.line,
                 .startCharacter = range.start.character,
                 .endLine = range.end.line,
                 .endCharacter = range.end.character,
                 .kind = folding_range.kind,
-            };
+            });
         }
 
-        return result_locations;
+        return try result_locations.toOwnedSlice(builder.allocator);
     }
 };
 
@@ -186,7 +187,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
                 const lhs = tree.nodeData(node).node_and_extra[0];
                 const start_tok = ast.lastToken(tree, lhs) + 2; // lparen + rbrace
                 const end_tok = ast.lastToken(tree, node);
-                try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
+                try builder.add(null, start_tok, end_tok, .exclusive, .exclusive_ignore_space);
             },
 
             .switch_case_one,
@@ -232,12 +233,12 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
                         start_tok -= 1;
                     }
                     const end_tok = ast.lastToken(tree, node);
-                    try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
+                    try builder.add(null, start_tok, end_tok, .exclusive, .exclusive_ignore_space);
                 } else { // no members (yet), ie `const T = type {};`
                     var start_tok = tree.firstToken(node);
                     while (tree.tokenTag(start_tok) != .l_brace) start_tok += 1;
                     const end_tok = ast.lastToken(tree, node);
-                    try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
+                    try builder.add(null, start_tok, end_tok, .exclusive, .exclusive_ignore_space);
                 }
             },
 
@@ -247,7 +248,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             .call_one_comma,
             => {
                 const lparen = tree.nodeMainToken(node);
-                try builder.add(null, lparen, ast.lastToken(tree, node), .exclusive, .exclusive);
+                try builder.add(null, lparen, ast.lastToken(tree, node), .exclusive, .exclusive_ignore_space);
             },
 
             // everything after here is mostly untested
