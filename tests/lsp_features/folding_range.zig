@@ -11,17 +11,18 @@ test "empty" {
 
 test "container type without members" {
     try testFoldingRange(
+        \\const S = struct {};
+    , &.{});
+    try testFoldingRange(
         \\const S = struct {
         \\};
-    , &.{
-        .{ .startLine = 0, .startCharacter = 18, .endLine = 1, .endCharacter = 0 },
-    });
+    , &.{});
     try testFoldingRange(
         \\const S = struct {
         \\    // hello there
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 18, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 18, .endLine = 1, .endCharacter = 18 },
     });
 }
 
@@ -62,40 +63,40 @@ test "region" {
 test "if" {
     try testFoldingRange(
         \\const foo = if (false) {
-        \\
+        \\    // then
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 11 },
     });
     try testFoldingRange(
         \\const foo = if (false) {
-        \\
+        \\    // then
         \\} else {
-        \\
+        \\    // else
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 0 },
-        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 1, .endCharacter = 11 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 11 },
     });
 }
 
 test "for/while" {
     try testFoldingRange(
         \\const foo = for ("") |_| {
-        \\
+        \\    // then
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 11 },
     });
     try testFoldingRange(
         \\const foo = for ("") |_| {
         \\    return;
         \\} else {
-        \\
+        \\    // else
         \\};
     , &.{
         .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 11 },
-        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 11 },
     });
 
     try testFoldingRange(
@@ -107,24 +108,27 @@ test "for/while" {
     });
     try testFoldingRange(
         \\const foo = while (true) {
-        \\
+        \\    // then
         \\} else {
         \\    //
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 26, .endLine = 1, .endCharacter = 11 },
         .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 6 },
     });
 }
 
 test "switch" {
     try testFoldingRange(
+        \\const foo = switch (5) {};
+    , &.{});
+    try testFoldingRange(
         \\const foo = switch (5) {
         \\    0 => {},
         \\    1 => {}
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 2, .endCharacter = 11 },
     });
     try testFoldingRange(
         \\const foo = switch (5) {
@@ -132,7 +136,7 @@ test "switch" {
         \\    1 => {},
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 2, .endCharacter = 12 },
     });
     try testFoldingRange(
         \\const foo = switch (5) {
@@ -146,7 +150,7 @@ test "switch" {
         \\};
     , &.{
         .{ .startLine = 1, .startCharacter = 4, .endLine = 5, .endCharacter = 6 },
-        .{ .startLine = 0, .startCharacter = 24, .endLine = 8, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 24, .endLine = 7, .endCharacter = 15 },
     });
 }
 
@@ -196,6 +200,75 @@ test "function with doc comment" {
     });
 }
 
+test "function with multi-line return type" {
+    try testFoldingRange(
+        \\fn foo(a: u32, b: u32, c: u32) enum {
+        \\    d,
+        \\    e,
+        \\    f,
+        \\} {
+        \\    _ = a;
+        \\    _ = b;
+        \\    _ = c;
+        \\}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 37, .endLine = 3, .endCharacter = 6 },
+        .{ .startLine = 4, .startCharacter = 3, .endLine = 7, .endCharacter = 10 },
+    });
+}
+
+test "function with multi-line parameters and return type" {
+    try testFoldingRange(
+        \\fn foo(
+        \\    a: u32,
+        \\    b: u32,
+        \\    c: u32,
+        \\) enum {
+        \\    d,
+        \\    e,
+        \\    f,
+        \\} {
+        \\    _ = a;
+        \\    _ = b;
+        \\    _ = c;
+        \\}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 7, .endLine = 3, .endCharacter = 11 },
+        .{ .startLine = 4, .startCharacter = 8, .endLine = 7, .endCharacter = 6 },
+        .{ .startLine = 8, .startCharacter = 3, .endLine = 11, .endCharacter = 10 },
+    });
+}
+
+test "nested folding ranges inside function parameter" {
+    if (true) return error.SkipZigTest; // TODO
+    try testFoldingRange(
+        \\fn foo(a: u32, b: u32, c: enum {
+        \\    d,
+        \\    e,
+        \\    f,
+        \\}, g: u32) void {
+        \\    _ = a;
+        \\    _ = b;
+        \\    _ = c;
+        \\    _ = g;
+        \\}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 32, .endLine = 3, .endCharacter = 6 },
+        .{ .startLine = 4, .startCharacter = 17, .endLine = 8, .endCharacter = 10 },
+    });
+}
+
+test "nested folding ranges inside container types" {
+    if (true) return error.SkipZigTest; // TODO
+    try testFoldingRange(
+        \\const Foo = struct { foo: struct {
+        \\    bar: void,
+        \\} };
+    , &.{
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 1, .endCharacter = 14 },
+    });
+}
+
 test "container decl" {
     try testFoldingRange(
         \\const Foo = struct {
@@ -203,7 +276,7 @@ test "container decl" {
         \\    beta: []const u8,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 2, .endCharacter = 21 },
     });
     try testFoldingRange(
         \\const Foo = struct {
@@ -212,7 +285,7 @@ test "container decl" {
         \\    // beta: []const u8,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 24 },
     });
     try testFoldingRange(
         \\const Foo = packed struct(u32) {
@@ -220,7 +293,7 @@ test "container decl" {
         \\    beta: u16,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 32, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 32, .endLine = 2, .endCharacter = 14 },
     });
     try testFoldingRange(
         \\const Foo = union {
@@ -228,7 +301,7 @@ test "container decl" {
         \\    beta: []const u8,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 19, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 19, .endLine = 2, .endCharacter = 21 },
     });
     try testFoldingRange(
         \\const Foo = union(enum) {
@@ -236,14 +309,14 @@ test "container decl" {
         \\    beta: []const u8,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 25, .endLine = 3, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 25, .endLine = 2, .endCharacter = 21 },
     });
     try testFoldingRange(
         \\const Foo = struct {
         \\    fn foo() void {}
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 20, .endLine = 2, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 1, .endCharacter = 20 },
     });
     try testFoldingRange(
         \\const Foo = struct {
@@ -252,7 +325,14 @@ test "container decl" {
         \\    // some comment
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 19 },
+    });
+    try testFoldingRange(
+        \\const Foo = struct {
+        \\    // some comment
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 1, .endCharacter = 19 },
     });
 }
 
@@ -264,7 +344,7 @@ test "call" {
         \\    null,
         \\);
     , &.{
-        .{ .startLine = 1, .startCharacter = 19, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 1, .startCharacter = 19, .endLine = 3, .endCharacter = 9 },
     });
 }
 
@@ -283,9 +363,7 @@ test "invalid condition within a `switch`" {
     try testFoldingRange(
         \\switch (a.) {
         \\}
-    , &.{
-        .{ .startLine = 0, .startCharacter = 11, .endLine = 1, .endCharacter = 0 },
-    });
+    , &.{});
 }
 
 test "weird code" {
