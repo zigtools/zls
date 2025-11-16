@@ -169,7 +169,7 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         }
 
         fn resizeFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-            std.debug.assert(memory.len > 0 and new_len.len > 0);
+            std.debug.assert(memory.len > 0 and new_len > 0);
             const self: *Self = @ptrCast(@alignCast(ptr));
             if (!self.parent_allocator.rawResize(memory, alignment, new_len, ret_addr)) return false;
             if (name) |n| {
@@ -183,7 +183,7 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
         }
 
         fn remapFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-            std.debug.assert(memory.len > 0 and new_len.len > 0);
+            std.debug.assert(memory.len > 0 and new_len > 0);
             const self: *Self = @ptrCast(@alignCast(ptr));
             const new_memory = self.parent_allocator.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
             if (name) |n| {

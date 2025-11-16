@@ -39,7 +39,7 @@ pub fn build(b: *Build) !void {
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const strip = b.option(bool, "strip", "Strip executable");
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &.{};
-    const use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
+    var use_llvm = b.option(bool, "use-llvm", "Use Zig's llvm code backend");
     const coverage = b.option(bool, "coverage", "Generate a coverage report with kcov") orelse false;
 
     const resolved_zls_version = getVersion(b);
@@ -89,6 +89,8 @@ pub fn build(b: *Build) !void {
 
         break :blk .{ tracy_options.createModule(), enable };
     };
+    // https://github.com/ziglang/zig/issues/25194
+    if (tracy_enable and use_llvm == null) use_llvm = true;
 
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
