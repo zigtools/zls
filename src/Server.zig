@@ -41,6 +41,7 @@ const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
 const log = std.log.scoped(.server);
 
 // public fields
+io: std.Io,
 allocator: std.mem.Allocator,
 config_manager: configuration.Manager,
 document_store: DocumentStore,
@@ -833,6 +834,7 @@ const Workspace = struct {
 
         std.debug.assert(workspace.build_on_save == null);
         workspace.build_on_save = BuildOnSave.init(.{
+            .io = args.server.io,
             .allocator = args.server.allocator,
             .workspace_path = workspace_path,
             .build_on_save_args = config.build_on_save_args,
@@ -1662,6 +1664,8 @@ fn isBlockingMessage(msg: Message) bool {
 }
 
 pub const CreateOptions = struct {
+    /// Must support `concurrent` unless the ZLS module is in single_threaded mode.
+    io: std.Io,
     /// Must be thread-safe unless the ZLS module is in single_threaded mode.
     allocator: std.mem.Allocator,
     /// Must be set when running `loop`. Controls how the server will send and receive messages.
@@ -1677,14 +1681,17 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
     defer tracy_zone.end();
 
     const allocator = options.allocator;
+    const io = options.io;
 
     const server = try allocator.create(Server);
     errdefer allocator.destroy(server);
 
     server.* = .{
+        .io = io,
         .allocator = allocator,
         .config_manager = options.config_manager orelse .init(allocator),
         .document_store = .{
+            .io = io,
             .allocator = allocator,
             .config = undefined, // set below
             .thread_pool = &server.thread_pool,
