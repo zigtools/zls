@@ -12,7 +12,7 @@ pub const RenderOptions = struct {
 };
 
 pub fn renderToFile(
-    tree: Ast,
+    tree: *const Ast,
     options: RenderOptions,
     file: std.fs.File,
 ) (std.fs.File.WriteError || std.fs.File.SetEndPosError || std.mem.Allocator.Error)!void {
@@ -28,7 +28,7 @@ pub fn renderToFile(
 }
 
 pub fn renderToWriter(
-    tree: Ast,
+    tree: *const Ast,
     options: RenderOptions,
     writer: *std.Io.Writer,
 ) std.Io.Writer.Error!void {
@@ -40,12 +40,12 @@ pub fn renderToWriter(
     return try p.renderRoot();
 }
 
-pub fn fmt(tree: Ast, options: RenderOptions) Formatter {
+pub fn fmt(tree: *const Ast, options: RenderOptions) Formatter {
     return .{ .tree = tree, .options = options };
 }
 
 pub const Formatter = struct {
-    tree: Ast,
+    tree: *const Ast,
     options: RenderOptions,
 
     pub fn format(
@@ -60,7 +60,7 @@ pub const Formatter = struct {
 
 const PrintAst = struct {
     w: *std.Io.Writer,
-    tree: Ast,
+    tree: *const Ast,
     options: RenderOptions,
     indent: u32 = 0,
     current_line: usize = 0,
@@ -869,7 +869,7 @@ test PrintAst {
     var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer aw.deinit();
 
-    renderToWriter(tree, .{}, &aw.writer) catch return error.OutOfMemory;
+    renderToWriter(&tree, .{}, &aw.writer) catch return error.OutOfMemory;
 
     try expectEqualStrings(
         \\pub const root = .{

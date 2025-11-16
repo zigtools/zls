@@ -23,7 +23,7 @@ const Inclusivity = enum {
 const Builder = struct {
     allocator: std.mem.Allocator,
     locations: std.ArrayList(FoldingRange),
-    tree: Ast,
+    tree: *const Ast,
     encoding: offsets.Encoding,
 
     fn deinit(builder: *Builder) void {
@@ -105,7 +105,7 @@ const Builder = struct {
     }
 };
 
-pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
+pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
     var builder: Builder = .{
         .allocator = allocator,
         .locations = .empty,
@@ -158,7 +158,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
             => {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_proto = tree.fullFnProto(&buffer, node).?;
-                var it = fn_proto.iterate(&tree);
+                var it = fn_proto.iterate(tree);
 
                 var last_param: ?Ast.full.FnProto.Param = null;
                 while (ast.nextFnParam(&it)) |param| {

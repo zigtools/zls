@@ -85,14 +85,14 @@ pub fn getSignatureInfo(
         .other = false,
     })).unwrap().?;
     const innermost_block = document_scope.getScopeAstNode(innermost_block_scope).?;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     // Use the innermost scope to determine the earliest token we would need
     //   to scan up to find a function or builtin call
     const first_token = tree.firstToken(innermost_block);
     // We start by finding the token that includes the current cursor position
     const last_token = blk: {
-        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index).preferRight(&tree);
+        const last_token = offsets.sourceIndexToTokenIndex(tree, absolute_index).preferRight(tree);
         // Determine whether index is after the token
         const passed = tree.tokenStart(last_token) < absolute_index;
         switch (tree.tokenTag(last_token)) {
@@ -280,7 +280,7 @@ pub fn getSignatureInfo(
                     );
                 }
 
-                const name_loc = Analyser.identifierLocFromIndex(handle.tree, loc.end - 1) orelse {
+                const name_loc = Analyser.identifierLocFromIndex(&handle.tree, loc.end - 1) orelse {
                     try symbol_stack.append(arena, .l_paren);
                     continue;
                 };

@@ -91,7 +91,7 @@ const Builder = struct {
     overlappingTokenSupport: bool,
 
     fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
 
         try self.handleComments(self.previous_source_index, tree.tokenStart(token));
         try self.addDirect(token_type, token_modifiers, offsets.tokenToLoc(tree, token));
@@ -222,10 +222,10 @@ fn fieldTokenType(
     handle: *DocumentStore.Handle,
     is_static_access: bool,
 ) ?TokenType {
-    if (!ast.isContainer(handle.tree, container_decl))
+    if (!ast.isContainer(&handle.tree, container_decl))
         return null;
     if (handle.tree.nodeTag(container_decl) == .root) return .property;
-    if (is_static_access and ast.isTaggedUnion(handle.tree, container_decl))
+    if (is_static_access and ast.isTaggedUnion(&handle.tree, container_decl))
         return .enumMember;
     const main_token = handle.tree.nodeMainToken(container_decl);
     if (main_token > handle.tree.tokens.len) return null;
@@ -283,7 +283,7 @@ fn colorIdentifierBasedOnType(
 
 fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
     const handle = builder.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     const main_token = tree.nodeMainToken(node);
 
@@ -420,7 +420,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
-            var it = fn_proto.iterate(&tree);
+            var it = fn_proto.iterate(tree);
             while (ast.nextFnParam(&it)) |param_decl| {
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
 
@@ -1003,13 +1003,13 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 }
 
 fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: Ast.Node.Index) !void {
-    const tree = builder.handle.tree;
+    const tree = &builder.handle.tree;
 
     var container_field = tree.fullContainerField(node).?;
     const field_token_type = fieldTokenType(container_decl, builder.handle, false) orelse .property;
 
     if (container_decl != .root and tree.tokenTag(tree.nodeMainToken(container_decl)) != .keyword_struct) {
-        container_field.convertToNonTupleLike(&tree);
+        container_field.convertToNonTupleLike(tree);
     }
 
     try writeToken(builder, container_field.comptime_token, .keyword);
@@ -1035,7 +1035,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
 }
 
 fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
-    const tree = builder.handle.tree;
+    const tree = &builder.handle.tree;
 
     const var_decl = tree.fullVarDecl(var_decl_node).?;
     try writeToken(builder, var_decl.visib_token, .keyword);
@@ -1101,7 +1101,7 @@ fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type:
 
 fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMemory}!void {
     const handle = builder.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     const name = offsets.identifierTokenToNameSlice(tree, name_token);
     const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
@@ -1150,7 +1150,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
 
 fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
     const handle = builder.handle;
-    const tree = builder.handle.tree;
+    const tree = &builder.handle.tree;
     const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
 
     const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
@@ -1233,7 +1233,7 @@ pub fn writeSemanticTokens(
         .overlappingTokenSupport = overlappingTokenSupport,
     };
 
-    var nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();
+    var nodes = if (loc) |l| try ast.nodesAtLoc(arena, &handle.tree, l) else handle.tree.rootDecls();
     if (nodes.len == 1 and nodes[0] == .root) {
         nodes = handle.tree.rootDecls();
     }

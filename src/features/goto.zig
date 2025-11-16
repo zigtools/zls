@@ -49,7 +49,7 @@ fn gotoDefinitionSymbol(
             }
             const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
-            const target_range = offsets.nodeToRange(type_declaration.handle.tree, type_declaration.node, offset_encoding);
+            const target_range = offsets.nodeToRange(&type_declaration.handle.tree, type_declaration.node, offset_encoding);
             return .{
                 .originSelectionRange = name_range,
                 .targetUri = type_declaration.handle.uri.raw,
@@ -58,7 +58,7 @@ fn gotoDefinitionSymbol(
             };
         },
     };
-    const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);
+    const target_range = offsets.tokenToRange(&token_handle.handle.tree, token_handle.token, offset_encoding);
 
     return .{
         .originSelectionRange = name_range,
@@ -79,7 +79,7 @@ fn gotoDefinitionLabel(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name_loc = Analyser.identifierLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try Analyser.lookupLabel(handle, name, pos_index)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, loc, offset_encoding), decl, kind, offset_encoding);
@@ -95,10 +95,10 @@ fn gotoDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionStructInit(
@@ -113,15 +113,15 @@ fn gotoDefinitionStructInit(
 
     if (kind == .declaration) return null;
 
-    const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
+    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
     if (token + 1 >= handle.tree.tokens.len) return null;
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
     const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
     const token_handle = try resolved_type.typeDefinitionToken() orelse return null;
-    const target_range = offsets.tokenToRange(token_handle.handle.tree, token_handle.token, offset_encoding);
+    const target_range = offsets.tokenToRange(&token_handle.handle.tree, token_handle.token, offset_encoding);
     return .{
-        .originSelectionRange = offsets.tokenToRange(handle.tree, token, offset_encoding),
+        .originSelectionRange = offsets.tokenToRange(&handle.tree, token, offset_encoding),
         .targetUri = token_handle.handle.uri.raw,
         .targetRange = target_range,
         .targetSelectionRange = target_range,
@@ -138,12 +138,12 @@ fn gotoDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
         return gotoDefinitionStructInit(analyser, handle, source_index, kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionBuiltin(
@@ -155,7 +155,7 @@ fn gotoDefinitionBuiltin(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const name_loc = offsets.tokenIndexToLoc(tree.source, loc.start);
     const name = offsets.locToSlice(tree.source, name_loc);
     if (std.mem.eql(u8, name, "@cImport")) {
@@ -209,14 +209,14 @@ fn gotoDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
     var locs: std.ArrayList(types.DefinitionLink) = .empty;
 
     for (accesses) |access| {
-        if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
+        if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
             try locs.append(arena, l);
     }
 
@@ -292,7 +292,7 @@ pub fn gotoHandler(
     defer analyser.deinit();
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-    const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => |loc| try gotoDefinitionBuiltin(&analyser, handle, loc, server.offset_encoding),

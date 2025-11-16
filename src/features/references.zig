@@ -24,7 +24,7 @@ fn labelReferences(
 
     std.debug.assert(decl.decl == .label); // use `symbolReferences` instead
     const handle = decl.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
@@ -38,7 +38,7 @@ fn labelReferences(
         // The first token is always going to be the label
         try locations.append(allocator, .{
             .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(handle.tree, first_tok, encoding),
+            .range = offsets.tokenToRange(&handle.tree, first_tok, encoding),
         });
     }
 
@@ -54,7 +54,7 @@ fn labelReferences(
 
         try locations.append(allocator, .{
             .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(handle.tree, curr_tok + 2, encoding),
+            .range = offsets.tokenToRange(&handle.tree, curr_tok + 2, encoding),
         });
     }
 
@@ -91,7 +91,7 @@ const Builder = struct {
         }
         try self.locations.append(self.allocator, .{
             .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
+            .range = offsets.tokenToRange(&handle.tree, token_index, self.encoding),
         });
     }
 
@@ -100,15 +100,15 @@ const Builder = struct {
             .builder = self,
             .handle = handle,
         };
-        try referenceNode(&context, handle.tree, node);
-        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        try referenceNode(&context, &handle.tree, node);
+        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
     }
 
-    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
         const decl_name = offsets.identifierTokenToNameSlice(
-            builder.decl_handle.handle.tree,
+            &builder.decl_handle.handle.tree,
             builder.decl_handle.nameToken(),
         );
 
@@ -207,7 +207,7 @@ const Builder = struct {
             .enum_literal => {
                 if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
-                const name = offsets.identifierTokenToNameSlice(handle.tree, name_token);
+                const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
                 if (!std.mem.eql(u8, name, decl_name)) return;
                 const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
 
@@ -354,7 +354,7 @@ const ControlFlowBuilder = struct {
     label: ?[]const u8 = null,
     last_loop: Ast.TokenIndex,
     nodes: []const Ast.Node.Index,
-    fn iter(builder: *ControlFlowBuilder, tree: Ast, node: Ast.Node.Index) Error!void {
+    fn iter(builder: *ControlFlowBuilder, tree: *const Ast, node: Ast.Node.Index) Error!void {
         const main_token = tree.nodeMainToken(node);
         switch (tree.nodeTag(node)) {
             .@"break", .@"continue" => {
@@ -399,7 +399,7 @@ const ControlFlowBuilder = struct {
         const handle = builder.token_handle.handle;
         try builder.locations.append(builder.allocator, .{
             .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(handle.tree, token_index, builder.encoding),
+            .range = offsets.tokenToRange(&handle.tree, token_index, builder.encoding),
         });
     }
 
@@ -415,7 +415,7 @@ fn controlFlowReferences(
     include_decl: bool,
 ) error{OutOfMemory}!std.ArrayList(types.Location) {
     const handle = token_handle.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const kw_token = token_handle.token;
 
     const source_index = handle.tree.tokenStart(kw_token);
@@ -530,10 +530,10 @@ const CallBuilder = struct {
             .builder = self,
             .handle = handle,
         };
-        try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
     }
 
-    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
 
@@ -654,7 +654,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
     if (handle.tree.mode == .zon) return null;
 
     const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
-    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree, source_index, true);
+    const pos_context = try Analyser.getPositionContext(server.allocator, &handle.tree, source_index, true);
 
     var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
@@ -669,13 +669,13 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         if (pos_context == .keyword and request != .rename) {
             break :locs try controlFlowReferences(
                 arena,
-                .{ .token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).preferLeft(), .handle = handle },
+                .{ .token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).preferLeft(), .handle = handle },
                 server.offset_encoding,
                 include_decl,
             );
         }
 
-        const name_loc = Analyser.identifierLocFromIndex(handle.tree, source_index) orelse return null;
+        const name_loc = Analyser.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
         const decl = switch (pos_context) {

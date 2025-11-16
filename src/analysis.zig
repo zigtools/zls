@@ -71,13 +71,13 @@ fn allocType(analyser: *Analyser, ty: Type) error{OutOfMemory}!*Type {
     return ptr;
 }
 
-pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex) error{OutOfMemory}!?[]const u8 {
-    const doc_comment_index = getDocCommentTokenIndex(&tree, base) orelse return null;
+pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: *const Ast, base: Ast.TokenIndex) error{OutOfMemory}!?[]const u8 {
+    const doc_comment_index = getDocCommentTokenIndex(tree, base) orelse return null;
     return try collectDocComments(allocator, tree, doc_comment_index, false);
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!?[]const u8 {
+pub fn getDocComments(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!?[]const u8 {
     const base = tree.nodeMainToken(node);
     const base_kind = tree.nodeTag(node);
 
@@ -123,7 +123,7 @@ pub fn getDocCommentTokenIndex(tree: *const Ast, base_token: Ast.TokenIndex) ?As
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, container_doc: bool) error{OutOfMemory}![]const u8 {
+pub fn collectDocComments(allocator: std.mem.Allocator, tree: *const Ast, doc_comments: Ast.TokenIndex, container_doc: bool) error{OutOfMemory}![]const u8 {
     var lines: std.ArrayList([]const u8) = .empty;
     defer lines.deinit(allocator);
 
@@ -152,7 +152,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
 }
 
 /// Gets a function's keyword, name, arguments and return value.
-pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: *const Ast, func: Ast.full.FnProto) []const u8 {
     const first_token = func.ast.fn_token;
     const last_token = if (func.ast.return_type.unwrap()) |return_type| ast.lastToken(tree, return_type) else first_token;
     return offsets.tokensToSlice(tree, first_token, last_token);
@@ -418,7 +418,7 @@ pub fn firstParamIs(
 
 pub fn getVariableSignature(
     arena: std.mem.Allocator,
-    tree: Ast,
+    tree: *const Ast,
     var_decl: Ast.full.VarDecl,
     include_name: bool,
 ) error{OutOfMemory}![]const u8 {
@@ -570,7 +570,7 @@ test trimCommonIndentation {
     }
 }
 
-pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]const u8 {
+pub fn getContainerFieldSignature(tree: *const Ast, field: Ast.full.ContainerField) ?[]const u8 {
     const type_expr = field.ast.type_expr.unwrap() orelse return null;
 
     const end_node = if (field.ast.value_expr.unwrap()) |value_expr|
@@ -586,7 +586,7 @@ pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) ?[]
 }
 
 /// Returns whether the given `node` is the identifier `type`.
-pub fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
+pub fn isMetaType(tree: *const Ast, node: Ast.Node.Index) bool {
     if (tree.nodeTag(node) == .identifier) {
         return std.mem.eql(u8, tree.tokenSlice(tree.nodeMainToken(node)), "type");
     }
@@ -594,7 +594,7 @@ pub fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
 }
 
 /// Returns whether the given function returns a `type`.
-pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
+pub fn isTypeFunction(tree: *const Ast, func: Ast.full.FnProto) bool {
     const return_type = func.ast.return_type.unwrap() orelse return false;
     return isMetaType(tree, return_type);
 }
@@ -617,13 +617,13 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 /// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
 /// if the `source_index` points to `@"name"`, the source location of `name` is returned.
-pub fn identifierLocFromIndex(tree: Ast, source_index: usize) ?offsets.Loc {
+pub fn identifierLocFromIndex(tree: *const Ast, source_index: usize) ?offsets.Loc {
     _, const loc = identifierTokenAndLocFromIndex(tree, source_index) orelse return null;
     return loc;
 }
 
-pub fn identifierTokenAndLocFromIndex(tree: Ast, source_index: usize) ?struct { Ast.TokenIndex, offsets.Loc } {
-    const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, &tree) orelse return null;
+pub fn identifierTokenAndLocFromIndex(tree: *const Ast, source_index: usize) ?struct { Ast.TokenIndex, offsets.Loc } {
+    const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, tree) orelse return null;
     switch (tree.tokenTag(token)) {
         .identifier,
         .builtin,
@@ -665,44 +665,44 @@ test identifierLocFromIndex {
         const expected_loc: offsets.Loc = .{ .start = 1, .end = 5 };
         std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, expected_loc)));
 
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 1));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 2));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 5));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 1));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 2));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 5));
     }
 
     {
         const expected_loc: offsets.Loc = .{ .start = 8, .end = 15 };
         std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, expected_loc)));
 
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 6));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 7));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 8));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 11));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 15));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 16));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 6));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 7));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 8));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 11));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 15));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
     }
 
     {
         const expected_loc: offsets.Loc = .{ .start = 19, .end = 26 };
         std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, expected_loc)));
 
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 16));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 17));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 18));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 19));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 23));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(tree, 27));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 28));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 17));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 18));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 19));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 23));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 27));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 28));
     }
 
     {
         const expected_loc: offsets.Loc = .{ .start = 43, .end = 46 };
         std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, expected_loc)));
 
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(tree, 42));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 43));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 45));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(tree, 46));
+        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 42));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 43));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 45));
+        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 46));
     }
 }
 
@@ -732,7 +732,7 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
     if (gop.found_existing) return null;
 
     const handle = node_handle.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     const resolved = switch (tree.nodeTag(node_handle.node)) {
         .identifier => blk: {
@@ -854,7 +854,7 @@ fn resolveGenericTypeInternal(
     return resolved;
 }
 
-fn findReturnStatementInternal(tree: Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+fn findReturnStatementInternal(tree: *const Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     var buffer: [2]Ast.Node.Index = undefined;
@@ -874,7 +874,7 @@ fn findReturnStatementInternal(tree: Ast, body: Ast.Node.Index, already_found: *
     return result;
 }
 
-fn findReturnStatement(tree: Ast, body: Ast.Node.Index) ?Ast.Node.Index {
+fn findReturnStatement(tree: *const Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     var already_found = false;
     return findReturnStatementInternal(tree, body, &already_found);
 }
@@ -892,7 +892,7 @@ fn resolveReturnValueOfFuncNode(
     handle: *DocumentStore.Handle,
     func_node: Ast.Node.Index,
 ) error{OutOfMemory}!?Type {
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     var buf: [1]Ast.Node.Index = undefined;
     const fn_proto = tree.fullFnProto(&buf, func_node).?;
@@ -1487,7 +1487,7 @@ fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const 
         else => return null,
     };
     const field_name_token = node_with_handle.handle.tree.nodeMainToken(string_literal_node);
-    const field_name = offsets.tokenToSlice(node_with_handle.handle.tree, field_name_token);
+    const field_name = offsets.tokenToSlice(&node_with_handle.handle.tree, field_name_token);
 
     // Need at least one char between the quotes, eg "a"
     if (field_name.len < 2) return null;
@@ -1665,7 +1665,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
         else => return null,
     };
 
-    const tree = decl_handle.handle.tree;
+    const tree = &decl_handle.handle.tree;
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
 
     if (is_cimport or !analyser.collect_callsite_references) return null;
@@ -1682,7 +1682,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
 
     var func_params_len: usize = 0;
 
-    var it = func.iterate(&tree);
+    var it = func.iterate(tree);
     while (ast.nextFnParam(&it)) |_| {
         func_params_len += 1;
     }
@@ -1803,7 +1803,7 @@ const FindBreaks = struct {
         context.break_operands.deinit(context.allocator);
     }
 
-    fn findBreakOperands(context: *FindBreaks, tree: Ast, node: Ast.Node.Index) Error!void {
+    fn findBreakOperands(context: *FindBreaks, tree: *const Ast, node: Ast.Node.Index) Error!void {
         std.debug.assert(node != .root);
 
         const allow_unlabeled = context.allow_unlabeled;
@@ -1883,7 +1883,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     switch (tree.nodeTag(node)) {
         .global_var_decl,
@@ -1939,7 +1939,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var field = tree.fullContainerField(node).?;
 
             if (container_type.isTaggedUnion()) {
-                field.convertToNonTupleLike(&tree);
+                field.convertToNonTupleLike(tree);
                 if (field.ast.type_expr == .none)
                     return Type.fromIP(analyser, .void_type, null);
             }
@@ -2398,7 +2398,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var parameters: std.ArrayList(Type.Data.Parameter) = .empty;
             var has_varargs = false;
 
-            var it = fn_proto.iterate(&tree);
+            var it = fn_proto.iterate(tree);
             while (ast.nextFnParam(&it)) |param| {
                 if (has_varargs) {
                     return null;
@@ -2945,7 +2945,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) er
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     switch (tree.nodeTag(node)) {
         .identifier => {
@@ -3975,7 +3975,7 @@ pub const Type = struct {
         };
         if (!self.isContainerKind(.keyword_struct)) return false;
         const node = scope_handle.toNode();
-        const tree = scope_handle.handle.tree;
+        const tree = &scope_handle.handle.tree;
         var buf: [2]Ast.Node.Index = undefined;
         const full = tree.fullContainerDecl(&buf, node) orelse return true;
         for (full.ast.members) |member| {
@@ -3998,7 +3998,7 @@ pub const Type = struct {
 
     pub fn isTaggedUnion(self: Type) bool {
         return switch (self.data) {
-            .container => |info| ast.isTaggedUnion(info.scope_handle.handle.tree, info.scope_handle.toNode()),
+            .container => |info| ast.isTaggedUnion(&info.scope_handle.handle.tree, info.scope_handle.toNode()),
             else => false,
         };
     }
@@ -4097,7 +4097,7 @@ pub const Type = struct {
     pub fn docComments(self: Type, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         if (self.is_type_val) {
             switch (self.data) {
-                .container => |info| return try getDocComments(allocator, info.scope_handle.handle.tree, info.scope_handle.toNode()),
+                .container => |info| return try getDocComments(allocator, &info.scope_handle.handle.tree, info.scope_handle.toNode()),
                 .function => |info| return info.doc_comments,
                 else => {},
             }
@@ -4247,7 +4247,7 @@ pub const Type = struct {
             .container => |info| {
                 const scope_handle = info.scope_handle;
                 const handle = scope_handle.handle;
-                const tree = handle.tree;
+                const tree = &handle.tree;
 
                 const node = scope_handle.toNode();
 
@@ -4298,7 +4298,7 @@ pub const Type = struct {
                             if (referenced) |r| try r.put(analyser.arena, .of(func_name, handle, func_name_token), {});
                             var first = true;
                             try writer.writeByte('(');
-                            var it = func.iterate(&tree);
+                            var it = func.iterate(tree);
                             while (ast.nextFnParam(&it)) |param| {
                                 const param_type_expr = param.type_expr orelse continue;
                                 if (!Analyser.isMetaType(tree, param_type_expr)) continue;
@@ -4375,7 +4375,7 @@ pub const Type = struct {
                 if (options.truncate_container_decls) {
                     try writer.writeAll("@compileError(...)");
                 } else {
-                    try writer.writeAll(offsets.nodeToSlice(node_handle.handle.tree, node_handle.node));
+                    try writer.writeAll(offsets.nodeToSlice(&node_handle.handle.tree, node_handle.node));
                 }
             },
             .type_parameter => |token_handle| {
@@ -4437,7 +4437,7 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayList([]const u8) {
+pub fn collectImports(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!std.ArrayList([]const u8) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -4460,7 +4460,7 @@ pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory
 
 /// Collects all `@cImport` nodes
 /// Caller owns returned memory.
-pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}![]Ast.Node.Index {
+pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}![]Ast.Node.Index {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -4480,7 +4480,7 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
             else => continue,
         }
 
-        if (!std.mem.eql(u8, Ast.tokenSlice(tree, tree.nodeMainToken(node)), "@cImport")) continue;
+        if (!std.mem.eql(u8, Ast.tokenSlice(tree.*, tree.nodeMainToken(node)), "@cImport")) continue;
 
         try import_nodes.append(allocator, node);
     }
@@ -4787,7 +4787,7 @@ pub const PositionContext = union(enum) {
             .char_literal,
             .parens_expr,
             => |l| return l,
-            .keyword => |token_index| return offsets.tokenToLoc(tree.*, token_index),
+            .keyword => |token_index| return offsets.tokenToLoc(tree, token_index),
             .global_error_set,
             .comment,
             .other,
@@ -4856,7 +4856,7 @@ pub fn isSymbolChar(char: u8) bool {
 /// lexing just a single line is always correct.
 pub fn getPositionContext(
     allocator: std.mem.Allocator,
-    tree: Ast,
+    tree: *const Ast,
     source_index: usize,
     /// Should we look beyond the `source_index`? `false` for completions, `true` otherwise (hover, goto, etc.)
     lookahead: bool,
@@ -4986,8 +4986,8 @@ pub fn getPositionContext(
                 }
             },
             .identifier => switch (curr_ctx.ctx) {
-                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc(&tree).?, tok) },
-                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(&tree).?, tok) },
+                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
+                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
                 .label_access => |loc| curr_ctx.ctx = if (loc.start == loc.end)
                     .{ .label_access = tok.loc }
                 else
@@ -5004,7 +5004,7 @@ pub fn getPositionContext(
                     else => curr_ctx.ctx = .other,
                 },
                 .comment, .other, .field_access, .global_error_set => {},
-                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(&tree) orelse tok.loc, tok) },
+                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
             },
             .question_mark => switch (curr_ctx.ctx) {
                 .field_access => {},
@@ -5149,7 +5149,7 @@ pub const DeclWithHandle = struct {
 
     /// Returns a `.identifier` or `.builtin` token.
     pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
-        return self.decl.nameToken(self.handle.tree);
+        return self.decl.nameToken(&self.handle.tree);
     }
 
     pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) error{OutOfMemory}!TokenWithHandle {
@@ -5177,7 +5177,7 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn typeDeclarationNode(self: DeclWithHandle) error{OutOfMemory}!?NodeWithHandle {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         switch (self.decl) {
             .ast_node => |node| switch (tree.nodeTag(node)) {
                 .global_var_decl,
@@ -5230,7 +5230,7 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn isConst(self: DeclWithHandle) bool {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         return switch (self.decl) {
             .ast_node => |node| switch (tree.nodeTag(node)) {
                 .global_var_decl,
@@ -5279,7 +5279,7 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn isCaptureByRef(self: DeclWithHandle) bool {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         return switch (self.decl) {
             .ast_node,
             .function_parameter,
@@ -5298,7 +5298,7 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         return switch (self.decl) {
             .ast_node => |node| try getDocComments(allocator, tree, node),
             .function_parameter => |pay| {
@@ -5338,7 +5338,7 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn isStatic(self: DeclWithHandle) error{OutOfMemory}!bool {
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         return switch (self.decl) {
             .ast_node => |node| switch (tree.nodeTag(node)) {
                 .global_var_decl,
@@ -5371,7 +5371,7 @@ pub const DeclWithHandle = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        const tree = self.handle.tree;
+        const tree = &self.handle.tree;
         var resolved_ty = switch (self.decl) {
             .ast_node => |node| try analyser.resolveTypeOfNodeInternal(.{
                 .node_handle = .of(node, self.handle),
@@ -5540,7 +5540,7 @@ pub fn collectDeclarationsOfContainer(
     const scope = container_scope.scope;
     const handle = container_scope.handle;
 
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const document_scope = try handle.getDocumentScope();
     const container_node = container_scope.toNode();
     const main_token = tree.nodeMainToken(container_node);
@@ -5702,7 +5702,7 @@ pub fn innermostScopeAtIndexWithTag(
 }
 
 pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!Type {
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const document_scope = try handle.getDocumentScope();
     if (document_scope.scopes.len == 1) return .{
         .data = .{ .container = .root(handle) },
@@ -5719,7 +5719,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
                 const func = tree.fullFnProto(&buf, function_node).?;
-                var it = func.iterate(&tree);
+                var it = func.iterate(tree);
                 while (ast.nextFnParam(&it)) |param| {
                     const param_type_expr = param.type_expr orelse continue;
                     if (!Analyser.isMetaType(tree, param_type_expr)) continue;
@@ -5774,7 +5774,7 @@ pub fn lookupSymbolGlobal(
     symbol: []const u8,
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const document_scope = try handle.getDocumentScope();
     var current_scope = innermostScopeAtIndex(document_scope, source_index);
 
@@ -5788,7 +5788,7 @@ pub fn lookupSymbolGlobal(
             std.debug.assert(decl == .ast_node);
 
             var field = tree.fullContainerField(decl.ast_node).?;
-            field.convertToNonTupleLike(&tree);
+            field.convertToNonTupleLike(tree);
 
             const field_name = offsets.tokenToLoc(tree, field.ast.main_token);
             if (field_name.start <= source_index and source_index <= field_name.end) {
@@ -5913,7 +5913,7 @@ pub fn resolveExpressionTypeFromAncestors(
 ) error{OutOfMemory}!?Type {
     if (ancestors.len == 0) return null;
 
-    const tree = handle.tree;
+    const tree = &handle.tree;
 
     switch (tree.nodeTag(ancestors[0])) {
         .struct_init_one,
@@ -6250,7 +6250,7 @@ pub fn getSymbolEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
     if (nodes.len == 0) return null;
     return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
@@ -6264,7 +6264,7 @@ pub fn resolveStructInitType(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const tree = handle.tree;
+    const tree = &handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
     if (nodes.len == 0) return null;
     var ty = try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]) orelse return null;
@@ -6330,22 +6330,22 @@ pub fn getSymbolFieldAccessesHighlight(
     property_types: *std.ArrayList(Type),
 ) !?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
-        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
-            const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
+        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
+            const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
             switch (handle.tree.tokenTag(token)) {
                 .question_mark => {
-                    const token_loc = offsets.tokenToLoc(handle.tree, token);
+                    const token_loc = offsets.tokenToLoc(&handle.tree, token);
                     break :blk .{ token_loc, token_loc };
                 },
                 .period_asterisk => {
-                    var name_loc = offsets.tokenToLoc(handle.tree, token);
+                    var name_loc = offsets.tokenToLoc(&handle.tree, token);
                     name_loc.start += 1; // trim the period
                     break :blk .{ name_loc, name_loc };
                 },
                 else => return null,
             }
         };
-        break :blk .{ name_loc, offsets.tokenToLoc(handle.tree, name_token) };
+        break :blk .{ name_loc, offsets.tokenToLoc(&handle.tree, name_token) };
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);

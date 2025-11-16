@@ -89,14 +89,14 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
                 else => continue,
             }
 
-            if (!std.mem.eql(u8, offsets.tokenToSlice(tree, token), "@cImport")) continue;
+            if (!std.mem.eql(u8, offsets.tokenToSlice(&tree, token), "@cImport")) continue;
 
             break :blk @enumFromInt(i);
         }
         return error.TestUnexpectedResult; // source doesn't contain a cImport
     };
 
-    const output = try translate_c.convertCInclude(allocator, tree, node);
+    const output = try translate_c.convertCInclude(allocator, &tree, node);
     defer allocator.free(output);
 
     const trimmed_output = std.mem.trimEnd(u8, output, &.{'\n'});

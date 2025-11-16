@@ -257,7 +257,7 @@ pub const Handle = struct {
         var tree = try parseTree(allocator, text, mode);
         errdefer tree.deinit(allocator);
 
-        var cimports = try collectCIncludes(allocator, tree);
+        var cimports = try collectCIncludes(allocator, &tree);
         errdefer cimports.deinit(allocator);
 
         return .{
@@ -314,7 +314,7 @@ pub const Handle = struct {
 
         if (self.impl.import_uris) |import_uris| return import_uris;
 
-        var imports = try analysis.collectImports(allocator, self.tree);
+        var imports = try analysis.collectImports(allocator, &self.tree);
         defer imports.deinit(allocator);
 
         const base_path = self.uri.toFsPath(allocator) catch |err| switch (err) {
@@ -345,7 +345,7 @@ pub const Handle = struct {
         if (self.getStatus().has_document_scope) return self.impl.document_scope;
         return try self.getLazy(DocumentScope, "document_scope", struct {
             fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
-                var document_scope: DocumentScope = try .init(allocator, handle.tree);
+                var document_scope: DocumentScope = try .init(allocator, &handle.tree);
                 errdefer document_scope.deinit(allocator);
 
                 // remove unused capacity
@@ -1396,7 +1396,7 @@ pub const CImportHandle = struct {
 
 /// Collects all `@cImport` nodes and converts them into c source code if possible
 /// Caller owns returned memory.
-fn collectCIncludes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
+fn collectCIncludes(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1661,7 +1661,7 @@ fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
 
         if (error_bundle.errorMessageCount() == 0) continue;
 
-        const loc = offsets.nodeToLoc(handle.tree, node);
+        const loc = offsets.nodeToLoc(&handle.tree, node);
         const source_loc = std.zig.findLineColumn(handle.tree.source, loc.start);
 
         comptime std.debug.assert(max_document_size <= std.math.maxInt(u32));

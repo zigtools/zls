@@ -27,7 +27,7 @@ const Context = struct {
     total_symbol_count: *usize,
 };
 
-fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
     std.debug.assert(node != .root);
 
     var new_ctx = ctx.*;
@@ -168,7 +168,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
 /// converts `Symbol` to `types.DocumentSymbol`
 fn convertSymbols(
     arena: std.mem.Allocator,
-    tree: Ast,
+    tree: *const Ast,
     from: []const Symbol,
     total_symbol_count: usize,
     encoding: offsets.Encoding,
@@ -225,7 +225,7 @@ fn convertSymbolsInternal(
 
 pub fn getDocumentSymbols(
     arena: std.mem.Allocator,
-    tree: Ast,
+    tree: *const Ast,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.DocumentSymbol {
     var root_symbols: std.ArrayList(Symbol) = .empty;

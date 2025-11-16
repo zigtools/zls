@@ -39,7 +39,7 @@ fn hoverSymbol(
         maybe_resolved_type = maybe_resolved_type orelse try decl_handle.resolveType(analyser);
     }
 
-    const tree = decl_handle.handle.tree;
+    const tree = &decl_handle.handle.tree;
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| switch (tree.nodeTag(node)) {
             .global_var_decl,
@@ -225,7 +225,7 @@ fn hoverDefinitionBuiltin(
     if (std.mem.eql(u8, name, "@cImport")) blk: {
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = handle.tree.nodeMainToken(cimport_node);
-            const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
+            const cimport_loc = offsets.tokenToLoc(&handle.tree, main_token);
             if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
         } else break :blk;
 
@@ -290,7 +290,7 @@ fn hoverDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, pos_index) orelse return null;
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const hover_text = blk: {
         const is_escaped_identifier = handle.tree.source[handle.tree.tokenStart(name_token)] == '@';
@@ -312,7 +312,7 @@ fn hoverDefinitionGlobal(
                 .value = hover_text,
             },
         },
-        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
+        .range = offsets.tokenToRange(&handle.tree, name_token, offset_encoding),
     };
 }
 
@@ -327,7 +327,7 @@ fn hoverDefinitionStructInit(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const token = offsets.sourceIndexToTokenIndex(handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
+    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
     if (token + 1 >= handle.tree.tokens.len) return null;
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
@@ -351,7 +351,7 @@ fn hoverDefinitionStructInit(
                 .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
             },
         },
-        .range = offsets.tokenToRange(handle.tree, token, offset_encoding),
+        .range = offsets.tokenToRange(&handle.tree, token, offset_encoding),
     };
 }
 
@@ -366,7 +366,7 @@ fn hoverDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(handle.tree, source_index) orelse {
+    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
         return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
@@ -379,7 +379,7 @@ fn hoverDefinitionEnumLiteral(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
         },
-        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
+        .range = offsets.tokenToRange(&handle.tree, name_token, offset_encoding),
     };
 }
 
@@ -429,7 +429,7 @@ fn hoverNumberLiteral(
     arena: std.mem.Allocator,
     markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?[]const u8 {
-    const tree = handle.tree;
+    const tree = &handle.tree;
     // number literals get tokenized separately from their minus sign
     const is_negative = tree.tokenTag(token_index -| 1) == .minus;
     const num_slice = tree.tokenSlice(token_index);
@@ -484,8 +484,8 @@ fn hoverDefinitionNumberLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const tree = handle.tree;
-    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number_literal, .char_literal }, &tree) orelse return null;
+    const tree = &handle.tree;
+    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number_literal, .char_literal }, tree) orelse return null;
     const num_loc = offsets.tokenToLoc(tree, token_index);
     const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
 
@@ -506,7 +506,7 @@ pub fn hover(
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) !?types.Hover {
-    const pos_context = try Analyser.getPositionContext(arena, handle.tree, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => |loc| try hoverDefinitionBuiltin(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),

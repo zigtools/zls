@@ -665,7 +665,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
     var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);
     defer tree.deinit(allocator);
 
-    const ctx = try Analyser.getPositionContext(allocator, tree, cursor_index, lookahead);
+    const ctx = try Analyser.getPositionContext(allocator, &tree, cursor_index, lookahead);
 
     var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();

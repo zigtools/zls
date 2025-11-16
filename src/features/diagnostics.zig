@@ -45,7 +45,7 @@ pub fn generateDiagnostics(
         try wip.init(server.allocator);
         defer wip.deinit();
 
-        try collectParseDiagnostics(handle.tree, &wip);
+        try collectParseDiagnostics(&handle.tree, &wip);
 
         var error_bundle = try wip.toOwnedBundle("");
         errdefer error_bundle.deinit(server.allocator);
@@ -71,11 +71,11 @@ pub fn generateDiagnostics(
         }
 
         if (config.warn_style and handle.tree.mode == .zig) {
-            try collectWarnStyleDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+            try collectWarnStyleDiagnostics(&handle.tree, arena, &diagnostics, server.offset_encoding);
         }
 
         if (config.highlight_global_var_declarations and handle.tree.mode == .zig) {
-            try collectGlobalVarDiagnostics(handle.tree, arena, &diagnostics, server.offset_encoding);
+            try collectGlobalVarDiagnostics(&handle.tree, arena, &diagnostics, server.offset_encoding);
         }
 
         try server.diagnostics_collection.pushSingleDocumentDiagnostics(
@@ -91,7 +91,7 @@ pub fn generateDiagnostics(
     };
 }
 
-fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfMemory}!void {
+fn collectParseDiagnostics(tree: *const Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -130,7 +130,7 @@ fn collectParseDiagnostics(tree: Ast, eb: *std.zig.ErrorBundle.Wip) error{OutOfM
 }
 
 fn errorBundleSourceLocationFromToken(
-    tree: Ast,
+    tree: *const Ast,
     eb: *std.zig.ErrorBundle.Wip,
     token: Ast.TokenIndex,
 ) error{OutOfMemory}!std.zig.ErrorBundle.SourceLocationIndex {
@@ -150,7 +150,7 @@ fn errorBundleSourceLocationFromToken(
 }
 
 fn collectWarnStyleDiagnostics(
-    tree: Ast,
+    tree: *const Ast,
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,
@@ -231,7 +231,7 @@ fn collectWarnStyleDiagnostics(
 }
 
 fn collectGlobalVarDiagnostics(
-    tree: Ast,
+    tree: *const Ast,
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,

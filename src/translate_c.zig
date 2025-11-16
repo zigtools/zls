@@ -28,12 +28,12 @@ const InMessage = std.zig.Server.Message;
 /// #define GLFW_INCLUDE_VULKAN
 /// #include "GLFW/glfw3.h"
 /// ```
-pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{ OutOfMemory, Unsupported }![]const u8 {
+pub fn convertCInclude(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{ OutOfMemory, Unsupported }![]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     std.debug.assert(ast.isBuiltinCall(tree, node));
-    std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, tree.nodeMainToken(node)), "@cImport"));
+    std.debug.assert(std.mem.eql(u8, tree.tokenSlice(tree.nodeMainToken(node)), "@cImport"));
 
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
@@ -48,7 +48,7 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
 
 fn convertCIncludeInternal(
     allocator: std.mem.Allocator,
-    tree: Ast,
+    tree: *const Ast,
     node: Ast.Node.Index,
     output: *std.ArrayList(u8),
 ) error{ OutOfMemory, Unsupported }!void {
@@ -60,10 +60,10 @@ fn convertCIncludeInternal(
     } else if (tree.builtinCallParams(&buffer, node)) |params| {
         if (params.len < 1) return;
 
-        const call_name = Ast.tokenSlice(tree, tree.nodeMainToken(node));
+        const call_name = tree.tokenSlice(tree.nodeMainToken(node));
 
         if (tree.nodeTag(params[0]) != .string_literal) return error.Unsupported;
-        const first = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[0])));
+        const first = extractString(tree.tokenSlice(tree.nodeMainToken(params[0])));
 
         if (std.mem.eql(u8, call_name, "@cInclude")) {
             try output.print(allocator, "#include <{s}>\n", .{first});
@@ -77,7 +77,7 @@ fn convertCIncludeInternal(
                 try output.print(allocator, "#define {s}\n", .{first});
             } else {
                 if (tree.nodeTag(params[1]) != .string_literal) return error.Unsupported;
-                const second = extractString(Ast.tokenSlice(tree, tree.nodeMainToken(params[1])));
+                const second = extractString(tree.tokenSlice(tree.nodeMainToken(params[1])));
                 try output.print(allocator, "#define {s} {s}\n", .{ first, second });
             }
         } else if (std.mem.eql(u8, call_name, "@cUndef")) {

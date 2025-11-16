@@ -29,7 +29,7 @@ pub fn generateSelectionRanges(
         locs.clearRetainingCapacity();
         for (0..handle.tree.nodes.len, handle.tree.nodes.items(.tag)) |i, tag| {
             const node: Ast.Node.Index = @enumFromInt(i);
-            const loc = offsets.nodeToLoc(handle.tree, node);
+            const loc = offsets.nodeToLoc(&handle.tree, node);
 
             if (!(loc.start <= index and index <= loc.end)) continue;
 
@@ -43,7 +43,7 @@ pub fn generateSelectionRanges(
                     var it = fn_proto.iterate(&handle.tree);
 
                     while (ast.nextFnParam(&it)) |param| {
-                        const param_loc = ast.paramLoc(handle.tree, param, true);
+                        const param_loc = ast.paramLoc(&handle.tree, param, true);
                         if (param_loc.start <= index and index <= param_loc.end) {
                             try locs.append(arena, param_loc);
                         }

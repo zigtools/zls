@@ -8,7 +8,7 @@ const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const full = Ast.full;
 
-fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType {
+fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.PtrType {
     const size: std.builtin.Type.Pointer.Size = switch (tree.tokenTag(info.main_token)) {
         .asterisk,
         .asterisk_asterisk,
@@ -58,7 +58,7 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
     return result;
 }
 
-pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
+pub fn ptrTypeSimple(tree: *const Ast, node: Node.Index) full.PtrType {
     std.debug.assert(tree.nodeTag(node) == .ptr_type);
     const extra_index, const child_type = tree.nodeData(node).extra_and_node;
     const extra = tree.extraData(extra_index, Node.PtrType);
@@ -73,7 +73,7 @@ pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
     });
 }
 
-pub fn ptrTypeSentinel(tree: Ast, node: Node.Index) full.PtrType {
+pub fn ptrTypeSentinel(tree: *const Ast, node: Node.Index) full.PtrType {
     std.debug.assert(tree.nodeTag(node) == .ptr_type_sentinel);
     const sentinel, const child_type = tree.nodeData(node).opt_node_and_node;
     return fullPtrTypeComponents(tree, .{
@@ -87,7 +87,7 @@ pub fn ptrTypeSentinel(tree: Ast, node: Node.Index) full.PtrType {
     });
 }
 
-pub fn ptrTypeAligned(tree: Ast, node: Node.Index) full.PtrType {
+pub fn ptrTypeAligned(tree: *const Ast, node: Node.Index) full.PtrType {
     std.debug.assert(tree.nodeTag(node) == .ptr_type_aligned);
     const align_node, const child_type = tree.nodeData(node).opt_node_and_node;
     return fullPtrTypeComponents(tree, .{
@@ -101,7 +101,7 @@ pub fn ptrTypeAligned(tree: Ast, node: Node.Index) full.PtrType {
     });
 }
 
-pub fn ptrTypeBitRange(tree: Ast, node: Node.Index) full.PtrType {
+pub fn ptrTypeBitRange(tree: *const Ast, node: Node.Index) full.PtrType {
     std.debug.assert(tree.nodeTag(node) == .ptr_type_bit_range);
     const extra_index, const child_type = tree.nodeData(node).extra_and_node;
     const extra = tree.extraData(extra_index, Node.PtrTypeBitRange);
@@ -116,7 +116,7 @@ pub fn ptrTypeBitRange(tree: Ast, node: Node.Index) full.PtrType {
     });
 }
 
-fn legacyAsmComponents(tree: Ast, info: full.AsmLegacy.Components) full.AsmLegacy {
+fn legacyAsmComponents(tree: *const Ast, info: full.AsmLegacy.Components) full.AsmLegacy {
     var result: full.AsmLegacy = .{
         .ast = info,
         .volatile_token = null,
@@ -179,7 +179,7 @@ fn legacyAsmComponents(tree: Ast, info: full.AsmLegacy.Components) full.AsmLegac
     return result;
 }
 
-fn fullAsmComponents(tree: Ast, info: full.Asm.Components) full.Asm {
+fn fullAsmComponents(tree: *const Ast, info: full.Asm.Components) full.Asm {
     var result: full.Asm = .{
         .ast = info,
         .volatile_token = null,
@@ -202,7 +202,7 @@ fn fullAsmComponents(tree: Ast, info: full.Asm.Components) full.Asm {
     return result;
 }
 
-pub fn asmLegacy(tree: Ast, node: Node.Index) full.AsmLegacy {
+pub fn asmLegacy(tree: *const Ast, node: Node.Index) full.AsmLegacy {
     const template, const extra_index = tree.nodeData(node).node_and_extra;
     const extra = tree.extraData(extra_index, Node.AsmLegacy);
     const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
@@ -214,7 +214,7 @@ pub fn asmLegacy(tree: Ast, node: Node.Index) full.AsmLegacy {
     });
 }
 
-pub fn asmSimple(tree: Ast, node: Node.Index) full.Asm {
+pub fn asmSimple(tree: *const Ast, node: Node.Index) full.Asm {
     const template, const rparen = tree.nodeData(node).node_and_token;
     return fullAsmComponents(tree, .{
         .asm_token = tree.nodeMainToken(node),
@@ -225,7 +225,7 @@ pub fn asmSimple(tree: Ast, node: Node.Index) full.Asm {
     });
 }
 
-pub fn asmFull(tree: Ast, node: Node.Index) full.Asm {
+pub fn asmFull(tree: *const Ast, node: Node.Index) full.Asm {
     const template, const extra_index = tree.nodeData(node).node_and_extra;
     const extra = tree.extraData(extra_index, Node.Asm);
     const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
@@ -238,7 +238,7 @@ pub fn asmFull(tree: Ast, node: Node.Index) full.Asm {
     });
 }
 
-fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
+fn fullIfComponents(tree: *const Ast, info: full.If.Components) full.If {
     var result: full.If = .{
         .ast = info,
         .payload_token = null,
@@ -272,7 +272,7 @@ fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
     return result;
 }
 
-pub fn ifFull(tree: Ast, node: Node.Index) full.If {
+pub fn ifFull(tree: *const Ast, node: Node.Index) full.If {
     std.debug.assert(tree.nodeTag(node) == .@"if");
     const cond_expr, const extra_index = tree.nodeData(node).node_and_extra;
     const extra = tree.extraData(extra_index, Node.If);
@@ -284,7 +284,7 @@ pub fn ifFull(tree: Ast, node: Node.Index) full.If {
     });
 }
 
-pub fn ifSimple(tree: Ast, node: Node.Index) full.If {
+pub fn ifSimple(tree: *const Ast, node: Node.Index) full.If {
     std.debug.assert(tree.nodeTag(node) == .if_simple);
     const cond_expr, const then_expr = tree.nodeData(node).node_and_node;
     return fullIfComponents(tree, .{
@@ -295,7 +295,7 @@ pub fn ifSimple(tree: Ast, node: Node.Index) full.If {
     });
 }
 
-fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
+fn fullWhileComponents(tree: *const Ast, info: full.While.Components) full.While {
     var result: full.While = .{
         .ast = info,
         .inline_token = null,
@@ -341,7 +341,7 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
     return result;
 }
 
-fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
+fn fullForComponents(tree: *const Ast, info: full.For.Components) full.For {
     var result: full.For = .{
         .ast = info,
         .inline_token = null,
@@ -370,7 +370,7 @@ fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
     return result;
 }
 
-pub fn whileSimple(tree: Ast, node: Node.Index) full.While {
+pub fn whileSimple(tree: *const Ast, node: Node.Index) full.While {
     const cond_expr, const then_expr = tree.nodeData(node).node_and_node;
     return fullWhileComponents(tree, .{
         .while_token = tree.nodeMainToken(node),
@@ -381,7 +381,7 @@ pub fn whileSimple(tree: Ast, node: Node.Index) full.While {
     });
 }
 
-pub fn whileCont(tree: Ast, node: Node.Index) full.While {
+pub fn whileCont(tree: *const Ast, node: Node.Index) full.While {
     const cond_expr, const extra_index = tree.nodeData(node).node_and_extra;
     const extra = tree.extraData(extra_index, Node.WhileCont);
     return fullWhileComponents(tree, .{
@@ -393,7 +393,7 @@ pub fn whileCont(tree: Ast, node: Node.Index) full.While {
     });
 }
 
-pub fn whileFull(tree: Ast, node: Node.Index) full.While {
+pub fn whileFull(tree: *const Ast, node: Node.Index) full.While {
     const cond_expr, const extra_index = tree.nodeData(node).node_and_extra;
     const extra = tree.extraData(extra_index, Node.While);
     return fullWhileComponents(tree, .{
@@ -405,7 +405,7 @@ pub fn whileFull(tree: Ast, node: Node.Index) full.While {
     });
 }
 
-pub fn forSimple(tree: Ast, node: Node.Index) full.For {
+pub fn forSimple(tree: *const Ast, node: Node.Index) full.For {
     const data = &tree.nodes.items(.data)[@intFromEnum(node)].node_and_node;
     return fullForComponents(tree, .{
         .for_token = tree.nodeMainToken(node),
@@ -415,7 +415,7 @@ pub fn forSimple(tree: Ast, node: Node.Index) full.For {
     });
 }
 
-pub fn forFull(tree: Ast, node: Node.Index) full.For {
+pub fn forFull(tree: *const Ast, node: Node.Index) full.For {
     const extra_index, const extra = tree.nodeData(node).@"for";
     const inputs = tree.extraDataSliceWithLen(extra_index, extra.inputs, Node.Index);
     const then_expr: Node.Index = @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs]);
@@ -428,7 +428,7 @@ pub fn forFull(tree: Ast, node: Node.Index) full.For {
     });
 }
 
-pub fn fullPtrType(tree: Ast, node: Node.Index) ?full.PtrType {
+pub fn fullPtrType(tree: *const Ast, node: Node.Index) ?full.PtrType {
     return switch (tree.nodeTag(node)) {
         .ptr_type_aligned => ptrTypeAligned(tree, node),
         .ptr_type_sentinel => ptrTypeSentinel(tree, node),
@@ -438,7 +438,7 @@ pub fn fullPtrType(tree: Ast, node: Node.Index) ?full.PtrType {
     };
 }
 
-pub fn fullIf(tree: Ast, node: Node.Index) ?full.If {
+pub fn fullIf(tree: *const Ast, node: Node.Index) ?full.If {
     return switch (tree.nodeTag(node)) {
         .if_simple => ifSimple(tree, node),
         .@"if" => ifFull(tree, node),
@@ -446,7 +446,7 @@ pub fn fullIf(tree: Ast, node: Node.Index) ?full.If {
     };
 }
 
-pub fn fullWhile(tree: Ast, node: Node.Index) ?full.While {
+pub fn fullWhile(tree: *const Ast, node: Node.Index) ?full.While {
     return switch (tree.nodeTag(node)) {
         .while_simple => whileSimple(tree, node),
         .while_cont => whileCont(tree, node),
@@ -455,7 +455,7 @@ pub fn fullWhile(tree: Ast, node: Node.Index) ?full.While {
     };
 }
 
-pub fn fullFor(tree: Ast, node: Node.Index) ?full.For {
+pub fn fullFor(tree: *const Ast, node: Node.Index) ?full.For {
     return switch (tree.nodeTag(node)) {
         .for_simple => forSimple(tree, node),
         .@"for" => forFull(tree, node),
@@ -463,7 +463,7 @@ pub fn fullFor(tree: Ast, node: Node.Index) ?full.For {
     };
 }
 
-pub fn fullAsm(tree: Ast, node: Node.Index) ?full.Asm {
+pub fn fullAsm(tree: *const Ast, node: Node.Index) ?full.Asm {
     return switch (tree.nodeTag(node)) {
         .asm_simple => asmSimple(tree, node),
         .@"asm" => asmFull(tree, node),
@@ -471,12 +471,12 @@ pub fn fullAsm(tree: Ast, node: Node.Index) ?full.Asm {
     };
 }
 
-fn findMatchingRBrace(tree: Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
+fn findMatchingRBrace(tree: *const Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
     return if (std.mem.findScalarPos(std.zig.Token.Tag, tree.tokens.items(.tag), start, .r_brace)) |index| @intCast(index) else null;
 }
 
 /// Similar to `std.zig.Ast.lastToken` but also handles ASTs with syntax errors.
-pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
+pub fn lastToken(tree: *const Ast, node: Node.Index) Ast.TokenIndex {
     var n = node;
     var end_offset: u32 = 0;
     const last_token = while (true) switch (tree.nodeTag(n)) {
@@ -892,7 +892,7 @@ pub fn lastToken(tree: Ast, node: Node.Index) Ast.TokenIndex {
     return last_token + end_offset;
 }
 
-pub fn testDeclNameAndToken(tree: Ast, test_decl_node: Ast.Node.Index) ?struct { Ast.TokenIndex, []const u8 } {
+pub fn testDeclNameAndToken(tree: *const Ast, test_decl_node: Ast.Node.Index) ?struct { Ast.TokenIndex, []const u8 } {
     const test_name_token = tree.nodeData(test_decl_node).opt_token_and_node[0].unwrap() orelse return null;
 
     switch (tree.tokenTag(test_name_token)) {
@@ -913,39 +913,39 @@ pub fn testDeclNameAndToken(tree: Ast, test_decl_node: Ast.Node.Index) ?struct {
 /// @tagName
 /// ```
 /// TODO investigate the parser to figure out why.
-pub fn identifierTokenFromIdentifierNode(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+pub fn identifierTokenFromIdentifierNode(tree: *const Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const main_token = tree.nodeMainToken(node);
     if (tree.tokenTag(main_token) != .identifier) return null;
     return main_token;
 }
 
-pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
+pub fn hasInferredError(tree: *const Ast, fn_proto: Ast.full.FnProto) bool {
     const return_type = fn_proto.ast.return_type.unwrap() orelse return false;
     return tree.tokenTag(tree.firstToken(return_type) - 1) == .bang;
 }
 
-pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) Ast.TokenIndex {
+pub fn paramFirstToken(tree: *const Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) Ast.TokenIndex {
     return (if (include_doc_comment) param.first_doc_comment else null) orelse
         param.comptime_noalias orelse
         param.name_token orelse
         tree.firstToken(param.type_expr.?);
 }
 
-pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
+pub fn paramLastToken(tree: *const Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
     return param.anytype_ellipsis3 orelse lastToken(tree, param.type_expr.?);
 }
 
-pub fn paramLoc(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) offsets.Loc {
+pub fn paramLoc(tree: *const Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) offsets.Loc {
     const first_token = paramFirstToken(tree, param, include_doc_comment);
     const last_token = paramLastToken(tree, param);
     return offsets.tokensToLoc(tree, first_token, last_token);
 }
 
-pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) []const u8 {
+pub fn paramSlice(tree: *const Ast, param: Ast.full.FnProto.Param, include_doc_comment: bool) []const u8 {
     return offsets.locToSlice(tree.source, paramLoc(tree, param, include_doc_comment));
 }
 
-pub fn isTaggedUnion(tree: Ast, node: Ast.Node.Index) bool {
+pub fn isTaggedUnion(tree: *const Ast, node: Ast.Node.Index) bool {
     if (tree.tokenTag(tree.nodeMainToken(node)) != .keyword_union)
         return false;
 
@@ -956,7 +956,7 @@ pub fn isTaggedUnion(tree: Ast, node: Ast.Node.Index) bool {
     return decl.ast.enum_token != null or decl.ast.arg != .none;
 }
 
-pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
+pub fn isContainer(tree: *const Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodeTag(node)) {
         .container_decl,
         .container_decl_trailing,
@@ -977,7 +977,7 @@ pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
-pub fn isBuiltinCall(tree: Ast, node: Ast.Node.Index) bool {
+pub fn isBuiltinCall(tree: *const Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodeTag(node)) {
         .builtin_call,
         .builtin_call_comma,
@@ -988,7 +988,7 @@ pub fn isBuiltinCall(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
-pub fn blockLabel(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+pub fn blockLabel(tree: *const Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const main_token = tree.nodeMainToken(node);
 
     if (main_token < 2) return null;
@@ -997,7 +997,7 @@ pub fn blockLabel(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     return main_token - 2;
 }
 
-pub fn errorSetFieldCount(tree: Ast, node: Ast.Node.Index) usize {
+pub fn errorSetFieldCount(tree: *const Ast, node: Ast.Node.Index) usize {
     std.debug.assert(tree.nodeTag(node) == .error_set_decl);
     var count: usize = 0;
     const lbrace, const rbrace = tree.nodeData(node).token_and_token;
@@ -1018,7 +1018,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 return null;
             }
             const param_type = it.fn_proto.ast.params[it.param_i];
-            const last_param_type_token = lastToken(it.tree.*, param_type);
+            const last_param_type_token = lastToken(it.tree, param_type);
             var tok_i = it.tree.firstToken(param_type) - 1;
             while (true) : (tok_i -= 1) switch (it.tree.tokenTag(tok_i)) {
                 .colon => continue,
@@ -1108,14 +1108,14 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
 /// see `iterateChildrenRecursive` for recursive-iteration.
 /// the order in which children are given corresponds to the order in which they are found in the source text
 pub fn iterateChildren(
-    tree: Ast,
+    tree: *const Ast,
     node: Ast.Node.Index,
     context: anytype,
     comptime Error: type,
-    comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
+    comptime callback: fn (@TypeOf(context), *const Ast, Ast.Node.Index) Error!void,
 ) Error!void {
     const ctx = struct {
-        fn inner(ctx: *const anyopaque, t: Ast, n: Ast.Node.Index) anyerror!void {
+        fn inner(ctx: *const anyopaque, t: *const Ast, n: Ast.Node.Index) anyerror!void {
             return callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, t, n);
         }
     };
@@ -1146,14 +1146,14 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
         accumulator: *std.ArrayList(Ast.Node.Tag),
         ally: std.mem.Allocator,
 
-        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) !void {
+        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) !void {
             try self.accumulator.append(self.ally, ast.nodeTag(child_node));
         }
     };
 
     const fn_decl = tree.rootDecls()[0];
     try iterateChildren(
-        tree,
+        &tree,
         fn_decl,
         Context{ .accumulator = &children_tags, .ally = allocator },
         error{OutOfMemory},
@@ -1167,10 +1167,10 @@ test "iterateChildren - fn_proto_* inside of fn_proto" {
 }
 
 fn iterateChildrenTypeErased(
-    tree: Ast,
+    tree: *const Ast,
     node: Ast.Node.Index,
     context: *const anyopaque,
-    callback: *const fn (*const anyopaque, Ast, Ast.Node.Index) anyerror!void,
+    callback: *const fn (*const anyopaque, *const Ast, Ast.Node.Index) anyerror!void,
 ) anyerror!void {
     switch (tree.nodeTag(node)) {
         .bool_not,
@@ -1480,7 +1480,7 @@ fn iterateChildrenTypeErased(
             var buffer: [1]Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buffer, node).?;
 
-            var it = fn_proto.iterate(&tree);
+            var it = fn_proto.iterate(tree);
             while (nextFnParam(&it)) |param| {
                 try callback(context, tree, param.type_expr orelse continue);
             }
@@ -1560,14 +1560,14 @@ fn iterateChildrenTypeErased(
 /// calls the given `callback` on every child of the given node and their children
 /// see `nodeChildrenRecursiveAlloc` for a non-iterator allocating variant.
 pub fn iterateChildrenRecursive(
-    tree: Ast,
+    tree: *const Ast,
     node: Ast.Node.Index,
     context: anytype,
     comptime Error: type,
-    comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
+    comptime callback: fn (@TypeOf(context), *const Ast, Ast.Node.Index) Error!void,
 ) Error!void {
     const RecursiveContext = struct {
-        fn recursive_callback(ctx: *const anyopaque, ast: Ast, child_node: Ast.Node.Index) anyerror!void {
+        fn recursive_callback(ctx: *const anyopaque, ast: *const Ast, child_node: Ast.Node.Index) anyerror!void {
             std.debug.assert(child_node != .root);
             try callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, ast, child_node);
             try iterateChildrenTypeErased(ast, child_node, ctx, recursive_callback);
@@ -1585,11 +1585,11 @@ pub fn iterateChildrenRecursive(
 /// see `iterateChildren` for a callback variant
 /// see `nodeChildrenRecursiveAlloc` for a recursive variant.
 /// caller owns the returned memory
-pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
+pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         allocator: std.mem.Allocator,
         children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
+        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
             try self.children.append(self.allocator, child_node);
         }
@@ -1615,7 +1615,7 @@ test nodeChildrenAlloc {
 
     const children = try nodeChildrenAlloc(
         allocator,
-        tree,
+        &tree,
         namespace,
     );
     defer allocator.free(children);
@@ -1627,11 +1627,11 @@ test nodeChildrenAlloc {
 /// returns the children of the given node.
 /// see `iterateChildrenRecursive` for a callback variant
 /// caller owns the returned memory
-pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
+pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         allocator: std.mem.Allocator,
         children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
+        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
             _ = ast;
             try self.children.append(self.allocator, child_node);
         }
@@ -1657,7 +1657,7 @@ test nodeChildrenRecursiveAlloc {
 
     const children = try nodeChildrenRecursiveAlloc(
         allocator,
-        tree,
+        &tree,
         namespace,
     );
     defer allocator.free(children);
@@ -1671,7 +1671,7 @@ test nodeChildrenRecursiveAlloc {
 /// returns a list of nodes that overlap with the given source code index.
 /// sorted from smallest to largest.
 /// caller owns the returned memory.
-pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usize) error{OutOfMemory}![]Ast.Node.Index {
+pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: *const Ast, index: usize) error{OutOfMemory}![]Ast.Node.Index {
     std.debug.assert(index <= tree.source.len);
 
     const Context = struct {
@@ -1679,7 +1679,7 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usi
         allocator: std.mem.Allocator,
         nodes: std.ArrayList(Ast.Node.Index) = .empty,
 
-        pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+        pub fn append(self: *@This(), ast: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
             std.debug.assert(node != .root);
             const loc = offsets.nodeToLoc(ast, node);
             if (loc.start <= self.index and self.index <= loc.end) {
@@ -1701,7 +1701,7 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usi
 /// sorted from smallest to largest.
 /// caller owns the returned memory.
 /// this function can be removed when the parser has been improved.
-pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, tree: Ast, source_index: usize) error{OutOfMemory}![]Ast.Node.Index {
+pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, tree: *const Ast, source_index: usize) error{OutOfMemory}![]Ast.Node.Index {
     const NodeLoc = struct {
         node: Ast.Node.Index,
         loc: offsets.Loc,
@@ -1732,7 +1732,7 @@ pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, t
 
 /// returns a list of nodes that together encloses the given source code range
 /// caller owns the returned memory
-pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {
+pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: *const Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {
     std.debug.assert(loc.start <= loc.end and loc.end <= tree.source.len);
 
     const Context = struct {
@@ -1740,7 +1740,7 @@ pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) err
         nodes: std.ArrayList(Ast.Node.Index) = .empty,
         locs: std.ArrayList(offsets.Loc) = .empty,
 
-        pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) !void {
+        pub fn append(self: *@This(), ast: *const Ast, node: Ast.Node.Index) !void {
             std.debug.assert(node != .root);
             try self.nodes.append(self.allocator, node);
             try self.locs.append(self.allocator, offsets.nodeToLoc(ast, node));
@@ -1891,7 +1891,7 @@ test smallestEnclosingSubrange {
 }
 
 pub fn indexOfBreakTarget(
-    tree: Ast,
+    tree: *const Ast,
     nodes: []const Ast.Node.Index,
     break_label_maybe: ?[]const u8,
 ) ?usize {

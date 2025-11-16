@@ -88,12 +88,12 @@ fn testNodesAtLoc(source: []const u8) !void {
     var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);
     defer tree.deinit(allocator);
 
-    const nodes = try ast.nodesAtLoc(allocator, tree, inner_loc);
+    const nodes = try ast.nodesAtLoc(allocator, &tree, inner_loc);
     defer allocator.free(nodes);
 
     const actual_loc: offsets.Loc = .{
-        .start = offsets.nodeToLoc(tree, nodes[0]).start,
-        .end = offsets.nodeToLoc(tree, nodes[nodes.len - 1]).end,
+        .start = offsets.nodeToLoc(&tree, nodes[0]).start,
+        .end = offsets.nodeToLoc(&tree, nodes[nodes.len - 1]).end,
     };
 
     const uri = "file.zig";

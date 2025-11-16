@@ -118,7 +118,7 @@ pub const SourceIndexToTokenIndexResult = union(enum) {
     }
 };
 
-pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) SourceIndexToTokenIndexResult {
+pub fn sourceIndexToTokenIndex(tree: *const Ast, source_index: usize) SourceIndexToTokenIndexResult {
     std.debug.assert(source_index <= tree.source.len);
 
     var upper_index: Ast.TokenIndex = @intCast(tree.tokens.len - 1);
@@ -190,15 +190,15 @@ test sourceIndexToTokenIndex {
     const expectEqual = std.testing.expectEqual;
 
     // zig fmt: off
-    try expectEqual(Result{ .none    = .{ .left = null, .right = 0    } }, sourceIndexToTokenIndex(tree, 0));
-    try expectEqual(Result{ .one     = 0                                }, sourceIndexToTokenIndex(tree, 1));
-    try expectEqual(Result{ .one     = 0                                }, sourceIndexToTokenIndex(tree, 2));
-    try expectEqual(Result{ .none    = .{ .left = 0,    .right = 1    } }, sourceIndexToTokenIndex(tree, 3));
-    try expectEqual(Result{ .one     = 1                                }, sourceIndexToTokenIndex(tree, 4));
-    try expectEqual(Result{ .one     = 1                                }, sourceIndexToTokenIndex(tree, 5));
-    try expectEqual(Result{ .between = .{ .left = 1,    .right = 2    } }, sourceIndexToTokenIndex(tree, 6));
-    try expectEqual(Result{ .one     = 2                                }, sourceIndexToTokenIndex(tree, 7));
-    try expectEqual(Result{ .none    = .{ .left = 2,    .right = null } }, sourceIndexToTokenIndex(tree, 8));
+    try expectEqual(Result{ .none    = .{ .left = null, .right = 0    } }, sourceIndexToTokenIndex(&tree, 0));
+    try expectEqual(Result{ .one     = 0                                }, sourceIndexToTokenIndex(&tree, 1));
+    try expectEqual(Result{ .one     = 0                                }, sourceIndexToTokenIndex(&tree, 2));
+    try expectEqual(Result{ .none    = .{ .left = 0,    .right = 1    } }, sourceIndexToTokenIndex(&tree, 3));
+    try expectEqual(Result{ .one     = 1                                }, sourceIndexToTokenIndex(&tree, 4));
+    try expectEqual(Result{ .one     = 1                                }, sourceIndexToTokenIndex(&tree, 5));
+    try expectEqual(Result{ .between = .{ .left = 1,    .right = 2    } }, sourceIndexToTokenIndex(&tree, 6));
+    try expectEqual(Result{ .one     = 2                                }, sourceIndexToTokenIndex(&tree, 7));
+    try expectEqual(Result{ .none    = .{ .left = 2,    .right = null } }, sourceIndexToTokenIndex(&tree, 8));
     // zig fmt: on
 }
 
@@ -215,9 +215,9 @@ test "sourceIndexToTokenIndex - token at end" {
     const Result = SourceIndexToTokenIndexResult;
     const expectEqual = std.testing.expectEqual;
 
-    try expectEqual(Result{ .none = .{ .left = null, .right = 0 } }, sourceIndexToTokenIndex(tree, 0));
-    try expectEqual(Result{ .one = 0 }, sourceIndexToTokenIndex(tree, 1));
-    try expectEqual(Result{ .one = 0 }, sourceIndexToTokenIndex(tree, 2));
+    try expectEqual(Result{ .none = .{ .left = null, .right = 0 } }, sourceIndexToTokenIndex(&tree, 0));
+    try expectEqual(Result{ .one = 0 }, sourceIndexToTokenIndex(&tree, 1));
+    try expectEqual(Result{ .one = 0 }, sourceIndexToTokenIndex(&tree, 2));
 }
 
 pub const IdentifierIndexRange = enum {
@@ -291,7 +291,7 @@ pub fn identifierIndexToSlice(text: [:0]const u8, source_index: usize, range: Id
     return locToSlice(text, identifierIndexToLoc(text, source_index, range));
 }
 
-pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc {
+pub fn identifierTokenToNameLoc(tree: *const Ast, identifier_token: Ast.TokenIndex) Loc {
     std.debug.assert(switch (tree.tokenTag(identifier_token)) {
         .builtin => true, // The Zig parser likes to emit .builtin where a identifier would be expected
         .identifier => true,
@@ -300,15 +300,15 @@ pub fn identifierTokenToNameLoc(tree: Ast, identifier_token: Ast.TokenIndex) Loc
     return identifierIndexToLoc(tree.source, tree.tokenStart(identifier_token), .name);
 }
 
-pub fn identifierTokenToNameSlice(tree: Ast, identifier_token: Ast.TokenIndex) []const u8 {
+pub fn identifierTokenToNameSlice(tree: *const Ast, identifier_token: Ast.TokenIndex) []const u8 {
     return locToSlice(tree.source, identifierTokenToNameLoc(tree, identifier_token));
 }
 
-pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
+pub fn tokensToLoc(tree: *const Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
     return .{ .start = tree.tokenStart(first_token), .end = tokenToLoc(tree, last_token).end };
 }
 
-pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
+pub fn tokenToLoc(tree: *const Ast, token_index: Ast.TokenIndex) Loc {
     const start = tree.tokenStart(token_index);
     const tag = tree.tokenTag(token_index);
 
@@ -360,27 +360,27 @@ fn testTokenToLoc(text: [:0]const u8, token_index: Ast.TokenIndex, start: usize,
     var tree = try Ast.parse(std.testing.allocator, text, .zig);
     defer tree.deinit(std.testing.allocator);
 
-    const actual = tokenToLoc(tree, token_index);
+    const actual = tokenToLoc(&tree, token_index);
 
     try std.testing.expectEqual(start, actual.start);
     try std.testing.expectEqual(end, actual.end);
 }
 
-pub fn tokenToSlice(tree: Ast, token_index: Ast.TokenIndex) []const u8 {
+pub fn tokenToSlice(tree: *const Ast, token_index: Ast.TokenIndex) []const u8 {
     return locToSlice(tree.source, tokenToLoc(tree, token_index));
 }
 
-pub fn tokensToSlice(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) []const u8 {
+pub fn tokensToSlice(tree: *const Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) []const u8 {
     std.debug.assert(first_token <= last_token);
     return locToSlice(tree.source, tokensToLoc(tree, first_token, last_token));
 }
 
-pub fn tokenToPosition(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) Position {
+pub fn tokenToPosition(tree: *const Ast, token_index: Ast.TokenIndex, encoding: Encoding) Position {
     const start = tree.tokenStart(token_index);
     return indexToPosition(tree.source, start, encoding);
 }
 
-pub fn tokenToRange(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) Range {
+pub fn tokenToRange(tree: *const Ast, token_index: Ast.TokenIndex, encoding: Encoding) Range {
     const start = tokenToPosition(tree, token_index, encoding);
     const loc = tokenToLoc(tree, token_index);
 
@@ -390,7 +390,7 @@ pub fn tokenToRange(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) 
     };
 }
 
-pub fn tokenLength(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) usize {
+pub fn tokenLength(tree: *const Ast, token_index: Ast.TokenIndex, encoding: Encoding) usize {
     const loc = tokenToLoc(tree, token_index);
     return locLength(tree.source, loc, encoding);
 }
@@ -450,15 +450,15 @@ pub fn tokenPositionToRange(text: [:0]const u8, position: Position, encoding: En
     };
 }
 
-pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
+pub fn nodeToLoc(tree: *const Ast, node: Ast.Node.Index) Loc {
     return tokensToLoc(tree, tree.firstToken(node), ast.lastToken(tree, node));
 }
 
-pub fn nodeToSlice(tree: Ast, node: Ast.Node.Index) []const u8 {
+pub fn nodeToSlice(tree: *const Ast, node: Ast.Node.Index) []const u8 {
     return locToSlice(tree.source, nodeToLoc(tree, node));
 }
 
-pub fn nodeToRange(tree: Ast, node: Ast.Node.Index, encoding: Encoding) Range {
+pub fn nodeToRange(tree: *const Ast, node: Ast.Node.Index, encoding: Encoding) Range {
     return locToRange(tree.source, nodeToLoc(tree, node), encoding);
 }
 
