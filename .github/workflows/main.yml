@@ -26,6 +26,12 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: zig fmt --check .
 
+      - name: prefetch dependencies (workaround)
+        run: |
+          zig fetch https://github.com/ziglibs/known-folders/archive/bafef170a73c064dc706fcfbdc2e406a35681a9c.tar.gz
+          zig fetch https://github.com/ziglibs/diffz/archive/36fc805f459677093c93c210e8f9aed28be13847.tar.gz
+          zig fetch https://github.com/zigtools/lsp-kit/archive/c46ac866dda11ab58e4ba71ed0d8ba21f43e81db.tar.gz
+
       - name: Run zig build check test
         run: zig build check test --summary all
 
