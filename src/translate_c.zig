@@ -107,6 +107,7 @@ pub const Result = union(enum) {
 /// null indicates a failure which is automatically logged
 /// Caller owns returned memory.
 pub fn translate(
+    io: std.Io,
     allocator: std.mem.Allocator,
     config: DocumentStore.Config,
     include_dirs: []const []const u8,
@@ -176,7 +177,7 @@ pub fn translate(
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Ignore;
 
-    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(allocator, process.stderr, argv.items, @errorName(err));
+    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
 
     process.spawn() catch |err| {
         log.err("failed to spawn zig translate-c process, error: {}", .{err});
@@ -264,12 +265,12 @@ pub fn translate(
     }
 }
 
-fn reportTranslateError(allocator: std.mem.Allocator, stderr: ?std.fs.File, argv: []const []const u8, err_name: []const u8) void {
+fn reportTranslateError(io: std.Io, allocator: std.mem.Allocator, stderr: ?std.fs.File, argv: []const []const u8, err_name: []const u8) void {
     const joined = std.mem.join(allocator, " ", argv) catch return;
     defer allocator.free(joined);
     if (stderr) |file| {
         var buffer: [1024]u8 = undefined;
-        var file_reader = file.readerStreaming(&buffer);
+        var file_reader = file.readerStreaming(io, &buffer);
         const stderr_output = file_reader.interface.allocRemaining(allocator, .limited(16 * 1024 * 1024)) catch return;
         defer allocator.free(stderr_output);
         log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{s}\n", .{ joined, stderr_output, err_name });

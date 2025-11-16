@@ -7,7 +7,7 @@ const tracy = @import("tracy");
 const DiffMatchPatch = @import("diffz");
 
 const dmp: DiffMatchPatch = .{
-    .diff_timeout = 250,
+    .diff_timeout = .fromMilliseconds(250),
 };
 
 pub fn edits(

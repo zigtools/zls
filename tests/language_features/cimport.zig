@@ -8,6 +8,7 @@ const Context = @import("../context.zig").Context;
 const offsets = zls.offsets;
 const translate_c = zls.translate_c;
 
+const io = std.testing.io;
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "zig compile server - translate c" {
@@ -110,6 +111,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
     defer ctx.deinit();
 
     var result = (try translate_c.translate(
+        io,
         allocator,
         ctx.server.document_store.config,
         &.{},

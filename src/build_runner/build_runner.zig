@@ -28,6 +28,12 @@ const Allocator = std.mem.Allocator;
 
 pub const dependencies = @import("@dependencies");
 
+pub const std_options: std.Options = .{
+    .side_channels_mitigations = .none,
+    .http_disable_tls = true,
+    .crypto_fork_safety = false,
+};
+
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
@@ -43,6 +49,10 @@ pub fn main() !void {
     const arena = thread_safe_arena.allocator();
 
     const args = try process.argsAlloc(arena);
+
+    var threaded = if (@hasDecl(std.Io, "Threaded")) std.Io.Threaded.init(arena) else {};
+    defer if (@TypeOf(threaded) != void) threaded.deinit();
+    const io = if (@TypeOf(threaded) != void) threaded.io() else {};
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -74,8 +84,10 @@ pub fn main() !void {
     };
 
     var graph = structInitIgnoreUnknown(std.Build.Graph, .{
+        .io = io,
         .arena = arena,
         .cache = .{
+            .io = io,
             .gpa = arena,
             .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
         },
@@ -85,7 +97,10 @@ pub fn main() !void {
         .zig_lib_directory = zig_lib_directory,
         .host = .{
             .query = .{},
-            .result = try std.zig.system.resolveTargetQuery(.{}),
+            .result = if (@TypeOf(io) != void)
+                try std.zig.system.resolveTargetQuery(io, .{})
+            else
+                try std.zig.system.resolveTargetQuery(.{}),
         },
         .time_report = false,
     });
@@ -385,13 +400,9 @@ pub fn main() !void {
         fn do(ww: *Watch) void {
             while (true) {
                 var buffer: [1]u8 = undefined;
-                var file_reader = std.fs.File.stdin().reader(&buffer);
-                const reader = &file_reader.interface;
-                const byte = reader.takeByte() catch |err| switch (err) {
-                    error.EndOfStream => process.exit(0),
-                    else => process.exit(1),
-                };
-                switch (byte) {
+                const amt = std.fs.File.stdin().read(&buffer) catch process.exit(1);
+                if (amt == 0) process.exit(0);
+                switch (buffer[0]) {
                     '\x00' => ww.trigger(),
                     else => process.exit(1),
                 }
@@ -470,7 +481,7 @@ const Watch = struct {
         return .{
             .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init() else {},
             .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
-            .manual_event = .{},
+            .manual_event = if (@hasField(std.Thread.ResetEvent, "unset")) .unset else .{},
             .steps = &.{},
         };
     }
@@ -757,6 +768,7 @@ fn workerMakeOneStep(
         .watch = true,
         .gpa = gpa,
         .web_server = null,
+        .ttyconf = .no_color,
         .unit_test_timeout_ns = null,
     }));
 

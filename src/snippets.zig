@@ -22,7 +22,7 @@ pub const top_level_decl_data = [_]Snipped{
     .{ .label = "test", .kind = .Snippet, .text = "test \"$1\" {$0}" },
     .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
     .{ .label = "std_options", .kind = .Snippet, .text = "pub const std_options: std.Options = .{$0};" },
-    .{ .label = "panic", .kind = .Snippet, .text = 
+    .{ .label = "panic", .kind = .Snippet, .text =
     \\pub fn panic(
     \\    msg: []const u8,
     \\    trace: ?*std.builtin.StackTrace,
@@ -89,7 +89,7 @@ pub const generic = [_]Snipped{
     .{ .label = "log warn", .kind = .Snippet, .text = "std.log.warn(\"$1\", .{$0});" },
     .{ .label = "log info", .kind = .Snippet, .text = "std.log.info(\"$1\", .{$0});" },
     .{ .label = "log debug", .kind = .Snippet, .text = "std.log.debug(\"$1\", .{$0});" },
-    .{ .label = "format", .kind = .Snippet, .text = 
+    .{ .label = "format", .kind = .Snippet, .text =
     \\pub fn format(
     \\    self: @This(),
     \\    writer: *std.Io.Writer,
