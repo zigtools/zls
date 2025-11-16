@@ -647,7 +647,7 @@ const PrintAst = struct {
                 for (source) |c| {
                     p.current_line -= @intFromBool(c == '\n');
                 }
-                const line_start_index = if (std.mem.lastIndexOfScalar(u8, p.tree.source[0..source_index], '\n')) |index| index + 1 else 0;
+                const line_start_index = if (std.mem.findScalarLast(u8, p.tree.source[0..source_index], '\n')) |index| index + 1 else 0;
                 p.current_column = source_index - line_start_index;
             },
             .gt => { // move forward

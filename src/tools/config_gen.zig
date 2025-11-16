@@ -268,7 +268,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
             .type = try option.getTypescriptType(),
             .description = option.description,
             .@"enum" = option.@"enum",
-            .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
+            .format = if (std.mem.find(u8, option.name, "path") != null) "path" else null,
             .default = default,
         });
     }
@@ -604,7 +604,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                     try documentation.print(allocator, "[{s}](https://ziglang.org/documentation/{s}/#{s})", .{
                         name,
                         version,
-                        std.mem.trimLeft(u8, spaceless_url_name, "@"),
+                        std.mem.trimStart(u8, spaceless_url_name, "@"),
                     });
                 } else if (state != .searching and std.mem.eql(u8, tag_name, "code_begin")) {
                     std.debug.assert(tokenizer.next().id == .Separator);
@@ -671,7 +671,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
 /// \`\`\`
 fn writeMarkdownCode(content: []const u8, source_type: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const trimmed_content = std.mem.trim(u8, content, " \n");
-    const is_multiline = std.mem.indexOfScalar(u8, trimmed_content, '\n') != null;
+    const is_multiline = std.mem.findScalar(u8, trimmed_content, '\n') != null;
     if (is_multiline) {
         var line_it = std.mem.tokenizeScalar(u8, trimmed_content, '\n');
         try writer.print("\n```{s}", .{source_type});
@@ -715,7 +715,7 @@ fn writeMarkdownFromHtml(html: []const u8, writer: *std.Io.Writer) !void {
 /// this is kind of a hacky solution. A cleaner solution would be to implement using a xml/html parser.
 fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32, writer: *std.Io.Writer) !void {
     var index: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, html, index, '<')) |tag_start_index| {
+    while (std.mem.findScalarPos(u8, html, index, '<')) |tag_start_index| {
         const tags: []const []const u8 = &.{ "pre", "p", "em", "ul", "li", "a", "code" };
         const opening_tags: []const []const u8 = &.{ "<pre>", "<p>", "<em>", "<ul>", "<li>", "<a>", "<code>" };
         const closing_tags: []const []const u8 = &.{ "</pre>", "</p>", "</em>", "</ul>", "</li>", "</a>", "</code>" };
@@ -734,13 +734,13 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
 
         // std.debug.print("tag: '{s}'\n", .{tag_name});
 
-        const content_start = 1 + (std.mem.indexOfScalarPos(u8, html, tag_start_index + 1 + tag_name.len, '>') orelse return error.InvalidTag);
+        const content_start = 1 + (std.mem.findScalarPos(u8, html, tag_start_index + 1 + tag_name.len, '>') orelse return error.InvalidTag);
 
         index = content_start;
-        const content_end = while (std.mem.indexOfScalarPos(u8, html, index, '<')) |end| {
+        const content_end = while (std.mem.findScalarPos(u8, html, index, '<')) |end| {
             if (std.mem.startsWith(u8, html[end..], closing_tag_name)) break end;
             if (std.mem.startsWith(u8, html[end..], opening_tag_name)) {
-                index = std.mem.indexOfPos(u8, html, end + opening_tag_name.len, closing_tag_name) orelse return error.MissingEndTag;
+                index = std.mem.findPos(u8, html, end + opening_tag_name.len, closing_tag_name) orelse return error.MissingEndTag;
                 index += closing_tag_name.len;
                 continue;
             }
@@ -765,11 +765,11 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
             try writer.writeAll("- ");
             try writeMarkdownFromHtmlInternal(content, true, depth, writer);
         } else if (std.mem.eql(u8, tag_name, "a")) {
-            const href_part = std.mem.trimLeft(u8, html[tag_start_index + 2 .. content_start - 1], " ");
+            const href_part = std.mem.trimStart(u8, html[tag_start_index + 2 .. content_start - 1], " ");
             std.debug.assert(std.mem.startsWith(u8, href_part, "href=\""));
             std.debug.assert(href_part[href_part.len - 1] == '"');
             const url = href_part["href=\"".len .. href_part.len - 1];
-            try writer.print("[{s}]({s})", .{ content, std.mem.trimLeft(u8, url, "@") });
+            try writer.print("[{s}]({s})", .{ content, std.mem.trimStart(u8, url, "@") });
         } else if (std.mem.eql(u8, tag_name, "code")) {
             try writeMarkdownCode(content, "zig", writer);
         } else return error.UnsupportedTag;
@@ -794,7 +794,7 @@ fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, sig
     var argument_start: usize = 0;
     var index: usize = 0;
     var type_start: ?usize = null;
-    while (std.mem.indexOfAnyPos(u8, signature, index, ",():")) |token_index| {
+    while (std.mem.findAnyPos(u8, signature, index, ",():")) |token_index| {
         if (signature[token_index] == '(') {
             index = token_index + 1;
             skipUntilClosingParenthesis(signature, &index);
@@ -830,13 +830,13 @@ fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const 
     var snippet: std.ArrayList(u8) = .empty;
     defer snippet.deinit(allocator);
 
-    const start_index = 1 + std.mem.indexOfScalar(u8, signature, '(').?;
+    const start_index = 1 + std.mem.findScalar(u8, signature, '(').?;
     try snippet.appendSlice(allocator, signature[0..start_index]);
 
     var argument_start: usize = start_index;
     var index: usize = start_index;
     var i: u32 = 1;
-    while (std.mem.indexOfAnyPos(u8, signature, index, ",()")) |token_index| {
+    while (std.mem.findAnyPos(u8, signature, index, ",()")) |token_index| {
         if (signature[token_index] == '(') {
             index = token_index + 1;
             skipUntilClosingParenthesis(signature, &index);
@@ -953,7 +953,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         try writer.writeAll("            .documentation =\n");
         var line_it = std.mem.splitScalar(u8, std.mem.trim(u8, markdown.written(), "\n"), '\n');
         while (line_it.next()) |line| {
-            try writer.print("            \\\\{s}\n", .{std.mem.trimRight(u8, line, " ")});
+            try writer.print("            \\\\{s}\n", .{std.mem.trimEnd(u8, line, " ")});
         }
 
         try writer.writeAll(

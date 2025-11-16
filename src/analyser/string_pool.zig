@@ -54,7 +54,7 @@ pub fn StringPool(comptime config: Config) type {
 
         /// Asserts that `str` contains no null bytes.
         pub fn getString(pool: *Pool, str: []const u8) ?String {
-            assert(std.mem.indexOfScalar(u8, str, 0) == null);
+            assert(std.mem.findScalar(u8, str, 0) == null);
 
             // precompute the hash before acquiring the lock
             const precomputed_key_hash = std.hash_map.hashString(str);
@@ -75,7 +75,7 @@ pub fn StringPool(comptime config: Config) type {
         /// Asserts that `str` contains no null bytes.
         /// Returns `error.OutOfMemory` if adding this new string would increase the amount of allocated bytes above std.math.maxInt(u32)
         pub fn getOrPutString(pool: *Pool, allocator: Allocator, str: []const u8) error{OutOfMemory}!String {
-            assert(std.mem.indexOfScalar(u8, str, 0) == null);
+            assert(std.mem.findScalar(u8, str, 0) == null);
 
             const start_index = std.math.cast(u32, pool.bytes.items.len) orelse return error.OutOfMemory;
 

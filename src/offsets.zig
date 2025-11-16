@@ -90,10 +90,10 @@ pub const SourceIndexToTokenIndexResult = union(enum) {
             .none => return null,
             .one => |token| return token,
             .between => |data| {
-                if (std.mem.indexOfScalar(std.zig.Token.Tag, preferred_tags, tree.tokenTag(data.left)) != null) {
+                if (std.mem.findScalar(std.zig.Token.Tag, preferred_tags, tree.tokenTag(data.left)) != null) {
                     return data.left;
                 }
-                if (std.mem.indexOfScalar(std.zig.Token.Tag, preferred_tags, tree.tokenTag(data.right)) != null) {
+                if (std.mem.findScalar(std.zig.Token.Tag, preferred_tags, tree.tokenTag(data.right)) != null) {
                     return data.right;
                 }
                 return null;

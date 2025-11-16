@@ -1358,7 +1358,7 @@ fn testHoverWithOptions(
         highlight: ?[]const u8 = null,
     },
 ) !void {
-    const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
+    const cursor_idx = std.mem.find(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 

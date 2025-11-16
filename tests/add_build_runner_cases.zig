@@ -37,7 +37,7 @@ pub fn addCases(
         if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".zig")) continue;
 
         for (test_filters) |test_filter| {
-            if (std.mem.indexOf(u8, entry.name, test_filter) != null) break;
+            if (std.mem.find(u8, entry.name, test_filter) != null) break;
         } else if (test_filters.len > 0) continue;
 
         const build_file = cases_dir.path(b, entry.name);

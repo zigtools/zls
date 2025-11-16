@@ -188,8 +188,8 @@ pub fn generateMultilineStringCodeActions(
     const tree = builder.handle.tree;
     std.debug.assert(.multiline_string_literal_line == tree.tokenTag(token));
     // Collect (exclusive) token range of the literal (one token per literal line)
-    const start = if (std.mem.lastIndexOfNone(Token.Tag, tree.tokens.items(.tag)[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
-    const end = std.mem.indexOfNonePos(Token.Tag, tree.tokens.items(.tag), token, &.{.multiline_string_literal_line}) orelse tree.tokens.len;
+    const start = if (std.mem.findLastNone(Token.Tag, tree.tokens.items(.tag)[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
+    const end = std.mem.findNonePos(Token.Tag, tree.tokens.items(.tag), token, &.{.multiline_string_literal_line}) orelse tree.tokens.len;
 
     // collect the text in the literal
     const loc = offsets.tokensToLoc(builder.handle.tree, @intCast(start), @intCast(end));
@@ -218,7 +218,7 @@ pub fn generateMultilineStringCodeActions(
     // Get Loc of the whole literal to delete it
     // Multiline string literal ends before the \n or \r, but it must be deleted too
     const first_token_start = builder.handle.tree.tokenStart(@intCast(start));
-    const last_token_end = std.mem.indexOfNonePos(
+    const last_token_end = std.mem.findNonePos(
         u8,
         builder.handle.tree.source,
         offsets.tokenToLoc(builder.handle.tree, @intCast(end - 1)).end + 1,
@@ -259,7 +259,7 @@ pub fn collectAutoDiscardDiagnostics(
 
     var i: usize = 0;
     while (i < tree.tokens.len) {
-        const first_token: Ast.TokenIndex = @intCast(std.mem.indexOfPos(
+        const first_token: Ast.TokenIndex = @intCast(std.mem.findPos(
             Token.Tag,
             tree.tokens.items(.tag),
             i,
@@ -273,9 +273,9 @@ pub fn collectAutoDiscardDiagnostics(
 
         if (!std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) continue;
 
-        const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, tree.tokenStart(semicolon_token) + 1, " ") orelse continue;
+        const autofix_comment_start = std.mem.findNonePos(u8, tree.source, tree.tokenStart(semicolon_token) + 1, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) continue;
-        const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
+        const autofix_str_start = std.mem.findNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
 
         const related_info = blk: {
@@ -483,7 +483,7 @@ fn handleUnusedCapture(
 
     if (!builder.wantKind(.@"source.fixAll")) return;
 
-    const capture_end: Ast.TokenIndex = @intCast(std.mem.indexOfScalarPos(
+    const capture_end: Ast.TokenIndex = @intCast(std.mem.findScalarPos(
         Token.Tag,
         tree.tokens.items(.tag),
         identifier_token,
@@ -654,7 +654,7 @@ fn handleUnorganizedImport(builder: *Builder) !void {
         const range: offsets.Range = switch (placement) {
             .top => blk: {
                 // Current behavior: insert at top after doc comments
-                const first_token = std.mem.indexOfNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
+                const first_token = std.mem.findNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
                 const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
                 break :blk .{ .start = insert_pos, .end = insert_pos };
             },
@@ -781,7 +781,7 @@ pub const ImportDecl = struct {
     pub fn getSortSlice(self: ImportDecl) []const u8 {
         switch (self.getKind()) {
             .file => {
-                if (std.mem.indexOfScalar(u8, self.getSortValue(), '/') != null) {
+                if (std.mem.findScalar(u8, self.getSortValue(), '/') != null) {
                     return self.getSortValue()[1 .. self.getSortValue().len - 1];
                 }
                 return self.getSortName();
@@ -821,7 +821,7 @@ pub const ImportDecl = struct {
 
         const end = offsets.tokenToLoc(tree, last_token).end;
         if (!include_line_break) return end;
-        return std.mem.indexOfNonePos(u8, tree.source, end, &.{ ' ', '\t', '\n' }) orelse tree.source.len;
+        return std.mem.findNonePos(u8, tree.source, end, &.{ ' ', '\t', '\n' }) orelse tree.source.len;
     }
 
     /// similar to `offsets.nodeToLoc` but will also include preceding comments and postfix semicolon and line break
@@ -1014,7 +1014,7 @@ fn createDiscardText(
     const insert_token_end = offsets.tokenToLoc(tree, insert_token).end;
     const source_until_next_token = tree.source[0..tree.tokenStart(insert_token + 1)];
     // skip comments between the insert tokena and the token after it
-    const insert_index = std.mem.indexOfScalarPos(u8, source_until_next_token, insert_token_end, '\n') orelse source_until_next_token.len;
+    const insert_index = std.mem.findScalarPos(u8, source_until_next_token, insert_token_end, '\n') orelse source_until_next_token.len;
 
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(tree.source, insert_index);
@@ -1167,11 +1167,11 @@ fn getDiscardLoc(tree: Ast, loc: offsets.Loc) ?offsets.Loc {
 
     // check if the colon is followed by the autofix comment
     const colon_end_index = tree.tokenStart(semicolon_token) + 1;
-    const autofix_comment_start = std.mem.indexOfNonePos(u8, tree.source, colon_end_index, " ") orelse return null;
+    const autofix_comment_start = std.mem.findNonePos(u8, tree.source, colon_end_index, " ") orelse return null;
     if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) return null;
-    const autofix_str_start = std.mem.indexOfNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse return null;
+    const autofix_str_start = std.mem.findNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse return null;
     if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) return null;
-    const autofix_comment_end = std.mem.indexOfNonePos(u8, tree.source, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
+    const autofix_comment_end = std.mem.findNonePos(u8, tree.source, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
 
     // move backwards until we find a newline
     const start_position = found: {
@@ -1203,7 +1203,7 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         break :blk i;
     };
 
-    const end_pipe_position = (std.mem.indexOfScalarPos(u8, text, start_pipe_position + 1, '|') orelse
+    const end_pipe_position = (std.mem.findScalarPos(u8, text, start_pipe_position + 1, '|') orelse
         return null) + 1;
 
     const trimmed = std.mem.trim(u8, text[start_pipe_position + 1 .. end_pipe_position - 1], &std.ascii.whitespace);

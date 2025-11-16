@@ -48,12 +48,12 @@ const Builder = struct {
                 .start = switch (start_reach) {
                     .inclusive, .inclusive_ignore_space => start_loc.start,
                     .exclusive => start_loc.end,
-                    .exclusive_ignore_space => std.mem.indexOfNonePos(u8, builder.tree.source, start_loc.end, " \t") orelse builder.tree.source.len,
+                    .exclusive_ignore_space => std.mem.findNonePos(u8, builder.tree.source, start_loc.end, " \t") orelse builder.tree.source.len,
                 },
                 .end = switch (end_reach) {
                     .inclusive, .inclusive_ignore_space => end_loc.end,
                     .exclusive => end_loc.start,
-                    .exclusive_ignore_space => std.mem.lastIndexOfNone(u8, builder.tree.source[0..end_loc.start], " \t") orelse 0,
+                    .exclusive_ignore_space => std.mem.findLastNone(u8, builder.tree.source[0..end_loc.start], " \t") orelse 0,
                 },
             },
             .kind = kind,
@@ -290,14 +290,14 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     defer stack.deinit(allocator);
 
     var i: usize = 0;
-    while (std.mem.indexOfPos(u8, tree.source, i, "//#")) |possible_region| {
+    while (std.mem.findPos(u8, tree.source, i, "//#")) |possible_region| {
         defer i = possible_region + "//#".len;
         if (std.mem.startsWith(u8, tree.source[possible_region..], "//#region")) {
             try stack.append(allocator, possible_region);
         } else if (std.mem.startsWith(u8, tree.source[possible_region..], "//#endregion")) {
             const start_index = stack.pop() orelse break; // null means there are more endregions than regions
             const end_index = offsets.lineLocAtIndex(tree.source, possible_region).end;
-            const is_same_line = std.mem.indexOfScalar(u8, tree.source[start_index..end_index], '\n') == null;
+            const is_same_line = std.mem.findScalar(u8, tree.source[start_index..end_index], '\n') == null;
             if (is_same_line) continue;
             try builder.locations.append(allocator, .{
                 .loc = .{

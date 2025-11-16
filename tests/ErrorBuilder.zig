@@ -326,7 +326,7 @@ const MsgItem = struct {
         const text = if (is_less) source[lhs.loc.start..rhs.loc.start] else source[rhs.loc.start..lhs.loc.start];
 
         // report messages on the same line in reverse order
-        if (std.mem.indexOfScalar(u8, text, '\n') == null) {
+        if (std.mem.findScalar(u8, text, '\n') == null) {
             return lhs.loc.start > rhs.loc.start;
         }
 

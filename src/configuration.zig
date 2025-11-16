@@ -648,7 +648,7 @@ pub const file_system_config_options: []const FileConfigInfo = &.{
 comptime {
     skip: for (std.meta.fieldNames(Config)) |field_name| {
         @setEvalBranchQuota(2_000);
-        if (std.mem.indexOf(u8, field_name, "path") == null) continue;
+        if (std.mem.find(u8, field_name, "path") == null) continue;
 
         for (file_system_config_options) |file_config| {
             if (std.mem.eql(u8, file_config.name, field_name)) continue :skip;

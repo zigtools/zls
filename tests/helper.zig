@@ -9,8 +9,8 @@ pub fn collectPlaceholderLocs(allocator: std.mem.Allocator, source: []const u8) 
     errdefer locations.deinit(allocator);
 
     var source_index: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
-        const end_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
+    while (std.mem.findScalarPos(u8, source, source_index, '<')) |start_index| {
+        const end_index = 1 + (std.mem.findScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
 
         try locations.append(allocator, .{
             .start = start_index,
@@ -29,11 +29,11 @@ pub fn replacePlaceholders(allocator: std.mem.Allocator, source: []const u8, new
     errdefer output.deinit(allocator);
 
     var source_index: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
+    while (std.mem.findScalarPos(u8, source, source_index, '<')) |start_index| {
         try output.appendSlice(allocator, source[source_index..start_index]);
         try output.appendSlice(allocator, new_name);
 
-        source_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
+        source_index = 1 + (std.mem.findScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
     }
     try output.appendSlice(allocator, source[source_index..source.len]);
 
@@ -77,8 +77,8 @@ pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const 
 
     var source_index: usize = 0;
     var new_source_index: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
-        const end_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
+    while (std.mem.findScalarPos(u8, source, source_index, '<')) |start_index| {
+        const end_index = 1 + (std.mem.findScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
 
         const old_loc: offsets.Loc = .{
             .start = start_index,
@@ -195,7 +195,7 @@ pub fn collectAnnotatedSourceLocations(
 
     var i: usize = 0;
     while (i < source.len) {
-        defer i = std.mem.indexOfScalarPos(u8, source, i, '\n') orelse source.len;
+        defer i = std.mem.findScalarPos(u8, source, i, '\n') orelse source.len;
 
         i = skipWhitespace(source, i);
         if (!std.mem.startsWith(u8, source[i..], "//")) continue;
@@ -211,7 +211,7 @@ pub fn collectAnnotatedSourceLocations(
         loc.end = i;
 
         const content_start = i;
-        const content_end = std.mem.indexOfScalarPos(u8, source, i, '\n') orelse source.len;
+        const content_end = std.mem.findScalarPos(u8, source, i, '\n') orelse source.len;
         const content = source[content_start..content_end];
 
         const loc_length = offsets.locLength(source, loc, .@"utf-8");
@@ -246,7 +246,7 @@ pub fn collectAnnotatedSourceLocations(
         };
 
         if (source_line_loc.end >= source.len) return error.InvalidSourceLoc;
-        if (std.mem.indexOfScalar(u8, offsets.locToSlice(source, source_line_loc), '\n') != null) return error.InvalidSourceLoc;
+        if (std.mem.findScalar(u8, offsets.locToSlice(source, source_line_loc), '\n') != null) return error.InvalidSourceLoc;
 
         try items.append(allocator, .{
             .loc = source_line_loc,
@@ -339,7 +339,7 @@ test "helper - collectAnnotatedSourceLocations" {
 fn skipWhitespace(source: []const u8, pos: usize) usize {
     var i = pos;
     while (i < source.len) : (i += 1) {
-        if (std.mem.indexOfScalar(u8, " \n", source[i]) == null) break;
+        if (std.mem.findScalar(u8, " \n", source[i]) == null) break;
     }
     return i;
 }

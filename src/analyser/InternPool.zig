@@ -2704,7 +2704,7 @@ fn coerceInMemoryAllowedErrorSets(
     defer missing_error_buf.deinit(gpa);
 
     for (src_set_names) |name| {
-        if (std.mem.indexOfScalar(String, dest_set_names, name) == null) {
+        if (std.mem.findScalar(String, dest_set_names, name) == null) {
             try missing_error_buf.append(gpa, name);
         }
     }

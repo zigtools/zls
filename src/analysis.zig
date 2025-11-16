@@ -610,7 +610,7 @@ pub fn isPascalCase(name: []const u8) bool {
 }
 
 pub fn isSnakeCase(name: []const u8) bool {
-    return std.mem.indexOf(u8, name, "_") != null;
+    return std.mem.find(u8, name, "_") != null;
 }
 
 // ANALYSIS ENGINE
@@ -4866,11 +4866,11 @@ pub fn getPositionContext(
 
     var line_loc = if (lookahead) offsets.lineLocAtIndex(tree.source, source_index) else offsets.lineLocUntilIndex(tree.source, source_index);
 
-    if (std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) return .comment;
+    if (std.mem.startsWith(u8, std.mem.trimStart(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) return .comment;
 
     // Check if the (trimmed) line starts with a '.', ie a continuation
     while (line_loc.start > 0) {
-        while (std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t\r"), ".")) {
+        while (std.mem.startsWith(u8, std.mem.trimStart(u8, offsets.locToSlice(tree.source, line_loc), " \t\r"), ".")) {
             if (line_loc.start > 1) {
                 line_loc.start -= 2; // jump over a (potential) preceding '\n'
             } else break;
@@ -4881,7 +4881,7 @@ pub fn getPositionContext(
                 }
             } else break;
         }
-        if (line_loc.start != 0 and std.mem.startsWith(u8, std.mem.trimLeft(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) {
+        if (line_loc.start != 0 and std.mem.startsWith(u8, std.mem.trimStart(u8, offsets.locToSlice(tree.source, line_loc), " \t"), "//")) {
             const prev_line_loc = offsets.lineLocAtIndex(tree.source, line_loc.start - 1); // `- 1` => prev line's `\n`
             line_loc.start = prev_line_loc.start;
             continue;
@@ -4935,7 +4935,7 @@ pub fn getPositionContext(
         switch (tok.tag) {
             .invalid => {
                 const s = tree.source[tok.loc.start..tok.loc.end];
-                const q = std.mem.indexOf(u8, s, "\"") orelse return .other;
+                const q = std.mem.find(u8, s, "\"") orelse return .other;
                 if (s[q -| 1] == '@') {
                     tok.tag = .identifier;
                 } else {
@@ -5927,7 +5927,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             var buffer: [2]Ast.Node.Index = undefined;
             const struct_init = tree.fullStructInit(&buffer, ancestors[0]).?;
-            if (std.mem.indexOfScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
+            if (std.mem.findScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
@@ -5947,7 +5947,7 @@ pub fn resolveExpressionTypeFromAncestors(
         => {
             var buffer: [2]Ast.Node.Index = undefined;
             const array_init = tree.fullArrayInit(&buffer, ancestors[0]).?;
-            const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
+            const element_index = std.mem.findScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
                 return null;
 
             if (try analyser.resolveExpressionType(
@@ -6054,7 +6054,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 );
             }
 
-            const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
+            const arg_index = std.mem.findScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
 
             var fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
@@ -6174,7 +6174,7 @@ pub fn resolveExpressionTypeFromAncestors(
             }
 
             if (version_data.builtins.get(call_name)) |data| {
-                const index = std.mem.indexOfScalar(Ast.Node.Index, params, node) orelse return null;
+                const index = std.mem.findScalar(Ast.Node.Index, params, node) orelse return null;
                 if (index >= data.parameters.len) return null;
                 const parameter = data.parameters[index];
                 const type_str = parameter.type orelse return null;

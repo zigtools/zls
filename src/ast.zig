@@ -472,7 +472,7 @@ pub fn fullAsm(tree: Ast, node: Node.Index) ?full.Asm {
 }
 
 fn findMatchingRBrace(tree: Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
-    return if (std.mem.indexOfScalarPos(std.zig.Token.Tag, tree.tokens.items(.tag), start, .r_brace)) |index| @intCast(index) else null;
+    return if (std.mem.findScalarPos(std.zig.Token.Tag, tree.tokens.items(.tag), start, .r_brace)) |index| @intCast(index) else null;
 }
 
 /// Similar to `std.zig.Ast.lastToken` but also handles ASTs with syntax errors.

@@ -352,7 +352,7 @@ test "builtin" {
 }
 
 fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_active_parameter: ?u32) !void {
-    const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
+    const cursor_idx = std.mem.find(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 

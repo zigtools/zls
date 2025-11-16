@@ -4262,7 +4262,7 @@ fn testCompletionWithOptions(
         completion_label_details: bool = true,
     },
 ) !void {
-    const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
+    const cursor_idx = std.mem.find(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 
@@ -4406,7 +4406,7 @@ fn testCompletionWithOptions(
 
         blk: {
             const actual_deprecated = if (actual_completion.tags) |tags|
-                std.mem.indexOfScalar(types.CompletionItemTag, tags, .Deprecated) != null
+                std.mem.findScalar(types.CompletionItemTag, tags, .Deprecated) != null
             else
                 false;
             std.debug.assert(actual_deprecated == (actual_completion.deprecated orelse false));
@@ -4495,7 +4495,7 @@ fn testCompletionTextEdit(
         enable_snippets: bool = false,
     },
 ) !void {
-    const cursor_idx = std.mem.indexOf(u8, options.source, "<cursor>").?;
+    const cursor_idx = std.mem.find(u8, options.source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ options.source[0..cursor_idx], options.source[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(text);
 

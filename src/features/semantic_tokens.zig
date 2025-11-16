@@ -718,7 +718,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 const string = offsets.nodeToSlice(tree, node);
                 var offset: usize = 0;
                 while (offset < string.len) {
-                    const slash_index = std.mem.indexOfScalarPos(u8, string, offset, '\\') orelse break;
+                    const slash_index = std.mem.findScalarPos(u8, string, offset, '\\') orelse break;
                     offset = slash_index;
                     _ = std.zig.string_literal.parseEscapeSequence(string, &offset);
                     try builder.addDirect(.escapeSequence, .{}, .{

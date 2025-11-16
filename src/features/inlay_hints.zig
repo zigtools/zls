@@ -295,7 +295,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, param
         const signature = param.signature;
         if (signature.len == 0) continue;
 
-        const colonIndex = std.mem.indexOfScalar(u8, signature, ':');
+        const colonIndex = std.mem.findScalar(u8, signature, ':');
         const type_expr = param.type orelse "";
 
         // TODO: parse noalias/comptime/label in config_gen.zig
