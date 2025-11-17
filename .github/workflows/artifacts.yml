@@ -53,6 +53,12 @@ jobs:
           tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
+      - name: prefetch dependencies (workaround)
+        run: |
+          zig fetch https://github.com/ziglibs/known-folders/archive/bafef170a73c064dc706fcfbdc2e406a35681a9c.tar.gz
+          zig fetch https://github.com/ziglibs/diffz/archive/36fc805f459677093c93c210e8f9aed28be13847.tar.gz
+          zig fetch https://github.com/zigtools/lsp-kit/archive/c46ac866dda11ab58e4ba71ed0d8ba21f43e81db.tar.gz
+
       - name: Build release artifacts
         if: env.SKIP_DEPLOY != 'true'
         run: |
