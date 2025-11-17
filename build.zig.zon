@@ -9,14 +9,11 @@
     // ```bash
     // nix flake update --commit-lock-file
     // ```
+    // And then update the Zig version in `flake.nix` to match the version here.
     // If you do not use Nix, a ZLS maintainer can take care of this.
     .minimum_zig_version = "0.16.0-dev.1326+2e6f7d36b",
+    // Must be kept in sync with the `deps.nix` for the Nix flake.
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    // Whenever the dependencies are updated, run the following command:
-    // ```bash
-    // nix run github:nix-community/zon2nix#default_0_14 > deps.nix
-    // ```
-    // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/bafef170a73c064dc706fcfbdc2e406a35681a9c.tar.gz",

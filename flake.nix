@@ -2,24 +2,24 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
 
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    zig-flake.url = "github:silversquirl/zig-flake";
+    zig-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
     self,
     nixpkgs,
-    zig-overlay,
+    zig-flake,
   }:
     builtins.foldl' nixpkgs.lib.recursiveUpdate {} (
       builtins.map
       (
         system: let
+          target = builtins.replaceStrings ["darwin"] ["macos"] system;
           pkgs = nixpkgs.legacyPackages.${system};
           fs = pkgs.lib.fileset;
-          zig = zig-overlay.packages.${system}.master;
-          target = builtins.replaceStrings ["darwin"] ["macos"] system;
-          revision = self;
+          # Must be kept in sync with the 'minimum_zig_version' in 'build.zig.zon'
+          zig = zig-flake.packages.${system}.zig_0_16_0_dev_1326;
         in {
           formatter.${system} = pkgs.alejandra;
           packages.${system} = rec {
