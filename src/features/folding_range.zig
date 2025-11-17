@@ -14,9 +14,11 @@ const FoldingRange = struct {
 };
 
 const Inclusivity = enum {
+    /// Include the token itself as part of the folding range.
     inclusive,
-    inclusive_ignore_space,
+    /// Do not include the token itself as part of the folding range.
     exclusive,
+    /// Same as `exclusive` but will also not include any adjacent whitespace.
     exclusive_ignore_space,
 };
 
@@ -40,22 +42,28 @@ const Builder = struct {
     ) error{OutOfMemory}!void {
         if (start >= end) return;
         if (builder.tree.tokensOnSameLine(start, end)) return;
-        const start_loc = offsets.tokenToLoc(builder.tree, start);
-        const end_loc = offsets.tokenToLoc(builder.tree, end);
+
+        const start_index = switch (start_reach) {
+            .inclusive => builder.tree.tokenStart(start),
+            .exclusive => offsets.tokenToLoc(builder.tree, start).end,
+            .exclusive_ignore_space => blk: {
+                const start_index = offsets.tokenToLoc(builder.tree, start).end;
+                const end_index = builder.tree.tokenStart(end);
+                break :blk std.mem.findNonePos(u8, builder.tree.source[0..end_index], start_index, " \t") orelse end_index;
+            },
+        };
+
+        const end_index = switch (end_reach) {
+            .inclusive => offsets.tokenToLoc(builder.tree, end).end,
+            .exclusive => builder.tree.tokenStart(end),
+            .exclusive_ignore_space => std.mem.findLastNone(u8, builder.tree.source[0..builder.tree.tokenStart(end)], " \t") orelse 0,
+        };
+
+        std.debug.assert(start_index <= end_index);
+        if (start_index == end_index) return;
 
         try builder.locations.append(builder.allocator, .{
-            .loc = .{
-                .start = switch (start_reach) {
-                    .inclusive, .inclusive_ignore_space => start_loc.start,
-                    .exclusive => start_loc.end,
-                    .exclusive_ignore_space => std.mem.findNonePos(u8, builder.tree.source, start_loc.end, " \t") orelse builder.tree.source.len,
-                },
-                .end = switch (end_reach) {
-                    .inclusive, .inclusive_ignore_space => end_loc.end,
-                    .exclusive => end_loc.start,
-                    .exclusive_ignore_space => std.mem.findLastNone(u8, builder.tree.source[0..end_loc.start], " \t") orelse 0,
-                },
-            },
+            .loc = .{ .start = start_index, .end = end_index },
             .kind = kind,
         });
     }
@@ -81,7 +89,7 @@ const Builder = struct {
         var mappings = try builder.allocator.alloc(offsets.multiple.IndexToPositionMapping, builder.locations.items.len * 2);
         defer builder.allocator.free(mappings);
 
-        for (builder.locations.items, result_ranges, 0..) |*folding_range, *result, i| {
+        for (builder.locations.items, result_ranges, 0..) |folding_range, *result, i| {
             mappings[2 * i + 0] = .{ .output = &result.start, .source_index = folding_range.loc.start };
             mappings[2 * i + 1] = .{ .output = &result.end, .source_index = folding_range.loc.end };
         }
@@ -292,18 +300,17 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
 
     var i: usize = 0;
     while (std.mem.findPos(u8, tree.source, i, "//#")) |possible_region| {
-        defer i = possible_region + "//#".len;
+        i = possible_region + "//#".len;
+        i = std.mem.findScalarPos(u8, tree.source, i, '\n') orelse tree.source.len;
+
         if (std.mem.startsWith(u8, tree.source[possible_region..], "//#region")) {
             try stack.append(allocator, possible_region);
         } else if (std.mem.startsWith(u8, tree.source[possible_region..], "//#endregion")) {
             const start_index = stack.pop() orelse break; // null means there are more endregions than regions
-            const end_index = offsets.lineLocAtIndex(tree.source, possible_region).end;
-            const is_same_line = std.mem.findScalar(u8, tree.source[start_index..end_index], '\n') == null;
-            if (is_same_line) continue;
             try builder.locations.append(allocator, .{
                 .loc = .{
                     .start = start_index,
-                    .end = end_index,
+                    .end = i,
                 },
                 .kind = .region,
             });
