@@ -570,10 +570,6 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!v
 
 fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
     return switch (kind) {
-        .Module => "1", // used for packages
-        .Folder => "2",
-        .File => "3",
-
         .Operator => "1",
         .Field, .EnumMember => "2",
         .Method => "3",
@@ -587,6 +583,11 @@ fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
         => "5",
         .Snippet => "6",
         .Keyword => "7",
+
+        // Used for `@import` completions. Must be set in `completeFileSystemStringLiteral`.
+        .Module => unreachable,
+        .Folder => unreachable,
+        .File => unreachable,
 
         else => unreachable,
     };
@@ -685,7 +686,6 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) error{OutOfMemory}!void {
-    var completions: CompletionSet = .empty;
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
 
@@ -711,6 +711,89 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
     const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_separator_index orelse string_content_loc.start });
 
+    const after_separator_index = if (previous_separator_index) |index| index + 1 else string_content_loc.start;
+    const insert_loc: offsets.Loc = .{ .start = after_separator_index, .end = builder.source_index };
+    const replace_loc: offsets.Loc = .{ .start = after_separator_index, .end = next_separator_index orelse string_content_loc.end };
+
+    const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
+    const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
+
+    if (pos_context == .import_string_literal) {
+        try builder.completions.ensureUnusedCapacity(builder.arena, 2);
+        if (store.config.zig_lib_dir) |zig_lib_dir| {
+            builder.completions.appendAssumeCapacity(.{
+                .label = "std",
+                .kind = .Module,
+                .detail = zig_lib_dir.path,
+                .sortText = "1",
+            });
+        }
+        if (store.config.builtin_path) |builtin_path| {
+            builder.completions.appendAssumeCapacity(.{
+                .label = "builtin",
+                .kind = .Module,
+                .detail = builtin_path,
+                .sortText = "2",
+            });
+        }
+
+        if (!DocumentStore.supports_build_system) {
+            // no build system modules
+        } else if (DocumentStore.isBuildFile(builder.orig_handle.uri)) blk: {
+            const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :blk;
+            const build_config = build_file.tryLockConfig() orelse break :blk;
+            defer build_file.unlockConfig();
+
+            try builder.completions.ensureUnusedCapacity(builder.arena, build_config.dependencies.map.count());
+            for (build_config.dependencies.map.keys(), build_config.dependencies.map.values()) |name, path| {
+                try builder.completions.append(builder.arena, .{
+                    .label = name,
+                    .kind = .Module,
+                    .detail = path,
+                    .sortText = "4",
+                });
+            }
+        } else switch (try builder.orig_handle.getAssociatedBuildFile(store)) {
+            .none, .unresolved => {},
+            .resolved => |resolved| blk: {
+                const build_config = resolved.build_file.tryLockConfig() orelse break :blk;
+                defer resolved.build_file.unlockConfig();
+
+                const module = build_config.modules.map.get(resolved.root_source_file) orelse break :blk;
+
+                try builder.completions.ensureUnusedCapacity(builder.arena, 1 + module.import_table.map.count());
+
+                builder.completions.appendAssumeCapacity(.{
+                    .label = "root",
+                    .kind = .Module,
+                    .detail = try builder.arena.dupe(u8, resolved.root_source_file),
+                    .sortText = "3",
+                });
+
+                for (module.import_table.map.keys(), module.import_table.map.values()) |name, root_source_file| {
+                    builder.completions.appendAssumeCapacity(.{
+                        .label = try builder.arena.dupe(u8, name),
+                        .kind = .Module,
+                        .detail = try builder.arena.dupe(u8, root_source_file),
+                        .sortText = "4",
+                    });
+                }
+            },
+        }
+
+        const string_content_range = offsets.locToRange(source, string_content_loc, builder.server.offset_encoding);
+
+        // completions on module replace the entire string literal
+        for (builder.completions.items) |*item| {
+            if (item.kind == .Module and item.textEdit == null) {
+                item.textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
+                    .{ .insert_replace_edit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
+                else
+                    .{ .text_edit = .{ .newText = item.label, .range = insert_range } };
+            }
+        }
+    }
+
     var search_paths: std.ArrayList([]const u8) = .empty;
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
@@ -727,13 +810,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         };
         try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
     }
-
-    const after_separator_index = if (previous_separator_index) |index| index + 1 else string_content_loc.start;
-    const insert_loc: offsets.Loc = .{ .start = after_separator_index, .end = builder.source_index };
-    const replace_loc: offsets.Loc = .{ .start = after_separator_index, .end = next_separator_index orelse string_content_loc.end };
-
-    const insert_range = offsets.locToRange(source, insert_loc, builder.server.offset_encoding);
-    const replace_range = offsets.locToRange(source, replace_loc, builder.server.offset_encoding);
 
     for (search_paths.items) |path| {
         if (!std.fs.path.isAbsolute(path)) continue;
@@ -766,7 +842,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             else
                 label;
 
-            _ = try completions.getOrPut(builder.arena, .{
+            try builder.completions.append(builder.arena, .{
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
@@ -774,84 +850,10 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                     .{ .insert_replace_edit = .{ .newText = insert_text, .insert = insert_range, .replace = replace_range } }
                 else
                     .{ .text_edit = .{ .newText = insert_text, .range = insert_range } },
+                .sortText = if (entry.kind == .file) "6" else "5",
             });
         }
     }
-
-    if (completing.len == 0 and pos_context == .import_string_literal) {
-        no_modules: {
-            if (!DocumentStore.supports_build_system) break :no_modules;
-
-            if (DocumentStore.isBuildFile(builder.orig_handle.uri)) blk: {
-                const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :blk;
-                const build_config = build_file.tryLockConfig() orelse break :blk;
-                defer build_file.unlockConfig();
-
-                try completions.ensureUnusedCapacity(builder.arena, build_config.dependencies.map.count());
-                for (build_config.dependencies.map.keys(), build_config.dependencies.map.values()) |name, path| {
-                    completions.putAssumeCapacity(.{
-                        .label = name,
-                        .kind = .Module,
-                        .detail = path,
-                    }, {});
-                }
-            } else switch (try builder.orig_handle.getAssociatedBuildFile(store)) {
-                .none, .unresolved => {},
-                .resolved => |resolved| blk: {
-                    const build_config = resolved.build_file.tryLockConfig() orelse break :blk;
-                    defer resolved.build_file.unlockConfig();
-
-                    const module = build_config.modules.map.get(resolved.root_source_file) orelse break :blk;
-
-                    try completions.ensureUnusedCapacity(builder.arena, 1 + module.import_table.map.count());
-
-                    completions.putAssumeCapacity(.{
-                        .label = "root",
-                        .kind = .Module,
-                        .detail = try builder.arena.dupe(u8, resolved.root_source_file),
-                    }, {});
-
-                    for (module.import_table.map.keys(), module.import_table.map.values()) |name, root_source_file| {
-                        completions.putAssumeCapacity(.{
-                            .label = try builder.arena.dupe(u8, name),
-                            .kind = .Module,
-                            .detail = try builder.arena.dupe(u8, root_source_file),
-                        }, {});
-                    }
-                },
-            }
-        }
-
-        try completions.ensureUnusedCapacity(builder.arena, 2);
-        if (store.config.zig_lib_dir) |zig_lib_dir| {
-            completions.putAssumeCapacity(.{
-                .label = "std",
-                .kind = .Module,
-                .detail = zig_lib_dir.path,
-            }, {});
-        }
-        if (store.config.builtin_path) |builtin_path| {
-            completions.putAssumeCapacity(.{
-                .label = "builtin",
-                .kind = .Module,
-                .detail = builtin_path,
-            }, {});
-        }
-
-        const string_content_range = offsets.locToRange(source, string_content_loc, builder.server.offset_encoding);
-
-        // completions on module replace the entire string literal
-        for (completions.keys()) |*item| {
-            if (item.kind == .Module and item.textEdit == null) {
-                item.textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                    .{ .insert_replace_edit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
-                else
-                    .{ .text_edit = .{ .newText = item.label, .range = insert_range } };
-            }
-        }
-    }
-
-    try builder.completions.appendSlice(builder.arena, completions.keys());
 }
 
 pub fn completionAtIndex(
@@ -930,8 +932,10 @@ pub fn completionAtIndex(
             }
         }
 
-        const score = kindToSortScore(item.kind.?);
-        item.sortText = try std.fmt.allocPrint(arena, "{s}_{s}", .{ score, item.label });
+        if (item.sortText == null) {
+            const score = kindToSortScore(item.kind.?);
+            item.sortText = try std.fmt.allocPrint(arena, "{s}_{s}", .{ score, item.label });
+        }
     }
 
     return .{ .isIncomplete = false, .items = completions };
