@@ -1741,7 +1741,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (std.mem.endsWith(u8, import_str, ".zig")) {
+    if (std.mem.endsWith(u8, import_str, ".zig") or std.mem.endsWith(u8, import_str, ".zon")) {
         const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.UnsupportedScheme => return null,
