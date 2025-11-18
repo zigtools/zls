@@ -978,50 +978,6 @@ const shared = @import("shared.zig");
 const Transport = shared.Transport;
 const BuildConfig = shared.BuildConfig;
 
-const Packages = struct {
-    allocator: std.mem.Allocator,
-
-    /// Outer key is the package name, inner key is the file path.
-    packages: std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) = .{},
-
-    /// Returns true if the package was already present.
-    pub fn addPackage(self: *Packages, name: []const u8, path: []const u8) !bool {
-        const name_gop_result = try self.packages.getOrPutValue(self.allocator, name, .{});
-        const path_gop_result = try name_gop_result.value_ptr.getOrPut(self.allocator, path);
-        return path_gop_result.found_existing;
-    }
-
-    pub fn toPackageList(self: *Packages) ![]BuildConfig.Package {
-        var result: ArrayList(BuildConfig.Package) = .{};
-        errdefer result.deinit(self.allocator);
-
-        const Context = struct {
-            keys: [][]const u8,
-
-            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
-            }
-        };
-
-        self.packages.sort(Context{ .keys = self.packages.keys() });
-
-        for (self.packages.keys(), self.packages.values()) |name, path_hashmap| {
-            for (path_hashmap.keys()) |path| {
-                try result.append(self.allocator, .{ .name = name, .path = path });
-            }
-        }
-
-        return try result.toOwnedSlice(self.allocator);
-    }
-
-    pub fn deinit(self: *Packages) void {
-        for (self.packages.values()) |*path_hashmap| {
-            path_hashmap.deinit(self.allocator);
-        }
-        self.packages.deinit(self.allocator);
-    }
-};
-
 fn extractBuildInformation(
     gpa: Allocator,
     b: *std.Build,
@@ -1030,27 +986,6 @@ fn extractBuildInformation(
     run: *Run,
     seed: u32,
 ) !void {
-    var steps = std.AutoArrayHashMapUnmanaged(*Step, void){};
-    defer steps.deinit(gpa);
-
-    // collect the set of all steps
-    {
-        var stack: ArrayList(*Step) = .{};
-        defer stack.deinit(gpa);
-
-        try stack.ensureUnusedCapacity(gpa, b.top_level_steps.count());
-        for (b.top_level_steps.values()) |tls| {
-            stack.appendAssumeCapacity(&tls.step);
-        }
-
-        while (stack.pop()) |step| {
-            const gop = try steps.getOrPut(gpa, step);
-            if (gop.found_existing) continue;
-
-            try stack.appendSlice(gpa, step.dependencies.items);
-        }
-    }
-
     const helper = struct {
         fn addLazyPathStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
             switch (lazy_path) {
@@ -1080,38 +1015,29 @@ fn extractBuildInformation(
                 .config_header_step => |config_header| try set.put(allocator, &config_header.step, {}),
             }
         }
-
+        /// Only adds the necessary dependencies to resolve the `root_source_file` and `include_dirs`. Does not include dependencies of imported modules.
         fn addModuleDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), module: *std.Build.Module) !void {
             if (module.root_source_file) |root_source_file| {
                 try addLazyPathStepDependencies(allocator, set, root_source_file);
-            }
-
-            for (module.import_table.values()) |import| {
-                if (import.root_source_file) |root_source_file| {
-                    try addLazyPathStepDependencies(allocator, set, root_source_file);
-                }
             }
 
             for (module.include_dirs.items) |include_dir| {
                 try addIncludeDirStepDependencies(allocator, set, include_dir);
             }
         }
-
-        fn processItem(
+        fn processModule(
             allocator: Allocator,
+            modules: *std.StringArrayHashMapUnmanaged(shared.BuildConfig.Module),
             module: *std.Build.Module,
             compile: ?*std.Build.Step.Compile,
-            name: []const u8,
-            packages: *Packages,
-            include_dirs: *std.StringArrayHashMapUnmanaged(void),
-            c_macros: *std.StringArrayHashMapUnmanaged(void),
         ) !void {
-            if (module.root_source_file) |root_source_file| {
-                _ = try packages.addPackage(name, root_source_file.getPath(module.owner));
-            }
+            const root_source_file = module.root_source_file orelse return;
+
+            var include_dirs: std.StringArrayHashMapUnmanaged(void) = .empty;
+            var c_macros: std.StringArrayHashMapUnmanaged(void) = .empty;
 
             if (compile) |exe| {
-                try processPkgConfig(allocator, include_dirs, c_macros, exe);
+                try processPkgConfig(allocator, &include_dirs, &c_macros, exe);
             }
 
             try c_macros.ensureUnusedCapacity(allocator, module.c_macros.items.len);
@@ -1156,81 +1082,125 @@ fn extractBuildInformation(
                     },
                 }
             }
+
+            const cwd = try std.process.getCwdAlloc(allocator);
+
+            const root_source_file_path = try std.fs.path.resolve(allocator, &.{ cwd, root_source_file.getPath2(module.owner, null) });
+
+            // All modules with the same root source file are merged. This limitation may be lifted in the future.
+            const gop = try modules.getOrPutValue(allocator, root_source_file_path, .{
+                .import_table = .{},
+                .c_macros = &.{},
+                .include_dirs = &.{},
+            });
+
+            for (module.import_table.keys(), module.import_table.values()) |name, import| {
+                const gop_import = try gop.value_ptr.import_table.map.getOrPut(allocator, name);
+                // This does not account for the possibility of collisions (i.e. modules with same root source file import different modules under the same name).
+                if (!gop_import.found_existing) {
+                    gop_import.value_ptr.* = try std.fs.path.resolve(allocator, &.{ cwd, import.root_source_file.?.getPath2(import.owner, null) });
+                }
+            }
+            gop.value_ptr.c_macros = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.c_macros, c_macros.keys() });
+            gop.value_ptr.include_dirs = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.include_dirs, include_dirs.keys() });
         }
     };
 
-    var step_dependencies: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
-    defer step_dependencies.deinit(gpa);
+    // The value tracks whether the step is a decendant of the "install" step.
+    var all_steps: std.AutoArrayHashMapUnmanaged(*Step, bool) = .empty;
+    defer all_steps.deinit(gpa);
 
-    // collect step dependencies
+    // collect all steps that are decendants of the "install" step.
     {
-        var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .{};
-        defer modules.deinit(gpa);
+        try all_steps.putNoClobber(gpa, b.getInstallStep(), true);
 
-        // collect root modules of `Step.Compile`
-        for (steps.keys()) |step| {
-            const compile = step.cast(Step.Compile) orelse continue;
-            const graph = compile.root_module.getGraph();
-            try modules.ensureUnusedCapacity(gpa, graph.modules.len);
-            for (graph.modules) |module| modules.putAssumeCapacity(module, {});
+        var i: usize = 0;
+        while (i < all_steps.count()) : (i += 1) {
+            const step = all_steps.keys()[i];
+
+            try all_steps.ensureUnusedCapacity(gpa, step.dependencies.items.len);
+            for (step.dependencies.items) |other_step| {
+                all_steps.putAssumeCapacity(other_step, true);
+            }
+        }
+    }
+
+    // collect all other steps
+    {
+        var i: usize = all_steps.count();
+
+        try all_steps.ensureUnusedCapacity(gpa, b.top_level_steps.count());
+        for (b.top_level_steps.values()) |tls| {
+            all_steps.putAssumeCapacity(&tls.step, true);
         }
 
-        // collect public modules
-        for (b.modules.values()) |root_module| {
-            const graph = root_module.getGraph();
+        while (i < all_steps.count()) : (i += 1) {
+            const step = all_steps.keys()[i];
+
+            try all_steps.ensureUnusedCapacity(gpa, step.dependencies.items.len);
+            for (step.dependencies.items) |other_step| {
+                all_steps.putAssumeCapacity(other_step, false);
+            }
+        }
+    }
+
+    // Collect all steps that need to be run so that we can resolve the lazy paths we are interested in (e.g. root_source_file).
+    {
+        var needed_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .empty;
+        defer needed_steps.deinit(gpa);
+
+        var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .empty;
+        defer modules.deinit(gpa);
+
+        // collect all modules of `Step.Compile`
+        for (all_steps.keys()) |step| {
+            const compile = step.cast(Step.Compile) orelse continue;
+            const graph = compile.root_module.getGraph();
             try modules.ensureUnusedCapacity(gpa, graph.modules.len);
             for (graph.modules) |module| modules.putAssumeCapacity(module, {});
         }
 
         // collect all dependencies of all found modules
         for (modules.keys()) |module| {
-            try helper.addModuleDependencies(gpa, &step_dependencies, module);
+            try helper.addModuleDependencies(gpa, &needed_steps, module);
+        }
+
+        prepare(gpa, b, &needed_steps, run, seed) catch |err| switch (err) {
+            error.UncleanExit => process.exit(1),
+            else => return err,
+        };
+
+        try runSteps(
+            gpa,
+            b,
+            &needed_steps,
+            main_progress_node,
+            run,
+        );
+    }
+
+    // We collect modules in the following order:
+    // - public modules (`std.Build.addModule`)
+    // - modules that are reachable from the "install" step
+    // - all other reachable modules
+    var modules: std.StringArrayHashMapUnmanaged(BuildConfig.Module) = .empty;
+
+    for (b.modules.values()) |root_module| {
+        const graph = root_module.getGraph();
+        for (graph.modules) |module| {
+            try helper.processModule(arena, &modules, module, null);
         }
     }
 
-    prepare(gpa, b, &step_dependencies, run, seed) catch |err| switch (err) {
-        error.UncleanExit => process.exit(1),
-        else => return err,
-    };
+    // We loop twice through all steps so that decendants of the "install" step are processed first.
+    for ([_]bool{ true, false }) |want_install_step_decendant| {
+        for (all_steps.keys(), all_steps.values()) |step, is_install_step_decendant| {
+            if (is_install_step_decendant != want_install_step_decendant) continue;
 
-    // run all steps that are dependencies
-    try runSteps(
-        gpa,
-        b,
-        &step_dependencies,
-        main_progress_node,
-        run,
-    );
-
-    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer include_dirs.deinit(gpa);
-
-    var c_macros: std.StringArrayHashMapUnmanaged(void) = .{};
-    defer c_macros.deinit(gpa);
-
-    var packages: Packages = .{ .allocator = gpa };
-    defer packages.deinit();
-
-    // extract packages and include paths
-    {
-        for (steps.keys()) |step| {
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
-            try helper.processItem(gpa, compile.root_module, compile, "root", &packages, &include_dirs, &c_macros);
             for (graph.modules) |module| {
-                for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
-                }
-            }
-        }
-
-        for (b.modules.values()) |root_module| {
-            const graph = root_module.getGraph();
-            try helper.processItem(gpa, root_module, null, "root", &packages, &include_dirs, &c_macros);
-            for (graph.modules) |module| {
-                for (module.import_table.keys(), module.import_table.values()) |name, import| {
-                    try helper.processItem(gpa, import, null, name, &packages, &include_dirs, &c_macros);
-                }
+                try helper.processModule(arena, &modules, module, compile);
             }
         }
     }
@@ -1249,27 +1219,29 @@ fn extractBuildInformation(
     //     .{ "diffz", "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864" },
     // };
 
-    var deps_build_roots: ArrayList(BuildConfig.DepsBuildRoots) = .{};
+    // Collect the dependencies from `build.zig.zon`
+    var root_dependencies: std.StringArrayHashMapUnmanaged([]const u8) = .empty;
     for (dependencies.root_deps) |root_dep| {
         inline for (comptime std.meta.declarations(dependencies.packages)) |package| blk: {
             if (std.mem.eql(u8, package.name, root_dep[1])) {
                 const package_info = @field(dependencies.packages, package.name);
                 if (!@hasDecl(package_info, "build_root")) break :blk;
                 if (!@hasDecl(package_info, "build_zig")) break :blk;
-                try deps_build_roots.append(arena, .{
-                    .name = root_dep[0],
-                    .path = try std.fs.path.join(arena, &.{ package_info.build_root, "build.zig" }),
-                });
+                try root_dependencies.put(
+                    arena,
+                    root_dep[0],
+                    try std.fs.path.join(arena, &.{ package_info.build_root, "build.zig" }),
+                );
             }
         }
     }
 
-    var available_options: std.json.ArrayHashMap(BuildConfig.AvailableOption) = .{};
-    try available_options.map.ensureTotalCapacity(arena, b.available_options_map.count());
+    var available_options: std.StringArrayHashMapUnmanaged(BuildConfig.AvailableOption) = .empty;
+    try available_options.ensureTotalCapacity(arena, b.available_options_map.count());
 
     var it = b.available_options_map.iterator();
     while (it.next()) |available_option| {
-        available_options.map.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
+        available_options.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
     }
 
     const stringifyValueAlloc = if (@hasDecl(std.json, "Stringify")) std.json.Stringify.valueAlloc else std.json.stringifyAlloc;
@@ -1277,12 +1249,10 @@ fn extractBuildInformation(
     const stringified_build_config = try stringifyValueAlloc(
         gpa,
         BuildConfig{
-            .deps_build_roots = deps_build_roots.items,
-            .packages = try packages.toPackageList(),
-            .include_dirs = include_dirs.keys(),
+            .dependencies = .{ .map = root_dependencies },
+            .modules = .{ .map = modules },
             .top_level_steps = b.top_level_steps.keys(),
-            .available_options = available_options,
-            .c_macros = c_macros.keys(),
+            .available_options = .{ .map = available_options },
         },
         .{ .whitespace = .indent_2 },
     );
