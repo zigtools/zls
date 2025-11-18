@@ -1,18 +1,17 @@
 {
-  "deps_build_roots": [],
-  "packages": [
-    {
-      "name": "root",
-      "path": "root.zig"
+  "dependencies": {},
+  "modules": {
+    "root.zig": {
+      "import_table": {},
+      "c_macros": [
+        "-Dkey=value"
+      ],
+      "include_dirs": []
     }
-  ],
-  "include_dirs": [],
+  },
   "top_level_steps": [
     "install",
     "uninstall"
   ],
-  "available_options": {},
-  "c_macros": [
-    "-Dkey=value"
-  ]
+  "available_options": {}
 }
