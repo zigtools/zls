@@ -1,25 +1,27 @@
 {
   "dependencies": {},
   "modules": {
-    "foo.zig": {
-      "import_table": {
-        "bar_in_foo": "bar.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
-    },
-    "bar.zig": {
-      "import_table": {
-        "foo_in_bar": "foo.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
-    },
     "main.zig": {
       "import_table": {
-        "foo_in_main": "foo.zig",
-        "bar_in_main": "bar.zig"
+        "collision": "first.zig",
+        "first": "first.zig",
+        "second": "second.zig"
       },
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "first.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "second.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "third.zig": {
+      "import_table": {},
       "c_macros": [],
       "include_dirs": []
     }

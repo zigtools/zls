@@ -58,6 +58,8 @@ pub fn addCases(
         build_cmd.addArg("--zig-lib-dir");
         build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
 
+        build_cmd.addFileInput(b.path("src/build_runner/shared.zig"));
+
         const actual_build_config_json = build_cmd.captureStdOut(.{});
 
         const run_diff = b.addRunArtifact(check_exe);

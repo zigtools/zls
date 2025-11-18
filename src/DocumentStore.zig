@@ -99,71 +99,70 @@ pub const BuildFile = struct {
         self.impl.mutex.unlock(io);
     }
 
-    /// Usage example:
-    /// ```zig
-    /// const package_uris: std.ArrayList([]const u8) = .empty;
-    /// defer {
-    ///     for (package_uris) |uri| allocator.free(uri);
-    ///     package_uris.deinit(allocator);
-    /// }
-    /// const success = try build_file.collectBuildConfigPackageUris(allocator, &package_uris);
-    /// ```
-    pub fn collectBuildConfigPackageUris(
-        self: *BuildFile,
-        io: std.Io,
-        allocator: std.mem.Allocator,
-        package_uris: *std.ArrayList(Uri),
-    ) error{OutOfMemory}!bool {
+    /// Returns whether the `Uri` is a dependency of the given `BuildFile`.
+    /// May return `null` to indicate an inconclusive result because
+    /// the required build config has not been resolved yet.
+    ///
+    /// invalidates any pointers into `build_files`
+    /// **Thread safe** takes an exclusive lock
+    fn isAssociatedWith(
+        build_file: *BuildFile,
+        uri: Uri,
+        store: *DocumentStore,
+    ) error{OutOfMemory}!union(enum) {
+        unknown,
+        no,
+        /// Stores the `root_source_file`. Caller owns returned memory.
+        yes: []const u8,
+    } {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        const build_config = self.tryLockConfig(io) orelse return false;
-        defer self.unlockConfig(io);
+        const allocator = store.allocator;
+        const io = store.io;
 
-        try package_uris.ensureUnusedCapacity(allocator, build_config.packages.len);
-        for (build_config.packages) |package| {
-            package_uris.appendAssumeCapacity(try .fromPath(allocator, package.path));
+        var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
+        defer arena_allocator.deinit();
+
+        const arena = arena_allocator.allocator();
+
+        var module_root_source_file_paths: std.ArrayList([]const u8) = .empty;
+
+        {
+            const build_config = build_file.tryLockConfig(io) orelse return .unknown;
+            defer build_file.unlockConfig(io);
+
+            const module_paths = build_config.modules.map.keys();
+
+            try module_root_source_file_paths.ensureUnusedCapacity(arena, module_paths.len);
+            for (module_paths) |module_path| {
+                module_root_source_file_paths.appendAssumeCapacity(try arena.dupe(u8, module_path));
+            }
         }
-        return true;
-    }
 
-    /// Usage example:
-    /// ```zig
-    /// const include_paths: std.ArrayList([]u8) = .empty;
-    /// defer {
-    ///     for (include_paths) |path| allocator.free(path);
-    ///     include_paths.deinit(allocator);
-    /// }
-    /// const success = try build_file.collectBuildConfigIncludePaths(allocator, &include_paths);
-    /// ```
-    pub fn collectBuildConfigIncludePaths(
-        self: *BuildFile,
-        io: std.Io,
-        allocator: std.mem.Allocator,
-        include_paths: *std.ArrayList([]const u8),
-    ) !bool {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
+        var found_uris: Uri.ArrayHashMap(void) = .empty;
 
-        const build_config = self.tryLockConfig(io) orelse return false;
-        defer self.unlockConfig(io);
+        var i: usize = 0;
 
-        try include_paths.ensureUnusedCapacity(allocator, build_config.include_dirs.len);
-        for (build_config.include_dirs) |include_path| {
-            const absolute_path = if (std.fs.path.isAbsolute(include_path))
-                try allocator.dupe(u8, include_path)
-            else blk: {
-                const build_file_path = self.uri.toFsPath(allocator) catch |err| switch (err) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    error.UnsupportedScheme => continue,
-                };
-                const build_file_dirname = std.fs.path.dirname(build_file_path) orelse continue;
-                break :blk try std.fs.path.join(allocator, &.{ build_file_dirname, include_path });
-            };
+        for (module_root_source_file_paths.items) |root_source_file| {
+            try found_uris.put(arena, try .fromPath(arena, root_source_file), {});
 
-            include_paths.appendAssumeCapacity(absolute_path);
+            while (i < found_uris.count()) : (i += 1) {
+                const source_uri = found_uris.keys()[i];
+                if (uri.eql(source_uri)) {
+                    return .{ .yes = try allocator.dupe(u8, root_source_file) };
+                }
+                if (isInStd(source_uri)) continue;
+
+                const handle = store.getOrLoadHandle(source_uri) orelse return .unknown;
+
+                const import_uris = try handle.getImportUris();
+                try found_uris.ensureUnusedCapacity(arena, import_uris.len);
+                for (import_uris) |import_uri| found_uris.putAssumeCapacity(try import_uri.dupe(arena), {});
+            }
         }
-        return true;
+
+        return .no;
     }
 
     fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
@@ -206,17 +205,25 @@ pub const Handle = struct {
                 /// not the build file should be skipped because it has previously been
                 /// found to be "unassociated" with the handle.
                 has_been_checked: std.DynamicBitSetUnmanaged,
-
-                fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-                    allocator.free(self.potential_build_files);
-                    self.has_been_checked.deinit(allocator);
-                    self.* = undefined;
-                }
             },
             /// The Handle has no associated build file (build.zig).
             none,
             /// The associated build file (build.zig) has been successfully resolved.
-            resolved: *BuildFile,
+            resolved: GetAssociatedBuildFileResult.Resolved,
+
+            fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                switch (self.*) {
+                    .init, .none => {},
+                    .unresolved => |*unresolved| {
+                        allocator.free(unresolved.potential_build_files);
+                        unresolved.has_been_checked.deinit(allocator);
+                    },
+                    .resolved => |resolved| {
+                        allocator.free(resolved.root_source_file);
+                    },
+                }
+                self.* = undefined;
+            }
         } = .init,
     },
 
@@ -297,10 +304,7 @@ pub const Handle = struct {
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
 
-        switch (self.impl.associated_build_file) {
-            .init, .none, .resolved => {},
-            .unresolved => |*payload| payload.deinit(allocator),
-        }
+        self.impl.associated_build_file.deinit(allocator);
 
         self.* = undefined;
     }
@@ -411,32 +415,25 @@ pub const Handle = struct {
         });
     }
 
-    /// Returns the associated build file (build.zig) of the handle.
-    ///
-    /// `DocumentStore.build_files` is guaranteed to contain this Uri.
-    /// Uri memory managed by its build_file
-    pub fn getAssociatedBuildFileUri(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!?Uri {
-        comptime std.debug.assert(supports_build_system);
-        switch (try self.getAssociatedBuildFileUri2(document_store)) {
-            .none,
-            .unresolved,
-            => return null,
-            .resolved => |build_file| return build_file.uri,
-        }
-    }
-
-    /// Returns the associated build file (build.zig) of the handle.
-    ///
-    /// `DocumentStore.build_files` is guaranteed to contain this Uri.
-    /// Uri memory managed by its build_file
-    pub fn getAssociatedBuildFileUri2(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!union(enum) {
+    pub const GetAssociatedBuildFileResult = union(enum) {
         /// The Handle has no associated build file (build.zig).
         none,
         /// The associated build file (build.zig) has not been resolved yet.
         unresolved,
         /// The associated build file (build.zig) has been successfully resolved.
-        resolved: *BuildFile,
-    } {
+        resolved: Resolved,
+
+        pub const Resolved = struct {
+            build_file: *BuildFile,
+            root_source_file: []const u8,
+        };
+    };
+
+    /// Returns the associated build file (build.zig) of the handle.
+    ///
+    /// `DocumentStore.build_files` is guaranteed to contain this Uri.
+    /// Uri memory managed by its build_file
+    pub fn getAssociatedBuildFile(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!GetAssociatedBuildFileResult {
         comptime std.debug.assert(supports_build_system);
 
         self.impl.lock.lockUncancelable(document_store.io);
@@ -468,17 +465,8 @@ pub const Handle = struct {
             },
             .unresolved => |*unresolved| unresolved,
             .none => return .none,
-            .resolved => |build_file| return .{ .resolved = build_file },
+            .resolved => |resolved| return .{ .resolved = resolved },
         };
-
-        // special case when there is only one potential build file
-        if (unresolved.potential_build_files.len == 1) {
-            const build_file = unresolved.potential_build_files[0];
-            log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri.raw, build_file.uri.raw });
-            unresolved.deinit(document_store.allocator);
-            self.impl.associated_build_file = .{ .resolved = build_file };
-            return .{ .resolved = build_file };
-        }
 
         var has_missing_build_config = false;
 
@@ -488,21 +476,29 @@ pub const Handle = struct {
         });
         while (it.next()) |i| {
             const build_file = unresolved.potential_build_files[i];
-            const is_associated = try document_store.uriAssociatedWithBuild(build_file, self.uri) orelse {
-                has_missing_build_config = true;
-                continue;
-            };
-
-            if (!is_associated) {
-                // the build file should be skipped in future calls.
-                unresolved.has_been_checked.set(i);
-                continue;
+            switch (try build_file.isAssociatedWith(self.uri, document_store)) {
+                .unknown => {
+                    has_missing_build_config = true;
+                    continue;
+                },
+                .no => {
+                    // the build file should be skipped in future calls.
+                    unresolved.has_been_checked.set(i);
+                    continue;
+                },
+                .yes => |root_source_file| {
+                    // log.debug("Resolved build file of '{s}' as '{s}' root={s}", .{ self.uri.raw, build_file.uri, root_source_file.raw });
+                    errdefer comptime unreachable;
+                    self.impl.associated_build_file.deinit(document_store.allocator);
+                    self.impl.associated_build_file = .{
+                        .resolved = .{
+                            .build_file = build_file,
+                            .root_source_file = root_source_file,
+                        },
+                    };
+                    return .{ .resolved = self.impl.associated_build_file.resolved };
+                },
             }
-
-            log.debug("Resolved build file of '{s}' as '{s}'", .{ self.uri.raw, build_file.uri.raw });
-            unresolved.deinit(document_store.allocator);
-            self.impl.associated_build_file = .{ .resolved = build_file };
-            return .{ .resolved = build_file };
         }
 
         if (has_missing_build_config) {
@@ -512,7 +508,7 @@ pub const Handle = struct {
             return .unresolved;
         }
 
-        unresolved.deinit(document_store.allocator);
+        self.impl.associated_build_file.deinit(document_store.allocator);
         self.impl.associated_build_file = .none;
         return .none;
     }
@@ -1166,19 +1162,13 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     };
-    const build_config = std.json.parseFromSlice(
+
+    return std.json.parseFromSlice(
         BuildConfig,
         self.allocator,
         zig_run_result.stdout,
         parse_options,
     ) catch return error.InvalidBuildConfig;
-    errdefer build_config.deinit();
-
-    for (build_config.value.packages) |*pkg| {
-        pkg.path = try std.fs.path.resolve(build_config.arena.allocator(), &.{ build_file_path, "..", pkg.path });
-    }
-
-    return build_config;
 }
 
 /// Checks if the build.zig file is accessible in dir.
@@ -1192,7 +1182,7 @@ fn buildDotZigExists(io: std.Io, dir_path: []const u8) bool {
 /// Walk down the tree towards the uri. When we hit `build.zig` files
 /// add them to the list of potential build files.
 /// `build.zig` files higher in the filesystem have precedence.
-/// See `Handle.getAssociatedBuildFileUri`.
+/// See `Handle.getAssociatedBuildFile`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}![]*BuildFile {
     if (isInStd(uri)) return &.{};
@@ -1284,12 +1274,12 @@ fn uriAssociatedWithBuild(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var checked_uris: Uri.ArrayHashMap(void) = .empty;
+    var checked_uris: std.StringHashMapUnmanaged(void) = .empty;
     defer checked_uris.deinit(self.allocator);
 
     var package_uris: std.ArrayList(Uri) = .empty;
     defer {
-        for (package_uris.items) |package_uri| package_uri.deinit(self.allocator);
+        for (package_uris.items) |package_uri| self.allocator.free(package_uri);
         package_uris.deinit(self.allocator);
     }
     const success = try build_file.collectBuildConfigPackageUris(self.io, self.allocator, &package_uris);
@@ -1355,7 +1345,11 @@ fn createAndStoreDocument(
     errdefer new_handle.deinit();
 
     if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
+        if (self.getBuildFile(uri)) |build_file| {
+            self.invalidateBuildFile(build_file.uri);
+        } else {
+            _ = self.getOrLoadBuildFile(uri);
+        }
     }
 
     self.mutex.lockUncancelable(self.io);
@@ -1365,6 +1359,7 @@ fn createAndStoreDocument(
     errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
 
     if (gop.found_existing) {
+        std.debug.assert(new_handle.impl.associated_build_file == .init);
         if (lsp_synced) {
             new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
             gop.value_ptr.*.impl.associated_build_file = .init;
@@ -1465,9 +1460,20 @@ pub fn collectDependencies(
     }
 
     if (supports_build_system) no_build_file: {
-        const build_file_uri = try handle.getAssociatedBuildFileUri(store) orelse break :no_build_file;
-        const build_file = store.getBuildFile(build_file_uri) orelse break :no_build_file;
-        _ = try build_file.collectBuildConfigPackageUris(store.io, allocator, dependencies);
+        const build_file = switch (try handle.getAssociatedBuildFile(store)) {
+            .none, .unresolved => break :no_build_file,
+            .resolved => |resolved| resolved.build_file,
+        };
+
+        const build_config = build_file.tryLockConfig(store.io) orelse break :no_build_file;
+        defer build_file.unlockConfig(store.io);
+
+        const module_paths = build_config.modules.map.keys();
+
+        try dependencies.ensureUnusedCapacity(allocator, module_paths.len);
+        for (module_paths) |module_path| {
+            dependencies.appendAssumeCapacity(try .fromPath(allocator, module_path));
+        }
     }
 }
 
@@ -1481,6 +1487,9 @@ pub fn collectIncludeDirs(
     include_dirs: *std.ArrayList([]const u8),
 ) !bool {
     comptime std.debug.assert(supports_build_system);
+
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
     var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
     defer arena_allocator.deinit();
@@ -1504,10 +1513,32 @@ pub fn collectIncludeDirs(
         include_dirs.appendAssumeCapacity(try allocator.dupe(u8, native_include_dir));
     }
 
-    const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
+    const collected_all = switch (try handle.getAssociatedBuildFile(store)) {
         .none => true,
         .unresolved => false,
-        .resolved => |build_file| try build_file.collectBuildConfigIncludePaths(store.io, allocator, include_dirs),
+        .resolved => |resolved| collected_all: {
+            const build_config = resolved.build_file.tryLockConfig(store.io) orelse break :collected_all false;
+            defer resolved.build_file.unlockConfig(store.io);
+
+            const module = build_config.modules.map.get(resolved.root_source_file) orelse break :collected_all true;
+
+            try include_dirs.ensureUnusedCapacity(allocator, module.include_dirs.len);
+            for (module.include_dirs) |include_path| {
+                const absolute_path = if (std.fs.path.isAbsolute(include_path))
+                    try allocator.dupe(u8, include_path)
+                else blk: {
+                    const build_file_path = resolved.build_file.uri.toFsPath(allocator) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.UnsupportedScheme => continue,
+                    };
+                    const build_file_dirname = std.fs.path.dirname(build_file_path) orelse continue;
+                    break :blk try std.fs.path.join(allocator, &.{ build_file_dirname, include_path });
+                };
+
+                include_dirs.appendAssumeCapacity(absolute_path);
+            }
+            break :collected_all true;
+        },
     };
 
     return collected_all;
@@ -1524,18 +1555,20 @@ pub fn collectCMacros(
 ) !bool {
     comptime std.debug.assert(supports_build_system);
 
-    const collected_all = switch (try handle.getAssociatedBuildFileUri2(store)) {
+    const collected_all = switch (try handle.getAssociatedBuildFile(store)) {
         .none => true,
         .unresolved => false,
-        .resolved => |build_file| blk: {
-            const build_config = build_file.tryLockConfig(store.io) orelse break :blk false;
-            defer build_file.unlockConfig(store.io);
+        .resolved => |resolved| collected_all: {
+            const build_config = resolved.build_file.tryLockConfig(store.io) orelse break :collected_all false;
+            defer resolved.build_file.unlockConfig(store.io);
 
-            try c_macros.ensureUnusedCapacity(allocator, build_config.c_macros.len);
-            for (build_config.c_macros) |c_macro| {
+            const module = build_config.modules.map.get(resolved.root_source_file) orelse break :collected_all true;
+
+            try c_macros.ensureUnusedCapacity(allocator, module.c_macros.len);
+            for (module.c_macros) |c_macro| {
                 c_macros.appendAssumeCapacity(try allocator.dupe(u8, c_macro));
             }
-            break :blk true;
+            break :collected_all true;
         },
     };
 
@@ -1714,6 +1747,15 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (std.mem.endsWith(u8, import_str, ".zig")) {
+        const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UnsupportedScheme => return null,
+        };
+        defer allocator.free(base_path);
+        return try resolveFileImportString(allocator, base_path, import_str);
+    }
+
     if (std.mem.eql(u8, import_str, "std")) {
         const zig_lib_dir = self.config.zig_lib_dir orelse return null;
 
@@ -1721,51 +1763,55 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         defer allocator.free(std_path);
 
         return try .fromPath(allocator, std_path);
-    } else if (std.mem.eql(u8, import_str, "builtin")) {
+    }
+
+    if (std.mem.eql(u8, import_str, "builtin")) {
         if (supports_build_system) {
-            if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| {
-                const build_file = self.getBuildFile(build_file_uri).?;
-                if (build_file.builtin_uri) |builtin_uri| {
-                    return try builtin_uri.dupe(allocator);
-                }
+            switch (try handle.getAssociatedBuildFile(self)) {
+                .none, .unresolved => {},
+                .resolved => |resolved| {
+                    if (resolved.build_file.builtin_uri) |builtin_uri| {
+                        return try builtin_uri.dupe(allocator);
+                    }
+                },
             }
         }
         if (self.config.builtin_path) |builtin_path| {
             return try .fromPath(allocator, builtin_path);
         }
         return null;
-    } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
-        if (!supports_build_system) return null;
+    }
 
-        if (isBuildFile(handle.uri)) blk: {
-            const build_file = self.getBuildFile(handle.uri) orelse break :blk;
-            const build_config = build_file.tryLockConfig(self.io) orelse break :blk;
-            defer build_file.unlockConfig(self.io);
+    if (!supports_build_system) return null;
 
-            for (build_config.deps_build_roots) |dep_build_root| {
-                if (std.mem.eql(u8, import_str, dep_build_root.name)) {
-                    return try .fromPath(allocator, dep_build_root.path);
-                }
-            }
-        } else if (try handle.getAssociatedBuildFileUri(self)) |build_file_uri| blk: {
-            const build_file = self.getBuildFile(build_file_uri).?;
-            const build_config = build_file.tryLockConfig(self.io) orelse break :blk;
-            defer build_file.unlockConfig(self.io);
+    if (std.mem.eql(u8, import_str, "root")) {
+        switch (try handle.getAssociatedBuildFile(self)) {
+            .none, .unresolved => return null,
+            .resolved => |result| return try .fromPath(allocator, result.root_source_file),
+        }
+    }
 
-            for (build_config.packages) |pkg| {
-                if (std.mem.eql(u8, import_str, pkg.name)) {
-                    return try .fromPath(allocator, pkg.path);
-                }
-            }
+    if (isBuildFile(handle.uri)) blk: {
+        const build_file = self.getBuildFile(handle.uri) orelse break :blk;
+        const build_config = build_file.tryLockConfig(self.io) orelse break :blk;
+        defer build_file.unlockConfig(self.io);
+
+        if (build_config.dependencies.map.get(import_str)) |path| {
+            return try .fromPath(allocator, path);
         }
         return null;
-    } else {
-        const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.UnsupportedScheme => return null,
-        };
-        defer allocator.free(base_path);
-        return try resolveFileImportString(allocator, base_path, import_str);
+    }
+
+    switch (try handle.getAssociatedBuildFile(self)) {
+        .none, .unresolved => return null,
+        .resolved => |resolved| {
+            const build_config = resolved.build_file.tryLockConfig(self.io) orelse return null;
+            defer resolved.build_file.unlockConfig(self.io);
+
+            const module = build_config.modules.map.get(resolved.root_source_file) orelse return null;
+            const imported_root_source_file = module.import_table.map.get(import_str) orelse return null;
+            return try .fromPath(allocator, imported_root_source_file);
+        },
     }
 }
 
