@@ -782,32 +782,43 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         no_modules: {
             if (!DocumentStore.supports_build_system) break :no_modules;
 
-            if (DocumentStore.isBuildFile(builder.orig_handle.uri)) {
-                const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :no_modules;
-                const build_config = build_file.tryLockConfig() orelse break :no_modules;
+            if (DocumentStore.isBuildFile(builder.orig_handle.uri)) blk: {
+                const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :blk;
+                const build_config = build_file.tryLockConfig() orelse break :blk;
                 defer build_file.unlockConfig();
 
-                try completions.ensureUnusedCapacity(builder.arena, build_config.deps_build_roots.len);
-                for (build_config.deps_build_roots) |dbr| {
+                try completions.ensureUnusedCapacity(builder.arena, build_config.dependencies.map.count());
+                for (build_config.dependencies.map.keys(), build_config.dependencies.map.values()) |name, path| {
                     completions.putAssumeCapacity(.{
-                        .label = dbr.name,
+                        .label = name,
                         .kind = .Module,
-                        .detail = dbr.path,
+                        .detail = path,
                     }, {});
                 }
-            } else if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| {
-                const build_file = store.getBuildFile(uri).?;
-                const build_config = build_file.tryLockConfig() orelse break :no_modules;
-                defer build_file.unlockConfig();
+            } else switch (try builder.orig_handle.getAssociatedBuildFile(store)) {
+                .none, .unresolved => {},
+                .resolved => |resolved| blk: {
+                    const build_config = resolved.build_file.tryLockConfig() orelse break :blk;
+                    defer resolved.build_file.unlockConfig();
 
-                try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
-                for (build_config.packages) |pkg| {
+                    const module = build_config.modules.map.get(resolved.root_source_file) orelse break :blk;
+
+                    try completions.ensureUnusedCapacity(builder.arena, 1 + module.import_table.map.count());
+
                     completions.putAssumeCapacity(.{
-                        .label = pkg.name,
+                        .label = "root",
                         .kind = .Module,
-                        .detail = pkg.path,
+                        .detail = try builder.arena.dupe(u8, resolved.root_source_file),
                     }, {});
-                }
+
+                    for (module.import_table.map.keys(), module.import_table.map.values()) |name, root_source_file| {
+                        completions.putAssumeCapacity(.{
+                            .label = try builder.arena.dupe(u8, name),
+                            .kind = .Module,
+                            .detail = try builder.arena.dupe(u8, root_source_file),
+                        }, {});
+                    }
+                },
             }
         }
 

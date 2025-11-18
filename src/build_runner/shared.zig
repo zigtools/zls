@@ -2,22 +2,24 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const native_endian = builtin.target.cpu.arch.endian();
-const need_bswap = native_endian != .little;
 
 pub const BuildConfig = struct {
-    deps_build_roots: []DepsBuildRoots,
-    packages: []Package,
-    include_dirs: []const []const u8,
+    /// The `dependencies` in `build.zig.zon`.
+    dependencies: std.json.ArrayHashMap([]const u8),
+    /// The key is the `root_source_file`.
+    /// All modules with the same root source file are merged. This limitation may be lifted in the future.
+    modules: std.json.ArrayHashMap(Module),
+    /// The names of all top level steps.
     top_level_steps: []const []const u8,
     available_options: std.json.ArrayHashMap(AvailableOption),
-    c_macros: []const []const u8 = &.{},
 
-    pub const DepsBuildRoots = Package;
-    pub const Package = struct {
-        name: []const u8,
-        path: []const u8,
+    pub const Module = struct {
+        import_table: std.json.ArrayHashMap([]const u8),
+        c_macros: []const []const u8,
+        include_dirs: []const []const u8,
     };
+
+    /// Equivalent to `std.Build.AvailableOption` which is not accessible because it non-pub.
     pub const AvailableOption = @FieldType(@FieldType(std.Build, "available_options_map").KV, "value");
 };
 
