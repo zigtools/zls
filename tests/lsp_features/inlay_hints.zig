@@ -585,7 +585,7 @@ test "tuple fields" {
 }
 
 const Options = struct {
-    kind: types.InlayHintKind,
+    kind: types.InlayHint.Kind,
     show_builtin: bool = true,
     exclude_single_argument: bool = false,
     hide_redundant_param_names: bool = false,
@@ -613,7 +613,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
         .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 
-    const params: types.InlayHintParams = .{
+    const params: types.InlayHint.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
         .range = range,
     };

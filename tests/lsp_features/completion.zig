@@ -11,8 +11,8 @@ const allocator: std.mem.Allocator = std.testing.allocator;
 
 const Completion = struct {
     label: []const u8,
-    labelDetails: ?types.CompletionItemLabelDetails = null,
-    kind: types.CompletionItemKind,
+    labelDetails: ?types.completion.Item.LabelDetails = null,
+    kind: types.completion.Item.Kind,
     detail: ?[]const u8 = null,
     documentation: ?[]const u8 = null,
     deprecated: bool = false,
@@ -4281,7 +4281,7 @@ fn testCompletionWithOptions(
 
     const test_uri = try ctx.addDocument(.{ .source = text });
 
-    const params: types.CompletionParams = .{
+    const params: types.completion.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
         .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
     };
@@ -4289,11 +4289,11 @@ fn testCompletionWithOptions(
     @setEvalBranchQuota(5000);
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params);
 
-    const completion_list: types.CompletionList = (response orelse {
+    const completion_list: types.completion.List = (response orelse {
         if (expected_completions.len == 0) return;
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
-    }).CompletionList;
+    }).completion_list;
 
     var actual = try extractCompletionLabels(completion_list.items);
     defer actual.deinit(allocator);
@@ -4317,7 +4317,7 @@ fn testCompletionWithOptions(
     try error_builder.addFile(test_uri.raw, text);
 
     for (found.keys()) |label| {
-        const actual_completion: types.CompletionItem = blk: {
+        const actual_completion: types.completion.Item = blk: {
             for (completion_list.items) |item| {
                 if (std.mem.eql(u8, label, item.label)) break :blk item;
             }
@@ -4342,7 +4342,7 @@ fn testCompletionWithOptions(
 
         if (expected_completion.documentation) |expected_doc| doc_blk: {
             const actual_doc = if (actual_completion.documentation) |doc| blk: {
-                const markup_context = doc.MarkupContent;
+                const markup_context = doc.markup_content;
                 try std.testing.expectEqual(types.MarkupKind.markdown, markup_context.kind);
                 break :blk markup_context.value;
             } else null;
@@ -4406,7 +4406,7 @@ fn testCompletionWithOptions(
 
         blk: {
             const actual_deprecated = if (actual_completion.tags) |tags|
-                std.mem.findScalar(types.CompletionItemTag, tags, .Deprecated) != null
+                std.mem.findScalar(types.completion.Item.Tag, tags, .Deprecated) != null
             else
                 false;
             std.debug.assert(actual_deprecated == (actual_completion.deprecated orelse false));
@@ -4519,7 +4519,7 @@ fn testCompletionTextEdit(
     const handle = ctx.server.document_store.getHandle(test_uri).?;
 
     const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);
-    const params: types.CompletionParams = .{
+    const params: types.completion.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
         .position = cursor_position,
     };
@@ -4532,7 +4532,7 @@ fn testCompletionTextEdit(
             std.debug.print("Server returned `null` as the result\n", .{});
             return error.InvalidResponse;
         };
-        const completion_item = try searchCompletionItemWithLabel(response.CompletionList, options.label);
+        const completion_item = try searchCompletionItemWithLabel(response.completion_list, options.label);
 
         std.debug.assert(completion_item.additionalTextEdits == null); // unsupported
 
@@ -4547,7 +4547,7 @@ fn testCompletionTextEdit(
             const start_position = offsets.indexToPosition(text, start_index, ctx.server.offset_encoding);
 
             break :blk .{
-                .TextEdit = .{
+                .text_edit = .{
                     .newText = completion_item.insertText orelse completion_item.label,
                     .range = .{ .start = start_position, .end = cursor_position },
                 },
@@ -4555,7 +4555,7 @@ fn testCompletionTextEdit(
         };
 
         switch (text_edit_or_insert_replace) {
-            .TextEdit => |text_edit| {
+            .text_edit => |text_edit| {
                 try std.testing.expect(text_edit.range.start.line == text_edit.range.end.line); // text edit range must be a single line
                 try std.testing.expect(offsets.positionInsideRange(cursor_position, text_edit.range)); // text edit range must contain the cursor position
 
@@ -4568,7 +4568,7 @@ fn testCompletionTextEdit(
                     try std.testing.expectEqualStrings(expected_replace_text, actual_text);
                 }
             },
-            .InsertReplaceEdit => |insert_replace_edit| {
+            .insert_replace_edit => |insert_replace_edit| {
                 std.debug.assert(supports_insert_replace);
 
                 try std.testing.expect(insert_replace_edit.insert.start.line == insert_replace_edit.insert.end.line); // text edit range must be a single line
@@ -4592,7 +4592,7 @@ fn testCompletionTextEdit(
     }
 }
 
-fn searchCompletionItemWithLabel(completion_list: types.CompletionList, label: []const u8) !types.CompletionItem {
+fn searchCompletionItemWithLabel(completion_list: types.completion.List, label: []const u8) !types.completion.Item {
     for (completion_list.items) |item| {
         if (std.mem.eql(u8, item.label, label)) return item;
     }

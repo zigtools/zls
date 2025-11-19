@@ -410,9 +410,9 @@ fn testDefinition(source: []const u8) !void {
 
     const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 
-    const declaration_params: types.DeclarationParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
-    const definition_params: types.DefinitionParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
-    const type_definition_params: types.TypeDefinitionParams = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
+    const declaration_params: types.declaration.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
+    const definition_params: types.Definition.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
+    const type_definition_params: types.type_definition.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
 
     const maybe_declaration_response = if (declaration_loc != null)
         try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params)
@@ -430,17 +430,17 @@ fn testDefinition(source: []const u8) !void {
         null;
 
     if (maybe_declaration_response) |response| {
-        try std.testing.expect(response == .array_of_DeclarationLink);
-        try std.testing.expect(response.array_of_DeclarationLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DeclarationLink[0].targetUri);
-        const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DeclarationLink[0].targetSelectionRange, ctx.server.offset_encoding);
+        try std.testing.expect(response == .definition_links);
+        try std.testing.expect(response.definition_links.len == 1);
+        try std.testing.expectEqualStrings(test_uri.raw, response.definition_links[0].targetUri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].targetSelectionRange, ctx.server.offset_encoding);
         if (declaration_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
                 try error_builder.msgAtLoc("expected declaration here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual declaration here", test_uri.raw, actual_loc, .err, .{});
             }
         }
-        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DeclarationLink[0].originSelectionRange.?, ctx.server.offset_encoding);
+        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
                 try error_builder.msgAtLoc("expected declaration origin here!", test_uri.raw, expected_origin_loc, .err, .{});
@@ -452,17 +452,17 @@ fn testDefinition(source: []const u8) !void {
     }
 
     if (maybe_definition_response) |response| {
-        try std.testing.expect(response == .array_of_DefinitionLink);
-        try std.testing.expect(response.array_of_DefinitionLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DefinitionLink[0].targetUri);
-        const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].targetSelectionRange, ctx.server.offset_encoding);
+        try std.testing.expect(response == .definition_links);
+        try std.testing.expect(response.definition_links.len == 1);
+        try std.testing.expectEqualStrings(test_uri.raw, response.definition_links[0].targetUri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].targetSelectionRange, ctx.server.offset_encoding);
         if (definition_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
                 try error_builder.msgAtLoc("expected definition here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual definition here", test_uri.raw, actual_loc, .err, .{});
             }
         }
-        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].originSelectionRange.?, ctx.server.offset_encoding);
+        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
                 try error_builder.msgAtLoc("expected definition origin here!", test_uri.raw, expected_origin_loc, .err, .{});
@@ -474,17 +474,17 @@ fn testDefinition(source: []const u8) !void {
     }
 
     if (maybe_type_definition_response) |response| {
-        try std.testing.expect(response == .array_of_DefinitionLink);
-        try std.testing.expect(response.array_of_DefinitionLink.len == 1);
-        try std.testing.expectEqualStrings(test_uri.raw, response.array_of_DefinitionLink[0].targetUri);
-        const actual_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].targetSelectionRange, ctx.server.offset_encoding);
+        try std.testing.expect(response == .definition_links);
+        try std.testing.expect(response.definition_links.len == 1);
+        try std.testing.expectEqualStrings(test_uri.raw, response.definition_links[0].targetUri);
+        const actual_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].targetSelectionRange, ctx.server.offset_encoding);
         if (type_definition_loc) |expected_loc| {
             if (!std.meta.eql(expected_loc, actual_loc)) {
                 try error_builder.msgAtLoc("expected type definition here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual type definition here", test_uri.raw, actual_loc, .err, .{});
             }
         }
-        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.array_of_DefinitionLink[0].originSelectionRange.?, ctx.server.offset_encoding);
+        const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
             if (!std.meta.eql(expected_origin_loc, actual_origin_loc)) {
                 try error_builder.msgAtLoc("expected type definition origin here!", test_uri.raw, expected_origin_loc, .err, .{});

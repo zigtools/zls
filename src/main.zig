@@ -57,7 +57,7 @@ fn logFn(
     comptime std.debug.assert(buffer.len >= zls.lsp.minimum_logging_buffer_size);
 
     if (log_transport) |transport| {
-        const lsp_message_type: zls.lsp.types.MessageType = switch (level) {
+        const lsp_message_type: zls.lsp.types.window.MessageType = switch (level) {
             .err => .Error,
             .warn => .Warning,
             .info => .Info,

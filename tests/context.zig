@@ -100,10 +100,10 @@ pub const Context = struct {
             try std.fmt.allocPrint(arena, "untitled:/Untitled-{d}.{t}", .{ self.file_id, options.mode });
         const uri: zls.Uri = try .parse(arena, path);
 
-        const params: types.DidOpenTextDocumentParams = .{
+        const params: types.TextDocument.DidOpenParams = .{
             .textDocument = .{
                 .uri = uri.raw,
-                .languageId = "zig",
+                .languageId = .{ .custom_value = "zig" },
                 .version = 420,
                 .text = options.source,
             },

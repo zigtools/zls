@@ -17,7 +17,7 @@ pub const Builder = struct {
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
-    only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeActionKind)),
+    only_kinds: ?std.EnumSet(std.meta.Tag(types.CodeAction.Kind)),
 
     actions: std.ArrayList(types.CodeAction) = .empty,
     fixall_text_edits: std.ArrayList(types.TextEdit) = .empty,
@@ -81,7 +81,7 @@ pub const Builder = struct {
     }
 
     /// Returns `false` if the client explicitly specified that they are not interested in this code action kind.
-    fn wantKind(builder: *Builder, kind: std.meta.Tag(types.CodeActionKind)) bool {
+    fn wantKind(builder: *Builder, kind: std.meta.Tag(types.CodeAction.Kind)) bool {
         const only_kinds = builder.only_kinds orelse return true;
         return only_kinds.contains(kind);
     }
@@ -235,7 +235,7 @@ pub fn generateMultilineStringCodeActions(
 }
 
 /// To report server capabilities
-pub const supported_code_actions: []const types.CodeActionKind = &.{
+pub const supported_code_actions: []const types.CodeAction.Kind = &.{
     .quickfix,
     .refactor,
     .source,
@@ -286,7 +286,7 @@ pub fn collectAutoDiscardDiagnostics(
             )) orelse break :blk &.{};
             const def = try decl.definitionToken(analyser, false);
             const range = offsets.tokenToRange(tree, def.token, offset_encoding);
-            break :blk try arena.dupe(types.DiagnosticRelatedInformation, &.{.{
+            break :blk try arena.dupe(types.Diagnostic.RelatedInformation, &.{.{
                 .location = .{
                     .uri = handle.uri.raw,
                     .range = range,

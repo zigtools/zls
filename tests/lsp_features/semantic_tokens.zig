@@ -2157,7 +2157,7 @@ fn testSemanticTokensOptions(
         .mode = options.mode,
     });
 
-    const params: types.SemanticTokensParams = .{
+    const params: types.semantic_tokens.Params = .{
         .textDocument = .{ .uri = uri.raw },
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/semanticTokens/full", params) orelse {

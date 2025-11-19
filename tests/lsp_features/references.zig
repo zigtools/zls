@@ -375,7 +375,7 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
             const file_uri = files.keys()[file_index];
 
             const middle = new_loc.start + (new_loc.end - new_loc.start) / 2;
-            const params: types.ReferenceParams = .{
+            const params: types.reference.Params = .{
                 .textDocument = .{ .uri = file_uri },
                 .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
                 .context = .{ .includeDeclaration = include_decl },
@@ -644,7 +644,7 @@ fn testSimpleReferences(source: []const u8) !void {
     try error_builder.addFile(file_uri.raw, phr.new_source);
     try error_builder.msgAtIndex("requested references here", file_uri.raw, cursor_index, .info, .{});
 
-    const params: types.ReferenceParams = .{
+    const params: types.reference.Params = .{
         .textDocument = .{ .uri = file_uri.raw },
         .position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding),
         .context = .{ .includeDeclaration = false },

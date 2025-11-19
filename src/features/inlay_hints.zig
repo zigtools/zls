@@ -141,7 +141,7 @@ const excluded_builtins_set: std.StaticStringMap(void) = blk: {
 pub const InlayHint = struct {
     index: usize,
     label: []const u8,
-    kind: types.InlayHintKind,
+    kind: types.InlayHint.Kind,
     tooltip: ?types.MarkupContent,
 
     fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
@@ -214,7 +214,7 @@ const Builder = struct {
                 .position = position,
                 .label = .{ .string = hint.label },
                 .kind = hint.kind,
-                .tooltip = if (hint.tooltip) |tooltip| .{ .MarkupContent = tooltip } else null,
+                .tooltip = if (hint.tooltip) |tooltip| .{ .markup_content = tooltip } else null,
                 .paddingLeft = false,
                 .paddingRight = hint.kind == .Parameter,
             };

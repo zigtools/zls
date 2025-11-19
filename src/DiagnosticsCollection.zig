@@ -282,7 +282,7 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
             var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
             try collection.collectLspDiagnosticsForDocument(document_uri, collection.offset_encoding, arena_allocator.allocator(), &diagnostics);
 
-            const notification: lsp.TypedJsonRPCNotification(lsp.types.PublishDiagnosticsParams) = .{
+            const notification: lsp.TypedJsonRPCNotification(lsp.types.publish_diagnostics.Params) = .{
                 .method = "textDocument/publishDiagnostics",
                 .params = .{
                     .uri = document_uri.raw,
@@ -361,7 +361,7 @@ fn convertErrorBundleToLSPDiangostics(
 
         const eb_notes = eb.getNotes(msg_index);
         const relatedInformation = if (eb_notes.len == 0) null else blk: {
-            const lsp_notes = try arena.alloc(lsp.types.DiagnosticRelatedInformation, eb_notes.len);
+            const lsp_notes = try arena.alloc(lsp.types.Diagnostic.RelatedInformation, eb_notes.len);
             for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
                 const eb_note = eb.getErrorMessage(eb_note_index);
                 if (eb_note.src_loc == .none) continue;
@@ -386,12 +386,12 @@ fn convertErrorBundleToLSPDiangostics(
             break :blk lsp_notes;
         };
 
-        var tags: std.ArrayList(lsp.types.DiagnosticTag) = .empty;
+        var tags: std.ArrayList(lsp.types.Diagnostic.Tag) = .empty;
 
         var message: []const u8 = eb.nullTerminatedString(err.msg);
 
         if (std.mem.startsWith(u8, message, "unused ")) {
-            try tags.append(arena, lsp.types.DiagnosticTag.Unnecessary);
+            try tags.append(arena, .Unnecessary);
         }
         if (std.mem.eql(u8, message, "found compile log statement")) {
             message = try std.fmt.allocPrint(arena, "{s}\n\nCompile Log Output:\n{s}", .{ message, eb.getCompileLogOutput() });
@@ -510,7 +510,7 @@ test DiagnosticsCollection {
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);
 
         try std.testing.expectEqual(1, diagnostics.items.len);
-        try std.testing.expectEqual(lsp.types.DiagnosticSeverity.Error, diagnostics.items[0].severity);
+        try std.testing.expectEqual(lsp.types.Diagnostic.Severity.Error, diagnostics.items[0].severity);
         try std.testing.expectEqualStrings("Living For The City", diagnostics.items[0].message);
         try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
     }
@@ -580,7 +580,7 @@ test "DiagnosticsCollection - compile_log_text" {
     try collection.collectLspDiagnosticsForDocument(src_uri, .@"utf-8", arena, &diagnostics);
 
     try std.testing.expectEqual(1, diagnostics.items.len);
-    try std.testing.expectEqual(lsp.types.DiagnosticSeverity.Error, diagnostics.items[0].severity);
+    try std.testing.expectEqual(lsp.types.Diagnostic.Severity.Error, diagnostics.items[0].severity);
     try std.testing.expectEqualStrings(
         \\found compile log statement
         \\

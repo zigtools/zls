@@ -24,7 +24,7 @@ const Builder = struct {
     arena: std.mem.Allocator,
     orig_handle: *DocumentStore.Handle,
     source_index: usize,
-    completions: std.ArrayList(types.CompletionItem),
+    completions: std.ArrayList(types.completion.Item),
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
 };
 
@@ -174,8 +174,8 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         }
     }
 
-    const documentation: @FieldType(types.CompletionItem, "documentation") = .{
-        .MarkupContent = .{
+    const documentation: @FieldType(types.completion.Item, "documentation") = .{
+        .markup_content = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
             .value = try std.mem.join(builder.arena, "\n\n", doc_comments.items),
         },
@@ -215,7 +215,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
         .switch_payload,
         .switch_inline_tag_payload,
         => {
-            var kind: types.CompletionItemKind = blk: {
+            var kind: types.completion.Item.Kind = blk: {
                 const parent_is_type_val = if (decl_handle.container_type) |container_ty| container_ty.is_type_val else null;
                 if (decl_handle.decl == .ast_node)
                     switch (decl_handle.handle.tree.nodeTag(decl_handle.decl.ast_node)) {
@@ -262,7 +262,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 }
             } else null;
 
-            const label_details: ?types.CompletionItemLabelDetails = blk: {
+            const label_details: ?types.completion.Item.LabelDetails = blk: {
                 if (!builder.server.client_capabilities.label_details_support) break :blk null;
 
                 break :blk .{ .description = detail };
@@ -272,7 +272,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) err
                 .label = name,
                 .kind = kind,
                 .documentation = if (compile_error_message) |message| .{
-                    .MarkupContent = .{
+                    .markup_content = .{
                         .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
                         .value = message,
                     },
@@ -305,7 +305,7 @@ fn functionTypeCompletion(
     func_name: []const u8,
     parent_container_ty: ?Analyser.Type,
     func_ty: Analyser.Type,
-) error{OutOfMemory}!?types.CompletionItem {
+) error{OutOfMemory}!?types.completion.Item {
     std.debug.assert(func_ty.isFunc());
 
     const info = func_ty.data.function;
@@ -363,14 +363,14 @@ fn functionTypeCompletion(
         },
     };
 
-    const kind: types.CompletionItemKind = if (func_ty.isTypeFunc())
+    const kind: types.completion.Item.Kind = if (func_ty.isTypeFunc())
         .Struct
     else if (has_self_param)
         .Method
     else
         .Function;
 
-    const label_details: ?types.CompletionItemLabelDetails = blk: {
+    const label_details: ?types.completion.Item.LabelDetails = blk: {
         if (!builder.server.client_capabilities.label_details_support) break :blk null;
 
         const detail = try builder.analyser.stringifyFunction(.{
@@ -421,9 +421,9 @@ fn functionTypeCompletion(
         .detail = details,
         .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
         .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-            .{ .InsertReplaceEdit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
+            .{ .insert_replace_edit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
         else
-            .{ .TextEdit = .{ .newText = new_text, .range = insert_range } },
+            .{ .text_edit = .{ .newText = new_text, .range = insert_range } },
     };
 }
 
@@ -535,11 +535,11 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .detail = builtin.signature,
             .insertTextFormat = insertTextFormat,
             .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                .{ .InsertReplaceEdit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
+                .{ .insert_replace_edit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
             else
-                .{ .TextEdit = .{ .newText = new_text[1..], .range = insert_range } },
+                .{ .text_edit = .{ .newText = new_text[1..], .range = insert_range } },
             .documentation = .{
-                .MarkupContent = .{
+                .markup_content = .{
                     .kind = .markdown,
                     .value = builtin.documentation,
                 },
@@ -568,7 +568,7 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!v
     try typeToCompletion(builder, ty);
 }
 
-fn kindToSortScore(kind: types.CompletionItemKind) []const u8 {
+fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
     return switch (kind) {
         .Module => "1", // used for packages
         .Folder => "2",
@@ -771,9 +771,9 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 .kind = if (entry.kind == .file) .File else .Folder,
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
                 .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                    .{ .InsertReplaceEdit = .{ .newText = insert_text, .insert = insert_range, .replace = replace_range } }
+                    .{ .insert_replace_edit = .{ .newText = insert_text, .insert = insert_range, .replace = replace_range } }
                 else
-                    .{ .TextEdit = .{ .newText = insert_text, .range = insert_range } },
+                    .{ .text_edit = .{ .newText = insert_text, .range = insert_range } },
             });
         }
     }
@@ -833,9 +833,9 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         for (completions.keys()) |*item| {
             if (item.kind == .Module and item.textEdit == null) {
                 item.textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                    .{ .InsertReplaceEdit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
+                    .{ .insert_replace_edit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
                 else
-                    .{ .TextEdit = .{ .newText = item.label, .range = insert_range } };
+                    .{ .text_edit = .{ .newText = item.label, .range = insert_range } };
             }
         }
     }
@@ -849,7 +849,7 @@ pub fn completionAtIndex(
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
-) error{OutOfMemory}!?types.CompletionList {
+) error{OutOfMemory}!?types.completion.List {
     std.debug.assert(source_index <= handle.tree.source.len);
 
     var builder: Builder = .{
@@ -905,9 +905,9 @@ pub fn completionAtIndex(
     for (completions) |*item| {
         if (item.textEdit == null) {
             item.textEdit = if (server.client_capabilities.supports_completion_insert_replace_support)
-                .{ .InsertReplaceEdit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
+                .{ .insert_replace_edit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
             else
-                .{ .TextEdit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
+                .{ .text_edit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
         }
         item.insertText = null;
         // https://github.com/microsoft/language-server-protocol/issues/898#issuecomment-593968008
@@ -930,15 +930,15 @@ pub fn completionAtIndex(
 //                    global error set / enum field set
 // <--------------------------------------------------------------------------->
 
-const CompletionSet = std.ArrayHashMapUnmanaged(types.CompletionItem, void, CompletionContext, false);
+const CompletionSet = std.ArrayHashMapUnmanaged(types.completion.Item, void, CompletionContext, false);
 
 const CompletionContext = struct {
-    pub fn hash(self: @This(), item: types.CompletionItem) u32 {
+    pub fn hash(self: @This(), item: types.completion.Item) u32 {
         _ = self;
         return std.array_hash_map.hashString(item.label);
     }
 
-    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
+    pub fn eql(self: @This(), a: types.completion.Item, b: types.completion.Item, b_index: usize) bool {
         _ = self;
         _ = b_index;
         return std.mem.eql(u8, a.label, b.label);
@@ -951,7 +951,7 @@ const CompletionNameAdapter = struct {
         return std.array_hash_map.hashString(name);
     }
 
-    pub fn eql(ctx: @This(), a: []const u8, b: types.CompletionItem, b_map_index: usize) bool {
+    pub fn eql(ctx: @This(), a: []const u8, b: types.completion.Item, b_map_index: usize) bool {
         _ = ctx;
         _ = b_map_index;
         return std.mem.eql(u8, a, b.label);
@@ -1008,7 +1008,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
             if (gop.key_ptr.documentation == null) {
                 if (try Analyser.getDocCommentsBeforeToken(builder.arena, &dependency_handle.tree, identifier_token)) |documentation| {
                     gop.key_ptr.documentation = .{
-                        .MarkupContent = .{
+                        .markup_content = .{
                             // TODO check if client supports markdown
                             .kind = .markdown,
                             .value = documentation,
@@ -1392,7 +1392,7 @@ fn collectContainerFields(
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        const completion_item: types.CompletionItem = switch (tree.nodeTag(decl.ast_node)) {
+        const completion_item: types.completion.Item = switch (tree.nodeTag(decl.ast_node)) {
             .container_field_init,
             .container_field_align,
             .container_field,

@@ -1391,7 +1391,7 @@ fn testHoverWithOptions(
         return error.InvalidResponse;
     };
 
-    const markup_context = response.contents.MarkupContent;
+    const markup_context = response.contents.markup_content;
 
     try std.testing.expectEqual(options.markup_kind, markup_context.kind);
     try zls.testing.expectEqualStrings(expected, markup_context.value);
