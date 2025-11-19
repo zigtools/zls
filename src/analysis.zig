@@ -2293,15 +2293,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 const import_param = params[0];
                 if (tree.nodeTag(import_param) != .string_literal) return null;
 
-                const import_str = tree.tokenSlice(tree.nodeMainToken(import_param));
+                const string_literal = tree.tokenSlice(tree.nodeMainToken(import_param));
+                const import_string = string_literal[1 .. string_literal.len - 1];
+                if (std.mem.endsWith(u8, import_string, ".zon")) {
+                    // TODO
+                    return null;
+                }
+
                 const import_uri = (try analyser.store.uriFromImportStr(
                     analyser.arena,
                     handle,
-                    import_str[1 .. import_str.len - 1],
+                    import_string,
                 )) orelse (try analyser.store.uriFromImportStr(
                     analyser.arena,
                     analyser.root_handle orelse return null,
-                    import_str[1 .. import_str.len - 1],
+                    import_string,
                 )) orelse return null;
 
                 const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
