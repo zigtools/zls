@@ -196,7 +196,7 @@ fn hoverDefinitionLabel(
 
     return .{
         .contents = .{
-            .MarkupContent = .{
+            .markup_content = .{
                 .kind = markup_kind,
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
@@ -270,7 +270,7 @@ fn hoverDefinitionBuiltin(
 
     return .{
         .contents = .{
-            .MarkupContent = .{
+            .markup_content = .{
                 .kind = markup_kind,
                 .value = contents.items,
             },
@@ -307,7 +307,7 @@ fn hoverDefinitionGlobal(
 
     return .{
         .contents = .{
-            .MarkupContent = .{
+            .markup_content = .{
                 .kind = markup_kind,
                 .value = hover_text,
             },
@@ -346,7 +346,7 @@ fn hoverDefinitionStructInit(
 
     return .{
         .contents = .{
-            .MarkupContent = .{
+            .markup_content = .{
                 .kind = markup_kind,
                 .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
             },
@@ -374,7 +374,7 @@ fn hoverDefinitionEnumLiteral(
 
     return .{
         .contents = .{
-            .MarkupContent = .{
+            .markup_content = .{
                 .kind = markup_kind,
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
             },
@@ -411,7 +411,7 @@ fn hoverDefinitionFieldAccess(
     }
 
     return .{
-        .contents = .{ .MarkupContent = .{
+        .contents = .{ .markup_content = .{
             .kind = markup_kind,
             .value = switch (content.items.len) {
                 0 => return null,
@@ -490,7 +490,7 @@ fn hoverDefinitionNumberLiteral(
     const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
 
     return .{
-        .contents = .{ .MarkupContent = .{
+        .contents = .{ .markup_content = .{
             .kind = markup_kind,
             .value = hover_text,
         } },

@@ -117,7 +117,7 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
 
     const test_uri = try ctx.addDocument(.{ .source = source });
 
-    const params: types.DocumentSymbolParams = .{
+    const params: types.DocumentSymbol.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
     };
 
@@ -131,7 +131,7 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
 
     var stack_buffer: [16][]const types.DocumentSymbol = undefined;
     var stack: std.ArrayList([]const types.DocumentSymbol) = .initBuffer(&stack_buffer);
-    stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
+    stack.appendAssumeCapacity(response.document_symbols);
 
     while (stack.items.len > 0) {
         const depth = stack.items.len - 1;

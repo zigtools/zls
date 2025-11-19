@@ -361,7 +361,7 @@ fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_ac
 
     const test_uri = try ctx.addDocument(.{ .source = text });
 
-    const params: types.SignatureHelpParams = .{
+    const params: types.SignatureHelp.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
         .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
     };

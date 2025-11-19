@@ -961,14 +961,14 @@ fn testOrganizeImports(before: []const u8, after: []const u8) !void {
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
-    try testDiagnostic(before, after, .{ .filter_kind = types.CodeActionKind.refactor });
+    try testDiagnostic(before, after, .{ .filter_kind = .refactor });
 }
 
 fn testDiagnostic(
     before: []const u8,
     after: []const u8,
     options: struct {
-        filter_kind: ?types.CodeActionKind = null,
+        filter_kind: ?types.CodeAction.Kind = null,
         filter_title: ?[]const u8 = null,
         want_zir: bool = true,
     },
@@ -997,7 +997,7 @@ fn testDiagnostic(
     const uri = try ctx.addDocument(.{ .source = source });
     const handle = ctx.server.document_store.getHandle(uri).?;
 
-    const params: types.CodeActionParams = .{
+    const params: types.CodeAction.Params = .{
         .textDocument = .{ .uri = uri.raw },
         .range = range,
         .context = .{
@@ -1016,7 +1016,7 @@ fn testDiagnostic(
     defer text_edits.deinit(allocator);
 
     for (response) |action| {
-        const code_action: types.CodeAction = action.CodeAction;
+        const code_action: types.CodeAction = action.code_action;
 
         if (options.filter_kind) |kind| {
             // check that `types.CodeActionContext.only` is being respected

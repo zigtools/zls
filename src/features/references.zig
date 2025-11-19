@@ -615,9 +615,9 @@ pub fn callsiteReferences(
 }
 
 pub const GeneralReferencesRequest = union(enum) {
-    rename: types.RenameParams,
-    references: types.ReferenceParams,
-    highlight: types.DocumentHighlightParams,
+    rename: types.rename.Params,
+    references: types.reference.Params,
+    highlight: types.DocumentHighlight.Params,
 
     fn uri(self: @This()) []const u8 {
         return switch (self) {

@@ -40,7 +40,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
-    const params: types.SelectionRangeParams = .{
+    const params: types.SelectionRange.Params = .{
         .textDocument = .{ .uri = test_uri.raw },
         .positions = &.{position},
     };

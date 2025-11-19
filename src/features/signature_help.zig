@@ -19,7 +19,7 @@ fn fnProtoToSignatureInfo(
     skip_self_param: bool,
     func_type: Analyser.Type,
     markup_kind: types.MarkupKind,
-) !types.SignatureInformation {
+) !types.SignatureHelp.Signature {
     const info = func_type.data.function;
 
     const label = try analyser.stringifyFunction(.{
@@ -40,7 +40,7 @@ fn fnProtoToSignatureInfo(
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
-    var params: std.ArrayList(types.ParameterInformation) = .empty;
+    var params: std.ArrayList(types.SignatureHelp.Signature.Parameter) = .empty;
     for (info.parameters) |param| {
         const param_label = try analyser.stringifyParameter(.{
             .info = param,
@@ -53,15 +53,15 @@ fn fnProtoToSignatureInfo(
 
         try params.append(arena, .{
             .label = .{ .string = param_label },
-            .documentation = if (param.doc_comments) |comment| .{ .MarkupContent = .{
+            .documentation = if (param.doc_comments) |comment| .{ .markup_content = .{
                 .kind = markup_kind,
                 .value = comment,
             } } else null,
         });
     }
-    return types.SignatureInformation{
+    return types.SignatureHelp.Signature{
         .label = label,
-        .documentation = if (info.doc_comments) |comment| .{ .MarkupContent = .{
+        .documentation = if (info.doc_comments) |comment| .{ .markup_content = .{
             .kind = markup_kind,
             .value = comment,
         } } else null,
@@ -76,7 +76,7 @@ pub fn getSignatureInfo(
     handle: *DocumentStore.Handle,
     absolute_index: usize,
     markup_kind: types.MarkupKind,
-) !?types.SignatureInformation {
+) !?types.SignatureHelp.Signature {
     const document_scope = try handle.getDocumentScope();
     const innermost_block_scope = Analyser.innermostScopeAtIndexWithTag(document_scope, absolute_index, .init(.{
         .block = true,
@@ -198,7 +198,7 @@ pub fn getSignatureInfo(
                     // Builtin token, find the builtin and construct signature information.
                     const builtin = data.builtins.get(tree.tokenSlice(expr_last_token)) orelse return null;
                     const param_infos = try arena.alloc(
-                        types.ParameterInformation,
+                        types.SignatureHelp.Signature.Parameter,
                         builtin.parameters.len,
                     );
                     for (param_infos, builtin.parameters) |*info, parameter| {
@@ -207,7 +207,7 @@ pub fn getSignatureInfo(
                             .documentation = null,
                         };
                     }
-                    return types.SignatureInformation{
+                    return types.SignatureHelp.Signature{
                         .label = builtin.signature,
                         .documentation = .{ .string = builtin.documentation },
                         .parameters = param_infos,

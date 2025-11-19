@@ -10,7 +10,7 @@ const tracy = @import("tracy");
 
 const FoldingRange = struct {
     loc: offsets.Loc,
-    kind: ?types.FoldingRangeKind = null,
+    kind: ?types.FoldingRange.Kind = null,
 };
 
 const Inclusivity = enum {
@@ -34,7 +34,7 @@ const Builder = struct {
 
     fn add(
         builder: *Builder,
-        kind: ?types.FoldingRangeKind,
+        kind: ?types.FoldingRange.Kind,
         start: Ast.TokenIndex,
         end: Ast.TokenIndex,
         start_reach: Inclusivity,
@@ -70,7 +70,7 @@ const Builder = struct {
 
     fn addNode(
         builder: *Builder,
-        kind: ?types.FoldingRangeKind,
+        kind: ?types.FoldingRange.Kind,
         node: Ast.Node.Index,
         start_reach: Inclusivity,
         end_reach: Inclusivity,

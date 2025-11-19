@@ -4,7 +4,7 @@ const types = @import("lsp").types;
 
 pub const Snipped = struct {
     label: []const u8,
-    kind: types.CompletionItemKind,
+    kind: types.completion.Item.Kind,
     text: ?[]const u8 = null,
 };
 

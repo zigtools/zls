@@ -870,7 +870,7 @@ fn notifyBuildStart(self: *DocumentStore) void {
             .jsonrpc = "2.0",
             .id = "progress",
             .method = "window/workDoneProgress/create",
-            .params = lsp.types.WorkDoneProgressCreateParams{
+            .params = lsp.types.window.work_done_progress.CreateParams{
                 .token = .{ .string = progress_token },
             },
         },
@@ -884,7 +884,7 @@ fn notifyBuildStart(self: *DocumentStore) void {
         .method = "$/progress",
         .params = .{
             .token = progress_token,
-            .value = lsp.types.WorkDoneProgressBegin{
+            .value = lsp.types.window.work_done_progress.Begin{
                 .title = "Loading build configuration",
             },
         },
@@ -917,7 +917,7 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
         .method = "$/progress",
         .params = .{
             .token = progress_token,
-            .value = lsp.types.WorkDoneProgressEnd{
+            .value = lsp.types.window.work_done_progress.End{
                 .message = message,
             },
         },

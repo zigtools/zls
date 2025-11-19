@@ -9,7 +9,7 @@ const types = @import("lsp").types;
 /// the given `index` must belong to the given InternPool
 pub fn dotCompletions(
     arena: std.mem.Allocator,
-    completions: *std.ArrayList(types.CompletionItem),
+    completions: *std.ArrayList(types.completion.Item),
     ip: *InternPool,
     index: InternPool.Index,
 ) error{OutOfMemory}!void {
@@ -426,14 +426,14 @@ test "dotCompletions - single pointer indirection" {
 fn testCompletion(
     ip: *InternPool,
     index: InternPool.Index,
-    expected: []const types.CompletionItem,
+    expected: []const types.completion.Item,
 ) !void {
     const gpa = std.testing.allocator;
     var arena_allocator: std.heap.ArenaAllocator = .init(gpa);
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
-    var completions: std.ArrayList(types.CompletionItem) = .empty;
+    var completions: std.ArrayList(types.completion.Item) = .empty;
 
     try dotCompletions(arena, &completions, ip, index);
 

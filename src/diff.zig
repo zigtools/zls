@@ -66,7 +66,7 @@ pub fn edits(
 pub fn applyContentChanges(
     allocator: std.mem.Allocator,
     text: []const u8,
-    content_changes: []const types.TextDocumentContentChangeEvent,
+    content_changes: []const types.TextDocument.ContentChangeEvent,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![:0]const u8 {
     const tracy_zone = tracy.trace(@src());
@@ -77,8 +77,8 @@ pub fn applyContentChanges(
         while (i != 0) {
             i -= 1;
             switch (content_changes[i]) {
-                .literal_1 => |content_change| break :blk .{ i, content_change.text }, // TextDocumentContentChangeWholeDocument
-                .literal_0 => continue, // TextDocumentContentChangePartial
+                .text_document_content_change_whole_document => |content_change| break :blk .{ i, content_change.text },
+                .text_document_content_change_partial => continue,
             }
         }
         break :blk .{ null, text };
@@ -93,7 +93,7 @@ pub fn applyContentChanges(
     const changes = content_changes[if (last_full_text_index) |index| index + 1 else 0..];
 
     for (changes) |item| {
-        const content_change = item.literal_0; // TextDocumentContentChangePartial
+        const content_change = item.text_document_content_change_partial;
 
         const loc = offsets.rangeToLoc(text_array.items, content_change.range, encoding);
         try text_array.replaceRange(allocator, loc.start, loc.end - loc.start, content_change.text);

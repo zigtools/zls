@@ -97,7 +97,7 @@ const Builder = struct {
         try self.addDirect(token_type, token_modifiers, offsets.tokenToLoc(tree, token));
     }
 
-    fn finish(self: *Builder) error{OutOfMemory}!types.SemanticTokens {
+    fn finish(self: *Builder) error{OutOfMemory}!types.semantic_tokens.Result {
         try self.handleComments(self.previous_source_index, self.handle.tree.source.len);
         return .{ .data = try self.token_buffer.toOwnedSlice(self.arena) };
     }
@@ -1226,7 +1226,7 @@ pub fn writeSemanticTokens(
     encoding: offsets.Encoding,
     limited: bool,
     overlappingTokenSupport: bool,
-) error{OutOfMemory}!types.SemanticTokens {
+) error{OutOfMemory}!types.semantic_tokens.Result {
     var builder = Builder{
         .arena = arena,
         .analyser = analyser,

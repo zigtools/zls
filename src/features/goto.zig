@@ -29,7 +29,7 @@ fn gotoDefinitionSymbol(
     decl_handle: Analyser.DeclWithHandle,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -75,7 +75,7 @@ fn gotoDefinitionLabel(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -91,7 +91,7 @@ fn gotoDefinitionGlobal(
     pos_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -107,7 +107,7 @@ fn gotoDefinitionStructInit(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -134,7 +134,7 @@ fn gotoDefinitionEnumLiteral(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -151,7 +151,7 @@ fn gotoDefinitionBuiltin(
     handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -205,7 +205,7 @@ fn gotoDefinitionFieldAccess(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]const types.DefinitionLink {
+) error{OutOfMemory}!?[]const types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -213,7 +213,7 @@ fn gotoDefinitionFieldAccess(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
-    var locs: std.ArrayList(types.DefinitionLink) = .empty;
+    var locs: std.ArrayList(types.Definition.Link) = .empty;
 
     for (accesses) |access| {
         if (try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), access, kind, offset_encoding)) |l|
@@ -232,7 +232,7 @@ fn gotoDefinitionString(
     pos_context: Analyser.PositionContext,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.DefinitionLink {
+) error{OutOfMemory}!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -279,8 +279,8 @@ pub fn gotoHandler(
     server: *Server,
     arena: std.mem.Allocator,
     kind: GotoKind,
-    request: types.DefinitionParams,
-) Server.Error!lsp.ResultType("textDocument/definition") {
+    request: types.Definition.Params,
+) Server.Error!?types.Definition.Result {
     const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidParams,
@@ -300,7 +300,7 @@ pub fn gotoHandler(
         .field_access => |loc| blk: {
             const links = try gotoDefinitionFieldAccess(&analyser, arena, handle, source_index, loc, kind, server.offset_encoding) orelse return null;
             if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
-                return .{ .array_of_DefinitionLink = links };
+                return .{ .definition_links = links };
             }
             switch (links.len) {
                 0 => unreachable,
@@ -319,12 +319,12 @@ pub fn gotoHandler(
 
     if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
         return .{
-            .array_of_DefinitionLink = try arena.dupe(types.DefinitionLink, &.{response}),
+            .definition_links = try arena.dupe(types.Definition.Link, &.{response}),
         };
     }
 
     return .{
-        .Definition = .{ .Location = .{
+        .definition = .{ .location = .{
             .uri = response.targetUri,
             .range = response.targetSelectionRange,
         } },
