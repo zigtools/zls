@@ -112,21 +112,18 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
         .container_field_align,
         .container_field,
         => blk: {
-            const container_kind = tree.tokenTag(tree.nodeMainToken(ctx.parent_container));
-            const is_struct = container_kind == .keyword_struct;
-
-            const kind: types.SymbolKind = switch (tree.nodeTag(ctx.parent_container)) {
-                .root => .Field,
+            const kind: types.SymbolKind, const is_struct = switch (tree.nodeTag(ctx.parent_container)) {
+                .root => .{ .Field, true },
                 .container_decl,
                 .container_decl_trailing,
                 .container_decl_arg,
                 .container_decl_arg_trailing,
                 .container_decl_two,
                 .container_decl_two_trailing,
-                => switch (container_kind) {
-                    .keyword_struct => .Field,
-                    .keyword_union => .Field,
-                    .keyword_enum => .EnumMember,
+                => switch (tree.tokenTag(tree.nodeMainToken(ctx.parent_container))) {
+                    .keyword_struct => .{ .Field, true },
+                    .keyword_union => .{ .Field, false },
+                    .keyword_enum => .{ .EnumMember, false },
                     .keyword_opaque => break :blk null,
                     else => unreachable,
                 },
@@ -136,7 +133,7 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
                 .tagged_union_enum_tag_trailing,
                 .tagged_union_two,
                 .tagged_union_two_trailing,
-                => .Field,
+                => .{ .Field, false },
                 else => unreachable,
             };
 

@@ -63,6 +63,14 @@ test "test decl" {
     );
 }
 
+test "root container field" {
+    try testDocumentSymbol(
+        \\foo: u32,
+    ,
+        \\Field foo
+    );
+}
+
 // https://github.com/zigtools/zls/issues/1583
 test "builtin" {
     try testDocumentSymbol(
@@ -90,6 +98,14 @@ test "nested struct with self" {
         \\  Constant Self
         \\  Function foo
         \\  Constant Bar
+    );
+}
+
+test "invalid top level enum literal" {
+    try testDocumentSymbol(
+        \\.foo: u32,
+    ,
+        \\
     );
 }
 
