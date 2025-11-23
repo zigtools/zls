@@ -762,7 +762,11 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     }
 
     const file_contents = self.readFile(uri) orelse return null;
-    return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
+    return self.createAndStoreDocument(
+        uri,
+        file_contents,
+        .{ .lsp_synced = false, .load_build_file_behaviour = .never },
+    ) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri.raw, err });
         return null;
     };
@@ -828,7 +832,11 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
     }
 
     const duped_text = try self.allocator.dupeZ(u8, text);
-    _ = try self.createAndStoreDocument(uri, duped_text, true);
+    _ = try self.createAndStoreDocument(
+        uri,
+        duped_text,
+        .{ .lsp_synced = true, .load_build_file_behaviour = .load_but_dont_update },
+    );
 }
 
 /// Closes a document that has been synced over the LSP protocol (`textDocument/didClose`).
@@ -865,7 +873,7 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
         log.warn("Document modified without being opened: {s}", .{uri.raw});
     }
 
-    _ = try self.createAndStoreDocument(uri, new_text, true);
+    _ = try self.createAndStoreDocument(uri, new_text, .{ .lsp_synced = true, .load_build_file_behaviour = .only_update });
 }
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
@@ -889,7 +897,11 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
             if (handle.isLspSynced()) return false;
         }
         const file_contents = self.readFile(uri) orelse return false;
-        _ = try self.createAndStoreDocument(uri, file_contents, false);
+        _ = try self.createAndStoreDocument(
+            uri,
+            file_contents,
+            .{ .lsp_synced = false, .load_build_file_behaviour = .only_update },
+        );
     }
 
     return true;
@@ -1471,25 +1483,38 @@ fn uriInImports(
     return false;
 }
 
+const CreateAndStoreOptions = struct {
+    lsp_synced: bool,
+    load_build_file_behaviour: enum { load_but_dont_update, only_update, never },
+};
+
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
 fn createAndStoreDocument(
     self: *DocumentStore,
     uri: Uri,
     text: [:0]const u8,
-    lsp_synced: bool,
+    options: CreateAndStoreOptions,
 ) error{OutOfMemory}!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_handle = Handle.init(self, uri, text, lsp_synced) catch |err| {
+    var new_handle = Handle.init(self, uri, text, options.lsp_synced) catch |err| {
         self.allocator.free(text);
         return err;
     };
     errdefer new_handle.deinit();
 
     if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
+        switch (options.load_build_file_behaviour) {
+            .load_but_dont_update => {
+                _ = self.getOrLoadBuildFile(uri);
+            },
+            .only_update => {
+                self.invalidateBuildFile(uri);
+            },
+            .never => {},
+        }
     }
 
     self.mutex.lockUncancelable(self.io);
