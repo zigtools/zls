@@ -143,7 +143,7 @@ test "autofix comment" {
             .relatedInformation = &.{
                 .{
                     .location = .{
-                        .uri = "untitled:/Untitled-0.zig",
+                        .uri = "untitled:///Untitled-0.zig",
                         .range = .{
                             .start = .{ .line = 1, .character = 10 },
                             .end = .{ .line = 1, .character = 13 },

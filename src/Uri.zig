@@ -7,6 +7,7 @@ const Uri = @This();
 ///   - consistent percent encoding (implementations may escape differently)
 ///   - consistent casing of the Windows drive letter
 ///   - consistent path seperator on Windows (convert '\\' to '/')
+///   - always add an authority component even if unnecessary
 raw: []const u8,
 
 pub fn parse(allocator: std.mem.Allocator, text: []const u8) (std.Uri.ParseError || error{OutOfMemory})!Uri {
@@ -22,9 +23,8 @@ fn parseWithOs(
 
     const capacity = capacity: {
         var capacity: usize = 0;
-        capacity += uri.scheme.len + ":".len;
+        capacity += uri.scheme.len + ":".len + "//".len;
         if (uri.host) |host| {
-            capacity += "//".len;
             if (uri.user) |user| {
                 capacity += user.percent_encoded.len;
                 if (uri.password) |password| {
@@ -47,9 +47,8 @@ fn parseWithOs(
     errdefer result.deinit(allocator);
 
     result.appendSliceAssumeCapacity(uri.scheme);
-    result.appendAssumeCapacity(':');
+    result.appendSliceAssumeCapacity("://");
     if (uri.host) |host| {
-        result.appendSliceAssumeCapacity("//");
         if (uri.user) |user| {
             normalizePercentEncoded(&result, user.percent_encoded, &isUserChar);
             if (uri.password) |password| {
@@ -92,15 +91,15 @@ fn parseWithOs(
 }
 
 test "parse (posix)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/foo/main.zig", false);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo/main.zig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/foo/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///foo/main.zig", uri.raw);
 }
 
 test "parse (windows)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/C:/foo\\main.zig", true);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///C:/foo\\main.zig", true);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/c:/foo/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/foo/main.zig", uri.raw);
 }
 
 test "parse - UNC (windows)" {
@@ -109,34 +108,40 @@ test "parse - UNC (windows)" {
     try std.testing.expectEqualStrings("file://wsl.localhost/foo/main.zig", uri.raw);
 }
 
-test "parse - normalize percent encoding (posix)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/foo%5cmain%2ezig", false);
+test "parse - always add authority component (posix)" {
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/foo/main.zig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/foo%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///foo/main.zig", uri.raw);
+}
+
+test "parse - normalize percent encoding (posix)" {
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo%5cmain%2ezig", false);
+    defer uri.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("file:///foo%5Cmain.zig", uri.raw);
 }
 
 test "parse - convert percent encoded '\\' to '/' (windows)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/C:%5Cmain.zig", true);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///C:%5Cmain.zig", true);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/c:/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/main.zig", uri.raw);
 }
 
 test "parse - preserve percent encoded '\\' (posix)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/foo%5Cmain.zig", false);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo%5Cmain.zig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/foo%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///foo%5Cmain.zig", uri.raw);
 }
 
 test "parse - percent encoded drive letter (windows)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:/%43%3a%5Cfoo\\main.zig", true);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///%43%3a%5Cfoo\\main.zig", true);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/c:/foo/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/foo/main.zig", uri.raw);
 }
 
 test "parse - windows like path on posix" {
     const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///C:%5Cmain.zig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:/C:%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///C:%5Cmain.zig", uri.raw);
 }
 
 pub fn deinit(uri: Uri, allocator: std.mem.Allocator) void {
@@ -181,7 +186,7 @@ fn fromPathWithOs(
     path: []const u8,
     comptime is_windows: bool,
 ) error{OutOfMemory}!Uri {
-    var buf: std.ArrayList(u8) = try .initCapacity(allocator, path.len + 6);
+    var buf: std.ArrayList(u8) = try .initCapacity(allocator, path.len + "file:///".len);
     errdefer buf.deinit(allocator);
 
     buf.appendSliceAssumeCapacity("file:");
@@ -192,7 +197,9 @@ fn fromPathWithOs(
     {
         // UNC path
     } else if (!std.mem.startsWith(u8, path, "/")) {
-        buf.appendAssumeCapacity('/');
+        buf.appendSliceAssumeCapacity("///");
+    } else {
+        buf.appendSliceAssumeCapacity("//");
     }
 
     var value = path;
@@ -226,7 +233,7 @@ test "fromPath (posix)" {
     const uri = try fromPathWithOs(std.testing.allocator, "/home/main.zig", false);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/home/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///home/main.zig", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, false);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -237,7 +244,7 @@ test "fromPath (windows)" {
     const uri = try fromPathWithOs(std.testing.allocator, "C:/main.zig", true);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/c:/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/main.zig", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, true);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -259,7 +266,7 @@ test "fromPath - preserve '\\' (posix)" {
     const uri = try fromPathWithOs(std.testing.allocator, "/home\\main.zig", false);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/home%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///home%5Cmain.zig", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, false);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -270,7 +277,7 @@ test "fromPath - convert '\\' to '/' (windows)" {
     const uri = try fromPathWithOs(std.testing.allocator, "C:\\main.zig", true);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/c:/main.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/main.zig", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, true);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -281,7 +288,7 @@ test "fromPath - root directory (posix)" {
     const uri = try fromPathWithOs(std.testing.allocator, "/", false);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/", uri.raw);
+    try std.testing.expectEqualStrings("file:///", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, false);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -292,7 +299,7 @@ test "fromPath - root directory (windows)" {
     const uri = try fromPathWithOs(std.testing.allocator, "C:/", true);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/c:/", uri.raw);
+    try std.testing.expectEqualStrings("file:///c:/", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, true);
     defer reparsed_uri.deinit(std.testing.allocator);
@@ -303,7 +310,7 @@ test "fromPath - windows like path on posix" {
     const uri = try fromPathWithOs(std.testing.allocator, "/C:\\main.zig", false);
     defer uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:/C:%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///C:%5Cmain.zig", uri.raw);
 
     const reparsed_uri: Uri = try .parseWithOs(std.testing.allocator, uri.raw, false);
     defer reparsed_uri.deinit(std.testing.allocator);
