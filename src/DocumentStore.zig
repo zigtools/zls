@@ -14,6 +14,7 @@ const tracy = @import("tracy");
 const translate_c = @import("translate_c.zig");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
+const TrigramStore = @import("TrigramStore.zig");
 
 const DocumentStore = @This();
 
@@ -26,6 +27,7 @@ thread_pool: *std.Thread.Pool,
 handles: Uri.ArrayHashMap(*Handle) = .empty,
 build_files: if (supports_build_system) Uri.ArrayHashMap(*BuildFile) else void = if (supports_build_system) .empty else {},
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
+trigram_stores: Uri.ArrayHashMap(TrigramStore) = .empty,
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?*lsp.Transport = null,
@@ -34,6 +36,8 @@ lsp_capabilities: struct {
     supports_semantic_tokens_refresh: bool = false,
     supports_inlay_hints_refresh: bool = false,
 } = .{},
+currently_loading_uris: Uri.ArrayHashMap(void) = .empty,
+wait_for_currently_loading_uri: std.Thread.Condition = .{},
 
 pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
 pub const Hash = [Hasher.mac_length]u8;
@@ -194,6 +198,7 @@ pub const Handle = struct {
         lazy_condition: std.Thread.Condition = .{},
 
         import_uris: ?[]Uri = null,
+        trigram_store: TrigramStore = undefined,
         document_scope: DocumentScope = undefined,
         zzoiir: ZirOrZoir = undefined,
 
@@ -232,6 +237,11 @@ pub const Handle = struct {
         /// `false` indicates the document only exists because it is a dependency of another document
         /// or has been closed with `textDocument/didClose`.
         lsp_synced: bool = false,
+        /// true if a thread has acquired the permission to compute the `TrigramStore`
+        /// all other threads will wait until the given thread has computed the `TrigramStore` before reading it.
+        has_trigram_store_lock: bool = false,
+        /// true if `handle.impl.trigram_store` has been set
+        has_trigram_store: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
@@ -242,7 +252,7 @@ pub const Handle = struct {
         /// all other threads will wait until the given thread has computed the `std.zig.Zir` or `std.zig.Zoir` before reading it.
         /// true if `handle.impl.zir` has been set
         has_zzoiir: bool = false,
-        _: u27 = 0,
+        _: u25 = 0,
     };
 
     /// Takes ownership of `text` on success.
@@ -287,6 +297,7 @@ pub const Handle = struct {
             .zon => self.impl.zzoiir.zon.deinit(allocator),
         };
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
+        if (status.has_trigram_store) self.impl.trigram_store.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
@@ -364,6 +375,23 @@ pub const Handle = struct {
             std.debug.assert(self.getStatus().has_document_scope);
         }
         return self.impl.document_scope;
+    }
+
+    pub fn getTrigramStore(self: *Handle) error{OutOfMemory}!TrigramStore {
+        if (self.getStatus().has_trigram_store) return self.impl.trigram_store;
+        return try self.getLazy(TrigramStore, "trigram_store", struct {
+            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!TrigramStore {
+                return try .init(allocator, &handle.tree);
+            }
+        });
+    }
+
+    /// Asserts that `getTrigramStore` has been previously called on `handle`.
+    pub fn getTrigramStoreCached(self: *Handle) TrigramStore {
+        if (builtin.mode == .Debug) {
+            std.debug.assert(self.getStatus().has_trigram_store);
+        }
+        return self.impl.trigram_store;
     }
 
     pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
@@ -603,6 +631,15 @@ pub fn deinit(self: *DocumentStore) void {
     }
     self.handles.deinit(self.allocator);
 
+    for (self.trigram_stores.keys(), self.trigram_stores.values()) |uri, *trigram_store| {
+        uri.deinit(self.allocator);
+        trigram_store.deinit(self.allocator);
+    }
+    self.trigram_stores.deinit(self.allocator);
+
+    std.debug.assert(self.currently_loading_uris.count() == 0);
+    self.currently_loading_uris.deinit(self.allocator);
+
     if (supports_build_system) {
         for (self.build_files.values()) |build_file| {
             build_file.deinit(self.allocator);
@@ -686,9 +723,47 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.getHandle(uri)) |handle| return handle;
+    {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        while (true) {
+            if (self.handles.get(uri)) |handle| return handle;
+
+            const gop = self.currently_loading_uris.getOrPutValue(
+                self.allocator,
+                uri,
+                {},
+            ) catch return null;
+
+            if (!gop.found_existing) {
+                break;
+            }
+
+            var mutex: std.Thread.Mutex = .{};
+
+            mutex.lock();
+            defer mutex.unlock();
+
+            self.lock.unlock();
+            self.wait_for_currently_loading_uri.wait(&mutex);
+            self.lock.lock();
+        }
+    }
+
+    defer {
+        self.lock.lock();
+        defer self.lock.unlock();
+        std.debug.assert(self.currently_loading_uris.swapRemove(uri));
+        self.wait_for_currently_loading_uri.broadcast();
+    }
+
     const file_contents = self.readFile(uri) orelse return null;
-    return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
+    return self.createAndStoreDocument(
+        uri,
+        file_contents,
+        .{ .lsp_synced = false, .load_build_file_behaviour = .never },
+    ) catch |err| {
         log.err("failed to store document '{s}': {}", .{ uri.raw, err });
         return null;
     };
@@ -754,7 +829,11 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
     }
 
     const duped_text = try self.allocator.dupeZ(u8, text);
-    _ = try self.createAndStoreDocument(uri, duped_text, true);
+    _ = try self.createAndStoreDocument(
+        uri,
+        duped_text,
+        .{ .lsp_synced = true, .load_build_file_behaviour = .load_but_dont_update },
+    );
 }
 
 /// Closes a document that has been synced over the LSP protocol (`textDocument/didClose`).
@@ -791,7 +870,7 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
         log.warn("Document modified without being opened: {s}", .{uri.raw});
     }
 
-    _ = try self.createAndStoreDocument(uri, new_text, true);
+    _ = try self.createAndStoreDocument(uri, new_text, .{ .lsp_synced = true, .load_build_file_behaviour = .only_update });
 }
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
@@ -815,7 +894,11 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
             if (handle.isLspSynced()) return false;
         }
         const file_contents = self.readFile(uri) orelse return false;
-        _ = try self.createAndStoreDocument(uri, file_contents, false);
+        _ = try self.createAndStoreDocument(
+            uri,
+            file_contents,
+            .{ .lsp_synced = false, .load_build_file_behaviour = .only_update },
+        );
     }
 
     return true;
@@ -928,6 +1011,9 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
 }
 
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     {
         build_file.impl.mutex.lock();
         defer build_file.impl.mutex.unlock();
@@ -1006,6 +1092,58 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
             ) catch {};
         }
     }
+}
+
+pub fn loadTrigramStores(
+    store: *DocumentStore,
+    filter_uris: []const std.Uri,
+) error{OutOfMemory}![]*DocumentStore.Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var handles: std.ArrayListUnmanaged(*DocumentStore.Handle) = try .initCapacity(store.allocator, store.handles.count());
+    errdefer handles.deinit(store.allocator);
+
+    for (store.handles.values()) |handle| {
+        var handle_uri = std.Uri.parse(handle.uri.raw) catch unreachable;
+        for (filter_uris) |filter_uri| {
+            if (!std.ascii.eqlIgnoreCase(handle_uri.scheme, filter_uri.scheme)) continue;
+            if (std.mem.startsWith(u8, handle_uri.path.percent_encoded, filter_uri.path.percent_encoded)) break;
+        } else break;
+        handles.appendAssumeCapacity(handle);
+    }
+
+    if (builtin.single_threaded) {
+        for (handles.items) |handle| {
+            _ = try handle.getTrigramStore();
+        }
+        return try handles.toOwnedSlice(store.allocator);
+    }
+
+    const loadTrigramStore = struct {
+        fn loadTrigramStore(
+            handle: *Handle,
+            did_out_of_memory: *std.atomic.Value(bool),
+        ) void {
+            _ = handle.getTrigramStore() catch {
+                did_out_of_memory.store(true, .release);
+            };
+        }
+    }.loadTrigramStore;
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    var did_out_of_memory: std.atomic.Value(bool) = .init(false);
+
+    for (handles.items) |handle| {
+        const status = handle.getStatus();
+        if (status.has_trigram_store) continue;
+        store.thread_pool.spawnWg(&wait_group, loadTrigramStore, .{ handle, &did_out_of_memory });
+    }
+    store.thread_pool.waitAndWork(&wait_group);
+
+    if (did_out_of_memory.load(.acquire)) return error.OutOfMemory;
+
+    return try handles.toOwnedSlice(store.allocator);
 }
 
 pub fn isBuildFile(uri: Uri) bool {
@@ -1190,6 +1328,9 @@ fn buildDotZigExists(dir_path: []const u8) bool {
 /// See `Handle.getAssociatedBuildFileUri`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}![]*BuildFile {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (isInStd(uri)) return &.{};
 
     var potential_build_files: std.ArrayList(*BuildFile) = .empty;
@@ -1332,25 +1473,38 @@ fn uriInImports(
     return false;
 }
 
+const CreateAndStoreOptions = struct {
+    lsp_synced: bool,
+    load_build_file_behaviour: enum { load_but_dont_update, only_update, never },
+};
+
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
 fn createAndStoreDocument(
     self: *DocumentStore,
     uri: Uri,
     text: [:0]const u8,
-    lsp_synced: bool,
+    options: CreateAndStoreOptions,
 ) error{OutOfMemory}!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_handle = Handle.init(self.allocator, uri, text, lsp_synced) catch |err| {
+    var new_handle = Handle.init(self.allocator, uri, text, options.lsp_synced) catch |err| {
         self.allocator.free(text);
         return err;
     };
     errdefer new_handle.deinit();
 
     if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
-        _ = self.getOrLoadBuildFile(uri);
+        switch (options.load_build_file_behaviour) {
+            .load_but_dont_update => {
+                _ = self.getOrLoadBuildFile(uri);
+            },
+            .only_update => {
+                self.invalidateBuildFile(uri);
+            },
+            .never => {},
+        }
     }
 
     self.lock.lock();
@@ -1360,17 +1514,12 @@ fn createAndStoreDocument(
     errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
 
     if (gop.found_existing) {
-        if (lsp_synced) {
-            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
-            gop.value_ptr.*.impl.associated_build_file = .init;
+        new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
+        gop.value_ptr.*.impl.associated_build_file = .init;
 
-            new_handle.uri = gop.key_ptr.*;
-            gop.value_ptr.*.deinit();
-            gop.value_ptr.*.* = new_handle;
-        } else {
-            // TODO prevent concurrent `createAndStoreDocument` invocations from racing each other
-            new_handle.deinit();
-        }
+        new_handle.uri = gop.key_ptr.*;
+        gop.value_ptr.*.deinit();
+        gop.value_ptr.*.* = new_handle;
     } else {
         gop.key_ptr.* = try uri.dupe(self.allocator);
         errdefer gop.key_ptr.*.deinit(self.allocator);
@@ -1383,6 +1532,75 @@ fn createAndStoreDocument(
     }
 
     return gop.value_ptr.*;
+}
+
+pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const workspace_path = try directory_uri.toFsPath(store.allocator);
+    defer store.allocator.free(workspace_path);
+
+    var workspace_dir = try std.fs.openDirAbsolute(workspace_path, .{ .iterate = true });
+    defer workspace_dir.close();
+
+    var walker = try workspace_dir.walk(store.allocator);
+    defer walker.deinit();
+
+    var not_currently_loading_uris: std.ArrayListUnmanaged(Uri) = .empty;
+    defer {
+        for (not_currently_loading_uris.items) |uri| uri.deinit(store.allocator);
+        not_currently_loading_uris.deinit(store.allocator);
+    }
+
+    var file_count: usize = 0;
+    {
+        while (try walker.next()) |entry| {
+            if (entry.kind == .directory) {
+                if (std.mem.startsWith(u8, entry.basename, ".") or std.mem.eql(u8, entry.basename, "zig-cache")) {
+                    walker.leave();
+                }
+                continue;
+            }
+            if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
+
+            file_count += 1;
+
+            const path = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+            defer store.allocator.free(path);
+
+            try not_currently_loading_uris.ensureUnusedCapacity(store.allocator, 1);
+
+            const uri: Uri = try .fromPath(store.allocator, path);
+            errdefer comptime unreachable;
+
+            store.lock.lockShared();
+            defer store.lock.unlockShared();
+
+            if (!store.handles.contains(uri) and
+                !store.currently_loading_uris.contains(uri))
+            {
+                not_currently_loading_uris.appendAssumeCapacity(uri);
+            }
+        }
+    }
+
+    errdefer comptime unreachable;
+
+    const S = struct {
+        fn getOrLoadHandleVoid(s: *DocumentStore, uri: Uri) void {
+            _ = s.getOrLoadHandle(uri);
+            uri.deinit(s.allocator);
+        }
+    };
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    while (not_currently_loading_uris.pop()) |uri| {
+        store.thread_pool.spawnWg(&wait_group, S.getOrLoadHandleVoid, .{ store, uri });
+    }
+    store.thread_pool.waitAndWork(&wait_group);
+
+    return file_count;
 }
 
 pub const CImportHandle = struct {

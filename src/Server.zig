@@ -563,7 +563,7 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .documentRangeFormattingProvider = .{ .bool = false },
             .foldingRangeProvider = .{ .bool = true },
             .selectionRangeProvider = .{ .bool = true },
-            .workspaceSymbolProvider = .{ .bool = false },
+            .workspaceSymbolProvider = .{ .bool = true },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = true,
@@ -855,7 +855,6 @@ const Workspace = struct {
 fn addWorkspace(server: *Server, uri: Uri) error{OutOfMemory}!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
-    log.info("added Workspace Folder: {s}", .{uri.raw});
 
     if (BuildOnSaveSupport.isSupportedComptime() and
         // Don't initialize build on save until initialization finished.
@@ -868,6 +867,16 @@ fn addWorkspace(server: *Server, uri: Uri) error{OutOfMemory}!void {
             .restart = false,
         });
     }
+
+    const file_count = server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
+        error.UnsupportedScheme => return, // https://github.com/microsoft/language-server-protocol/issues/1264
+        else => {
+            log.err("failed to load files in workspace '{s}': {}", .{ uri.raw, err });
+            return;
+        },
+    };
+
+    log.info("added Workspace Folder: {s} ({d} files)", .{ uri.raw, file_count });
 }
 
 fn removeWorkspace(server: *Server, uri: Uri) void {
@@ -1563,6 +1572,10 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) Error!?types.workspace.Symbol.Result {
+    return try @import("features/workspace_symbols.zig").handler(server, arena, request);
+}
+
 const HandledRequestParams = union(enum) {
     initialize: types.InitializeParams,
     shutdown,
@@ -1586,6 +1599,7 @@ const HandledRequestParams = union(enum) {
     @"textDocument/codeAction": types.CodeAction.Params,
     @"textDocument/foldingRange": types.FoldingRange.Params,
     @"textDocument/selectionRange": types.SelectionRange.Params,
+    @"workspace/symbol": types.workspace.Symbol.Params,
     other: lsp.MethodWithParams,
 };
 
@@ -1630,6 +1644,7 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/codeAction",
             .@"textDocument/foldingRange",
             .@"textDocument/selectionRange",
+            .@"workspace/symbol",
             => return false,
             .other => return false,
         },
@@ -1814,6 +1829,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
         .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
         .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
         .other => return null,
     };
 }
