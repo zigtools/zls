@@ -1,10 +1,8 @@
 {
   "dependencies": {},
   "modules": {
-    "root.zig": {
-      "import_table": {
-        "bar": "root.zig"
-      },
+    ".zig-local-cache/generated.zig": {
+      "import_table": {},
       "c_macros": [],
       "include_dirs": []
     }
