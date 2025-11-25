@@ -54,6 +54,7 @@ jobs:
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
       - name: prefetch dependencies (workaround)
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           zig fetch https://github.com/ziglibs/known-folders/archive/bafef170a73c064dc706fcfbdc2e406a35681a9c.tar.gz
           zig fetch https://github.com/ziglibs/diffz/archive/36fc805f459677093c93c210e8f9aed28be13847.tar.gz
