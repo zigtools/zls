@@ -2188,198 +2188,175 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             const params = tree.builtinCallParams(&buffer, node).?;
 
             const call_name = tree.tokenSlice(tree.nodeMainToken(node));
-            if (std.mem.eql(u8, call_name, "@This")) {
-                if (params.len != 0) return null;
-                return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
-            }
 
-            const cast_map: std.StaticStringMap(usize) = .initComptime(.{
-                .{ "@as", 0 },
-                .{ "@atomicLoad", 0 },
-                .{ "@atomicRmw", 0 },
-                .{ "@cVaArg", 1 },
-                .{ "@extern", 0 },
-                .{ "@mulAdd", 0 },
-                .{ "@unionInit", 0 },
-            });
-            if (cast_map.get(call_name)) |idx| {
-                if (params.len <= idx) return null;
-                const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[idx], handle))) orelse return null;
-                return try ty.instanceTypeVal(analyser);
-            }
+            const item = std.zig.BuiltinFn.list.get(call_name) orelse return null;
+            switch (item.tag) {
+                .This => {
+                    if (params.len != 0) return null;
+                    return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
+                },
+                .as,
+                .atomic_load,
+                .atomic_rmw,
+                .@"extern",
+                .mul_add,
+                .union_init,
+                => {
+                    if (params.len < 1) return null;
+                    const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    return try ty.instanceTypeVal(analyser);
+                },
 
-            const float_map: std.StaticStringMap(void) = .initComptime(.{
-                .{"@sqrt"},
-                .{"@sin"},
-                .{"@cos"},
-                .{"@tan"},
-                .{"@exp"},
-                .{"@exp2"},
-                .{"@log"},
-                .{"@log2"},
-                .{"@log10"},
-                .{"@floor"},
-                .{"@ceil"},
-                .{"@trunc"},
-                .{"@round"},
-            });
-            if (float_map.has(call_name)) {
-                if (params.len != 1) return null;
-                const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
-                const payload = switch (ty.data) {
-                    .ip_index => |payload| payload,
-                    else => return null,
-                };
-                if (!analyser.ip.isFloat(analyser.ip.scalarType(payload.type))) return null;
-                return Type.fromIP(analyser, payload.type, null);
-            }
+                .c_va_arg => {
+                    if (params.len < 2) return null;
+                    const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[1], handle))) orelse return null;
+                    return try ty.instanceTypeVal(analyser);
+                },
+                .sqrt,
+                .sin,
+                .cos,
+                .tan,
+                .exp,
+                .exp2,
+                .log,
+                .log2,
+                .log10,
+                .floor,
+                .ceil,
+                .trunc,
+                .round,
+                => {
+                    if (params.len != 1) return null;
+                    const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    const payload = switch (ty.data) {
+                        .ip_index => |payload| payload,
+                        else => return null,
+                    };
+                    if (!analyser.ip.isFloat(analyser.ip.scalarType(payload.type))) return null;
+                    return Type.fromIP(analyser, payload.type, null);
+                },
+                .abs => {
+                    if (params.len != 1) return null;
 
-            if (std.mem.eql(u8, call_name, "@abs")) {
-                if (params.len != 1) return null;
+                    const ty = try analyser.resolveTypeOfNodeInternal(.of(params[0], handle)) orelse return null;
 
-                const ty = try analyser.resolveTypeOfNodeInternal(.of(params[0], handle)) orelse return null;
+                    const payload = switch (ty.data) {
+                        .ip_index => |payload| payload,
+                        else => return null,
+                    };
 
-                const payload = switch (ty.data) {
-                    .ip_index => |payload| payload,
-                    else => return null,
-                };
+                    // Based on Sema.zirAbs
+                    const operand_ty = payload.type;
+                    const scalar_ty = analyser.ip.scalarType(operand_ty);
+                    const scalar_tag = analyser.ip.zigTypeTag(scalar_ty) orelse return null;
+                    const result_ty = switch (scalar_tag) {
+                        .comptime_float, .float, .comptime_int => operand_ty,
+                        .int => if (analyser.ip.isSignedInt(scalar_ty, builtin.target))
+                            try analyser.ip.toUnsigned(analyser.gpa, operand_ty, builtin.target)
+                        else
+                            operand_ty,
+                        else => return null,
+                    };
 
-                // Based on Sema.zirAbs
-                const operand_ty = payload.type;
-                const scalar_ty = analyser.ip.scalarType(operand_ty);
-                const scalar_tag = analyser.ip.zigTypeTag(scalar_ty) orelse return null;
-                const result_ty = switch (scalar_tag) {
-                    .comptime_float, .float, .comptime_int => operand_ty,
-                    .int => if (analyser.ip.isSignedInt(scalar_ty, builtin.target))
-                        try analyser.ip.toUnsigned(analyser.gpa, operand_ty, builtin.target)
-                    else
-                        operand_ty,
-                    else => return null,
-                };
+                    return Type.fromIP(analyser, result_ty, null);
+                },
+                .TypeOf => {
+                    // TODO Do peer type resolution, we just keep the first for now.
 
-                return Type.fromIP(analyser, result_ty, null);
-            }
+                    if (params.len < 1) return null;
+                    var resolved_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    return try resolved_type.typeOf(analyser);
+                },
+                .import => {
+                    if (params.len == 0) return null;
+                    const import_param = params[0];
+                    if (tree.nodeTag(import_param) != .string_literal) return null;
 
-            // Almost the same as the above, return a type value though.
-            // TODO Do peer type resolution, we just keep the first for now.
-            if (std.mem.eql(u8, call_name, "@TypeOf")) {
-                if (params.len < 1) return null;
-                var resolved_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
-                return try resolved_type.typeOf(analyser);
-            }
+                    const import_str = tree.tokenSlice(tree.nodeMainToken(import_param));
+                    const import_uri = (try analyser.store.uriFromImportStr(
+                        analyser.arena,
+                        handle,
+                        import_str[1 .. import_str.len - 1],
+                    )) orelse (try analyser.store.uriFromImportStr(
+                        analyser.arena,
+                        analyser.root_handle orelse return null,
+                        import_str[1 .. import_str.len - 1],
+                    )) orelse return null;
 
-            const type_map: std.StaticStringMap(InternPool.Index) = .initComptime(.{
-                .{ "type", .type_type },
-                .{ "void", .void_type },
-                .{ "bool", .bool_type },
-                .{ "noreturn", .noreturn_type },
-                .{ "comptime_float", .comptime_float_type },
-                .{ "comptime_int", .comptime_int_type },
-                .{ "undefined", .undefined_type },
-                .{ "null", .null_type },
-                .{ "enum_literal", .enum_literal_type },
-            });
-            if (std.mem.eql(u8, call_name, "@Type")) {
-                if (params.len != 1) return null;
-                if (tree.nodeTag(params[0]) != .enum_literal) return null;
-                const name_token = tree.nodeMainToken(params[0]);
-                const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                const ip_index = type_map.get(name) orelse return null;
-                return Type.fromIP(analyser, .type_type, ip_index);
-            }
+                    const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
 
-            if (std.mem.eql(u8, call_name, "@import")) {
-                if (params.len == 0) return null;
-                const import_param = params[0];
-                if (tree.nodeTag(import_param) != .string_literal) return null;
+                    return .{
+                        .data = .{ .container = .root(new_handle) },
+                        .is_type_val = true,
+                    };
+                },
+                .c_import => {
+                    if (!DocumentStore.supports_build_system) return null;
+                    const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
 
-                const import_str = tree.tokenSlice(tree.nodeMainToken(import_param));
-                const import_uri = (try analyser.store.uriFromImportStr(
-                    analyser.arena,
-                    handle,
-                    import_str[1 .. import_str.len - 1],
-                )) orelse (try analyser.store.uriFromImportStr(
-                    analyser.arena,
-                    analyser.root_handle orelse return null,
-                    import_str[1 .. import_str.len - 1],
-                )) orelse return null;
+                    const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
 
-                const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
+                    return .{
+                        .data = .{ .container = .root(new_handle) },
+                        .is_type_val = true,
+                    };
+                },
+                .FieldType => {
+                    if (params.len < 2) return null;
 
-                return .{
-                    .data = .{ .container = .root(new_handle) },
-                    .is_type_val = true,
-                };
-            }
+                    const container_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    const instance = try container_type.instanceTypeVal(analyser) orelse return null;
 
-            if (std.mem.eql(u8, call_name, "@cImport")) {
-                if (!DocumentStore.supports_build_system) return null;
-                const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
+                    const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
 
-                const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
+                    const field = try instance.lookupSymbol(analyser, field_name) orelse return null;
+                    const result = try field.resolveType(analyser) orelse return null;
+                    return try result.typeOf(analyser);
+                },
+                .field => {
+                    if (params.len < 2) return null;
 
-                return .{
-                    .data = .{ .container = .root(new_handle) },
-                    .is_type_val = true,
-                };
-            }
+                    const lhs = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
 
-            if (std.mem.eql(u8, call_name, "@FieldType")) {
-                if (params.len < 2) return null;
+                    const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
 
-                const container_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
-                const instance = try container_type.instanceTypeVal(analyser) orelse return null;
+                    return try analyser.resolveFieldAccess(lhs, field_name);
+                },
+                .compile_error => {
+                    return .{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
+                },
+                .EnumLiteral => {
+                    return Type.fromIP(analyser, .type_type, .enum_literal_type);
+                },
+                .Vector => {
+                    if (params.len != 2) return null;
 
-                const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
+                    const child_ty = try analyser.resolveTypeOfNodeInternal(.of(params[1], handle)) orelse return null;
+                    if (!child_ty.is_type_val) return null;
 
-                const field = try instance.lookupSymbol(analyser, field_name) orelse return null;
-                const result = try field.resolveType(analyser) orelse return null;
-                return try result.typeOf(analyser);
-            }
+                    const child_ty_ip_index = switch (child_ty.data) {
+                        .ip_index => |payload| payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type),
+                        else => return null,
+                    };
 
-            if (std.mem.eql(u8, call_name, "@field")) {
-                if (params.len < 2) return null;
+                    const len = try analyser.resolveIntegerLiteral(u32, .of(params[0], handle)) orelse
+                        return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
 
-                const lhs = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
+                        .vector_type = .{
+                            .len = len,
+                            .child = child_ty_ip_index,
+                        },
+                    });
 
-                const field_name = try analyser.resolveStringLiteral(.of(params[1], handle)) orelse return null;
-
-                return try analyser.resolveFieldAccess(lhs, field_name);
-            }
-
-            if (std.mem.eql(u8, call_name, "@compileError")) {
-                return .{ .data = .{ .compile_error = node_handle }, .is_type_val = false };
-            }
-
-            if (std.mem.eql(u8, call_name, "@Vector")) {
-                if (params.len != 2) return null;
-
-                const child_ty = try analyser.resolveTypeOfNodeInternal(.of(params[1], handle)) orelse return null;
-                if (!child_ty.is_type_val) return null;
-
-                const child_ty_ip_index = switch (child_ty.data) {
-                    .ip_index => |payload| payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type),
-                    else => return null,
-                };
-
-                const len = try analyser.resolveIntegerLiteral(u32, .of(params[0], handle)) orelse
-                    return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
-
-                const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
-                    .vector_type = .{
-                        .len = len,
-                        .child = child_ty_ip_index,
-                    },
-                });
-
-                return Type.fromIP(analyser, .type_type, vector_ty_ip_index);
-            }
-
-            if (version_data.builtins.get(call_name)) |data| {
-                const type_str = data.return_type;
-                if (try analyser.resolvePrimitive(type_str)) |primitive|
-                    return Type.fromIP(analyser, primitive, null);
-                return analyser.instanceStdBuiltinType(type_str);
+                    return Type.fromIP(analyser, .type_type, vector_ty_ip_index);
+                },
+                else => {
+                    const data = version_data.builtins.get(call_name) orelse return null;
+                    if (try analyser.resolvePrimitive(data.return_type)) |primitive|
+                        return Type.fromIP(analyser, primitive, null);
+                    return analyser.instanceStdBuiltinType(data.return_type);
+                },
             }
         },
         .fn_proto,
@@ -4431,9 +4408,16 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{
         .is_type_val = true,
     };
 
-    const builtin_type_decl = try builtin_root_struct_type.lookupSymbol(analyser, type_name) orelse return null;
-    const builtin_type = try builtin_type_decl.resolveType(analyser) orelse return null;
-    return try builtin_type.instanceTypeVal(analyser);
+    var result_ty = builtin_root_struct_type;
+    var i: usize = 0;
+    while (i < type_name.len) {
+        const end = std.mem.findScalarPos(u8, type_name, i, '.') orelse type_name.len;
+        const name = type_name[i..end];
+        i = 1 + end;
+        const decl = try result_ty.lookupSymbol(analyser, name) orelse return null;
+        result_ty = try decl.resolveType(analyser) orelse return null;
+    }
+    return try result_ty.instanceTypeVal(analyser);
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).

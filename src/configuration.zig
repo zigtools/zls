@@ -665,44 +665,24 @@ comptime {
 
 /// The same struct as `Config` but every field is optional.
 pub const UnresolvedConfig = blk: {
-    var config_info: std.builtin.Type = @typeInfo(Config);
-    var fields: [config_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
-    for (config_info.@"struct".fields, &fields) |field, *new_field| {
-        new_field.* = field;
-        if (@typeInfo(field.type) != .optional) {
-            new_field.type = @Type(.{
-                .optional = .{ .child = field.type },
-            });
-        }
-        new_field.default_value_ptr = &@as(new_field.type, null);
+    var struct_info: std.builtin.Type.Struct = @typeInfo(Config).@"struct";
+    var field_types: [struct_info.fields.len]type = undefined;
+    var field_attrs: [struct_info.fields.len]std.builtin.Type.StructField.Attributes = undefined;
+    for (&field_types, &field_attrs, struct_info.fields) |*ty, *attr, field| {
+        ty.* = if (@typeInfo(field.type) != .optional) ?field.type else field.type;
+        attr.* = .{ .default_value_ptr = &@as(ty.*, null) };
     }
-    config_info.@"struct".fields = fields[0..];
-    config_info.@"struct".decls = &.{};
-    break :blk @Type(config_info);
+    break :blk @Struct(.auto, null, std.meta.fieldNames(Config), &field_types, &field_attrs);
 };
 
 /// A packed struct where every field name is copied from `Config` but the field type is `bool`.
-pub const DidConfigChange = blk: {
-    const config_fields = std.meta.fields(Config);
-    var fields: [config_fields.len]std.builtin.Type.StructField = undefined;
-    for (config_fields, &fields) |field, *new_field| {
-        new_field.* = .{
-            .name = field.name,
-            .type = bool,
-            .default_value_ptr = &false,
-            .is_comptime = false,
-            .alignment = 0,
-        };
-    }
-    break :blk @Type(.{
-        .@"struct" = .{
-            .layout = .@"packed",
-            .fields = &fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
-};
+pub const DidConfigChange = @Struct(
+    .@"packed",
+    null,
+    std.meta.fieldNames(Config),
+    &@splat(bool),
+    &@splat(.{ .default_value_ptr = &false }),
+);
 
 pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;

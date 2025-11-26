@@ -1718,7 +1718,7 @@ test "enum literal" {
         \\const literal = .foo;
         \\const foo = <cursor>
     , &.{
-        .{ .label = "literal", .kind = .EnumMember, .detail = "@Type(.enum_literal)" },
+        .{ .label = "literal", .kind = .EnumMember, .detail = "@EnumLiteral()" },
     });
 }
 
@@ -2771,7 +2771,7 @@ test "continue with label - structinit" {
     });
 }
 
-test "deprecated " {
+test "deprecated" {
     // removed symbols from the standard library are ofted marked with a compile error
     try testCompletion(
         \\const foo = @compileError("Deprecated; some message");
@@ -3077,48 +3077,88 @@ test "builtin fns return type" {
     });
 }
 
-test "builtin fns taking an enum arg" {
+test "function arguments of @Int" {
     try testCompletion(
         \\test {
-        \\    @Type(.{.<cursor>
+        \\    @Int(.<cursor>)
         \\}
     , &.{
-        .{ .label = "type", .kind = .Field, .detail = "void" },
-        .{ .label = "void", .kind = .Field, .detail = "void" },
-        .{ .label = "bool", .kind = .Field, .detail = "void" },
-        .{ .label = "noreturn", .kind = .Field, .detail = "void" },
-        .{ .label = "int", .kind = .Field, .detail = "Int" },
-        .{ .label = "float", .kind = .Field, .detail = "Float" },
-        .{ .label = "pointer", .kind = .Field, .detail = "Pointer" },
-        .{ .label = "array", .kind = .Field, .detail = "Array" },
-        .{ .label = "@\"struct\"", .kind = .Field, .detail = "Struct" },
-        .{ .label = "comptime_float", .kind = .Field, .detail = "void" },
-        .{ .label = "comptime_int", .kind = .Field, .detail = "void" },
-        .{ .label = "undefined", .kind = .Field, .detail = "void" },
-        .{ .label = "null", .kind = .Field, .detail = "void" },
-        .{ .label = "optional", .kind = .Field, .detail = "Optional" },
-        .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
-        .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
-        .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
-        .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
-        .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },
-        .{ .label = "@\"opaque\"", .kind = .Field, .detail = "Opaque" },
-        .{ .label = "frame", .kind = .Field, .detail = "Frame" },
-        .{ .label = "@\"anyframe\"", .kind = .Field, .detail = "AnyFrame" },
-        .{ .label = "vector", .kind = .Field, .detail = "Vector" },
-        .{ .label = "enum_literal", .kind = .Field, .detail = "void" },
+        .{ .label = "signed", .kind = .EnumMember },
+        .{ .label = "unsigned", .kind = .EnumMember },
+    });
+}
+
+test "function arguments of @Pointer" {
+    try testCompletion(
+        \\test {
+        \\    @Pointer(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "one", .kind = .EnumMember },
+        .{ .label = "many", .kind = .EnumMember },
+        .{ .label = "slice", .kind = .EnumMember },
+        .{ .label = "c", .kind = .EnumMember },
     });
     try testCompletion(
         \\test {
-        \\    @Type(.{.@"struct" = .{.<cursor>
+        \\    @Pointer(undefined, .<cursor>)
         \\}
     , &.{
-        .{ .label = "layout", .kind = .Field, .detail = "ContainerLayout" },
-        .{ .label = "backing_integer", .kind = .Field, .detail = "?type = null" },
-        .{ .label = "fields", .kind = .Field, .detail = "[]const StructField" },
-        .{ .label = "decls", .kind = .Field, .detail = "[]const Declaration" },
-        .{ .label = "is_tuple", .kind = .Field, .detail = "bool" },
+        .{ .label = "@\"const\"", .kind = .Field, .detail = "bool = false" },
+        .{ .label = "@\"volatile\"", .kind = .Field, .detail = "bool = false" },
+        .{ .label = "@\"allowzero\"", .kind = .Field, .detail = "bool = false" },
+        .{ .label = "@\"addrspace\"", .kind = .Field, .detail = "?AddressSpace = null" },
+        .{ .label = "@\"align\"", .kind = .Field, .detail = "?usize = null" },
     });
+}
+
+test "function arguments of @Fn" {
+    try testCompletion(
+        \\test {
+        \\    @Fn(undefined, undefined, undefined, .{.<cursor>})
+        \\}
+    , &.{
+        .{ .label = "@\"callconv\"", .kind = .Field, .detail = "CallingConvention = .auto" },
+        .{ .label = "varargs", .kind = .Field, .detail = "bool = false" },
+    });
+}
+
+test "function arguments of @Struct" {
+    try testCompletion(
+        \\test {
+        \\    @Struct(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "@\"extern\"", .kind = .EnumMember },
+        .{ .label = "@\"packed\"", .kind = .EnumMember },
+        .{ .label = "auto", .kind = .EnumMember },
+    });
+}
+
+test "function arguments of @Union" {
+    try testCompletion(
+        \\test {
+        \\    @Union(.<cursor>)
+        \\}
+    , &.{
+        .{ .label = "@\"extern\"", .kind = .EnumMember },
+        .{ .label = "@\"packed\"", .kind = .EnumMember },
+        .{ .label = "auto", .kind = .EnumMember },
+    });
+}
+
+test "function arguments of @Enum" {
+    try testCompletion(
+        \\test {
+        \\    @Enum(undefined, .<cursor>)
+        \\}
+    , &.{
+        .{ .label = "exhaustive", .kind = .EnumMember },
+        .{ .label = "nonexhaustive", .kind = .EnumMember },
+    });
+}
+
+test "function arguments of @setFloatMode" {
     try testCompletion(
         \\test {
         \\    @setFloatMode(.<cursor>)
@@ -3127,6 +3167,9 @@ test "builtin fns taking an enum arg" {
         .{ .label = "strict", .kind = .EnumMember },
         .{ .label = "optimized", .kind = .EnumMember },
     });
+}
+
+test "function arguments of @prefetch" {
     try testCompletion(
         \\test {
         \\    @prefetch(, .{.<cursor>})
@@ -3136,6 +3179,9 @@ test "builtin fns taking an enum arg" {
         .{ .label = "locality", .kind = .Field, .detail = "u2 = 3" },
         .{ .label = "cache", .kind = .Field, .detail = "Cache = .data" },
     });
+}
+
+test "function arguments of @reduce" {
     try testCompletion(
         \\test {
         \\    @reduce(.<cursor>
@@ -3149,6 +3195,9 @@ test "builtin fns taking an enum arg" {
         .{ .label = "Add", .kind = .EnumMember },
         .{ .label = "Mul", .kind = .EnumMember },
     });
+}
+
+test "function arguments of @export" {
     try testCompletionTextEdit(.{
         .source = "comptime { @export(foo ,.<cursor>",
         .label = "name",
@@ -3156,6 +3205,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "comptime { @export(foo ,.{ .name = ",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @extern" {
     try testCompletionTextEdit(.{
         .source = "test { @extern(T , .<cursor>",
         .label = "is_thread_local",
@@ -3163,6 +3215,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @extern(T , .{ .is_thread_local = ",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @cmpxchgWeak" {
     try testCompletionTextEdit(.{
         .source = "test { @cmpxchgWeak(1,2,3,4, .<cursor>",
         .label = "acq_rel",
@@ -3170,6 +3225,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @cmpxchgWeak(1,2,3,4, .acq_rel",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @cmpxchgStrong" {
     try testCompletionTextEdit(.{
         .source = "test { @cmpxchgStrong(1,2,3,4,5,.<cursor>",
         .label = "acq_rel",
@@ -3177,6 +3235,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @cmpxchgStrong(1,2,3,4,5,.acq_rel",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @atomicLoad" {
     try testCompletionTextEdit(.{
         .source = "test { @atomicLoad(1,2,.<cursor>",
         .label = "acq_rel",
@@ -3184,6 +3245,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @atomicLoad(1,2,.acq_rel",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @atomicStore" {
     try testCompletionTextEdit(.{
         .source = "test { @atomicStore(1,2,3,.<cursor>",
         .label = "acq_rel",
@@ -3191,6 +3255,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @atomicStore(1,2,3,.acq_rel",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @atomicRmw" {
     try testCompletionTextEdit(.{
         .source = "test { @atomicRmw(1,2,.<cursor>",
         .label = "Add",
@@ -3205,6 +3272,9 @@ test "builtin fns taking an enum arg" {
         .expected_replace_line = "test { @atomicRmw(1,2,3,4,.acq_rel",
         .enable_snippets = false,
     });
+}
+
+test "function arguments of @call" {
     try testCompletion(
         \\test {
         \\    @call(.<cursor>
@@ -3218,6 +3288,9 @@ test "builtin fns taking an enum arg" {
         .{ .label = "compile_time", .kind = .EnumMember },
         .{ .label = "no_suspend", .kind = .EnumMember },
     });
+}
+
+test "function attributes" {
     try testCompletionTextEdit(.{
         .source = "var a: u16 addrspace(.<cursor>",
         .label = "constant",

@@ -142,9 +142,6 @@ const reduce = @reduce(.And, undefined);
 const set_float_mode = @setFloatMode(.strict);
 //    ^^^^^^^^^^^^^^ (void)()
 //                                   ^^^^^^^ (FloatMode)()
-const Type = @Type(.type);
-//    ^^^^ (type)()
-//                 ^^^^^ (void)()
 const union_init = @unionInit(union {}, undefined, undefined);
 //    ^^^^^^^^^^ (union {})()
 
@@ -176,24 +173,24 @@ const panic = @panic("foo");
 const trap = @trap();
 //    ^^^^ (noreturn)()
 
-const type_type: @Type(.type) = i32;
-//    ^^^^^^^^^ (type)()
-const type_void: @Type(.void) = {};
-//    ^^^^^^^^^ (void)()
-const type_bool: @Type(.bool) = false;
-//    ^^^^^^^^^ (bool)()
-const type_noreturn: @Type(.noreturn) = @panic("foo");
-//    ^^^^^^^^^^^^^ (noreturn)()
-const type_comptime_float: @Type(.comptime_float) = 3.14;
-//    ^^^^^^^^^^^^^^^^^^^ (comptime_float)()
-const type_comptime_int: @Type(.comptime_int) = 42;
-//    ^^^^^^^^^^^^^^^^^ (comptime_int)()
-const type_undefined: @Type(.undefined) = undefined;
-//    ^^^^^^^^^^^^^^ (@TypeOf(undefined))()
-const type_null: @Type(.null) = null;
-//    ^^^^^^^^^ (@TypeOf(null))()
-const type_enum_literal: @Type(.enum_literal) = .foo;
-//    ^^^^^^^^^^^^^^^^^ (@Type(.enum_literal))()
+const Int = @Int(.signed, 16);
+//    ^^^ (type)()
+//               ^^^^^^^ (Signedness)()
+const Pointer = @Pointer(.one, undefined, undefined, undefined);
+//    ^^^^^^^ (type)()
+//                       ^^^^ (Size)()
+const Struct = @Struct(.auto, undefined, undefined, undefined, undefined);
+//    ^^^^^^ (type)()
+//                     ^^^^^ (ContainerLayout)()
+const Union = @Union(.auto, undefined, undefined, undefined, undefined);
+//    ^^^^^ (type)()
+//                   ^^^^^ (ContainerLayout)()
+const Enum = @Enum(undefined, .exhaustive, undefined, undefined);
+//    ^^^^ (type)()
+//                            ^^^^^^^^^^^ (Mode)()
+
+const type_enum_literal: @EnumLiteral() = .foo;
+//    ^^^^^^^^^^^^^^^^^ (@EnumLiteral())()
 
 const type_info = @typeInfo(u8);
 //    ^^^^^^^^^ (Type)()

@@ -5,7 +5,7 @@ const int_literal_pointer = &0;
 //    ^^^^^^^^^^^^^^^^^^^ (*const comptime_int)()
 
 const enum_literal_pointer = &.foo;
-//    ^^^^^^^^^^^^^^^^^^^^ (*const @Type(.enum_literal))()
+//    ^^^^^^^^^^^^^^^^^^^^ (*const @EnumLiteral())()
 
 const string_literal_pointer = &"foo";
 //    ^^^^^^^^^^^^^^^^^^^^^^ (*const *const [3:0]u8)()
