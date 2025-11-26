@@ -427,7 +427,7 @@ const Tokenizer = struct {
 
 const Builtin = struct {
     name: []const u8,
-    signature: []const u8,
+    signature: [:0]const u8,
     documentation: std.ArrayList(u8),
 };
 
@@ -454,6 +454,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
     var builtins: std.ArrayList(Builtin) = .empty;
     errdefer {
         for (builtins.items) |*builtin| {
+            allocator.free(builtin.signature);
             builtin.documentation.deinit(allocator);
         }
         builtins.deinit(allocator);
@@ -535,7 +536,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
 
                     switch (state) {
                         .builtin_begin => {
-                            builtins.items[builtins.items.len - 1].signature = content_name;
+                            builtins.items[builtins.items.len - 1].signature = try allocator.dupeZ(u8, content_name);
                             state = .builtin_content;
                         },
                         .builtin_content => {
@@ -787,85 +788,74 @@ const Parameter = struct {
 /// `comptime DestType: type, integer: anytype) DestType`
 /// and outputs its parameters and return type:
 /// `comptime DestType: type`, `integer: anytype`, `DestType`
-fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}!struct { []Parameter, []const u8 } {
+fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, signature: [:0]const u8) error{OutOfMemory}!struct { []Parameter, []const u8 } {
     var parameters: std.ArrayList(Parameter) = .empty;
     defer parameters.deinit(allocator);
 
-    var argument_start: usize = 0;
-    var index: usize = 0;
-    var type_start: ?usize = null;
-    while (std.mem.findAnyPos(u8, signature, index, ",():")) |token_index| {
-        if (signature[token_index] == '(') {
-            index = token_index + 1;
-            skipUntilClosingParenthesis(signature, &index);
-            continue;
+    var tokenizer: std.zig.Tokenizer = .init(signature);
+    var argument_start: ?usize = null;
+    var colon_index: ?usize = null;
+    while (true) {
+        const token = tokenizer.next();
+        switch (token.tag) {
+            .eof => unreachable,
+            .l_paren => {
+                var paren_depth: usize = 1;
+                while (paren_depth > 0) {
+                    switch (tokenizer.next().tag) {
+                        .l_paren => paren_depth += 1,
+                        .r_paren => paren_depth -= 1,
+                        else => {},
+                    }
+                }
+                continue;
+            },
+            .colon => {
+                std.debug.assert(argument_start != null);
+                std.debug.assert(colon_index == null);
+                colon_index = token.loc.start;
+            },
+            .comma, .r_paren => |tag| {
+                if (argument_start) |start| {
+                    try parameters.append(allocator, .{
+                        .signature = std.mem.trim(u8, signature[start..token.loc.start], &std.ascii.whitespace),
+                        .type = if (colon_index) |i| std.mem.trim(u8, signature[1 + i .. token.loc.start], &std.ascii.whitespace) else null,
+                    });
+                }
+                argument_start = null;
+                colon_index = null;
+                if (tag == .r_paren) break;
+            },
+            .doc_comment, .container_doc_comment => {},
+            else => {
+                if (argument_start == null) {
+                    argument_start = token.loc.start;
+                    std.debug.assert(colon_index == null);
+                }
+            },
         }
-        if (signature[token_index] == ':') {
-            std.debug.assert(signature[token_index + 1] == ' ');
-            type_start = token_index + 2;
-            index = token_index + 2;
-            continue;
-        }
-        const argument = std.mem.trim(u8, signature[argument_start..token_index], &std.ascii.whitespace);
-        if (argument.len != 0) {
-            try parameters.append(allocator, .{
-                .signature = argument,
-                .type = if (type_start) |i| std.mem.trim(u8, signature[i..token_index], &std.ascii.whitespace) else null,
-            });
-        }
-        argument_start = token_index + 1;
-        index = token_index + 1;
-        type_start = null;
-        if (signature[token_index] == ')') break;
     }
 
-    std.debug.assert(signature[index] == ' ');
-    const return_type = signature[index + 1 ..];
+    const return_type = signature[tokenizer.index + 1 ..];
     return .{ try parameters.toOwnedSlice(allocator), return_type };
 }
 
-/// takes in a signature like this: `@intToEnum(comptime DestType: type, integer: anytype) DestType`
-/// and outputs a snippet: `@intToEnum(${1:comptime DestType: type}, ${2:integer: anytype})`
-fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const u8) error{OutOfMemory}![]const u8 {
+fn createSignatureSnippet(
+    allocator: std.mem.Allocator,
+    builtin_name: []const u8,
+    parameters: []const Parameter,
+) error{OutOfMemory}![]const u8 {
     var snippet: std.ArrayList(u8) = .empty;
     defer snippet.deinit(allocator);
 
-    const start_index = 1 + std.mem.findScalar(u8, signature, '(').?;
-    try snippet.appendSlice(allocator, signature[0..start_index]);
-
-    var argument_start: usize = start_index;
-    var index: usize = start_index;
-    var i: u32 = 1;
-    while (std.mem.findAnyPos(u8, signature, index, ",()")) |token_index| {
-        if (signature[token_index] == '(') {
-            index = token_index + 1;
-            skipUntilClosingParenthesis(signature, &index);
-            continue;
-        }
-        const argument = std.mem.trim(u8, signature[argument_start..token_index], &std.ascii.whitespace);
-        if (argument.len != 0) {
-            if (i != 1) try snippet.appendSlice(allocator, ", ");
-            try snippet.print(allocator, "${{{d}:{s}}}", .{ i, argument });
-        }
-        argument_start = token_index + 1;
-        index = token_index + 1;
-        i += 1;
-        if (signature[token_index] == ')') break;
+    try snippet.print(allocator, "{s}(", .{builtin_name});
+    for (parameters, 1..) |param, i| {
+        if (i != 1) try snippet.print(allocator, ", ", .{});
+        try snippet.print(allocator, "${{{d}:{s}}}", .{ i, param.signature });
     }
     try snippet.append(allocator, ')');
 
-    return snippet.toOwnedSlice(allocator);
-}
-
-fn skipUntilClosingParenthesis(signature: []const u8, index: *usize) void {
-    var paren_depth: usize = 1;
-    while (paren_depth > 0) : (index.* += 1) {
-        switch (signature[index.*]) {
-            '(' => paren_depth += 1,
-            ')' => paren_depth -= 1,
-            else => {},
-        }
-    }
+    return try snippet.toOwnedSlice(allocator);
 }
 
 fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
@@ -885,6 +875,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
     const builtins = try collectBuiltinData(allocator, version, langref_source);
     defer {
         for (builtins) |*builtin| {
+            allocator.free(builtin.signature);
             builtin.documentation.deinit(allocator);
         }
         allocator.free(builtins);
@@ -921,14 +912,11 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
     );
 
     for (builtins) |builtin| {
-        const signature = try std.mem.replaceOwned(u8, allocator, builtin.signature, "\n", "");
-        defer allocator.free(signature);
-
-        const snippet = try extractSnippetFromSignature(allocator, signature);
-        defer allocator.free(snippet);
-
-        const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, signature[builtin.name.len + 1 ..]);
+        const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, builtin.signature[builtin.name.len + 1 ..]);
         defer allocator.free(parameters);
+
+        const snippet = try createSignatureSnippet(allocator, builtin.name, parameters);
+        defer allocator.free(snippet);
 
         try writer.print(
             \\    .{{
@@ -940,7 +928,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
             \\
         , .{
             std.zig.fmtString(builtin.name),
-            std.zig.fmtString(signature),
+            std.zig.fmtString(builtin.signature),
             std.zig.fmtString(withoutStdBuiltinPrefix(return_type)),
             std.zig.fmtString(snippet),
         });
