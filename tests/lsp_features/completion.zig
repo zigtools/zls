@@ -4322,6 +4322,22 @@ test "insert replace behaviour - file system completions" {
     // zig fmt: on
 }
 
+test "generic function with @This() as self param" {
+    try testCompletion(
+        \\const Foo = struct {
+        \\    fn bar(_: *const @This(), comptime _: type) void {}
+        \\};
+        \\const foo: Foo = .{};
+        \\const _ = foo.<cursor>
+    , &.{
+        .{
+            .label = "bar",
+            .kind = .Function,
+            .detail = "fn (_: *const Foo, comptime _: type) void",
+        },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }

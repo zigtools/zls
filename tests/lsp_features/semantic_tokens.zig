@@ -2086,6 +2086,45 @@ test "weird code" {
     , &.{}, .{ .mode = .zon });
 }
 
+test "generic function with @This() as self param" {
+    try testSemanticTokens(
+        \\const Demo = struct {
+        \\    fn bar(_: *@This(), comptime _: type) void {}
+        \\};
+        \\test {
+        \\    var demo: Demo = .{};
+        \\    Demo.bar(&demo, usize);
+        \\    demo.bar(usize);
+        \\}
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Demo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "bar", .method, .{ .declaration = true, .generic = true } },
+        .{ "_", .parameter, .{ .declaration = true } },
+        .{ "@This", .builtin, .{} },
+        .{ "comptime", .keyword, .{} },
+        .{ "_", .typeParameter, .{ .declaration = true } },
+        .{ "type", .type, .{} },
+        .{ "void", .type, .{} },
+        .{ "test", .keyword, .{} },
+        .{ "var", .keyword, .{} },
+        .{ "demo", .variable, .{ .declaration = true, .mutable = true } },
+        .{ "Demo", .namespace, .{} },
+        .{ "=", .operator, .{} },
+        .{ "Demo", .namespace, .{} },
+        .{ "bar", .function, .{ .generic = true } },
+        .{ "&", .operator, .{} },
+        .{ "demo", .variable, .{ .mutable = true } },
+        .{ "usize", .type, .{} },
+        .{ "demo", .variable, .{ .mutable = true } },
+        .{ "bar", .function, .{ .generic = true } },
+        .{ "usize", .type, .{} },
+    });
+}
+
 const TokenData = struct {
     []const u8,
     zls.semantic_tokens.TokenType,
