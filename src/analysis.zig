@@ -5695,12 +5695,21 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
         .is_type_val = true,
     };
 
+    var pending_meta_params: TokenToTypeMap = .empty;
+    defer pending_meta_params.deinit(analyser.gpa);
+
     var current: DocumentScope.Scope.Index = .root;
     var meta_params: TokenToTypeMap = .empty;
     var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
-            .container => current = scope_index,
+            .container => {
+                current = scope_index;
+                for (pending_meta_params.keys(), pending_meta_params.values()) |token_handle, ty| {
+                    try meta_params.put(analyser.arena, token_handle, ty);
+                }
+                pending_meta_params.clearRetainingCapacity();
+            },
             .function => {
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
@@ -5712,7 +5721,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                     const param_name_token = param.name_token orelse continue;
                     const token_handle: TokenWithHandle = .{ .token = param_name_token, .handle = handle };
                     const ty: Type = .{ .data = .{ .type_parameter = token_handle }, .is_type_val = true };
-                    try meta_params.put(analyser.arena, token_handle, ty);
+                    try pending_meta_params.put(analyser.gpa, token_handle, ty);
                 }
             },
             else => {},
