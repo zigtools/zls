@@ -406,7 +406,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 } else {
                     const container_ty = try builder.analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
                     if (container_ty.data.container.scope_handle.scope != .root and
-                        Analyser.firstParamIs(func_ty, container_ty))
+                        builder.analyser.firstParamIs(func_ty, container_ty))
                     {
                         func_name_tok_type = .method;
                     }

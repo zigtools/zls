@@ -373,7 +373,7 @@ pub fn isInstanceCall(
 
     std.debug.assert(container_ty.is_type_val);
 
-    return firstParamIs(func_ty, container_ty);
+    return analyser.firstParamIs(func_ty, container_ty);
 }
 
 pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) !bool {
@@ -382,13 +382,15 @@ pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) !bool {
     if (container.is_type_val) return false;
     const in_container = try container.typeOf(analyser);
     if (in_container.isNamespace()) return false;
-    return Analyser.firstParamIs(func_ty, in_container);
+    return analyser.firstParamIs(func_ty, in_container);
 }
 
 pub fn firstParamIs(
+    analyser: *Analyser,
     func_type: Type,
     expected_type: Type,
 ) bool {
+    _ = analyser;
     std.debug.assert(expected_type.is_type_val);
     std.debug.assert(func_type.isFunc());
     const func_info = func_type.data.function;
@@ -4111,7 +4113,7 @@ pub const Type = struct {
             if (try lookupSymbolContainer(self, symbol, .other)) |decl| {
                 const ty = try decl.resolveType(analyser) orelse return null;
                 const func_type = try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
-                if (firstParamIs(func_type, try self.typeOf(analyser))) {
+                if (analyser.firstParamIs(func_type, try self.typeOf(analyser))) {
                     return decl;
                 }
             }
@@ -5568,7 +5570,7 @@ pub fn collectDeclarationsOfContainer(
                         const alias_type = try decl_with_handle.resolveType(analyser) orelse continue;
                         const func_ty = try analyser.resolveFuncProtoOfCallable(alias_type) orelse continue;
 
-                        if (!firstParamIs(func_ty, .{
+                        if (!analyser.firstParamIs(func_ty, .{
                             .data = .{ .container = info },
                             .is_type_val = true,
                         })) continue;
