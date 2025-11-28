@@ -1,3 +1,11 @@
+const A = struct {
+    alpha: u32,
+};
+
+const B = struct {
+    beta: u32,
+};
+
 const Enum = enum {
     foo,
     bar,
@@ -115,3 +123,19 @@ const switch_null_inline = switch (null) {
     //              ^ (@TypeOf(null))() TODO this should be `unknown`
     //                 ^ (unknown)()
 };
+
+// zig fmt: off
+const labeled_switch = blk: switch (some_u8) {
+//    ^^^^^^^^^^^^^^ (u8)()
+    'x' => |a| break :blk a,
+    'y' => |a| break :blk a,
+    else => |a| break :blk a,
+};
+
+const labeled_switch_2 = blk: switch (undefined) {
+//    ^^^^^^^^^^^^^^^^ (either type)()
+    1 => break :blk A{},
+    2 => B{},
+    else => unreachable,
+};
+// zig fmt: on
