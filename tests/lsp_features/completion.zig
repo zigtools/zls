@@ -4338,6 +4338,34 @@ test "generic function with @This() as self param" {
     });
 }
 
+test "methods of branching type" {
+    try testCompletion(
+        \\const Reader = switch (undefined) {
+        \\    .windows => struct {
+        \\        fn foo(_: *Reader) bool {}
+        \\    },
+        \\    else => struct {
+        \\        fn bar(_: *Reader) bool {}
+        \\    },
+        \\};
+        \\test {
+        \\    var reader: Reader = undefined;
+        \\    reader.<cursor>
+        \\}
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Function,
+            .detail = "fn (_: *either type) bool",
+        },
+        .{
+            .label = "bar",
+            .kind = .Function,
+            .detail = "fn (_: *either type) bool",
+        },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
