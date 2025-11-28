@@ -22,6 +22,37 @@ const Inclusivity = enum {
     exclusive_ignore_space,
 };
 
+/// Check if a node is an @import() call or an alias/field access based on an import.
+/// This drills down field accesses to find the base, assuming identifiers are aliases.
+fn isImportOrAlias(tree: *const Ast, init_node: Ast.Node.Index) bool {
+    var node = init_node;
+    while (true) {
+        switch (tree.nodeTag(node)) {
+            .builtin_call_two, .builtin_call_two_comma => {
+                // Check if this is @import("...")
+                const token = tree.nodeMainToken(node);
+                const builtin_name = offsets.tokenToSlice(tree, token);
+                if (!std.mem.eql(u8, builtin_name, "@import")) return false;
+
+                const first_param, const second_param = tree.nodeData(node).opt_node_and_opt_node;
+                const param_node = first_param.unwrap() orelse return false;
+                if (second_param != .none) return false;
+                return tree.nodeTag(param_node) == .string_literal;
+            },
+            .field_access => {
+                // Field access like @import("foo").bar or std.ascii
+                // Continue drilling down to check the left side
+                node = tree.nodeData(node).node_and_token[0];
+            },
+            .identifier => {
+                // Assume identifiers are aliases like `const ascii = std.ascii`
+                return true;
+            },
+            else => return false,
+        }
+    }
+}
+
 const Builder = struct {
     allocator: std.mem.Allocator,
     locations: std.ArrayList(FoldingRange),
@@ -150,7 +181,39 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
 
     // TODO add folding range normal comments
 
-    // TODO add folding range for top level `@Import()`
+    // Folding range for top level imports
+    {
+        var start_import: ?Ast.Node.Index = null;
+        var end_import: ?Ast.Node.Index = null;
+
+        const root_decls = tree.rootDecls();
+        for (root_decls) |node| {
+            const is_import = blk: {
+                if (tree.nodeTag(node) != .simple_var_decl) break :blk false;
+                const var_decl = tree.simpleVarDecl(node);
+                const init_node = var_decl.ast.init_node.unwrap() orelse break :blk false;
+
+                break :blk isImportOrAlias(tree, init_node);
+            };
+
+            if (is_import) {
+                if (start_import == null) {
+                    start_import = node;
+                }
+                end_import = node;
+            } else if (start_import != null and end_import != null) {
+                // We found a non-import after a sequence of imports, create folding range
+                try builder.add(null, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
+                start_import = null;
+                end_import = null;
+            }
+        }
+
+        // Handle the case where imports continue to the end of the file
+        if (start_import != null and end_import != null and start_import.? != end_import.?) {
+            try builder.add(null, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
+        }
+    }
 
     for (0..tree.nodes.len) |i| {
         const node: Ast.Node.Index = @enumFromInt(i);

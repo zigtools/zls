@@ -376,6 +376,44 @@ test "weird code" {
     );
 }
 
+test "imports" {
+    try testFoldingRange(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+    , &.{
+        .{ .startLine = 0, .startCharacter = 0, .endLine = 1, .endCharacter = 34 },
+    });
+    try testFoldingRange(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+        \\const lsp = @import("lsp");
+        \\const types = lsp.types;
+        \\
+        \\pub fn main() void {}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 0, .endLine = 3, .endCharacter = 23 },
+    });
+    // Single import should not create folding range
+    try testFoldingRange(
+        \\const std = @import("std");
+        \\
+        \\pub fn main() void {}
+    , &.{});
+    // Imports with gap in between should create separate folding ranges
+    try testFoldingRange(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+        \\
+        \\pub const foo = 5;
+        \\
+        \\const lsp = @import("lsp");
+        \\const types = @import("types");
+    , &.{
+        .{ .startLine = 0, .startCharacter = 0, .endLine = 1, .endCharacter = 34 },
+        .{ .startLine = 5, .startCharacter = 0, .endLine = 6, .endCharacter = 30 },
+    });
+}
+
 fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
