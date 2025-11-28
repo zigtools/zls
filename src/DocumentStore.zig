@@ -1205,7 +1205,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}
     // https://github.com/ziglang/zig/issues/15607
     const root_end_index: usize = root_end_index: {
         if (builtin.target.os.tag != .windows) break :root_end_index 0;
-        const component_iterator = std.fs.path.componentIterator(path) catch return &.{};
+        const component_iterator = std.fs.path.componentIterator(path);
         break :root_end_index component_iterator.root_end_index;
     };
 
