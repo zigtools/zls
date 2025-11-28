@@ -23,34 +23,33 @@ const Inclusivity = enum {
 };
 
 /// Check if a node is an @import() call or an alias/field access based on an import.
-/// This recursively drills down field accesses to find the base.
-fn isImportOrAlias(tree: *const Ast, node: Ast.Node.Index) bool {
-    const token = tree.nodeMainToken(node);
-    switch (tree.nodeTag(node)) {
-        .builtin_call_two, .builtin_call_two_comma => {
-            // Check if this is @import("...")
-            const builtin_name = offsets.tokenToSlice(tree, token);
-            if (!std.mem.eql(u8, builtin_name, "@import")) return false;
+/// This drills down field accesses to find the base, assuming identifiers are aliases.
+fn isImportOrAlias(tree: *const Ast, init_node: Ast.Node.Index) bool {
+    var node = init_node;
+    while (true) {
+        switch (tree.nodeTag(node)) {
+            .builtin_call_two, .builtin_call_two_comma => {
+                // Check if this is @import("...")
+                const token = tree.nodeMainToken(node);
+                const builtin_name = offsets.tokenToSlice(tree, token);
+                if (!std.mem.eql(u8, builtin_name, "@import")) return false;
 
-            const first_param, const second_param = tree.nodeData(node).opt_node_and_opt_node;
-            const param_node = first_param.unwrap() orelse return false;
-            if (second_param != .none) return false;
-            return tree.nodeTag(param_node) == .string_literal;
-        },
-        .field_access => {
-            // Field access like @import("foo").bar or std.ascii
-            // Accept it as an import/alias pattern
-            return true;
-        },
-        .identifier => {
-            // This could be an alias like `const ascii = std.ascii`
-            // We can't easily determine this without full symbol resolution,
-            // so we'll be conservative and return false here.
-            // The code_actions.zig uses full symbol lookup which is expensive.
-            // For folding ranges, we'll only fold direct @import statements.
-            return false;
-        },
-        else => return false,
+                const first_param, const second_param = tree.nodeData(node).opt_node_and_opt_node;
+                const param_node = first_param.unwrap() orelse return false;
+                if (second_param != .none) return false;
+                return tree.nodeTag(param_node) == .string_literal;
+            },
+            .field_access => {
+                // Field access like @import("foo").bar or std.ascii
+                // Continue drilling down to check the left side
+                node = tree.nodeData(node).node_and_token[0];
+            },
+            .identifier => {
+                // Assume identifiers are aliases like `const ascii = std.ascii`
+                return true;
+            },
+            else => return false,
+        }
     }
 }
 
@@ -194,7 +193,6 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
                 const var_decl = tree.simpleVarDecl(node);
                 const init_node = var_decl.ast.init_node.unwrap() orelse break :blk false;
 
-                // Check if this is an @import() call or a field access/identifier based on an import
                 break :blk isImportOrAlias(tree, init_node);
             };
 
