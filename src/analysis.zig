@@ -415,7 +415,17 @@ pub fn firstParamIs(
         else => expected_type,
     };
 
-    return deref_type.eql(deref_expected_type);
+    return switch (deref_type.data) {
+        .either => |entries| {
+            for (entries) |entry| {
+                if (entry.type_data.eql(deref_expected_type.data)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        else => deref_type.eql(deref_expected_type),
+    };
 }
 
 pub fn getVariableSignature(
