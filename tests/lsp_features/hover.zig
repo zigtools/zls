@@ -452,6 +452,44 @@ test "decl literal function" {
     );
 }
 
+test "decl literal pointer" {
+    try testHover(
+        \\const S = struct {
+        \\    const value: S = .{};
+        \\    const ptr: *const S = &value;
+        \\};
+        \\const s: *const S = .pt<cursor>r;
+    ,
+        \\```zig
+        \\const ptr: *const S = &value
+        \\```
+        \\```zig
+        \\(*const S)
+        \\```
+        \\
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
+    );
+
+    try testHover(
+        \\const S = struct {
+        \\    const value: S = .{};
+        \\    fn pointerFn() *const S {
+        \\        return &value;
+        \\    }
+        \\};
+        \\const s: *const S = .poi<cursor>nterFn();
+    ,
+        \\```zig
+        \\fn pointerFn() *const S
+        \\```
+        \\```zig
+        \\(fn () *const S)
+        \\```
+        \\
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
+    );
+}
+
 test "decl literal on generic type" {
     try testHover(
         \\fn Box(comptime T: type) type {
