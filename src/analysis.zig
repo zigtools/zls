@@ -1827,7 +1827,7 @@ const FindBreaks = struct {
                     try context.break_operands.append(context.allocator, operand.unwrap() orelse return);
                 } else if (context.label) |label| {
                     if (opt_label_token.unwrap()) |label_token| {
-                        if (std.mem.eql(u8, label, tree.tokenSlice(label_token))) {
+                        if (std.mem.eql(u8, label, offsets.identifierTokenToNameSlice(tree, label_token))) {
                             try context.break_operands.append(context.allocator, operand.unwrap() orelse return);
                         }
                     }
@@ -2496,6 +2496,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
         => {
             const switch_node = tree.switchFull(node);
 
+            // TODO: peer type resolution based on all `break` statements and `switch` cases
+            if (switch_node.label_token) |label_token| {
+                var context: FindBreaks = .{
+                    .label = offsets.identifierTokenToNameSlice(tree, label_token),
+                    .allow_unlabeled = false,
+                    .allocator = analyser.gpa,
+                };
+                defer context.deinit();
+                try context.findBreakOperands(tree, node);
+                for (context.break_operands.items) |operand| {
+                    if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type|
+                        return operand_type;
+                }
+            }
+
             var either: std.ArrayList(Type.TypeWithDescriptor) = .empty;
             for (switch_node.ast.cases) |case| {
                 const switch_case = tree.fullSwitchCase(case).?;
@@ -2547,7 +2562,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                 return else_type;
 
             var context: FindBreaks = .{
-                .label = if (loop.label_token) |token| tree.tokenSlice(token) else null,
+                .label = if (loop.label_token) |token| offsets.identifierTokenToNameSlice(tree, token) else null,
                 .allow_unlabeled = true,
                 .allocator = analyser.gpa,
             };

@@ -115,3 +115,12 @@ const switch_null_inline = switch (null) {
     //              ^ (@TypeOf(null))() TODO this should be `unknown`
     //                 ^ (unknown)()
 };
+
+// zig fmt: off
+const labeled_switch = blk: switch (some_u8) {
+//    ^^^^^^^^^^^^^^ (u8)()
+    'x' => |a| break :blk a,
+    'y' => |a| break :blk a,
+    else => |a| break :blk a,
+};
+// zig fmt: on
