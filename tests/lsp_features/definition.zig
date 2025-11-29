@@ -135,6 +135,29 @@ test "decl literal on generic type" {
     );
 }
 
+test "decl literal pointer" {
+    try testDefinition(
+        \\const S = struct {
+        \\    const value: S = .{};
+        \\    const <def><decl>ptr</decl></def>: *const S = &value;
+        \\};
+        \\test {
+        \\    const ptr: *const S = .<>ptr;
+        \\}
+    );
+    try testDefinition(
+        \\const S = struct {
+        \\    const value: S = .{};
+        \\    fn <def><decl>pointerFn</decl></def>() *const S {
+        \\        return &value;
+        \\    }
+        \\};
+        \\test {
+        \\    const ptr: *const S = .poi<>nterFn();
+        \\}
+    );
+}
+
 test "capture" {
     try testDefinition(
         \\test {

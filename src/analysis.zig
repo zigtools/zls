@@ -5873,6 +5873,7 @@ pub fn lookupSymbolFieldInit(
         const unwrapped =
             try analyser.resolveUnwrapErrorUnionType(container_type, .payload) orelse
             try analyser.resolveOptionalUnwrap(container_type) orelse
+            try analyser.resolveDerefType(container_type) orelse
             break;
         container_type = unwrapped;
     }
