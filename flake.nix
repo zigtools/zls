@@ -20,7 +20,7 @@
       (
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
-          zig = zig-overlay.packages.${system}."0.15.1";
+          zig = zig-overlay.packages.${system}."0.15.2";
           gitignoreSource = gitignore.lib.gitignoreSource;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
           revision = self;
