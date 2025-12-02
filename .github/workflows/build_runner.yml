@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - zig-version: 0.15.1
+          - zig-version: 0.15.2
             build-runner-file: master.zig
           # - zig-version: mach-latest
           #   build-runner-file: master.zig
