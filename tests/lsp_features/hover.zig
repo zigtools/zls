@@ -334,10 +334,10 @@ test "root struct" {
         \\const foo: @This() = .{}
         \\```
         \\```zig
-        \\(test)
+        \\(Untitled-0)
         \\```
         \\
-        \\Go to [test](file:///test.zig#L1)
+        \\Go to [Untitled-0](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -353,7 +353,7 @@ test "inferred struct init" {
         \\(type)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
     try testHover(
         \\const S = struct { foo: u32 };
@@ -367,7 +367,7 @@ test "inferred struct init" {
         \\(type)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -385,7 +385,7 @@ test "decl literal" {
         \\(S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
     try testHover(
         \\const S = struct {
@@ -410,7 +410,7 @@ test "decl literal function" {
         \\(fn () S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
 
     try testHover(
@@ -428,7 +428,7 @@ test "decl literal function" {
         \\(fn () !S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
     try testHover(
         \\const Inner = struct {
@@ -448,7 +448,7 @@ test "decl literal function" {
         \\(fn () Inner)
         \\```
         \\
-        \\Go to [Inner](file:///test.zig#L1)
+        \\Go to [Inner](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -471,7 +471,7 @@ test "decl literal on generic type" {
         \\(Box(u8))
         \\```
         \\
-        \\Go to [Box](file:///test.zig#L1)
+        \\Go to [Box](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -495,7 +495,7 @@ test "decl literal on generic type - alias" {
         \\(Box(u8))
         \\```
         \\
-        \\Go to [Box](file:///test.zig#L1)
+        \\Go to [Box](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -585,7 +585,7 @@ test "enum member" {
         \\(Enum)
         \\```
         \\
-        \\Go to [Enum](file:///test.zig#L1)
+        \\Go to [Enum](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -607,7 +607,7 @@ test "generic type" {
         \\(GenericType(StructType,EnumType))
         \\```
         \\
-        \\Go to [GenericType](file:///test.zig#L3) | [StructType](file:///test.zig#L1) | [EnumType](file:///test.zig#L2)
+        \\Go to [GenericType](untitled:///Untitled-0.zig#L3) | [StructType](untitled:///Untitled-0.zig#L1) | [EnumType](untitled:///Untitled-0.zig#L2)
     );
 }
 
@@ -652,7 +652,7 @@ test "enum literal" {
         \\(E)
         \\```
         \\
-        \\Go to [E](file:///test.zig#L1)
+        \\Go to [E](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -671,7 +671,7 @@ test "function" {
         \\(fn (A, B) error{A,B}!C)
         \\```
         \\
-        \\Go to [A](file:///test.zig#L1) | [B](file:///test.zig#L2) | [C](file:///test.zig#L3)
+        \\Go to [A](untitled:///Untitled-0.zig#L1) | [B](untitled:///Untitled-0.zig#L2) | [C](untitled:///Untitled-0.zig#L3)
     );
     try testHover(
         \\const S = struct { a: i32 };
@@ -685,7 +685,7 @@ test "function" {
         \\(fn (S, S) error{A,B}!S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
     try testHover(
         \\const E = error { A, B, C };
@@ -768,7 +768,7 @@ test "optional" {
         \\(?S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -785,7 +785,7 @@ test "error union" {
         \\(error{A,B}!S)
         \\```
         \\
-        \\Go to [S](file:///test.zig#L1)
+        \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
 }
 
@@ -1130,7 +1130,7 @@ test "escaped identifier in enum literal" {
         \\(E)
         \\```
         \\
-        \\Go to [E](file:///test.zig#L1)
+        \\Go to [E](untitled:///Untitled-0.zig#L1)
     , .{
         .highlight = "@\"hello world\"",
         .markup_kind = .markdown,
@@ -1369,7 +1369,6 @@ fn testHoverWithOptions(
     const arena = ctx.arena.allocator();
 
     const uri = try ctx.addDocument(.{
-        .uri = "file:///test.zig",
         .source = text,
     });
     const handle = server.document_store.getHandle(uri).?;

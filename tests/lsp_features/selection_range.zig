@@ -41,7 +41,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
     const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
     const params: types.SelectionRangeParams = .{
-        .textDocument = .{ .uri = test_uri },
+        .textDocument = .{ .uri = test_uri.raw },
         .positions = &.{position},
     };
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/selectionRange", params);

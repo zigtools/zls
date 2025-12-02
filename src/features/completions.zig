@@ -11,7 +11,7 @@ const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("tracy");
-const URI = @import("../uri.zig");
+const Uri = @import("../Uri.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const analyser_completions = @import("../analyser/completions.zig");
 
@@ -145,7 +145,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) error{OutOfMemory}!voi
 fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
-    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
+    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
     if (is_cimport) {
         if (std.mem.startsWith(u8, name, "_")) return;
         // TODO figuring out which declarations should be excluded could be made more complete and accurate
@@ -684,7 +684,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 ///  - `.cinclude_string_literal`
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
-fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) !void {
+fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) error{OutOfMemory}!void {
     var completions: CompletionSet = .empty;
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
@@ -720,8 +720,11 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             log.err("failed to resolve include paths: {}", .{err});
             return;
         };
-    } else {
-        const document_path = try URI.toFsPath(builder.arena, builder.orig_handle.uri);
+    } else blk: {
+        const document_path = builder.orig_handle.uri.toFsPath(builder.arena) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UnsupportedScheme => break :blk,
+        };
         try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
     }
 
@@ -881,10 +884,7 @@ pub fn completionAtIndex(
         .cinclude_string_literal,
         .embedfile_string_literal,
         .string_literal,
-        => completeFileSystemStringLiteral(&builder, pos_context) catch |err| {
-            log.err("failed to get file system completions: {}", .{err});
-            return null;
-        },
+        => try completeFileSystemStringLiteral(&builder, pos_context),
         else => return null,
     }
 
@@ -968,7 +968,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) e
 
     const store = &builder.server.document_store;
 
-    var dependencies: std.ArrayList(DocumentStore.Uri) = .empty;
+    var dependencies: std.ArrayList(Uri) = .empty;
     try dependencies.append(builder.arena, builder.orig_handle.uri);
     try store.collectDependencies(builder.arena, builder.orig_handle, &dependencies);
 

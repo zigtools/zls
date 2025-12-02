@@ -143,7 +143,7 @@ test "autofix comment" {
             .relatedInformation = &.{
                 .{
                     .location = .{
-                        .uri = "file:///test.zig",
+                        .uri = "untitled:///Untitled-0.zig",
                         .range = .{
                             .start = .{ .line = 1, .character = 10 },
                             .end = .{ .line = 1, .character = 13 },
@@ -169,7 +169,6 @@ fn testDiagnostics(
     defer context.deinit();
 
     const uri = try context.addDocument(.{
-        .uri = "file:///test.zig",
         .source = source,
     });
 

@@ -958,7 +958,7 @@ fn testDiagnostic(
     const handle = ctx.server.document_store.getHandle(uri).?;
 
     const params: types.CodeActionParams = .{
-        .textDocument = .{ .uri = uri },
+        .textDocument = .{ .uri = uri.raw },
         .range = range,
         .context = .{
             .diagnostics = &.{},
@@ -989,9 +989,9 @@ fn testDiagnostic(
         const workspace_edit = code_action.edit.?;
         const changes = workspace_edit.changes.?.map;
         try std.testing.expectEqual(@as(usize, 1), changes.count());
-        try std.testing.expect(changes.contains(uri));
+        try std.testing.expect(changes.contains(uri.raw));
 
-        try text_edits.appendSlice(allocator, changes.get(uri).?);
+        try text_edits.appendSlice(allocator, changes.get(uri.raw).?);
     }
 
     const actual = try zls.diff.applyTextEdits(allocator, source, text_edits.items, ctx.server.offset_encoding);

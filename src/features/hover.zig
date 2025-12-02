@@ -177,7 +177,7 @@ fn hoverSymbolResolved(
                 try output.print(arena, " | ", .{});
             const source_index = ref.handle.tree.tokenStart(ref.token);
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
-            try output.print(arena, "[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
+            try output.print(arena, "[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri.raw, line });
         }
     } else {
         try output.print(arena, "{s}", .{def_str});

@@ -6,7 +6,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const ast = @import("ast.zig");
 const tracy = @import("tracy");
 const Ast = std.zig.Ast;
-const URI = @import("uri.zig");
+const Uri = @import("Uri.zig");
 const log = std.log.scoped(.translate_c);
 
 const OutMessage = std.zig.Client.Message;
@@ -90,20 +90,20 @@ fn convertCIncludeInternal(
 
 pub const Result = union(enum) {
     // uri to the generated zig file
-    success: []const u8,
+    success: Uri,
     // zig translate-c failed with the given error messages
     failure: std.zig.ErrorBundle,
 
     pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
         switch (self.*) {
-            .success => |path| allocator.free(path),
+            .success => |uri| uri.deinit(allocator),
             .failure => |*bundle| bundle.deinit(allocator),
         }
     }
 };
 
 /// takes a c header file and returns the result from calling `zig translate-c`
-/// returns a URI to the generated zig file on success or the content of stderr on failure
+/// returns a Uri to the generated zig file on success or the content of stderr on failure
 /// null indicates a failure which is automatically logged
 /// Caller owns returned memory.
 pub fn translate(
@@ -234,7 +234,7 @@ pub fn translate(
                 const result_path = try global_cache_dir.join(allocator, &.{ "o", &hex_result_path, "cimport.zig" });
                 defer allocator.free(result_path);
 
-                return .{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
+                return .{ .success = try .fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
             },
             .error_bundle => {
                 const error_bundle_header = reader.takeStruct(InMessage.ErrorBundle, .little) catch return error.InvalidMessage;
