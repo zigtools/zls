@@ -23,7 +23,7 @@ pub fn addCases(
     });
 
     // https://github.com/ziglang/zig/issues/20605
-    var dir = std.fs.openDirAbsolute(b.pathFromRoot(cases_path_from_root), .{ .iterate = true }) catch |err|
+    var dir = std.fs.cwd().openDir(cases_path_from_root, .{ .iterate = true }) catch |err|
         std.debug.panic("failed to open '{s}': {}", .{ cases_path_from_root, err });
     defer dir.close();
 
