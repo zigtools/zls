@@ -5869,13 +5869,9 @@ pub fn lookupSymbolFieldInit(
         else => false,
     };
 
-    while (true) {
-        const unwrapped =
-            try analyser.resolveUnwrapErrorUnionType(container_type, .payload) orelse
-            try analyser.resolveOptionalUnwrap(container_type) orelse
-            break;
-        container_type = unwrapped;
-    }
+    container_type = try container_type
+        .resolveDeclLiteralResultType()
+        .instanceTypeVal(analyser) orelse container_type;
 
     if (is_struct_init) {
         return try container_type.lookupSymbol(analyser, field_name);
