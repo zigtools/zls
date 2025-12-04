@@ -30,7 +30,7 @@
             default = zls;
             zls = pkgs.stdenvNoCC.mkDerivation {
               name = "zls";
-              version = "0.15.0";
+              version = "0.15.1";
               meta.mainProgram = "zls";
               src = gitignoreSource ./.;
               nativeBuildInputs = [zig];
