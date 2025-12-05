@@ -1048,6 +1048,7 @@ fn extractBuildInformation(
             modules: *std.StringArrayHashMapUnmanaged(shared.BuildConfig.Module),
             module: *std.Build.Module,
             compile: ?*Step.Compile,
+            cwd: []const u8,
         ) !void {
             const root_source_file = module.root_source_file orelse return;
 
@@ -1100,8 +1101,6 @@ fn extractBuildInformation(
                     },
                 }
             }
-
-            const cwd = try std.process.getCwdAlloc(allocator);
 
             const root_source_file_path = try std.fs.path.resolve(allocator, &.{ cwd, root_source_file.getPath2(module.owner, null) });
 
@@ -1207,11 +1206,12 @@ fn extractBuildInformation(
     // - modules that are reachable from the "install" step
     // - all other reachable modules
     var modules: std.StringArrayHashMapUnmanaged(BuildConfig.Module) = .empty;
+    const cwd = try std.process.getCwdAlloc(arena);
 
     for (b.modules.values()) |root_module| {
         const graph = root_module.getGraph();
         for (graph.modules) |module| {
-            try helper.processModule(arena, &modules, module, null);
+            try helper.processModule(arena, &modules, module, null, cwd);
         }
     }
 
@@ -1223,9 +1223,19 @@ fn extractBuildInformation(
             const compile = step.cast(Step.Compile) orelse continue;
             const graph = compile.root_module.getGraph();
             for (graph.modules) |module| {
-                try helper.processModule(arena, &modules, module, compile);
+                try helper.processModule(arena, &modules, module, compile, cwd);
             }
         }
+    }
+
+    var compilations: std.ArrayList(BuildConfig.Compile) = .empty;
+    for (all_steps.keys()) |step| {
+        const compile = step.cast(Step.Compile) orelse continue;
+        const root_source_file = compile.root_module.root_source_file orelse continue;
+        const root_source_file_path = try std.fs.path.resolve(arena, &.{ cwd, root_source_file.getPath2(compile.root_module.owner, null) });
+        try compilations.append(arena, .{
+            .root_module = root_source_file_path,
+        });
     }
 
     // Sample `@dependencies` structure:
@@ -1272,6 +1282,7 @@ fn extractBuildInformation(
         BuildConfig{
             .dependencies = .{ .map = root_dependencies },
             .modules = .{ .map = modules },
+            .compilations = compilations.items,
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = .{ .map = available_options },
         },
