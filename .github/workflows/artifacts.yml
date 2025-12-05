@@ -11,29 +11,13 @@ on:
 
 jobs:
   deploy:
-    if: github.repository_owner == 'zigtools' && github.ref == 'refs/heads/master'
+    if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # required to resolve the version string
-
-      - name: Skip if no new commits
-        run: |
-          LAST_SUCCESS_COMMIT=$(curl -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/zigtools/zls/actions/workflows/artifacts.yml/runs?branch=master&status=success&per_page=1" | jq --raw-output ".workflow_runs[0].head_sha")
-          CURRENT_COMMIT=$(git rev-parse HEAD)
-
-          echo "Latest commit with successfull CI: $LAST_SUCCESS_COMMIT"
-          echo "Current commit: $CURRENT_COMMIT"
-
-          if [ $LAST_SUCCESS_COMMIT = $CURRENT_COMMIT ]; then
-            echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
-            echo "skipped=yes" >> $GITHUB_OUTPUT
-            echo "Commits are equal, skipping."
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: mlugg/setup-zig@v2
         if: env.SKIP_DEPLOY != 'true'
