@@ -9,6 +9,8 @@ pub const BuildConfig = struct {
     /// The key is the `root_source_file`.
     /// All modules with the same root source file are merged. This limitation may be lifted in the future.
     modules: std.json.ArrayHashMap(Module),
+    /// List of all compilations units.
+    compilations: []const Compile,
     /// The names of all top level steps.
     top_level_steps: []const []const u8,
     available_options: std.json.ArrayHashMap(AvailableOption),
@@ -17,6 +19,13 @@ pub const BuildConfig = struct {
         import_table: std.json.ArrayHashMap([]const u8),
         c_macros: []const []const u8,
         include_dirs: []const []const u8,
+    };
+
+    pub const Compile = struct {
+        /// Key in `BuildConfig.modules`.
+        root_module: []const u8,
+
+        // may contain additional information in the future like `target` or `link_libc`.
     };
 
     /// Equivalent to `std.Build.AvailableOption` which is not accessible because it non-pub.

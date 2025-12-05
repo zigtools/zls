@@ -26,6 +26,11 @@
       "include_dirs": []
     }
   },
+  "compilations": [
+    {
+      "root_module": "main.zig"
+    }
+  ],
   "top_level_steps": [
     "install",
     "uninstall"

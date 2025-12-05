@@ -1229,6 +1229,16 @@ fn extractBuildInformation(
         }
     }
 
+    var compilations: std.ArrayList(BuildConfig.Compile) = .empty;
+    for (all_steps.keys()) |step| {
+        const compile = step.cast(Step.Compile) orelse continue;
+        const root_source_file = compile.root_module.root_source_file orelse continue;
+        const root_source_file_path = try std.fs.path.resolve(arena, &.{ b.graph.cache.cwd, root_source_file.getPath2(compile.root_module.owner, null) });
+        try compilations.append(arena, .{
+            .root_module = root_source_file_path,
+        });
+    }
+
     // Sample `@dependencies` structure:
     // pub const packages = struct {
     //     pub const @"1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5" = struct {
@@ -1273,6 +1283,7 @@ fn extractBuildInformation(
         BuildConfig{
             .dependencies = .{ .map = root_dependencies },
             .modules = .{ .map = modules },
+            .compilations = compilations.items,
             .top_level_steps = b.top_level_steps.keys(),
             .available_options = .{ .map = available_options },
         },

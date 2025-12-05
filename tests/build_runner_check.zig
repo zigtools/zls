@@ -50,6 +50,10 @@ pub fn main(init: std.process.Init) !u8 {
             try mod.import_table.map.reIndex(arena);
         }
 
+        for (new.compilations) |*compile| {
+            @as(*[]const u8, @constCast(&compile.root_module)).* = try sanitizePath(arena, compile.root_module, cwd, local_cache_dir, global_cache_dir);
+        }
+
         break :sanitized try std.json.Stringify.valueAlloc(
             gpa,
             new,
