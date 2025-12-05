@@ -225,6 +225,8 @@ pub const Handle = struct {
                 self.* = undefined;
             }
         } = .init,
+
+        associated_compilation_units: GetAssociatedCompilationUnitsResult = .unresolved,
     },
 
     const ZirOrZoir = union(Ast.Mode) {
@@ -305,6 +307,7 @@ pub const Handle = struct {
         self.cimports.deinit(allocator);
 
         self.impl.associated_build_file.deinit(allocator);
+        self.impl.associated_compilation_units.deinit(allocator);
 
         self.* = undefined;
     }
@@ -511,6 +514,95 @@ pub const Handle = struct {
         self.impl.associated_build_file.deinit(document_store.allocator);
         self.impl.associated_build_file = .none;
         return .none;
+    }
+
+    pub const GetAssociatedCompilationUnitsResult = union(enum) {
+        /// The Handle has no associated compilation unit.
+        none,
+        /// The associated compilation unit has not been resolved yet.
+        unresolved,
+        /// The associated compilation unit has been successfully resolved to a list of root module.
+        resolved: []const []const u8,
+
+        fn deinit(result: *GetAssociatedCompilationUnitsResult, allocator: std.mem.Allocator) void {
+            switch (result.*) {
+                .none, .unresolved => {},
+                .resolved => |root_source_files| {
+                    allocator.free(root_source_files);
+                },
+            }
+            result.* = undefined;
+        }
+    };
+
+    /// Returns the root source file of the root module of the given handle. Same as `@import("root")`.
+    pub fn getAssociatedCompilationUnits(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!GetAssociatedCompilationUnitsResult {
+        const allocator = document_store.allocator;
+        const io = document_store.io;
+
+        const build_file, const target_root_source_file = switch (self.impl.associated_compilation_units) {
+            else => return self.impl.associated_compilation_units,
+            .unresolved => switch (try self.getAssociatedBuildFile(document_store)) {
+                .none => return .none,
+                .unresolved => return .unresolved,
+                .resolved => |resolved| .{ resolved.build_file, resolved.root_source_file },
+            },
+        };
+
+        const build_config = build_file.tryLockConfig(io) orelse return .none;
+        defer build_file.unlockConfig(io);
+
+        const modules = &build_config.modules.map;
+
+        var visted: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, modules.count());
+        defer visted.deinit(allocator);
+
+        var queue: std.ArrayList(usize) = try .initCapacity(allocator, 1);
+        defer queue.deinit(allocator);
+
+        const target_index = modules.getIndex(target_root_source_file).?;
+
+        // We only care about the root source file of each root module so we convert them to a set.
+        var root_modules: std.StringArrayHashMapUnmanaged(void) = .empty;
+        defer root_modules.deinit(allocator);
+
+        try root_modules.ensureTotalCapacity(allocator, build_config.compilations.len);
+        for (build_config.compilations) |compile| {
+            root_modules.putAssumeCapacity(compile.root_module, {});
+        }
+
+        var results: std.ArrayList([]const u8) = .empty;
+        defer results.deinit(allocator);
+
+        // Do a graph search from root modules until we reach `root_source_file`
+        for (root_modules.keys()) |root_module| {
+            visted.unsetAll();
+            queue.clearRetainingCapacity();
+            queue.appendAssumeCapacity(modules.getIndex(root_module).?);
+
+            while (queue.pop()) |index| {
+                if (index == target_index) {
+                    try results.append(allocator, root_module);
+                    break;
+                }
+
+                if (visted.isSet(index)) continue;
+                visted.set(index);
+
+                const imported_modules = modules.values()[index].import_table.map.values();
+                try queue.ensureUnusedCapacity(allocator, imported_modules.len);
+                for (imported_modules) |root_source_file| {
+                    queue.appendAssumeCapacity(modules.getIndex(root_source_file) orelse continue);
+                }
+            }
+        }
+
+        if (results.items.len == 0) {
+            self.impl.associated_compilation_units = .none;
+        } else {
+            self.impl.associated_compilation_units = .{ .resolved = try results.toOwnedSlice(allocator) };
+        }
+        return self.impl.associated_compilation_units;
     }
 
     fn getLazy(
@@ -1360,9 +1452,13 @@ fn createAndStoreDocument(
 
     if (gop.found_existing) {
         std.debug.assert(new_handle.impl.associated_build_file == .init);
+        std.debug.assert(new_handle.impl.associated_compilation_units == .unresolved);
         if (lsp_synced) {
             new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
             gop.value_ptr.*.impl.associated_build_file = .init;
+
+            new_handle.impl.associated_compilation_units = gop.value_ptr.*.impl.associated_compilation_units;
+            gop.value_ptr.*.impl.associated_compilation_units = .unresolved;
 
             new_handle.uri = gop.key_ptr.*;
             gop.value_ptr.*.deinit();
@@ -1739,30 +1835,53 @@ fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
     try self.diagnostics_collection.publishDiagnostics();
 }
 
+pub const UriFromImportStringResult = union(enum) {
+    none,
+    one: Uri,
+    many: []const Uri,
+
+    pub fn deinit(result: *UriFromImportStringResult, allocator: std.mem.Allocator) void {
+        switch (result.*) {
+            .none => {},
+            .one => |uri| uri.deinit(allocator),
+            .many => |uris| {
+                for (uris) |uri| uri.deinit(allocator);
+                allocator.free(uris);
+            },
+        }
+    }
+};
+
 /// takes the string inside a @import() node (without the quotation marks)
 /// and returns it's uri
 /// caller owns the returned memory
 /// **Thread safe** takes a shared lock
-pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, handle: *Handle, import_str: []const u8) error{OutOfMemory}!?Uri {
+pub fn uriFromImportStr(
+    self: *DocumentStore,
+    allocator: std.mem.Allocator,
+    handle: *Handle,
+    import_str: []const u8,
+) error{OutOfMemory}!UriFromImportStringResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (std.mem.endsWith(u8, import_str, ".zig") or std.mem.endsWith(u8, import_str, ".zon")) {
         const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.UnsupportedScheme => return null,
+            error.UnsupportedScheme => return .none,
         };
         defer allocator.free(base_path);
-        return try resolveFileImportString(allocator, base_path, import_str);
+        const uri = try resolveFileImportString(allocator, base_path, import_str) orelse return .none;
+        return .{ .one = uri };
     }
 
     if (std.mem.eql(u8, import_str, "std")) {
-        const zig_lib_dir = self.config.zig_lib_dir orelse return null;
+        const zig_lib_dir = self.config.zig_lib_dir orelse return .none;
 
         const std_path = try zig_lib_dir.join(allocator, &.{ "std", "std.zig" });
         defer allocator.free(std_path);
 
-        return try .fromPath(allocator, std_path);
+        return .{ .one = try .fromPath(allocator, std_path) };
     }
 
     if (std.mem.eql(u8, import_str, "builtin")) {
@@ -1771,24 +1890,33 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
                 .none, .unresolved => {},
                 .resolved => |resolved| {
                     if (resolved.build_file.builtin_uri) |builtin_uri| {
-                        return try builtin_uri.dupe(allocator);
+                        return .{ .one = try builtin_uri.dupe(allocator) };
                     }
                 },
             }
         }
         if (self.config.builtin_path) |builtin_path| {
-            return try .fromPath(allocator, builtin_path);
+            return .{ .one = try .fromPath(allocator, builtin_path) };
         }
-        return null;
+        return .none;
     }
 
-    if (!supports_build_system) return null;
+    if (!supports_build_system) return .none;
 
     if (std.mem.eql(u8, import_str, "root")) {
-        switch (try handle.getAssociatedBuildFile(self)) {
-            .none, .unresolved => return null,
-            .resolved => |result| return try .fromPath(allocator, result.root_source_file),
+        const root_source_files = switch (try handle.getAssociatedCompilationUnits(self)) {
+            .none, .unresolved => return .none,
+            .resolved => |root_source_files| root_source_files,
+        };
+        var uris: std.ArrayList(Uri) = try .initCapacity(allocator, root_source_files.len);
+        defer {
+            for (uris.items) |uri| uri.deinit(allocator);
+            uris.deinit(allocator);
         }
+        for (root_source_files) |root_source_file| {
+            uris.appendAssumeCapacity(try .fromPath(allocator, root_source_file));
+        }
+        return .{ .many = try uris.toOwnedSlice(allocator) };
     }
 
     if (isBuildFile(handle.uri)) blk: {
@@ -1797,20 +1925,20 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         defer build_file.unlockConfig(self.io);
 
         if (build_config.dependencies.map.get(import_str)) |path| {
-            return try .fromPath(allocator, path);
+            return .{ .one = try .fromPath(allocator, path) };
         }
-        return null;
+        return .none;
     }
 
     switch (try handle.getAssociatedBuildFile(self)) {
-        .none, .unresolved => return null,
+        .none, .unresolved => return .none,
         .resolved => |resolved| {
-            const build_config = resolved.build_file.tryLockConfig(self.io) orelse return null;
+            const build_config = resolved.build_file.tryLockConfig(self.io) orelse return .none;
             defer resolved.build_file.unlockConfig(self.io);
 
-            const module = build_config.modules.map.get(resolved.root_source_file) orelse return null;
-            const imported_root_source_file = module.import_table.map.get(import_str) orelse return null;
-            return try .fromPath(allocator, imported_root_source_file);
+            const module = build_config.modules.map.get(resolved.root_source_file) orelse return .none;
+            const imported_root_source_file = module.import_table.map.get(import_str) orelse return .none;
+            return .{ .one = try .fromPath(allocator, imported_root_source_file) };
         },
     }
 }

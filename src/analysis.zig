@@ -2296,22 +2296,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                         return null;
                     }
 
-                    const import_uri = (try analyser.store.uriFromImportStr(
-                        analyser.arena,
-                        handle,
-                        import_string,
-                    )) orelse (try analyser.store.uriFromImportStr(
-                        analyser.arena,
-                        analyser.root_handle orelse return null,
-                        import_string,
-                    )) orelse return null;
-
-                    const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
-
-                    return .{
-                        .data = .{ .container = .root(new_handle) },
-                        .is_type_val = true,
-                    };
+                    if (try analyser.resolveImportString(handle, import_string)) |ty| return ty;
+                    if (try analyser.resolveImportString(analyser.root_handle orelse return null, import_string)) |ty| return ty;
+                    return null;
                 },
                 .c_import => {
                     if (!DocumentStore.supports_build_system) return null;
@@ -4445,6 +4432,34 @@ pub const ScopeWithHandle = struct {
     }
 };
 
+pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, import_string: []const u8) error{OutOfMemory}!?Type {
+    const result = try analyser.store.uriFromImportStr(analyser.arena, handle, import_string);
+    switch (result) {
+        .none => return null,
+        .one => |uri| {
+            const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
+            return .{
+                .data = .{ .container = .root(node_handle) },
+                .is_type_val = true,
+            };
+        },
+        .many => |uris| {
+            var entries: std.ArrayList(Type.Data.EitherEntry) = try .initCapacity(analyser.arena, uris.len);
+            for (uris) |uri| {
+                const node_handle = analyser.store.getOrLoadHandle(uri) orelse continue;
+                entries.appendAssumeCapacity(.{
+                    .type_data = .{ .container = .root(node_handle) },
+                    .descriptor = "",
+                });
+            }
+            return .{
+                .data = .{ .either = entries.items },
+                .is_type_val = true,
+            };
+        },
+    }
+}
+
 /// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
 pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Type {
@@ -4719,12 +4734,7 @@ pub fn getFieldAccessType(
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
-                    const import_uri = try analyser.store.uriFromImportStr(analyser.arena, handle, import_str) orelse return null;
-                    const node_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
-                    current_type = .{
-                        .data = .{ .container = .root(node_handle) },
-                        .is_type_val = true,
-                    };
+                    current_type = try analyser.resolveImportString(handle, import_str) orelse return null;
                     _ = tokenizer.next(); // eat the .r_paren
                     continue; // Outermost `while`
                 }
