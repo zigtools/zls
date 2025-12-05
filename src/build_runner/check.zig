@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn isBuildRunnerSupported(runtime_zig_version: std.SemanticVersion) bool {
     const build_options = @import("build_options");
-    const is_zls_version_tagged = build_options.version.pre == null and build_options.version.build == null;
+    const is_zls_version_tagged = build_options.version.pre == null;
     const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
     return isBuildRunnerSupportedInternal(
         min_runtime_zig_version,
@@ -20,10 +20,10 @@ fn isBuildRunnerSupportedInternal(
     /// Will be set iff ZLS is a tagged release.
     strict: bool,
 ) bool {
-    const minimum_version_is_tagged = minimum_zig_version.build == null and minimum_zig_version.pre == null;
+    const minimum_version_is_tagged = minimum_zig_version.pre == null;
 
     var zig_version = param_zig_version;
-    var version_is_tagged = zig_version.build == null and zig_version.pre == null;
+    var version_is_tagged = zig_version.pre == null;
 
     if (!version_is_tagged and zig_version.patch != 0) {
         // A zig version like `0.12.2-dev` has the same compatibility as `0.12.1`
@@ -68,7 +68,7 @@ test {
     // The build runner must support the Zig version that ZLS is being built with
     const current_zig_version = @import("builtin").zig_version;
     try std.testing.expect(isBuildRunnerSupported(current_zig_version));
-    const is_zls_version_tagged_release = current_zig_version.build == null and current_zig_version.pre == null;
+    const is_zls_version_tagged_release = current_zig_version.pre == null;
 
     if (is_zls_version_tagged_release) {
         // A tagged release of ZLS should support the same tagged release of Zig
@@ -85,7 +85,7 @@ test isBuildRunnerSupportedInternal {
     for (test_cases) |test_case| {
         const minimum_runtime_zig_version: std.SemanticVersion = try .parse(test_case.minimum_runtime_zig_version);
         const runtime_zig_version: std.SemanticVersion = try .parse(test_case.runtime_zig_version);
-        const minimum_runtime_version_is_tagged = minimum_runtime_zig_version.build == null and minimum_runtime_zig_version.pre == null;
+        const minimum_runtime_version_is_tagged = minimum_runtime_zig_version.pre == null;
         const expected_if_strict, const expected_if_not_strict = switch (test_case.is_supported) {
             .yes => .{ true, true },
             .no => .{ false, false },

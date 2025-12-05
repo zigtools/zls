@@ -103,7 +103,7 @@ pub fn build(b: *Build) !void {
 
     const version_data_module = blk: {
         const gen_version_data_cmd = b.addRunArtifact(gen_exe);
-        const version = if (zls_version.pre == null and zls_version.build == null) b.fmt("{f}", .{zls_version}) else "master";
+        const version = if (zls_version.pre == null) b.fmt("{f}", .{zls_version}) else "master";
         gen_version_data_cmd.addArgs(&.{ "--langref-version", version });
 
         gen_version_data_cmd.addArg("--langref-path");
@@ -133,8 +133,7 @@ pub fn build(b: *Build) !void {
     }
 
     { // zig build release
-        const is_tagged_release = zls_version.pre == null and zls_version.build == null;
-        const targets = comptime if (is_tagged_release) release_targets ++ additional_tagged_release_targets else release_targets;
+        const targets = comptime if (zls_version.pre == null) release_targets ++ additional_tagged_release_targets else release_targets;
 
         var release_artifacts: [targets.len]*Build.Step.Compile = undefined;
         for (targets, &release_artifacts) |target_query, *artifact| {
@@ -340,7 +339,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
         };
     }
 
-    if (zls_version.pre == null and zls_version.build == null) return zls_version;
+    if (zls_version.pre == null) return zls_version;
 
     const argv: []const []const u8 = &.{
         "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
@@ -605,15 +604,15 @@ const Build = blk: {
     const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
 
-    const min_build_zig_is_tagged = min_build_zig.build == null and min_build_zig.pre == null;
-    const min_runtime_is_tagged = min_build_zig.build == null and min_build_zig.pre == null;
+    const min_build_zig_is_tagged = min_build_zig.pre == null;
+    const min_runtime_is_tagged = min_build_zig.pre == null;
 
     const min_build_zig_simple: std.SemanticVersion = .{ .major = min_build_zig.major, .minor = min_build_zig.minor, .patch = 0 };
     const min_runtime_zig_simple: std.SemanticVersion = .{ .major = min_runtime_zig.major, .minor = min_runtime_zig.minor, .patch = 0 };
 
     std.debug.assert(zls_version.pre == null or std.mem.eql(u8, zls_version.pre.?, "dev"));
     std.debug.assert(zls_version.build == null);
-    const zls_version_is_tagged = zls_version.pre == null and zls_version.build == null;
+    const zls_version_is_tagged = zls_version.pre == null;
     const zls_version_simple: std.SemanticVersion = .{ .major = zls_version.major, .minor = zls_version.minor, .patch = 0 };
     const zls_version_simple_str = std.fmt.comptimePrint("{d}.{d}.0", .{ zls_version.major, zls_version.minor });
 
@@ -670,8 +669,8 @@ const Build = blk: {
     }
 
     // check minimum build version
-    const is_current_zig_tagged_release = builtin.zig_version.pre == null and builtin.zig_version.build == null;
-    const is_min_build_zig_tagged_release = min_build_zig.pre == null and min_build_zig.build == null;
+    const is_current_zig_tagged_release = builtin.zig_version.pre == null;
+    const is_min_build_zig_tagged_release = min_build_zig.pre == null;
     const current_zig_simple: std.SemanticVersion = .{ .major = builtin.zig_version.major, .minor = builtin.zig_version.minor, .patch = 0 };
     if (switch (builtin.zig_version.order(min_build_zig)) {
         .lt => true,
