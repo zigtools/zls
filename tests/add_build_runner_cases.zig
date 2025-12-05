@@ -64,9 +64,13 @@ pub fn addCases(
 
         const run_diff = b.addRunArtifact(check_exe);
         run_diff.setName(b.fmt("run {s} ({s})", .{ check_exe.name, entry.name }));
+        run_diff.setCwd(cases_dir);
         run_diff.addFileArg(expected_build_config_json);
         run_diff.addFileArg(actual_build_config_json);
-        run_diff.addDirectoryArg(cases_dir);
+        run_diff.addArg("--cache-dir");
+        run_diff.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.cache_root}) });
+        run_diff.addArg("--global-cache-dir");
+        run_diff.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.global_cache_root}) });
 
         test_step.dependOn(&run_diff.step);
     }
