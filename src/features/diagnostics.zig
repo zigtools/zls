@@ -385,8 +385,8 @@ pub fn getErrorBundleFromStderr(
 
     var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
     while (line_iterator.next()) |line| {
-        var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
-
+        // `{optional indentation}{src_path}:{line}:{column}: {msg}`
+        var pos_and_diag_iterator = std.mem.splitScalar(u8, std.mem.trimStart(u8, line, " "), ':');
         const src_path = pos_and_diag_iterator.next() orelse continue;
         const line_string = pos_and_diag_iterator.next() orelse continue;
         const column_string = pos_and_diag_iterator.next() orelse continue;
