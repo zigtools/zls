@@ -686,20 +686,13 @@ const Build = blk: {
             \\
             \\
         ++ if (is_min_build_zig_tagged_release)
-            std.fmt.comptimePrint(
-                \\Please download the {[minimum_version]s} release of Zig. (https://ziglang.org/download/)
-                \\
-                \\Tagged releases of ZLS are also available.
-                \\  -> https://github.com/zigtools/zls/releases
-                \\  -> https://github.com/zigtools/zls/releases/tag/{[minimum_version_simple]} (may not exist yet)
-            , .{
-                .minimum_version = minimum_build_zig_version,
-                .minimum_version_simple = min_build_zig_simple,
-            })
+            \\Please download the {[minimum_version]s} release of Zig. (https://ziglang.org/download/)
+            \\
+            \\Tagged releases of ZLS are also available.
+            \\  -> https://github.com/zigtools/zls/releases
         else if (is_current_zig_tagged_release)
             \\Please download or compile a tagged release of ZLS.
             \\  -> https://github.com/zigtools/zls/releases
-            \\  -> https://github.com/zigtools/zls/releases/tag/{[current_version]s} (may not exist yet)
         else
             \\You can take one of the following actions to resolve this issue:
             \\  - Download the latest nightly of Zig (https://ziglang.org/download/)
