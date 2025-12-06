@@ -1,0 +1,39 @@
+{
+  "dependencies": {},
+  "modules": {
+    "main.zig": {
+      "import_table": {
+        "collision": "first.zig",
+        "first": "first.zig",
+        "second": "second.zig"
+      },
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "first.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "second.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    },
+    "third.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    }
+  },
+  "compilations": [
+    {
+      "root_module": "main.zig"
+    }
+  ],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}
