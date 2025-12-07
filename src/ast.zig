@@ -116,69 +116,6 @@ pub fn ptrTypeBitRange(tree: *const Ast, node: Node.Index) full.PtrType {
     });
 }
 
-fn legacyAsmComponents(tree: *const Ast, info: full.AsmLegacy.Components) full.AsmLegacy {
-    var result: full.AsmLegacy = .{
-        .ast = info,
-        .volatile_token = null,
-        .inputs = &.{},
-        .outputs = &.{},
-        .first_clobber = null,
-    };
-    if (info.asm_token + 1 < tree.tokens.len and tree.tokenTag(info.asm_token + 1) == .keyword_volatile) {
-        result.volatile_token = info.asm_token + 1;
-    }
-    const outputs_end: usize = for (info.items, 0..) |item, i| {
-        switch (tree.nodeTag(item)) {
-            .asm_output => continue,
-            else => break i,
-        }
-    } else info.items.len;
-
-    result.outputs = info.items[0..outputs_end];
-    result.inputs = info.items[outputs_end..];
-
-    if (info.items.len == 0) {
-        // asm ("foo" ::: "a", "b");
-        const template_token = lastToken(tree, info.template);
-        if (template_token + 4 < tree.tokens.len and
-            tree.tokenTag(template_token + 1) == .colon and
-            tree.tokenTag(template_token + 2) == .colon and
-            tree.tokenTag(template_token + 3) == .colon and
-            tree.tokenTag(template_token + 4) == .string_literal)
-        {
-            result.first_clobber = template_token + 4;
-        }
-    } else if (result.inputs.len != 0) {
-        // asm ("foo" :: [_] "" (y) : "a", "b");
-        const last_input = result.inputs[result.inputs.len - 1];
-        const rparen = lastToken(tree, last_input);
-        var i = rparen + 1;
-        // Allow a (useless) comma right after the closing parenthesis.
-        if (tree.tokenTag(i) == .comma) i += 1;
-        if (tree.tokenTag(i) == .colon and
-            tree.tokenTag(i + 1) == .string_literal)
-        {
-            result.first_clobber = i + 1;
-        }
-    } else {
-        // asm ("foo" : [_] "" (x) :: "a", "b");
-        const last_output = result.outputs[result.outputs.len - 1];
-        const rparen = lastToken(tree, last_output);
-        var i = rparen + 1;
-        // Allow a (useless) comma right after the closing parenthesis.
-        if (i + 1 < tree.tokens.len and tree.tokenTag(i) == .comma) i += 1;
-        if (i + 2 < tree.tokens.len and
-            tree.tokenTag(i) == .colon and
-            tree.tokenTag(i + 1) == .colon and
-            tree.tokenTag(i + 2) == .string_literal)
-        {
-            result.first_clobber = i + 2;
-        }
-    }
-
-    return result;
-}
-
 fn fullAsmComponents(tree: *const Ast, info: full.Asm.Components) full.Asm {
     var result: full.Asm = .{
         .ast = info,
@@ -200,18 +137,6 @@ fn fullAsmComponents(tree: *const Ast, info: full.Asm.Components) full.Asm {
     result.inputs = info.items[outputs_end..];
 
     return result;
-}
-
-pub fn asmLegacy(tree: *const Ast, node: Node.Index) full.AsmLegacy {
-    const template, const extra_index = tree.nodeData(node).node_and_extra;
-    const extra = tree.extraData(extra_index, Node.AsmLegacy);
-    const items = tree.extraDataSlice(.{ .start = extra.items_start, .end = extra.items_end }, Node.Index);
-    return legacyAsmComponents(tree, .{
-        .asm_token = tree.nodeMainToken(node),
-        .template = template,
-        .items = items,
-        .rparen = extra.rparen,
-    });
 }
 
 pub fn asmSimple(tree: *const Ast, node: Node.Index) full.Asm {
@@ -690,11 +615,6 @@ pub fn lastToken(tree: *const Ast, node: Node.Index) Ast.TokenIndex {
             const extra_index, const extra = tree.nodeData(n).@"for";
             const index = @intFromEnum(extra_index) + extra.inputs + @intFromBool(extra.has_else);
             n = @enumFromInt(tree.extra_data[index]);
-        },
-        .asm_legacy => {
-            _, const extra_index = tree.nodeData(n).node_and_extra;
-            const extra = tree.extraData(extra_index, Node.AsmLegacy);
-            break extra.rparen;
         },
         .@"asm" => {
             _, const extra_index = tree.nodeData(n).node_and_extra;
@@ -1518,7 +1438,6 @@ fn iterateChildrenTypeErased(
             if (field.value_expr.unwrap()) |value_expr| try callback(context, tree, value_expr);
         },
 
-        .asm_legacy,
         .@"asm",
         => {
             const asm_node = tree.asmFull(node);
