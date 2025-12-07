@@ -1877,32 +1877,6 @@ test "test decl" {
     });
 }
 
-test "legacy asm" {
-    try testSemanticTokens(
-        \\fn foo() void {
-        \\    asm volatile (""
-        \\        : [_] "" (-> type),
-        \\        :
-        \\        : "clobber"
-        \\    );
-        \\}
-    , &.{
-        .{ "fn", .keyword, .{} },
-        .{ "foo", .function, .{ .declaration = true } },
-        .{ "void", .type, .{} },
-
-        .{ "asm", .keyword, .{} },
-        .{ "volatile", .keyword, .{} },
-        .{ "\"\"", .string, .{} },
-
-        .{ "_", .variable, .{} },
-        .{ "\"\"", .string, .{} },
-        .{ "type", .type, .{} },
-
-        .{ "\"clobber\"", .string, .{} },
-    });
-}
-
 test "asm" {
     try testSemanticTokens(
         \\fn syscall1(number: usize, arg1: usize) usize {

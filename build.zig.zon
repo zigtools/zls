@@ -10,7 +10,7 @@
     // nix flake update --commit-lock-file
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    .minimum_zig_version = "0.16.0-dev.1484+d0ba6642b",
+    .minimum_zig_version = "0.16.0-dev.1646+cfa3c1453",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
