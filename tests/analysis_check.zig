@@ -44,7 +44,8 @@ pub fn main() Error!void {
 
     const arena = arena_allocator.allocator();
 
-    var config: zls.DocumentStore.Config = .init;
+    var zig_exe_path: ?[]const u8 = null;
+    var zig_lib_dir: ?std.Build.Cache.Directory = null;
 
     var opt_file_path: ?[]const u8 = null;
 
@@ -57,11 +58,11 @@ pub fn main() Error!void {
                 opt_file_path = try arena.dupe(u8, arg);
             }
         } else if (std.mem.eql(u8, arg, "--zig-exe-path")) {
-            const zig_exe_path = arg_it.next() orelse {
+            const temp_zig_exe_path = arg_it.next() orelse {
                 std.log.err("expected argument after '--zig-exe-path'.", .{});
                 std.process.exit(1);
             };
-            config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
+            zig_exe_path = try arena.dupe(u8, temp_zig_exe_path);
         } else if (std.mem.eql(u8, arg, "--zig-lib-path")) {
             std.debug.assert(builtin.target.os.tag != .wasi);
             const zig_lib_path = arg_it.next() orelse {
@@ -77,34 +78,20 @@ pub fn main() Error!void {
                 std.process.exit(1);
             };
 
-            var zig_lib_dir = std.fs.cwd().openDir(resolved_zig_lib_path, .{}) catch |err| {
+            var handle = std.fs.cwd().openDir(resolved_zig_lib_path, .{}) catch |err| {
                 std.log.err("failed to open zig library directory '{s}: {}'", .{ resolved_zig_lib_path, err });
                 std.process.exit(1);
             };
-            errdefer zig_lib_dir.close();
+            errdefer handle.close();
 
-            config.zig_lib_dir = .{
-                .handle = zig_lib_dir,
+            zig_lib_dir = .{
+                .handle = handle,
                 .path = try arena.dupe(u8, resolved_zig_lib_path),
             };
         } else {
             std.log.err("Unrecognized argument '{s}'.", .{arg});
             std.process.exit(1);
         }
-    }
-
-    if (builtin.target.os.tag == .wasi) {
-        const wasi_preopens = try std.fs.wasi.preopensAlloc(gpa);
-        defer {
-            for (wasi_preopens.names[3..]) |name| gpa.free(name);
-            gpa.free(wasi_preopens.names);
-        }
-
-        const zig_lib_dir_fd = wasi_preopens.find("/lib") orelse {
-            std.log.err("failed to resolve '/lib' WASI preopen", .{});
-            std.process.exit(1);
-        };
-        config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
     }
 
     var thread_pool: std.Thread.Pool = undefined;
@@ -116,6 +103,26 @@ pub fn main() Error!void {
 
     var diagnostics_collection: zls.DiagnosticsCollection = .{ .allocator = gpa };
     defer diagnostics_collection.deinit();
+
+    var config: zls.DocumentStore.Config = .{
+        .zig_exe_path = zig_exe_path,
+        .zig_lib_dir = zig_lib_dir,
+        .build_runner_path = null,
+        .builtin_path = null,
+        .global_cache_dir = null,
+        .wasi_preopens = switch (builtin.target.os.tag) {
+            .wasi => try std.fs.wasi.preopensAlloc(arena),
+            else => {},
+        },
+    };
+
+    if (builtin.target.os.tag == .wasi) {
+        const zig_lib_dir_fd = config.wasi_preopens.find("/lib") orelse {
+            std.log.err("failed to resolve '/lib' WASI preopen", .{});
+            std.process.exit(1);
+        };
+        config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
+    }
 
     var document_store: zls.DocumentStore = .{
         .io = io,

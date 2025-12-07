@@ -24,7 +24,7 @@ pub const Context = struct {
     var cached_config_manager: ?zls.configuration.Manager = null;
 
     pub fn init() !Context {
-        const config_manager = cached_config_manager orelse config_manager: {
+        if (cached_config_manager == null) {
             var config = default_config;
             defer if (builtin.target.os.tag != .wasi) {
                 if (config.zig_exe_path) |zig_exe_path| allocator.free(zig_exe_path);
@@ -39,19 +39,17 @@ pub const Context = struct {
                 config.global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
             }
 
-            var config_manager: zls.configuration.Manager = .init(cached_config_arena.allocator());
+            var config_manager: zls.configuration.Manager = try .init(cached_config_arena.allocator());
             try config_manager.setConfiguration(.frontend, &config);
             _ = try config_manager.resolveConfiguration(cached_config_arena.allocator());
             cached_config_manager = config_manager;
-            break :config_manager config_manager;
-        };
+        }
 
         const server: *zls.Server = try .create(.{
             .io = io,
             .allocator = allocator,
             .transport = null,
-            .config = null,
-            .config_manager = config_manager,
+            .config_manager = &cached_config_manager.?,
         });
         errdefer server.destroy();
 
@@ -73,8 +71,6 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        self.server.config_manager = .init(undefined);
-
         _ = self.server.sendRequestSync(self.arena.allocator(), "shutdown", {}) catch unreachable;
         self.server.sendNotificationSync(self.arena.allocator(), "exit", {}) catch unreachable;
         std.debug.assert(self.server.status == .exiting_success);

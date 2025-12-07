@@ -43,7 +43,7 @@ const log = std.log.scoped(.server);
 // public fields
 io: std.Io,
 allocator: std.mem.Allocator,
-config_manager: configuration.Manager,
+config_manager: *configuration.Manager,
 document_store: DocumentStore,
 transport: ?*lsp.Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
@@ -985,7 +985,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
     const new_build_on_save_args: bool = result.did_change.build_on_save_args;
     const new_force_autofix: bool = result.did_change.force_autofix;
 
-    server.document_store.config = createDocumentStoreConfig(&server.config_manager);
+    server.document_store.config = createDocumentStoreConfig(server.config_manager);
 
     if (BuildOnSaveSupport.isSupportedComptime() and
         // If the client supports the `workspace/configuration` request, defer
@@ -1125,6 +1125,7 @@ fn createDocumentStoreConfig(config_manager: *const configuration.Manager) Docum
         .build_runner_path = config_manager.config.build_runner_path,
         .builtin_path = config_manager.config.builtin_path,
         .global_cache_dir = config_manager.global_cache_dir,
+        .wasi_preopens = config_manager.wasi_preopens,
     };
 }
 
@@ -1657,9 +1658,7 @@ pub const CreateOptions = struct {
     allocator: std.mem.Allocator,
     /// Must be set when running `loop`. Controls how the server will send and receive messages.
     transport: ?*lsp.Transport,
-    /// The `global_cache_path` will not be resolve automatically.
-    config: ?*const Config,
-    config_manager: ?configuration.Manager = null,
+    config_manager: *configuration.Manager,
     max_thread_count: usize = 4, // what is a good value here?
 };
 
@@ -1676,7 +1675,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
     server.* = .{
         .io = io,
         .allocator = allocator,
-        .config_manager = options.config_manager orelse .init(allocator),
+        .config_manager = options.config_manager,
         .document_store = .{
             .io = io,
             .allocator = allocator,
@@ -1687,7 +1686,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
         .thread_pool = undefined, // set below
         .diagnostics_collection = .{ .allocator = allocator },
     };
-    server.document_store.config = createDocumentStoreConfig(&server.config_manager);
+    server.document_store.config = createDocumentStoreConfig(server.config_manager);
 
     try server.thread_pool.init(.{
         .allocator = allocator,
@@ -1701,9 +1700,6 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
     if (options.transport) |transport| {
         server.setTransport(transport);
     }
-    if (options.config) |config| {
-        try server.config_manager.setConfiguration2(.frontend, config);
-    }
 
     return server;
 }
@@ -1716,7 +1712,6 @@ pub fn destroy(server: *Server) void {
     server.workspaces.deinit(server.allocator);
     server.diagnostics_collection.deinit();
     server.client_capabilities.deinit(server.allocator);
-    server.config_manager.deinit();
     for (server.pending_show_messages.items) |params| server.allocator.free(params.message);
     server.pending_show_messages.deinit(server.allocator);
     server.allocator.destroy(server);

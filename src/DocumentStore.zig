@@ -56,14 +56,10 @@ pub const Config = struct {
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
-
-    pub const init: Config = .{
-        .zig_exe_path = null,
-        .zig_lib_dir = null,
-        .build_runner_path = null,
-        .builtin_path = null,
-        .global_cache_dir = null,
-    };
+    wasi_preopens: switch (builtin.os.tag) {
+        .wasi => std.fs.wasi.Preopens,
+        else => void,
+    },
 };
 
 /// Represents a `build.zig`
@@ -648,19 +644,14 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
 
     const dir, const sub_path = blk: {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
-            // look up whether the file path refers to a preopen directory.
-            for ([_]?std.Build.Cache.Directory{
-                self.config.zig_lib_dir,
-                self.config.global_cache_dir,
-            }) |opt_preopen_dir| {
-                const preopen_dir = opt_preopen_dir orelse continue;
-                const preopen_path = preopen_dir.path.?;
-                std.debug.assert(std.mem.eql(u8, preopen_path, "/lib") or std.mem.eql(u8, preopen_path, "/cache"));
+            for (self.config.wasi_preopens.names, 0..) |name, i| {
+                const preopen_dir: std.fs.Dir = .{ .fd = @intCast(i) };
+                const preopen_path = std.mem.trimEnd(u8, name, "/");
 
                 if (!std.mem.startsWith(u8, file_path, preopen_path)) continue;
                 if (!std.mem.startsWith(u8, file_path[preopen_path.len..], "/")) continue;
 
-                break :blk .{ preopen_dir.handle, file_path[preopen_path.len + 1 ..] };
+                break :blk .{ preopen_dir, std.mem.trimStart(u8, file_path[preopen_path.len..], "/") };
             }
         }
         break :blk .{ std.fs.cwd(), file_path };

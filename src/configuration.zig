@@ -18,6 +18,10 @@ pub const Manager = struct {
     },
     zig_lib_dir: ?std.Build.Cache.Directory,
     global_cache_dir: ?std.Build.Cache.Directory,
+    wasi_preopens: switch (builtin.os.tag) {
+        .wasi => std.fs.wasi.Preopens,
+        else => void,
+    },
     build_runner_supported: union(enum) {
         /// If returned, guarantees `zig_exe != null`.
         yes,
@@ -34,28 +38,24 @@ pub const Manager = struct {
         /// consumption since the user is probably not going set settings
         /// often in one session.
         arena: std.heap.ArenaAllocator.State,
-        cached_wasi_preopens: switch (builtin.os.tag) {
-            .wasi => ?std.fs.wasi.Preopens,
-            else => void,
-        },
     },
 
-    pub fn init(allocator: std.mem.Allocator) Manager {
+    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Manager {
         return .{
             .allocator = allocator,
             .zig_exe = null,
             .zig_lib_dir = null,
             .global_cache_dir = null,
             .build_runner_supported = .no_dont_error,
+            .wasi_preopens = switch (builtin.os.tag) {
+                .wasi => try std.fs.wasi.preopensAlloc(allocator),
+                else => {},
+            },
             .config = .{},
             .impl = .{
                 .is_dirty = true,
                 .configs = .initFill(.{}),
                 .arena = .{},
-                .cached_wasi_preopens = switch (builtin.os.tag) {
-                    .wasi => null,
-                    else => {},
-                },
             },
         };
     }
@@ -64,10 +64,8 @@ pub const Manager = struct {
         const allocator = manager.allocator;
         switch (builtin.os.tag) {
             .wasi => {
-                if (manager.impl.cached_wasi_preopens) |wasi_preopens| {
-                    for (wasi_preopens.names[3..]) |name| allocator.free(name);
-                    allocator.free(wasi_preopens.names);
-                }
+                for (manager.wasi_preopens.names[3..]) |name| allocator.free(name);
+                allocator.free(manager.wasi_preopens.names);
             },
             else => {
                 if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close();
@@ -208,18 +206,10 @@ pub const Manager = struct {
             }
         }
 
-        const wasi_preopens = switch (builtin.os.tag) {
-            .wasi => manager.impl.cached_wasi_preopens orelse wasi_preopens: {
-                manager.impl.cached_wasi_preopens = try std.fs.wasi.preopensAlloc(manager.allocator);
-                break :wasi_preopens manager.impl.cached_wasi_preopens.?;
-            },
-            else => {},
-        };
-
         if (config.zig_lib_path) |zig_lib_path| blk: {
             const zig_lib_dir: std.fs.Dir = switch (builtin.target.os.tag) {
                 // TODO The `zig_lib_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .fd = wasi_preopens.find(zig_lib_path) orelse {
+                .wasi => .{ .fd = manager.wasi_preopens.find(zig_lib_path) orelse {
                     log.warn("failed to resolve '{s}' WASI preopen", .{zig_lib_path});
                     config.zig_lib_path = null;
                     break :blk;
@@ -241,7 +231,7 @@ pub const Manager = struct {
         if (config.global_cache_path) |global_cache_path| blk: {
             const global_cache_dir: std.fs.Dir = switch (builtin.target.os.tag) {
                 // TODO The `global_cache_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .fd = wasi_preopens.find(global_cache_path) orelse {
+                .wasi => .{ .fd = manager.wasi_preopens.find(global_cache_path) orelse {
                     log.warn("failed to resolve '{s}' WASI preopen", .{global_cache_path});
                     config.global_cache_path = null;
                     break :blk;

@@ -552,11 +552,14 @@ pub fn main() !u8 {
         log.info("Log File:         none", .{});
     }
 
+    var config_manager: zls.configuration.Manager = try .init(allocator);
+    defer config_manager.deinit();
+
     const server: *zls.Server = try .create(.{
         .io = io,
         .allocator = allocator,
         .transport = transport,
-        .config = null,
+        .config_manager = &config_manager,
     });
     defer server.destroy();
 
