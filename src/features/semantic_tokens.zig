@@ -737,51 +737,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .unreachable_literal => {
             try writeToken(builder, main_token, .keywordLiteral);
         },
-        .asm_legacy => {
-            const asm_node: Ast.full.AsmLegacy = ast.asmLegacy(tree, node);
-
-            try writeToken(builder, main_token, .keyword);
-            try writeToken(builder, asm_node.volatile_token, .keyword);
-            try writeNodeTokens(builder, asm_node.ast.template);
-
-            for (asm_node.outputs) |output_node| {
-                try writeToken(builder, tree.nodeMainToken(output_node), .variable);
-                try writeToken(builder, tree.nodeMainToken(output_node) + 2, .string);
-                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
-                if (has_arrow) {
-                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
-                        try writeNodeTokens(builder, lhs);
-                    }
-                } else {
-                    try writeToken(builder, tree.nodeMainToken(output_node) + 4, .variable);
-                }
-            }
-
-            for (asm_node.inputs) |input_node| {
-                try writeToken(builder, tree.nodeMainToken(input_node), .variable);
-                try writeToken(builder, tree.nodeMainToken(input_node) + 2, .string);
-                try writeNodeTokens(builder, tree.nodeData(input_node).node_and_token[0]);
-            }
-
-            if (asm_node.first_clobber) |first_clobber| clobbers: {
-                var tok_i = first_clobber;
-                while (true) : (tok_i += 1) {
-                    try writeToken(builder, tok_i, .string);
-                    tok_i += 1;
-                    switch (tree.tokenTag(tok_i)) {
-                        .r_paren => break :clobbers,
-                        .comma => {
-                            if (tree.tokenTag(tok_i + 1) == .r_paren) {
-                                break :clobbers;
-                            } else {
-                                continue;
-                            }
-                        },
-                        else => break :clobbers,
-                    }
-                }
-            }
-        },
         .asm_simple,
         .@"asm",
         => {

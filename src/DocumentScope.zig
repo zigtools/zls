@@ -766,7 +766,6 @@ fn walkNode(
         .builtin_call,
         .builtin_call_comma,
         .container_field,
-        .asm_legacy,
         .asm_simple,
         .@"asm",
 

@@ -489,14 +489,6 @@ const PrintAst = struct {
                     try p.renderItem(statement);
                 }
             },
-            .asm_legacy => {
-                const asm_data = tree.asmLegacy(node);
-                try p.renderOptTokenField(asm_data.first_clobber, "first_clobber", .hide_if_none);
-                try p.renderOptTokenField(asm_data.volatile_token, "volatile_token", .hide_if_none);
-                try p.renderField(asm_data.ast.template, "template");
-                try p.renderNodeSliceField(asm_data.inputs, "inputs");
-                try p.renderNodeSliceField(asm_data.outputs, "outputs");
-            },
             .asm_simple,
             .@"asm",
             => {
@@ -758,7 +750,6 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         .block,
         .block_semicolon,
         => "Block",
-        .asm_legacy,
         .asm_simple,
         .@"asm",
         => "Asm",
