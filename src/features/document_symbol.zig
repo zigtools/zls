@@ -112,33 +112,40 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
         .container_field_align,
         .container_field,
         => blk: {
-            const kind: types.SymbolKind, const is_struct = switch (tree.nodeTag(ctx.parent_container)) {
-                .root => .{ .Field, true },
+            const container_kind = switch (tree.nodeTag(ctx.parent_container)) {
+                .root => .keyword_struct,
                 .container_decl,
                 .container_decl_trailing,
                 .container_decl_arg,
                 .container_decl_arg_trailing,
                 .container_decl_two,
                 .container_decl_two_trailing,
-                => switch (tree.tokenTag(tree.nodeMainToken(ctx.parent_container))) {
-                    .keyword_struct => .{ .Field, true },
-                    .keyword_union => .{ .Field, false },
-                    .keyword_enum => .{ .EnumMember, false },
-                    .keyword_opaque => break :blk null,
-                    else => unreachable,
-                },
+                => tree.tokenTag(tree.nodeMainToken(ctx.parent_container)),
                 .tagged_union,
                 .tagged_union_trailing,
                 .tagged_union_enum_tag,
                 .tagged_union_enum_tag_trailing,
                 .tagged_union_two,
                 .tagged_union_two_trailing,
-                => .{ .Field, false },
+                => .keyword_union,
                 else => unreachable,
             };
 
-            const container_field = tree.fullContainerField(node).?;
-            if (is_struct and container_field.ast.tuple_like) break :blk null;
+            const kind: types.SymbolKind = switch (container_kind) {
+                .keyword_struct => .Field,
+                .keyword_union => .Field,
+                .keyword_enum => .EnumMember,
+                .keyword_opaque => break :blk null,
+                else => unreachable,
+            };
+
+            var container_field = tree.fullContainerField(node).?;
+            switch (container_kind) {
+                .keyword_struct => {},
+                .keyword_enum, .keyword_union => container_field.convertToNonTupleLike(tree),
+                else => unreachable,
+            }
+            if (container_field.ast.tuple_like) break :blk null;
 
             const decl_name_token = container_field.ast.main_token;
 

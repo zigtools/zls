@@ -39,6 +39,19 @@ test "tuple" {
     );
 }
 
+test "union" {
+    try testDocumentSymbol(
+        \\const U = union {
+        \\    alpha: u32,
+        \\    beta,
+        \\};
+    ,
+        \\Constant U
+        \\  Field alpha
+        \\  Field beta
+    );
+}
+
 test "enum" {
     try testDocumentSymbol(
         \\const E = enum {
@@ -49,6 +62,30 @@ test "enum" {
         \\Constant E
         \\  EnumMember alpha
         \\  EnumMember beta
+    );
+}
+
+test "invalid tuple-like container" {
+    try testDocumentSymbol(
+        \\const E = enum {
+        \\    '=',
+        \\};
+    ,
+        \\Constant E
+    );
+    try testDocumentSymbol(
+        \\const U = union {
+        \\    '=',
+        \\};
+    ,
+        \\Constant U
+    );
+    try testDocumentSymbol(
+        \\const U = union(enum) {
+        \\    '=',
+        \\};
+    ,
+        \\Constant U
     );
 }
 
