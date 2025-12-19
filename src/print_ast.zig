@@ -855,6 +855,58 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
     };
 }
 
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !u8 {
+    const gpa, const is_debug = gpa: {
+        if (@import("builtin").target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
+        break :gpa switch (@import("builtin").mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
+
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.ioBasic();
+
+    var args = try std.process.argsAlloc(gpa);
+    defer std.process.argsFree(gpa, args);
+
+    if (args.len != 2) {
+        std.process.fatal("expected exactly 1 argument but got {d}", .{args.len - 1});
+    }
+
+    const file_path = args[1];
+
+    const source = source: {
+        const source_file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+        defer source_file.close(io);
+        var read_buffer: [4096]u8 = undefined;
+        var file_reader = source_file.reader(io, &read_buffer);
+        break :source try std.zig.readSourceFileToEndAlloc(gpa, &file_reader);
+    };
+    defer gpa.free(source);
+
+    const mode: Ast.Mode = if (std.mem.endsWith(u8, file_path, ".zon")) .zon else .zig;
+    var tree: Ast = try .parse(gpa, source, mode);
+    defer tree.deinit(gpa);
+
+    var buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+
+    renderToWriter(
+        &tree,
+        .{ .trailing_comments = .{ .filename = file_path } },
+        &stdout_writer.interface,
+    ) catch return stdout_writer.err.?;
+    stdout_writer.interface.flush() catch return stdout_writer.err.?;
+
+    return 0;
+}
+
 test PrintAst {
     const source =
         \\const std = @import("std");
