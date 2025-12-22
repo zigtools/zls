@@ -237,7 +237,7 @@ pub fn renderLineDiff(
     std.debug.print("\n============ difference: =============\n", .{});
 
     const stderr = std.fs.File.stderr();
-    const tty_config = std.Io.tty.detectConfig(stderr);
+    const tty_config: std.Io.tty.Config = .detect(stderr);
     var file_writer = stderr.writer(&.{});
     const writer = &file_writer.interface;
 

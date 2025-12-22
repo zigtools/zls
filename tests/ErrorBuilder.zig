@@ -178,8 +178,9 @@ pub fn fmt(builder: *const ErrorBuilder, tty_config: std.Io.tty.Config) std.fmt.
 }
 
 pub fn writeDebug(builder: *const ErrorBuilder) void {
-    const stderr = std.fs.File.stderr();
-    const tty_config = std.Io.tty.detectConfig(stderr);
+    var buffer: [4096]u8 = undefined;
+    const stderr, const tty_config = std.debug.lockStderrWriter(&buffer);
+    defer std.debug.unlockStderrWriter();
     // does zig trim the output or why is this needed?
     stderr.writeAll(" ") catch return;
     std.debug.print("\n{f}\n", .{builder.fmt(tty_config)});
