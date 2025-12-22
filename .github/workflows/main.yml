@@ -20,7 +20,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0-dev.1484+d0ba6642b
+          version: master
 
       - name: Run zig fmt
         if: matrix.os == 'ubuntu-22.04'

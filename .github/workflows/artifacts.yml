@@ -39,7 +39,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         if: env.SKIP_DEPLOY != 'true'
         with:
-          version: 0.16.0-dev.1484+d0ba6642b
+          version: master
 
       - name: Install APT packages
         if: env.SKIP_DEPLOY != 'true'
