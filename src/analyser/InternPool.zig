@@ -3347,16 +3347,23 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
 /// Asserts the type is an integer or vector of integers.
 pub fn toUnsigned(ip: *InternPool, gpa: Allocator, ty: Index, target: std.Target) Allocator.Error!Index {
     const tag = ip.zigTypeTag(ty) orelse unreachable;
-    return switch (tag) {
-        .int => try ip.get(gpa, .{ .int_type = .{
-            .signedness = .unsigned,
-            .bits = ip.intInfo(ty, target).bits,
-        } }),
-        .vector => try ip.get(gpa, .{ .vector_type = .{
-            .len = ip.vectorLen(ty),
-            .child = try ip.toUnsigned(gpa, ip.childType(ty), target),
-        } }),
-        else => unreachable,
+    return switch (ty) {
+        .usize_type, .isize_type => .usize_type,
+        .c_ushort_type, .c_short_type => .c_ushort_type,
+        .c_uint_type, .c_int_type => .c_uint_type,
+        .c_ulong_type, .c_long_type => .c_ulong_type,
+        .c_ulonglong_type, .c_longlong_type => .c_ulonglong_type,
+        else => switch (tag) {
+            .int => try ip.get(gpa, .{ .int_type = .{
+                .signedness = .unsigned,
+                .bits = ip.intInfo(ty, target).bits,
+            } }),
+            .vector => try ip.get(gpa, .{ .vector_type = .{
+                .len = ip.vectorLen(ty),
+                .child = try ip.toUnsigned(gpa, ip.childType(ty), target),
+            } }),
+            else => unreachable,
+        },
     };
 }
 
