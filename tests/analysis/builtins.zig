@@ -153,14 +153,12 @@ const abs_i33 = @abs(@as(i33, undefined));
 //    ^^^^^^^ (u33)()
 const abs_u33 = @abs(@as(u33, undefined));
 //    ^^^^^^^ (u33)()
-// TODO: type of @abs with isize depends on target; see https://github.com/ziglang/zig/pull/23587
-// const abs_isize = @abs(@as(isize, undefined));
-// //    ^^^^^^^^^ (usize)()
+const abs_isize = @abs(@as(isize, undefined));
+//    ^^^^^^^^^ (usize)()
 const abs_usize = @abs(@as(usize, undefined));
 //    ^^^^^^^^^ (usize)()
-// TODO: type of @abs with c_int depends on target; see https://github.com/ziglang/zig/pull/23587
-// const abs_c_int = @abs(@as(c_int, undefined));
-// //    ^^^^^^^^^ (c_uint)()
+const abs_c_int = @abs(@as(c_int, undefined));
+//    ^^^^^^^^^ (c_uint)()
 const abs_c_uint = @abs(@as(c_uint, undefined));
 //    ^^^^^^^^^^ (c_uint)()
 const abs_vector_i8 = @abs(@as(@Vector(4, i8), undefined));
