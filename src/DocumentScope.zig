@@ -141,8 +141,8 @@ pub const Declaration = union(enum) {
             var buffer: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buffer, self.func).?;
             var param_index: u16 = 0;
-            var it = func.iterate(tree);
-            while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
+            var it: ast.FnParamIterator = .init(&func, tree);
+            while (it.next()) |param| : (param_index += 1) {
                 if (self.param_index == param_index) return param;
             }
             return null;
@@ -934,8 +934,8 @@ noinline fn walkFuncNode(
     );
 
     var param_index: u16 = 0;
-    var it = func.iterate(tree);
-    while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
+    var it: ast.FnParamIterator = .init(&func, tree);
+    while (it.next()) |param| : (param_index += 1) {
         if (param.name_token) |name_token| {
             try scope.pushDeclaration(
                 name_token,
@@ -1326,7 +1326,8 @@ noinline fn walkOtherNode(
     tree: *const Ast,
     node_idx: Ast.Node.Index,
 ) error{OutOfMemory}!void {
-    try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, walkNode);
+    var it: ast.Iterator = .init(tree, node_idx);
+    while (it.next(tree)) |child| try walkNode(context, tree, child);
 }
 
 // Lookup

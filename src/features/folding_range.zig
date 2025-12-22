@@ -230,10 +230,10 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             => {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_proto = tree.fullFnProto(&buffer, node).?;
-                var it = fn_proto.iterate(tree);
 
                 var last_param: ?Ast.full.FnProto.Param = null;
-                while (ast.nextFnParam(&it)) |param| {
+                var it: ast.FnParamIterator = .init(&fn_proto, tree);
+                while (it.next()) |param| {
                     last_param = param;
                 }
 

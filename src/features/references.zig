@@ -101,7 +101,9 @@ const Builder = struct {
             .handle = handle,
         };
         try referenceNode(&context, &handle.tree, node);
-        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        var walker: ast.Walker = try .init(self.allocator, &handle.tree, node);
+        defer walker.deinit(self.allocator);
+        while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
     fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
@@ -389,9 +391,13 @@ const ControlFlowBuilder = struct {
                 const last_loop = builder.last_loop;
                 defer builder.last_loop = last_loop;
                 builder.last_loop = main_token;
-                try ast.iterateChildren(tree, node, builder, Error, iter);
+                var it: ast.Iterator = .init(tree, node);
+                while (it.next(tree)) |child| try iter(builder, tree, child);
             },
-            else => try ast.iterateChildren(tree, node, builder, Error, iter),
+            else => {
+                var it: ast.Iterator = .init(tree, node);
+                while (it.next(tree)) |child| try iter(builder, tree, child);
+            },
         }
     }
 
@@ -488,7 +494,8 @@ fn controlFlowReferences(
         => {
             if (tree.isTokenPrecededByTags(kw_token, &.{ .identifier, .colon }))
                 builder.label = tree.tokenSlice(kw_token - 2);
-            try ast.iterateChildren(tree, nodes[0], &builder, ControlFlowBuilder.Error, ControlFlowBuilder.iter);
+            var it: ast.Iterator = .init(tree, nodes[0]);
+            while (it.next(tree)) |child| try builder.iter(tree, child);
         },
         else => {},
     }
@@ -530,7 +537,9 @@ const CallBuilder = struct {
             .builder = self,
             .handle = handle,
         };
-        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        var walker: ast.Walker = try .init(self.allocator, &handle.tree, node);
+        defer walker.deinit(self.allocator);
+        while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
     fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {

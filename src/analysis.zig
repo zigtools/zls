@@ -1725,8 +1725,8 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
 
     var func_params_len: usize = 0;
 
-    var it = func.iterate(tree);
-    while (ast.nextFnParam(&it)) |_| {
+    var it: ast.FnParamIterator = .init(&func, tree);
+    while (it.next()) |_| {
         func_params_len += 1;
     }
 
@@ -1872,12 +1872,14 @@ const FindBreaks = struct {
             .for_simple,
             => {
                 context.allow_unlabeled = false;
-                try ast.iterateChildren(tree, node, context, Error, findBreakOperands);
+                var it: ast.Iterator = .init(tree, node);
+                while (it.next(tree)) |child| try findBreakOperands(context, tree, child);
                 context.allow_unlabeled = allow_unlabeled;
             },
 
             else => {
-                try ast.iterateChildren(tree, node, context, Error, findBreakOperands);
+                var it: ast.Iterator = .init(tree, node);
+                while (it.next(tree)) |child| try findBreakOperands(context, tree, child);
             },
         }
     }
@@ -2416,8 +2418,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             var parameters: std.ArrayList(Type.Data.Parameter) = .empty;
             var has_varargs = false;
 
-            var it = fn_proto.iterate(tree);
-            while (ast.nextFnParam(&it)) |param| {
+            var it: ast.FnParamIterator = .init(&fn_proto, tree);
+            while (it.next()) |param| {
                 if (has_varargs) {
                     return null;
                 }
@@ -4343,8 +4345,8 @@ pub const Type = struct {
                             if (referenced) |r| try r.put(analyser.arena, .of(func_name, handle, func_name_token), {});
                             var first = true;
                             try writer.writeByte('(');
-                            var it = func.iterate(tree);
-                            while (ast.nextFnParam(&it)) |param| {
+                            var it: ast.FnParamIterator = .init(&func, tree);
+                            while (it.next()) |param| {
                                 const param_type_expr = param.type_expr orelse continue;
                                 if (!Analyser.isMetaType(tree, param_type_expr)) continue;
                                 const param_name_token = param.name_token orelse continue;
@@ -5849,8 +5851,8 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
                 const function_node = document_scope.getScopeAstNode(scope_index).?;
                 var buf: [1]Ast.Node.Index = undefined;
                 const func = tree.fullFnProto(&buf, function_node).?;
-                var it = func.iterate(tree);
-                while (ast.nextFnParam(&it)) |param| {
+                var it: ast.FnParamIterator = .init(&func, tree);
+                while (it.next()) |param| {
                     const param_type_expr = param.type_expr orelse continue;
                     if (!Analyser.isMetaType(tree, param_type_expr)) continue;
                     const param_name_token = param.name_token orelse continue;

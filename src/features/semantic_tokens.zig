@@ -420,8 +420,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
-            var it = fn_proto.iterate(tree);
-            while (ast.nextFnParam(&it)) |param_decl| {
+            var it: ast.FnParamIterator = .init(&fn_proto, tree);
+            while (it.next()) |param_decl| {
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
 
                 const token_type: TokenType = if (param_decl.type_expr) |type_expr|

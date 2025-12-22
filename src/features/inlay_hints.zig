@@ -564,7 +564,12 @@ pub fn writeRangeInlayHint(
 
     for (nodes) |child| {
         try writeNodeInlayHint(&builder, &handle.tree, child);
-        try ast.iterateChildrenRecursive(&handle.tree, child, &builder, error{OutOfMemory}, writeNodeInlayHint);
+
+        var walker: ast.Walker = try .init(arena, &handle.tree, child);
+        defer walker.deinit(arena);
+        while (try walker.nextIgnoreClose(arena, &handle.tree)) |node| {
+            try writeNodeInlayHint(&builder, &handle.tree, node);
+        }
     }
 
     return try builder.getInlayHints(offset_encoding);

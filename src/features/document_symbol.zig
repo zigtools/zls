@@ -185,7 +185,8 @@ fn callback(ctx: *Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMe
         ctx.total_symbol_count.* += 1;
     }
 
-    try ast.iterateChildren(tree, node, &new_ctx, error{OutOfMemory}, callback);
+    var it: ast.Iterator = .init(tree, node);
+    while (it.next(tree)) |child| try callback(&new_ctx, tree, child);
 }
 
 /// converts `Symbol` to `types.DocumentSymbol`
@@ -263,7 +264,8 @@ pub fn getDocumentSymbols(
         .parent_symbols = &root_symbols,
         .total_symbol_count = &total_symbol_count,
     };
-    try ast.iterateChildren(tree, .root, &ctx, error{OutOfMemory}, callback);
+    var it: ast.Iterator = .init(tree, .root);
+    while (it.next(tree)) |child| try callback(&ctx, tree, child);
 
     return try convertSymbols(arena, tree, root_symbols.items, ctx.total_symbol_count.*, encoding);
 }
