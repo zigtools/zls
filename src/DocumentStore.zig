@@ -1436,7 +1436,7 @@ fn createAndStoreDocument(
     };
     errdefer new_handle.deinit();
 
-    if (supports_build_system and isBuildFile(uri) and !isInStd(uri)) {
+    if (supports_build_system and lsp_synced and isBuildFile(uri) and !isInStd(uri)) {
         if (self.getBuildFile(uri)) |build_file| {
             self.invalidateBuildFile(build_file.uri);
         } else {
