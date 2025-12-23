@@ -1,11 +1,10 @@
 {
-  "deps_build_roots": [],
-  "packages": [],
-  "include_dirs": [],
+  "dependencies": {},
+  "modules": {},
+  "compilations": [],
   "top_level_steps": [
     "install",
     "uninstall"
   ],
-  "available_options": {},
-  "c_macros": []
+  "available_options": {}
 }
