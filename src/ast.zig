@@ -1545,6 +1545,11 @@ pub const Walker = struct {
         walker.stack.items.len -= 1;
     }
 
+    /// Returns the parent node after a `Event.open` has been returned from `next`.
+    pub fn parentNode(walker: *const Walker) Ast.Node.Index {
+        return walker.stack.items[walker.stack.items.len - 2].node;
+    }
+
     const Stack = struct {
         node: Ast.Node.Index,
         it: Iterator,
