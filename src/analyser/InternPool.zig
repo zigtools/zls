@@ -4839,8 +4839,7 @@ test "test thread safety of InternPool" {
     if (builtin.single_threaded) return error.SkipZigTest;
 
     const gpa = std.testing.allocator;
-    var pool: std.Thread.Pool = undefined;
-    try pool.init(.{ .allocator = gpa });
+    var pool: std.Io.Threaded = .init(gpa);
     defer pool.deinit();
 
     var ip: InternPool = try .init(gpa);
@@ -4853,11 +4852,9 @@ test "test thread safety of InternPool" {
     const funcs = struct {
         fn do(
             intern_pool: *InternPool,
-            wait_group: *std.Thread.WaitGroup,
             allocator: std.mem.Allocator,
             count: usize,
         ) void {
-            defer wait_group.finish();
             // insert float_32_value from 0 to count + random work
             for (0..count) |i| {
                 _ = intern_pool.get(allocator, .{ .float_32_value = @floatFromInt(i) }) catch @panic("OOM");
@@ -4869,12 +4866,12 @@ test "test thread safety of InternPool" {
         }
     };
 
-    var wait_group: std.Thread.WaitGroup = .{};
-    for (0..pool.threads.len) |_| {
-        wait_group.start();
-        try pool.spawn(funcs.do, .{ &ip, &wait_group, gpa, size });
+    var wait_group: std.Io.Group = .init;
+    const io = pool.ioBasic();
+    for (0..@max(1, pool.async_limit.minInt(4))) |_| {
+        wait_group.async(io, funcs.do, .{ &ip, gpa, size });
     }
-    pool.waitAndWork(&wait_group);
+    wait_group.wait(io);
 
     try std.testing.expectEqual(index_start + size, ip.map.count());
 

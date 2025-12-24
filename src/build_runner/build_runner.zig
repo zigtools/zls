@@ -120,7 +120,7 @@ pub fn main() !void {
 
     var targets = ArrayListManaged([]const u8).init(arena);
     var debug_log_scopes = ArrayListManaged([]const u8).init(arena);
-    var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
+    var n_jobs_limit: std.Io.Limit = .nothing;
 
     var install_prefix: ?[]const u8 = null;
     var dir_list: std.Build.DirList = .{};
@@ -306,7 +306,7 @@ pub fn main() !void {
                     std.debug.print("number of jobs must be at least 1\n", .{});
                     process.exit(1);
                 }
-                thread_pool_options.n_jobs = n_jobs;
+                n_jobs_limit = .limited(n_jobs);
             } else if (mem.eql(u8, arg, "--")) {
                 builder.args = argsRest(args, arg_idx);
                 break;
@@ -366,20 +366,21 @@ pub fn main() !void {
         .max_rss_mutex = .{},
         .skip_oom_steps = skip_oom_steps,
         .memory_blocked_steps = .init(arena),
-        .thread_pool = undefined, // set below
+        .thread_pool = .init(arena), // set below
 
         .claimed_rss = 0,
 
         .watch = watch,
         .cycle = 0,
     };
+    if (n_jobs_limit != .nothing) {
+        run.thread_pool.setAsyncLimit(n_jobs_limit);
+    }
 
     if (run.max_rss == 0) {
         run.max_rss = process.totalSystemMemory() catch std.math.maxInt(u64);
         run.max_rss_is_default = true;
     }
-
-    try run.thread_pool.init(thread_pool_options);
     defer run.thread_pool.deinit();
 
     if (!watch) {
@@ -527,7 +528,7 @@ const Run = struct {
     max_rss_mutex: std.Thread.Mutex,
     skip_oom_steps: bool,
     memory_blocked_steps: ArrayListManaged(*Step),
-    thread_pool: std.Thread.Pool,
+    thread_pool: std.Io.Threaded,
 
     claimed_rss: usize,
 
@@ -624,19 +625,18 @@ fn runSteps(
     var step_prog = parent_prog_node.start("steps", steps.len);
     defer step_prog.end();
 
-    var wait_group: std.Thread.WaitGroup = .{};
-    defer wait_group.wait();
+    const io = thread_pool.ioBasic();
+    var wait_group: std.Io.Group = .init;
+    defer wait_group.wait(io);
 
     // Here we spawn the initial set of tasks with a nice heuristic -
     // dependency order. Each worker when it finishes a step will then
     // check whether it should run any dependants.
     for (steps) |step| {
         if (step.state == .skipped_oom) continue;
-
-        wait_group.start();
-        thread_pool.spawn(workerMakeOneStep, .{
+        wait_group.async(io, workerMakeOneStep, .{
             &wait_group, gpa, b, steps_stack, step, step_prog, run,
-        }) catch @panic("OOM");
+        });
     }
 
     if (run.watch) {
@@ -701,7 +701,7 @@ fn constructGraphAndCheckForDependencyLoop(
 }
 
 fn workerMakeOneStep(
-    wg: *std.Thread.WaitGroup,
+    wg: *std.Io.Group,
     gpa: std.mem.Allocator,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
@@ -709,7 +709,7 @@ fn workerMakeOneStep(
     prog_node: std.Progress.Node,
     run: *Run,
 ) void {
-    defer wg.finish();
+    const io = run.thread_pool.ioBasic();
     const thread_pool = &run.thread_pool;
 
     // First, check the conditions for running this step. If they are not met,
@@ -793,10 +793,7 @@ fn workerMakeOneStep(
 
         // Successful completion of a step, so we queue up its dependants as well.
         for (s.dependants.items) |dep| {
-            wg.start();
-            thread_pool.spawn(workerMakeOneStep, .{
-                wg, gpa, b, steps_stack, dep, prog_node, run,
-            }) catch @panic("OOM");
+            wg.async(io, workerMakeOneStep, .{ wg, gpa, b, steps_stack, dep, prog_node, run });
         }
     }
 
@@ -818,11 +815,7 @@ fn workerMakeOneStep(
             assert(dep.max_rss != 0);
             if (dep.max_rss <= remaining) {
                 remaining -= dep.max_rss;
-
-                wg.start();
-                thread_pool.spawn(workerMakeOneStep, .{
-                    wg, gpa, b, steps_stack, dep, prog_node, run,
-                }) catch @panic("OOM");
+                wg.async(io, workerMakeOneStep, .{ wg, gpa, b, steps_stack, dep, prog_node, run });
             } else {
                 run.memory_blocked_steps.items[i] = dep;
                 i += 1;

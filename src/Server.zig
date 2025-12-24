@@ -50,8 +50,8 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
 // private fields
-thread_pool: std.Thread.Pool,
-wait_group: std.Thread.WaitGroup = .{},
+thread_pool: std.Io.Threaded,
+wait_group: std.Io.Group = .init,
 ip: InternPool = undefined,
 /// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
 /// See https://github.com/ziglang/zig/issues/16369
@@ -337,7 +337,7 @@ fn generateDiagnostics(server: *Server, handle: *DocumentStore.Handle) void {
             };
         }
     }.do;
-    server.thread_pool.spawnWg(&server.wait_group, do, .{ server, handle });
+    server.wait_group.async(server.thread_pool.ioBasic(), do, .{ server, handle });
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -1688,10 +1688,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
     };
     server.document_store.config = createDocumentStoreConfig(server.config_manager);
 
-    try server.thread_pool.init(.{
-        .allocator = allocator,
-        .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
-    });
+    server.thread_pool = .init(allocator);
     errdefer server.thread_pool.deinit();
 
     server.ip = try InternPool.init(allocator);
@@ -1757,12 +1754,13 @@ pub fn loop(server: *Server) !void {
             continue;
         }
 
+        const io = server.thread_pool.ioBasic();
         if (isBlockingMessage(message)) {
-            server.thread_pool.waitAndWork(&server.wait_group);
-            server.wait_group.reset();
+            server.wait_group.wait(io);
+            server.wait_group = .init;
             server.processMessageReportError(arena_allocator.state, message);
         } else {
-            server.thread_pool.spawnWg(&server.wait_group, processMessageReportError, .{ server, arena_allocator.state, message });
+            server.wait_group.async(io, processMessageReportError, .{ server, arena_allocator.state, message });
         }
     }
 }

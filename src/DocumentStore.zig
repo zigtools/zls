@@ -22,7 +22,7 @@ allocator: std.mem.Allocator,
 /// the DocumentStore assumes that `config` is not modified while calling one of its functions.
 config: Config,
 lock: std.Thread.RwLock = .{},
-thread_pool: *std.Thread.Pool,
+thread_pool: *std.Io.Threaded,
 handles: Uri.ArrayHashMap(*Handle) = .empty,
 build_files: if (supports_build_system) Uri.ArrayHashMap(*BuildFile) else void = if (supports_build_system) .empty else {},
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
@@ -824,10 +824,8 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 
     const build_file = self.getBuildFile(build_file_uri) orelse return;
 
-    self.thread_pool.spawn(invalidateBuildFileWorker, .{ self, build_file }) catch {
-        self.invalidateBuildFileWorker(build_file);
-        return;
-    };
+    const io = self.thread_pool.ioBasic();
+    _ = io.async(invalidateBuildFileWorker, .{ self, build_file });
 }
 
 const progress_token = "buildProgressToken";

@@ -94,8 +94,7 @@ pub fn main() Error!void {
         }
     }
 
-    var thread_pool: std.Thread.Pool = undefined;
-    thread_pool.init(.{ .allocator = gpa }) catch std.debug.panic("failed to initalize thread pool", .{});
+    var thread_pool: std.Io.Threaded = .init(gpa);
     defer thread_pool.deinit();
 
     var ip: InternPool = try .init(gpa);
