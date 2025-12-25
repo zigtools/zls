@@ -4,8 +4,9 @@ const tracy = @import("tracy");
 const offsets = @import("offsets.zig");
 const Uri = @import("Uri.zig");
 
+io: std.Io,
 allocator: std.mem.Allocator,
-mutex: std.Thread.Mutex = .{},
+mutex: std.Io.Mutex = .init,
 tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
     version: u32 = 0,
     error_bundle_src_base_path: ?[]const u8 = null,
@@ -74,8 +75,8 @@ pub fn pushSingleDocumentDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    collection.mutex.lock();
-    defer collection.mutex.unlock();
+    collection.mutex.lockUncancelable(collection.io);
+    defer collection.mutex.unlock(collection.io);
 
     const gop_tag = try collection.tag_set.getOrPutValue(collection.allocator, tag, .{});
 
@@ -130,8 +131,8 @@ pub fn pushErrorBundle(
     try new_error_bundle.init(collection.allocator);
     defer new_error_bundle.deinit();
 
-    collection.mutex.lock();
-    defer collection.mutex.unlock();
+    collection.mutex.lockUncancelable(collection.io);
+    defer collection.mutex.unlock(collection.io);
 
     const gop = try collection.tag_set.getOrPutValue(collection.allocator, tag, .{});
     const version_order = std.math.order(version, gop.value_ptr.version);
@@ -188,8 +189,8 @@ pub fn clearErrorBundle(collection: *DiagnosticsCollection, tag: Tag) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    collection.mutex.lock();
-    defer collection.mutex.unlock();
+    collection.mutex.lockUncancelable(collection.io);
+    defer collection.mutex.unlock(collection.io);
 
     const item = collection.tag_set.getPtr(tag) orelse return;
 
@@ -214,8 +215,8 @@ pub fn clearSingleDocumentDiagnostics(collection: *DiagnosticsCollection, docume
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    collection.mutex.lock();
-    defer collection.mutex.unlock();
+    collection.mutex.lockUncancelable(collection.io);
+    defer collection.mutex.unlock(collection.io);
 
     for (collection.tag_set.values()) |*item| {
         var kv = item.diagnostics_set.fetchSwapRemove(document_uri) orelse continue;
@@ -270,8 +271,8 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
 
     while (true) {
         const json_message = blk: {
-            collection.mutex.lock();
-            defer collection.mutex.unlock();
+            collection.mutex.lockUncancelable(collection.io);
+            defer collection.mutex.unlock(collection.io);
 
             const entry = collection.outdated_files.pop() orelse break;
             defer entry.key.deinit(collection.allocator);
@@ -486,7 +487,10 @@ test DiagnosticsCollection {
 
     const arena = arena_allocator.allocator();
 
-    var collection: DiagnosticsCollection = .{ .allocator = std.testing.allocator };
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
     defer collection.deinit();
 
     try std.testing.expectEqual(0, collection.outdated_files.count());
@@ -558,7 +562,10 @@ test DiagnosticsCollection {
 }
 
 test "DiagnosticsCollection - compile_log_text" {
-    var collection: DiagnosticsCollection = .{ .allocator = std.testing.allocator };
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
     defer collection.deinit();
 
     var eb = try createTestingErrorBundle(&.{.{ .message = "found compile log statement" }}, "@as(comptime_int, 7)\n@as(comptime_int, 13)");

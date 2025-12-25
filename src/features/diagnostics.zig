@@ -282,7 +282,6 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             server.io,
             server.allocator,
             config.zig_exe_path.?,
-            &server.zig_ast_check_lock,
             handle.tree.source,
         ) catch |err| {
             log.err("failed to run ast-check: {}", .{err});
@@ -316,7 +315,6 @@ fn getErrorBundleFromAstCheck(
     io: std.Io,
     allocator: std.mem.Allocator,
     zig_exe_path: []const u8,
-    zig_ast_check_lock: *std.Thread.Mutex,
     source: [:0]const u8,
 ) !std.zig.ErrorBundle {
     const tracy_zone = tracy.trace(@src());
@@ -328,9 +326,6 @@ fn getErrorBundleFromAstCheck(
     defer allocator.free(stderr_bytes);
 
     {
-        zig_ast_check_lock.lock();
-        defer zig_ast_check_lock.unlock();
-
         var process: std.process.Child = .init(&.{ zig_exe_path, "ast-check", "--color", "off" }, allocator);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Ignore;
@@ -481,7 +476,7 @@ pub const BuildOnSave = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
     child_process: *std.process.Child,
-    thread: std.Thread,
+    worker: std.Io.Future(void),
 
     const shared = @import("../build_runner/shared.zig");
     const ServerToClient = shared.ServerToClient;
@@ -499,7 +494,7 @@ pub const BuildOnSave = struct {
         collection: *DiagnosticsCollection,
     };
 
-    pub fn init(options: InitOptions) !?BuildOnSave {
+    pub fn init(options: InitOptions) error{ OutOfMemory, ConcurrencyUnavailable }!?BuildOnSave {
         const child_process = try options.allocator.create(std.process.Child);
         errdefer options.allocator.destroy(child_process);
 
@@ -535,6 +530,9 @@ pub const BuildOnSave = struct {
         };
 
         errdefer {
+            child_process.stdin.?.close();
+            child_process.stdin = null;
+
             _ = terminateChildProcessReportError(
                 options.io,
                 options.allocator,
@@ -547,7 +545,8 @@ pub const BuildOnSave = struct {
         const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
         errdefer options.allocator.free(duped_workspace_path);
 
-        const thread = try std.Thread.spawn(.{ .allocator = options.allocator }, loop, .{
+        const worker = try options.io.concurrent(loop, .{
+            options.io,
             options.allocator,
             child_process,
             options.collection,
@@ -559,27 +558,14 @@ pub const BuildOnSave = struct {
             .io = options.io,
             .allocator = options.allocator,
             .child_process = child_process,
-            .thread = thread,
+            .worker = worker,
         };
     }
 
     pub fn deinit(self: *BuildOnSave) void {
-        defer self.* = undefined;
-        defer self.allocator.destroy(self.child_process);
-
-        self.child_process.stdin.?.close();
-        self.child_process.stdin = null;
-
-        const success = terminateChildProcessReportError(
-            self.io,
-            self.allocator,
-            self.child_process,
-            "zig build runner",
-            .wait,
-        );
-        if (!success) return;
-
-        self.thread.join();
+        self.worker.cancel(self.io);
+        self.allocator.destroy(self.child_process);
+        self.* = undefined;
     }
 
     pub fn sendManualWatchUpdate(self: *BuildOnSave) void {
@@ -587,12 +573,26 @@ pub const BuildOnSave = struct {
     }
 
     fn loop(
+        io: std.Io,
         allocator: std.mem.Allocator,
         child_process: *std.process.Child,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
     ) void {
         defer allocator.free(workspace_path);
+
+        defer {
+            child_process.stdin.?.close();
+            child_process.stdin = null;
+
+            _ = terminateChildProcessReportError(
+                io,
+                allocator,
+                child_process,
+                "zig build runner",
+                .wait,
+            );
+        }
 
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
         defer diagnostic_tags.deinit(allocator);
@@ -602,27 +602,25 @@ pub const BuildOnSave = struct {
             collection.publishDiagnostics() catch {};
         }
 
-        var poller = std.Io.poll(allocator, enum { stdout }, .{ .stdout = child_process.stdout.? });
-        defer poller.deinit();
-        const stdout = poller.reader(.stdout);
+        var read_buffer: [@sizeOf(ServerToClient.Header)]u8 = undefined;
+        var file_reader = child_process.stdout.?.reader(io, &read_buffer);
+        const reader = &file_reader.interface;
 
-        pool: while (true) {
-            while (stdout.buffered().len < @sizeOf(ServerToClient.Header)) {
-                const keep_polling = poller.poll() catch |err| {
+        while (true) {
+            const header = reader.takeStruct(ServerToClient.Header, .little) catch |err| switch (err) {
+                error.ReadFailed => {
                     log.err("failed to receive message from zig build runner: {}", .{err});
                     return;
-                };
-                if (!keep_polling) break :pool;
-            }
-            const header = stdout.takeStruct(ServerToClient.Header, .little) catch unreachable;
-            while (stdout.buffered().len < header.bytes_len) {
-                const keep_polling = poller.poll() catch |err| {
+                },
+                error.EndOfStream => break,
+            };
+            const body = reader.readAlloc(allocator, header.bytes_len) catch |err| switch (err) {
+                error.ReadFailed, error.EndOfStream, error.OutOfMemory => {
                     log.err("failed to receive message from zig build runner: {}", .{err});
                     return;
-                };
-                if (!keep_polling) break :pool;
-            }
-            const body = stdout.take(header.bytes_len) catch unreachable;
+                },
+            };
+            defer allocator.free(body);
 
             switch (header.tag) {
                 .watch_error_bundle => {

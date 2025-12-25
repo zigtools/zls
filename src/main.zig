@@ -515,7 +515,7 @@ pub fn main() !u8 {
 
     var threaded: std.Io.Threaded = .init(allocator);
     defer threaded.deinit();
-    const io = threaded.io();
+    const io = threaded.ioBasic();
 
     const result = try parseArgs(io, allocator);
     defer result.deinit(allocator);

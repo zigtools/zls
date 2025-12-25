@@ -50,9 +50,9 @@ pub fn main() !void {
 
     const args = try process.argsAlloc(arena);
 
-    var threaded = if (@hasDecl(std.Io, "Threaded")) std.Io.Threaded.init(arena) else {};
-    defer if (@TypeOf(threaded) != void) threaded.deinit();
-    const io = if (@TypeOf(threaded) != void) threaded.io() else {};
+    var threaded: std.Io.Threaded = .init(arena);
+    defer threaded.deinit();
+    const io = threaded.ioBasic();
 
     // skip my own exe name
     var arg_idx: usize = 1;
@@ -83,7 +83,7 @@ pub fn main() !void {
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var graph = structInitIgnoreUnknown(std.Build.Graph, .{
+    var graph: std.Build.Graph = .{
         .io = io,
         .arena = arena,
         .cache = .{
@@ -97,13 +97,10 @@ pub fn main() !void {
         .zig_lib_directory = zig_lib_directory,
         .host = .{
             .query = .{},
-            .result = if (@TypeOf(io) != void)
-                try std.zig.system.resolveTargetQuery(io, .{})
-            else
-                try std.zig.system.resolveTargetQuery(.{}),
+            .result = try std.zig.system.resolveTargetQuery(io, .{}),
         },
         .time_report = false,
-    });
+    };
 
     graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
     graph.cache.addPrefix(build_root_directory);
@@ -120,7 +117,6 @@ pub fn main() !void {
 
     var targets = ArrayListManaged([]const u8).init(arena);
     var debug_log_scopes = ArrayListManaged([]const u8).init(arena);
-    var thread_pool_options: std.Thread.Pool.Options = .{ .allocator = arena };
 
     var install_prefix: ?[]const u8 = null;
     var dir_list: std.Build.DirList = .{};
@@ -306,7 +302,7 @@ pub fn main() !void {
                     std.debug.print("number of jobs must be at least 1\n", .{});
                     process.exit(1);
                 }
-                thread_pool_options.n_jobs = n_jobs;
+                threaded.setAsyncLimit(.limited(n_jobs));
             } else if (mem.eql(u8, arg, "--")) {
                 builder.args = argsRest(args, arg_idx);
                 break;
@@ -363,10 +359,9 @@ pub fn main() !void {
     var run: Run = .{
         .max_rss = max_rss,
         .max_rss_is_default = false,
-        .max_rss_mutex = .{},
+        .max_rss_mutex = .init,
         .skip_oom_steps = skip_oom_steps,
         .memory_blocked_steps = .init(arena),
-        .thread_pool = undefined, // set below
 
         .claimed_rss = 0,
 
@@ -378,9 +373,6 @@ pub fn main() !void {
         run.max_rss = process.totalSystemMemory() catch std.math.maxInt(u64);
         run.max_rss_is_default = true;
     }
-
-    try run.thread_pool.init(thread_pool_options);
-    defer run.thread_pool.deinit();
 
     if (!watch) {
         try extractBuildInformation(
@@ -394,7 +386,7 @@ pub fn main() !void {
         return;
     }
 
-    var w = try Watch.init();
+    var w = try Watch.init(io);
 
     const message_thread = try std.Thread.spawn(.{}, struct {
         fn do(ww: *Watch) void {
@@ -443,14 +435,14 @@ pub fn main() !void {
         // if any more events come in. After the debounce interval has passed,
         // trigger a rebuild on all steps with modified inputs, as well as their
         // recursive dependants.
-        var debounce_timeout: std.Build.Watch.Timeout = .none;
+        var debounce_timeout: std.Io.Timeout = .none;
         while (true) switch (try w.wait(gpa, debounce_timeout)) {
             .timeout => {
                 markFailedStepsDirty(gpa, step_stack.keys());
                 continue :rebuild;
             },
             .dirty => if (debounce_timeout == .none) {
-                debounce_timeout = .{ .ms = debounce_interval_ms };
+                debounce_timeout = .{ .duration = .{ .raw = .fromMilliseconds(debounce_interval_ms), .clock = .real } };
             },
             .clean => {},
         };
@@ -472,16 +464,18 @@ fn markFailedStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
 
 /// A wrapper around `std.Build.Watch` that supports manually triggering recompilations.
 const Watch = struct {
+    io: std.Io,
     fs_watch: std.Build.Watch,
     supports_fs_watch: bool,
-    manual_event: std.Thread.ResetEvent,
+    manual_event: std.Io.Event,
     steps: []const *Step,
 
-    fn init() !Watch {
+    fn init(io: std.Io) !Watch {
         return .{
+            .io = io,
             .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init() else {},
             .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
-            .manual_event = if (@hasField(std.Thread.ResetEvent, "unset")) .unset else .{},
+            .manual_event = .unset,
             .steps = &.{},
         };
     }
@@ -497,20 +491,39 @@ const Watch = struct {
         if (w.supports_fs_watch) {
             @panic("received manualy filesystem event even though std.Build.Watch is supported");
         }
-        w.manual_event.set();
+        w.manual_event.set(w.io);
     }
 
-    fn wait(w: *Watch, gpa: Allocator, timeout: std.Build.Watch.Timeout) !std.Build.Watch.WaitResult {
+    fn wait(w: *Watch, gpa: Allocator, timeout: std.Io.Timeout) !std.Build.Watch.WaitResult {
         if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
-            return try w.fs_watch.wait(gpa, timeout);
+            return try w.fs_watch.wait(gpa, switch (timeout) {
+                .none => .none,
+                .duration => |d| .{ .ms = @intCast(d.raw.toMilliseconds()) },
+                .deadline => unreachable,
+            });
         }
-        switch (timeout) {
-            .none => w.manual_event.wait(),
-            .ms => |ms| w.manual_event.timedWait(@as(u64, ms) * std.time.ns_per_ms) catch return .timeout,
-        }
+        waitTimeout(&w.manual_event, w.io, timeout) catch |err| switch (err) {
+            error.Canceled => unreachable,
+            error.Timeout => return .timeout,
+        };
         w.manual_event.reset();
         markStepsDirty(gpa, w.steps);
         return .dirty;
+    }
+
+    /// Copy of `std.Io.Event.waitTimeout` but a compile error has been fixed.
+    pub fn waitTimeout(event: *std.Io.Event, io: std.Io, timeout: std.Io.Timeout) (error{Timeout} || std.Io.Cancelable)!void {
+        if (@cmpxchgStrong(std.Io.Event, event, .unset, .waiting, .acquire, .acquire)) |prev| switch (prev) {
+            .unset => unreachable,
+            .waiting => assert(!builtin.single_threaded), // invalid state
+            .is_set => return,
+        };
+        try io.futexWaitTimeout(std.Io.Event, event, .waiting, timeout);
+        switch (@atomicLoad(std.Io.Event, event, .acquire)) {
+            .unset => unreachable, // `reset` called before pending `wait` returned
+            .waiting => return error.Timeout,
+            .is_set => return,
+        }
     }
 
     fn markStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
@@ -524,10 +537,9 @@ const Watch = struct {
 const Run = struct {
     max_rss: u64,
     max_rss_is_default: bool,
-    max_rss_mutex: std.Thread.Mutex,
+    max_rss_mutex: std.Io.Mutex,
     skip_oom_steps: bool,
     memory_blocked_steps: ArrayListManaged(*Step),
-    thread_pool: std.Thread.Pool,
 
     claimed_rss: usize,
 
@@ -618,14 +630,14 @@ fn runSteps(
     parent_prog_node: std.Progress.Node,
     run: *Run,
 ) error{ OutOfMemory, UncleanExit }!void {
-    const thread_pool = &run.thread_pool;
+    const io = b.graph.io;
     const steps = steps_stack.keys();
 
     var step_prog = parent_prog_node.start("steps", steps.len);
     defer step_prog.end();
 
-    var wait_group: std.Thread.WaitGroup = .{};
-    defer wait_group.wait();
+    var group: std.Io.Group = .init;
+    defer group.wait(io);
 
     // Here we spawn the initial set of tasks with a nice heuristic -
     // dependency order. Each worker when it finishes a step will then
@@ -633,10 +645,9 @@ fn runSteps(
     for (steps) |step| {
         if (step.state == .skipped_oom) continue;
 
-        wait_group.start();
-        thread_pool.spawn(workerMakeOneStep, .{
-            &wait_group, gpa, b, steps_stack, step, step_prog, run,
-        }) catch @panic("OOM");
+        group.async(io, workerMakeOneStep, .{
+            &group, gpa, b, steps_stack, step, step_prog, run,
+        });
     }
 
     if (run.watch) {
@@ -701,7 +712,7 @@ fn constructGraphAndCheckForDependencyLoop(
 }
 
 fn workerMakeOneStep(
-    wg: *std.Thread.WaitGroup,
+    group: *std.Io.Group,
     gpa: std.mem.Allocator,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
@@ -709,8 +720,7 @@ fn workerMakeOneStep(
     prog_node: std.Progress.Node,
     run: *Run,
 ) void {
-    defer wg.finish();
-    const thread_pool = &run.thread_pool;
+    const io = b.graph.io;
 
     // First, check the conditions for running this step. If they are not met,
     // then we return without doing the step, relying on another worker to
@@ -732,8 +742,8 @@ fn workerMakeOneStep(
     }
 
     if (s.max_rss != 0) {
-        run.max_rss_mutex.lock();
-        defer run.max_rss_mutex.unlock();
+        run.max_rss_mutex.lockUncancelable(io);
+        defer run.max_rss_mutex.unlock(io);
 
         // Avoid running steps twice.
         if (s.state != .precheck_done) {
@@ -762,15 +772,14 @@ fn workerMakeOneStep(
     var sub_prog_node = prog_node.start(s.name, 0);
     defer sub_prog_node.end();
 
-    const make_result = s.make(structInitIgnoreUnknown(std.Build.Step.MakeOptions, .{
+    const make_result = s.make(.{
         .progress_node = sub_prog_node,
-        .thread_pool = thread_pool,
         .watch = true,
         .gpa = gpa,
         .web_server = null,
         .ttyconf = .no_color,
         .unit_test_timeout_ns = null,
-    }));
+    });
 
     if (run.watch) {
         const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
@@ -793,18 +802,17 @@ fn workerMakeOneStep(
 
         // Successful completion of a step, so we queue up its dependants as well.
         for (s.dependants.items) |dep| {
-            wg.start();
-            thread_pool.spawn(workerMakeOneStep, .{
-                wg, gpa, b, steps_stack, dep, prog_node, run,
-            }) catch @panic("OOM");
+            group.async(io, workerMakeOneStep, .{
+                group, gpa, b, steps_stack, dep, prog_node, run,
+            });
         }
     }
 
     // If this is a step that claims resources, we must now queue up other
     // steps that are waiting for resources.
     if (s.max_rss != 0) {
-        run.max_rss_mutex.lock();
-        defer run.max_rss_mutex.unlock();
+        run.max_rss_mutex.lockUncancelable(io);
+        defer run.max_rss_mutex.unlock(io);
 
         // Give the memory back to the scheduler.
         run.claimed_rss -= s.max_rss;
@@ -819,10 +827,9 @@ fn workerMakeOneStep(
             if (dep.max_rss <= remaining) {
                 remaining -= dep.max_rss;
 
-                wg.start();
-                thread_pool.spawn(workerMakeOneStep, .{
-                    wg, gpa, b, steps_stack, dep, prog_node, run,
-                }) catch @panic("OOM");
+                group.async(io, workerMakeOneStep, .{
+                    group, gpa, b, steps_stack, dep, prog_node, run,
+                });
             } else {
                 run.memory_blocked_steps.items[i] = dep;
                 i += 1;
@@ -1272,9 +1279,7 @@ fn extractBuildInformation(
         available_options.map.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
     }
 
-    const stringifyValueAlloc = if (@hasDecl(std.json, "Stringify")) std.json.Stringify.valueAlloc else std.json.stringifyAlloc;
-
-    const stringified_build_config = try stringifyValueAlloc(
+    const stringified_build_config = try std.json.Stringify.valueAlloc(
         gpa,
         BuildConfig{
             .deps_build_roots = deps_build_roots.items,
@@ -1508,25 +1513,4 @@ fn serveWatchErrorBundle(
         error_bundle.string_bytes,
     };
     writer.writeVecAll(&data) catch return file_writer.err.?;
-}
-
-/// Initialize a struct with provided values. Any values that are unrecognized
-/// will be ignored.
-fn structInitIgnoreUnknown(T: type, init: anytype) T {
-    var result: T = undefined;
-    inline for (@typeInfo(T).@"struct".fields) |field| {
-        if (@hasField(@TypeOf(init), field.name)) {
-            switch (@typeInfo(field.type)) {
-                .@"struct" => {
-                    @field(result, field.name) = structInitIgnoreUnknown(field.type, @field(init, field.name));
-                },
-                else => {
-                    @field(result, field.name) = @field(init, field.name);
-                },
-            }
-        } else {
-            @field(result, field.name) = comptime field.defaultValue() orelse @compileError("missing struct field: " ++ field.name);
-        }
-    }
-    return result;
 }

@@ -784,8 +784,8 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
             if (DocumentStore.isBuildFile(builder.orig_handle.uri)) {
                 const build_file = store.getBuildFile(builder.orig_handle.uri) orelse break :no_modules;
-                const build_config = build_file.tryLockConfig() orelse break :no_modules;
-                defer build_file.unlockConfig();
+                const build_config = build_file.tryLockConfig(store.io) orelse break :no_modules;
+                defer build_file.unlockConfig(store.io);
 
                 try completions.ensureUnusedCapacity(builder.arena, build_config.deps_build_roots.len);
                 for (build_config.deps_build_roots) |dbr| {
@@ -797,8 +797,8 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 }
             } else if (try builder.orig_handle.getAssociatedBuildFileUri(store)) |uri| {
                 const build_file = store.getBuildFile(uri).?;
-                const build_config = build_file.tryLockConfig() orelse break :no_modules;
-                defer build_file.unlockConfig();
+                const build_config = build_file.tryLockConfig(store.io) orelse break :no_modules;
+                defer build_file.unlockConfig(store.io);
 
                 try completions.ensureUnusedCapacity(builder.arena, build_config.packages.len);
                 for (build_config.packages) |pkg| {
