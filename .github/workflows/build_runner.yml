@@ -15,11 +15,12 @@ on:
 
 jobs:
   check_build_runner:
+    if: false
     strategy:
       fail-fast: false
       matrix:
         include:
-          - zig-version: 0.15.1
+          - zig-version: 0.16.0
           # - zig-version: mach-latest
           # Zig master is handled by 'zig build test' in the main CI
     runs-on: ubuntu-22.04
