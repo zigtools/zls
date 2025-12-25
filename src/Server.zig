@@ -50,12 +50,8 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
 // private fields
-thread_pool: std.Thread.Pool,
-wait_group: std.Thread.WaitGroup = .{},
+wait_group: std.Io.Group = .init,
 ip: InternPool = undefined,
-/// avoid Zig deadlocking when spawning multiple `zig ast-check` processes at the same time.
-/// See https://github.com/ziglang/zig/issues/16369
-zig_ast_check_lock: std.Thread.Mutex = .{},
 /// Stores messages that should be displayed with `window/showMessage` once the server has been initialized.
 pending_show_messages: std.ArrayList(types.window.ShowMessageParams) = .empty,
 client_capabilities: ClientCapabilities = .{},
@@ -337,7 +333,7 @@ fn generateDiagnostics(server: *Server, handle: *DocumentStore.Handle) void {
             };
         }
     }.do;
-    server.thread_pool.spawnWg(&server.wait_group, do, .{ server, handle });
+    server.wait_group.async(server.io, do, .{ server, handle });
 }
 
 fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -1177,7 +1173,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         else => return error.InvalidParams,
     };
 
-    if (std.process.can_spawn and DocumentStore.isBuildFile(document_uri)) {
+    if (DocumentStore.supports_build_system and DocumentStore.isBuildFile(document_uri)) {
         server.document_store.invalidateBuildFile(document_uri);
     }
 
@@ -1652,9 +1648,9 @@ fn isBlockingMessage(msg: Message) bool {
 }
 
 pub const CreateOptions = struct {
-    /// Must support `concurrent` unless the ZLS module is in single_threaded mode.
+    /// An implementation that doesn't support `concurrent` is permitted but will not be able to provide some features like build on save.
     io: std.Io,
-    /// Must be thread-safe unless the ZLS module is in single_threaded mode.
+    /// Must be thread-safe unless the ZLS module is in single_threaded mode or the Io implementation has no parallelism.
     allocator: std.mem.Allocator,
     /// Must be set when running `loop`. Controls how the server will send and receive messages.
     transport: ?*lsp.Transport,
@@ -1662,12 +1658,12 @@ pub const CreateOptions = struct {
     max_thread_count: usize = 4, // what is a good value here?
 };
 
-pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.SpawnError)!*Server {
+pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = options.allocator;
     const io = options.io;
+    const allocator = options.allocator;
 
     const server = try allocator.create(Server);
     errdefer allocator.destroy(server);
@@ -1680,19 +1676,11 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
             .io = io,
             .allocator = allocator,
             .config = undefined, // set below
-            .thread_pool = &server.thread_pool,
             .diagnostics_collection = &server.diagnostics_collection,
         },
-        .thread_pool = undefined, // set below
-        .diagnostics_collection = .{ .allocator = allocator },
+        .diagnostics_collection = .{ .io = io, .allocator = allocator },
     };
     server.document_store.config = createDocumentStoreConfig(server.config_manager);
-
-    try server.thread_pool.init(.{
-        .allocator = allocator,
-        .n_jobs = @min(4, std.Thread.getCpuCount() catch 1), // what is a good value here?
-    });
-    errdefer server.thread_pool.deinit();
 
     server.ip = try InternPool.init(allocator);
     errdefer server.ip.deinit(allocator);
@@ -1705,7 +1693,7 @@ pub fn create(options: CreateOptions) (std.mem.Allocator.Error || std.Thread.Spa
 }
 
 pub fn destroy(server: *Server) void {
-    server.thread_pool.deinit();
+    server.wait_group.wait(server.io);
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
@@ -1752,17 +1740,12 @@ pub fn loop(server: *Server) !void {
 
         errdefer comptime unreachable;
 
-        if (zig_builtin.single_threaded) {
-            server.processMessageReportError(arena_allocator.state, message);
-            continue;
-        }
-
         if (isBlockingMessage(message)) {
-            server.thread_pool.waitAndWork(&server.wait_group);
-            server.wait_group.reset();
+            server.wait_group.wait(server.io);
+            server.wait_group = .init;
             server.processMessageReportError(arena_allocator.state, message);
         } else {
-            server.thread_pool.spawnWg(&server.wait_group, processMessageReportError, .{ server, arena_allocator.state, message });
+            server.wait_group.async(server.io, processMessageReportError, .{ server, arena_allocator.state, message });
         }
     }
 }

@@ -180,11 +180,6 @@ pub fn StringPool(comptime config: Config) type {
         pub fn deinit(pool: *Pool, allocator: Allocator) void {
             pool.bytes.deinit(allocator);
             pool.map.deinit(allocator);
-            if (builtin.mode == .Debug and !builtin.single_threaded and config.thread_safe) {
-                // detect deadlock when calling deinit while holding the lock
-                pool.mutex.lock();
-                pool.mutex.unlock();
-            }
             pool.* = undefined;
         }
 

@@ -30,9 +30,9 @@ pub fn main() Error!void {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
-    var threaded: std.Io.Threaded = .init(gpa);
+    var threaded: std.Io.Threaded = .init_single_threaded;
     defer threaded.deinit();
-    const io = threaded.io();
+    const io = threaded.ioBasic();
 
     var arg_it = std.process.argsWithAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
     defer arg_it.deinit();
@@ -94,14 +94,13 @@ pub fn main() Error!void {
         }
     }
 
-    var thread_pool: std.Thread.Pool = undefined;
-    thread_pool.init(.{ .allocator = gpa }) catch std.debug.panic("failed to initalize thread pool", .{});
-    defer thread_pool.deinit();
-
     var ip: InternPool = try .init(gpa);
     defer ip.deinit(gpa);
 
-    var diagnostics_collection: zls.DiagnosticsCollection = .{ .allocator = gpa };
+    var diagnostics_collection: zls.DiagnosticsCollection = .{
+        .io = io,
+        .allocator = gpa,
+    };
     defer diagnostics_collection.deinit();
 
     var config: zls.DocumentStore.Config = .{
@@ -128,7 +127,6 @@ pub fn main() Error!void {
         .io = io,
         .allocator = gpa,
         .config = config,
-        .thread_pool = &thread_pool,
         .diagnostics_collection = &diagnostics_collection,
     };
     defer document_store.deinit();
