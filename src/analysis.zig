@@ -237,6 +237,7 @@ fn rawStringifyParameter(
         try info.type.rawStringify(writer, analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
+            .escape_r_braces = options.snippet_placeholders,
         });
     }
 
@@ -4193,6 +4194,7 @@ pub const Type = struct {
     pub const FormatOptions = struct {
         referenced: ?*ReferencedType.Set = null,
         truncate_container_decls: bool,
+        escape_r_braces: bool = false,
     };
 
     fn rawStringify(
@@ -4247,7 +4249,11 @@ pub const Type = struct {
                     }
                     try elem_ty.rawStringify(writer, analyser, options);
                 }
-                try writer.writeAll(" }");
+                if (options.escape_r_braces) {
+                    try writer.writeAll(" \\}");
+                } else {
+                    try writer.writeAll(" }");
+                }
             },
             .optional => |child_ty| {
                 try writer.writeByte('?');
@@ -4303,7 +4309,11 @@ pub const Type = struct {
                                 str_token = token - 4;
                             }
                             const str = tree.tokenSlice(str_token);
-                            try writer.writeAll(str);
+                            if (options.escape_r_braces) {
+                                try writer.print("{f}", .{fmtSnippetPlaceholder(str)});
+                            } else {
+                                try writer.writeAll(str);
+                            }
                             if (referenced) |r| try r.put(analyser.arena, .of(str, handle, str_token), {});
                             return;
                         }
@@ -4335,6 +4345,7 @@ pub const Type = struct {
                                 try param_ty.rawStringify(writer, analyser, .{
                                     .referenced = referenced,
                                     .truncate_container_decls = options.truncate_container_decls,
+                                    .escape_r_braces = options.escape_r_braces,
                                 });
                                 first = false;
                             }
@@ -4360,9 +4371,17 @@ pub const Type = struct {
 
                         try writer.writeAll(offsets.tokensToSlice(tree, start_token, end_token));
                         if (container_decl.ast.members.len == 0) {
-                            try writer.writeAll(" {}");
+                            if (options.escape_r_braces) {
+                                try writer.writeAll(" {\\}");
+                            } else {
+                                try writer.writeAll(" {}");
+                            }
                         } else {
-                            try writer.writeAll(" {...}");
+                            if (options.escape_r_braces) {
+                                try writer.writeAll(" {...\\}");
+                            } else {
+                                try writer.writeAll(" {...}");
+                            }
                         }
                     },
 

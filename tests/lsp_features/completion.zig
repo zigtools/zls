@@ -3930,6 +3930,48 @@ test "insert replace behaviour - function with snippets" {
     });
 }
 
+test "insert replace behaviour - function with snippets - placeholder for argument with type containing '}'" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn func(x: struct {u32}, y: struct {a:i32}) void {}
+        \\const foo = <cursor>;
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(${1:x: struct { u32 \\}}, ${2:y: struct {...\\}});",
+        .expected_replace_line = "const foo = func(${1:x: struct { u32 \\}}, ${2:y: struct {...\\}});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const @"SomeType}" = struct {};
+        \\fn func(x: @"SomeType}") void {}
+        \\const foo = <cursor>;
+        ,
+        .label = "func",
+        .expected_insert_line =
+        \\const foo = func(${1:x: @"SomeType\}"});
+        ,
+        .expected_replace_line =
+        \\const foo = func(${1:x: @"SomeType\}"});
+        ,
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn Type(comptime T: type) type { return opaque {}; }
+        \\fn func(x: Type(struct {})) void {}
+        \\const foo = <cursor>;
+        ,
+        .label = "func",
+        .expected_insert_line = "const foo = func(${1:x: Type(struct {\\})});",
+        .expected_replace_line = "const foo = func(${1:x: Type(struct {\\})});",
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
 test "insert replace behaviour - function with snippets - 'self parameter' with placeholder" {
     try testCompletionTextEdit(.{
         .source =
