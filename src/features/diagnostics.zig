@@ -475,7 +475,7 @@ pub fn getErrorBundleFromStderr(
 pub const BuildOnSave = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
-    child_process: *std.process.Child,
+    child_process: std.process.Child,
     worker: std.Io.Future(void),
 
     const shared = @import("../build_runner/shared.zig");
@@ -495,9 +495,6 @@ pub const BuildOnSave = struct {
     };
 
     pub fn init(options: InitOptions) error{ OutOfMemory, ConcurrencyUnavailable }!?BuildOnSave {
-        const child_process = try options.allocator.create(std.process.Child);
-        errdefer options.allocator.destroy(child_process);
-
         const base_args: []const []const u8 = &.{
             options.zig_exe_path,
             "build",
@@ -517,14 +514,13 @@ pub const BuildOnSave = struct {
         if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
         argv.appendSliceAssumeCapacity(options.build_on_save_args);
 
-        child_process.* = .init(argv.items, options.allocator);
+        var child_process: std.process.Child = .init(argv.items, options.allocator);
         child_process.stdin_behavior = .Pipe;
         child_process.stdout_behavior = .Pipe;
         child_process.stderr_behavior = .Pipe;
         child_process.cwd = options.workspace_path;
 
         child_process.spawn() catch |err| {
-            options.allocator.destroy(child_process);
             log.err("failed to spawn zig build process: {}", .{err});
             return null;
         };
@@ -536,7 +532,7 @@ pub const BuildOnSave = struct {
             _ = terminateChildProcessReportError(
                 options.io,
                 options.allocator,
-                child_process,
+                &child_process,
                 "zig build runner",
                 .kill,
             );
@@ -548,7 +544,7 @@ pub const BuildOnSave = struct {
         const worker = try options.io.concurrent(loop, .{
             options.io,
             options.allocator,
-            child_process,
+            child_process.stdout.?,
             options.collection,
             duped_workspace_path,
         });
@@ -564,7 +560,18 @@ pub const BuildOnSave = struct {
 
     pub fn deinit(self: *BuildOnSave) void {
         self.worker.cancel(self.io);
-        self.allocator.destroy(self.child_process);
+
+        self.child_process.stdin.?.close();
+        self.child_process.stdin = null;
+
+        _ = terminateChildProcessReportError(
+            self.io,
+            self.allocator,
+            &self.child_process,
+            "zig build runner",
+            .wait,
+        );
+
         self.* = undefined;
     }
 
@@ -575,24 +582,11 @@ pub const BuildOnSave = struct {
     fn loop(
         io: std.Io,
         allocator: std.mem.Allocator,
-        child_process: *std.process.Child,
+        stdout: std.fs.File,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
     ) void {
         defer allocator.free(workspace_path);
-
-        defer {
-            child_process.stdin.?.close();
-            child_process.stdin = null;
-
-            _ = terminateChildProcessReportError(
-                io,
-                allocator,
-                child_process,
-                "zig build runner",
-                .wait,
-            );
-        }
 
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
         defer diagnostic_tags.deinit(allocator);
@@ -603,7 +597,7 @@ pub const BuildOnSave = struct {
         }
 
         var read_buffer: [@sizeOf(ServerToClient.Header)]u8 = undefined;
-        var file_reader = child_process.stdout.?.reader(io, &read_buffer);
+        var file_reader = stdout.reader(io, &read_buffer);
         const reader = &file_reader.interface;
 
         while (true) {
