@@ -10,16 +10,19 @@ pub fn main() !u8 {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.ioBasic();
+
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
     if (args.len != 4) @panic("invalid arguments");
 
-    const expected = std.fs.cwd().readFileAlloc(args[1], gpa, .limited(16 * 1024 * 1024)) catch |err|
+    const expected = std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .limited(16 * 1024 * 1024)) catch |err|
         std.debug.panic("could no open/read file '{s}': {}", .{ args[1], err });
     defer gpa.free(expected);
 
-    const actual_unsanitized = std.fs.cwd().readFileAlloc(args[2], gpa, .limited(16 * 1024 * 1024)) catch |err|
+    const actual_unsanitized = std.Io.Dir.cwd().readFileAlloc(io, args[2], gpa, .limited(16 * 1024 * 1024)) catch |err|
         std.debug.panic("could no open/read file '{s}': {}", .{ args[2], err });
     defer gpa.free(actual_unsanitized);
 

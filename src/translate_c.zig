@@ -126,10 +126,10 @@ pub fn translate(
     var sub_path: [std.fs.base64_encoder.calcSize(16)]u8 = undefined;
     _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
 
-    var sub_dir = try global_cache_dir.handle.makeOpenPath(&sub_path, .{});
-    defer sub_dir.close();
+    var sub_dir = try global_cache_dir.handle.createDirPathOpen(io, &sub_path, .{});
+    defer sub_dir.close(io);
 
-    sub_dir.writeFile(.{
+    sub_dir.writeFile(io, .{
         .sub_path = "cimport.h",
         .data = source,
     }) catch |err| {
@@ -137,7 +137,7 @@ pub fn translate(
         return null;
     };
 
-    defer global_cache_dir.handle.deleteTree(&sub_path) catch |err| {
+    defer global_cache_dir.handle.deleteTree(io, &sub_path) catch |err| {
         log.warn("failed to delete '{s}/{s}': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
     };
 
@@ -179,28 +179,28 @@ pub fn translate(
 
     errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
 
-    process.spawn() catch |err| {
+    process.spawn(io) catch |err| {
         log.err("failed to spawn zig translate-c process, error: {}", .{err});
         return null;
     };
 
-    defer _ = process.wait() catch |wait_err| {
+    defer _ = process.wait(io) catch |wait_err| {
         log.err("zig translate-c process did not terminate, error: {}", .{wait_err});
     };
 
     {
-        var stdin_writer = process.stdin.?.writer(&.{});
+        var stdin_writer = process.stdin.?.writer(io, &.{});
         const writer = &stdin_writer.interface;
 
         writer.writeStruct(OutMessage.Header{
             .tag = .update,
             .bytes_len = 0,
-        }, .little) catch return @as(std.fs.File.WriteError!?Result, stdin_writer.err.?);
+        }, .little) catch return @as(std.Io.File.Writer.Error!?Result, stdin_writer.err.?);
 
         writer.writeStruct(OutMessage.Header{
             .tag = .exit,
             .bytes_len = 0,
-        }, .little) catch return @as(std.fs.File.WriteError!?Result, stdin_writer.err.?);
+        }, .little) catch return @as(std.Io.File.Writer.Error!?Result, stdin_writer.err.?);
     }
 
     var poller = std.Io.poll(allocator, enum { stdout }, .{ .stdout = process.stdout.? });
@@ -265,7 +265,7 @@ pub fn translate(
     }
 }
 
-fn reportTranslateError(io: std.Io, allocator: std.mem.Allocator, stderr: ?std.fs.File, argv: []const []const u8, err_name: []const u8) void {
+fn reportTranslateError(io: std.Io, allocator: std.mem.Allocator, stderr: ?std.Io.File, argv: []const []const u8, err_name: []const u8) void {
     const joined = std.mem.join(allocator, " ", argv) catch return;
     defer allocator.free(joined);
     if (stderr) |file| {

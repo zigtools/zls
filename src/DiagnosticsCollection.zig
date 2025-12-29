@@ -263,7 +263,7 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
     return try .fromPath(allocator, absolute_src_path);
 }
 
-pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || std.posix.WriteError)!void {
+pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!void {
     const transport = collection.transport orelse return;
 
     var arena_allocator: std.heap.ArenaAllocator = .init(collection.allocator);

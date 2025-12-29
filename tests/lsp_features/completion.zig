@@ -4714,17 +4714,17 @@ fn searchCompletionItemWithLabel(completion_list: types.completion.List, label: 
         if (std.mem.eql(u8, item.label, label)) return item;
     }
 
-    const stderr, _ = std.debug.lockStderrWriter(&.{});
-    defer std.debug.unlockStderrWriter();
+    const stderr = std.debug.lockStderr(&.{}).terminal();
+    defer std.debug.unlockStderr();
 
-    try stderr.print(
+    try stderr.writer.print(
         \\server returned no completion item with label '{s}'
         \\
         \\labels:
         \\
     , .{label});
     for (completion_list.items) |item| {
-        try stderr.print("  - {s}\n", .{item.label});
+        try stderr.writer.print("  - {s}\n", .{item.label});
     }
 
     return error.MissingCompletionItem;

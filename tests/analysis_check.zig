@@ -78,11 +78,11 @@ pub fn main() Error!void {
                 std.process.exit(1);
             };
 
-            var handle = std.fs.cwd().openDir(resolved_zig_lib_path, .{}) catch |err| {
+            var handle = std.Io.Dir.cwd().openDir(io, resolved_zig_lib_path, .{}) catch |err| {
                 std.log.err("failed to open zig library directory '{s}: {}'", .{ resolved_zig_lib_path, err });
                 std.process.exit(1);
             };
-            errdefer handle.close();
+            errdefer handle.close(io);
 
             zig_lib_dir = .{
                 .handle = handle,
@@ -120,7 +120,7 @@ pub fn main() Error!void {
             std.log.err("failed to resolve '/lib' WASI preopen", .{});
             std.process.exit(1);
         };
-        config.zig_lib_dir = .{ .handle = .{ .fd = zig_lib_dir_fd }, .path = "/lib" };
+        config.zig_lib_dir = .{ .handle = .{ .handle = zig_lib_dir_fd }, .path = "/lib" };
     }
 
     var document_store: zls.DocumentStore = .{
@@ -136,7 +136,7 @@ pub fn main() Error!void {
         std.process.exit(1);
     };
 
-    const source = std.fs.cwd().readFileAllocOptions(file_path, gpa, .limited(16 * 1024 * 1024), .of(u8), 0) catch |err|
+    const source = std.Io.Dir.cwd().readFileAllocOptions(io, file_path, gpa, .limited(16 * 1024 * 1024), .of(u8), 0) catch |err|
         std.debug.panic("failed to read from {s}: {}", .{ file_path, err });
     defer gpa.free(source);
 

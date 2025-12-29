@@ -229,6 +229,9 @@ pub fn renderLineDiff(
     var diff_list = diff(allocator, expected, actual) catch @panic("OOM");
     defer diff_list.deinit(allocator);
 
+    const stderr = std.debug.lockStderr(&.{}).terminal();
+    defer std.debug.unlockStderr();
+
     std.debug.print(" \n====== expected this output: =========\n", .{});
     printWithVisibleNewlines(expected);
     std.debug.print("\n======== instead found this: =========\n", .{});
@@ -236,26 +239,21 @@ pub fn renderLineDiff(
     std.debug.print("\n======================================\n", .{});
     std.debug.print("\n============ difference: =============\n", .{});
 
-    const stderr = std.fs.File.stderr();
-    const tty_config: std.Io.tty.Config = .detect(stderr);
-    var file_writer = stderr.writer(&.{});
-    const writer = &file_writer.interface;
-
     for (diff_list.items(.operation), diff_list.items(.text)) |op, text| {
-        tty_config.setColor(writer, switch (op) {
+        stderr.setColor(switch (op) {
             .insert => .green,
             .delete => .red,
             .equal => .reset,
         }) catch {};
-        writer.writeAll(switch (op) {
+        stderr.writer.writeAll(switch (op) {
             .insert => "+ ",
             .delete => "- ",
             .equal => "  ",
         }) catch {};
         printLine(text);
     }
-    tty_config.setColor(writer, .reset) catch {};
-    writer.writeAll("␃") catch {}; // End of Text symbol (ETX)
+    stderr.setColor(.reset) catch {};
+    stderr.writer.writeAll("␃") catch {}; // End of Text symbol (ETX)
     std.debug.print("\n======================================\n", .{});
 }
 

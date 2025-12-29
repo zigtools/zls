@@ -23,14 +23,14 @@ pub fn addCases(
     });
 
     // https://github.com/ziglang/zig/issues/20605
-    var dir = std.fs.cwd().openDir(cases_path_from_root, .{ .iterate = true }) catch |err|
+    var dir = std.Io.Dir.cwd().openDir(b.graph.io, cases_path_from_root, .{ .iterate = true }) catch |err|
         std.debug.panic("failed to open '{s}': {}", .{ cases_path_from_root, err });
-    defer dir.close();
+    defer dir.close(b.graph.io);
 
     var it = dir.iterate();
 
     while (true) {
-        const entry = it.next() catch |err|
+        const entry = it.next(b.graph.io) catch |err|
             std.debug.panic("failed to walk directory '{s}': {}", .{ cases_path_from_root, err }) orelse break;
 
         if (entry.kind != .file) continue;

@@ -331,18 +331,18 @@ fn getErrorBundleFromAstCheck(
         process.stdout_behavior = .Ignore;
         process.stderr_behavior = .Pipe;
 
-        process.spawn() catch |err| {
+        process.spawn(io) catch |err| {
             log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
             return .empty;
         };
-        try process.stdin.?.writeAll(source);
-        process.stdin.?.close();
+        try process.stdin.?.writeStreamingAll(io, source);
+        process.stdin.?.close(io);
 
         process.stdin = null;
 
         stderr_bytes = try readToEndAlloc(io, allocator, process.stderr.?, .limited(16 * 1024 * 1024));
 
-        const term = process.wait() catch |err| {
+        const term = process.wait(io) catch |err| {
             log.warn("Failed to await zig ast-check process, error: {}", .{err});
             return .empty;
         };
@@ -523,14 +523,14 @@ pub const BuildOnSave = struct {
         child_process.stderr_behavior = .Pipe;
         child_process.cwd = options.workspace_path;
 
-        child_process.spawn() catch |err| {
+        child_process.spawn(options.io) catch |err| {
             options.allocator.destroy(child_process);
             log.err("failed to spawn zig build process: {}", .{err});
             return null;
         };
 
         errdefer {
-            child_process.stdin.?.close();
+            child_process.stdin.?.close(options.io);
             child_process.stdin = null;
 
             _ = terminateChildProcessReportError(
@@ -569,7 +569,7 @@ pub const BuildOnSave = struct {
     }
 
     pub fn sendManualWatchUpdate(self: *BuildOnSave) void {
-        self.child_process.stdin.?.writeAll("\x00") catch {};
+        self.child_process.stdin.?.writeStreamingAll(self.io, "\x00") catch {};
     }
 
     fn loop(
@@ -582,7 +582,7 @@ pub const BuildOnSave = struct {
         defer allocator.free(workspace_path);
 
         defer {
-            child_process.stdin.?.close();
+            child_process.stdin.?.close(io);
             child_process.stdin = null;
 
             _ = terminateChildProcessReportError(
@@ -650,7 +650,7 @@ pub const BuildOnSave = struct {
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
         diagnostic_tags: *std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void),
-    ) (error{ OutOfMemory, InvalidMessage } || std.posix.WriteError)!void {
+    ) (error{ OutOfMemory, InvalidMessage } || std.Io.File.Writer.Error)!void {
         var reader: std.Io.Reader = .fixed(body);
 
         const header = reader.takeStruct(ServerToClient.ErrorBundle, .little) catch return error.InvalidMessage;
@@ -700,8 +700,8 @@ fn terminateChildProcessReportError(
     defer allocator.free(stderr);
 
     const term = (switch (kind) {
-        .wait => child_process.wait(),
-        .kill => child_process.kill(),
+        .wait => child_process.wait(io),
+        .kill => child_process.kill(io),
     }) catch |err| {
         log.warn("Failed to await {s}: {}", .{ name, err });
         return false;
@@ -730,9 +730,9 @@ fn terminateChildProcessReportError(
 fn readToEndAlloc(
     io: std.Io,
     allocator: std.mem.Allocator,
-    file: std.fs.File,
+    file: std.Io.File,
     limit: std.Io.Limit,
-) (std.fs.File.ReadError || error{ OutOfMemory, StreamTooLong })![]u8 {
+) (std.Io.File.Reader.Error || error{ OutOfMemory, StreamTooLong })![]u8 {
     var buffer: [1024]u8 = undefined;
     var file_reader = file.readerStreaming(io, &buffer);
     return file_reader.interface.allocRemaining(allocator, limit) catch |err| switch (err) {

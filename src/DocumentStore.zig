@@ -656,7 +656,7 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
     const dir, const sub_path = blk: {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
             for (self.config.wasi_preopens.names, 0..) |name, i| {
-                const preopen_dir: std.fs.Dir = .{ .fd = @intCast(i) };
+                const preopen_dir: std.Io.Dir = .{ .handle = @intCast(i) };
                 const preopen_path = std.mem.trimEnd(u8, name, "/");
 
                 if (!std.mem.startsWith(u8, file_path, preopen_path)) continue;
@@ -665,10 +665,11 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
                 break :blk .{ preopen_dir, std.mem.trimStart(u8, file_path[preopen_path.len..], "/") };
             }
         }
-        break :blk .{ std.fs.cwd(), file_path };
+        break :blk .{ std.Io.Dir.cwd(), file_path };
     };
 
     return dir.readFileAllocOptions(
+        self.io,
         sub_path,
         self.allocator,
         .limited(max_document_size),
@@ -1022,7 +1023,7 @@ pub fn isInStd(uri: Uri) bool {
 
 /// looks for a `zls.build.json` file in the build file directory
 /// has to be freed with `json_compat.parseFree`
-fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: BuildFile) !std.json.Parsed(BuildAssociatedConfig) {
+fn loadBuildAssociatedConfiguration(io: std.Io, allocator: std.mem.Allocator, build_file: BuildFile) !std.json.Parsed(BuildAssociatedConfig) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1031,7 +1032,8 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
 
-    const file_buf = try std.fs.cwd().readFileAlloc(
+    const file_buf = try std.Io.Dir.cwd().readFileAlloc(
+        io,
         config_file_path,
         allocator,
         .limited(16 * 1024 * 1024),
@@ -1106,12 +1108,15 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     const zig_run_result = blk: {
         const tracy_zone2 = tracy.trace(@src());
         defer tracy_zone2.end();
-        break :blk try std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = args,
-            .cwd = cwd,
-            .max_output_bytes = 16 * 1024 * 1024,
-        });
+        break :blk try std.process.Child.run(
+            self.allocator,
+            self.io,
+            .{
+                .argv = args,
+                .cwd = cwd,
+                .max_output_bytes = 16 * 1024 * 1024,
+            },
+        );
     };
     defer self.allocator.free(zig_run_result.stdout);
     defer self.allocator.free(zig_run_result.stderr);
@@ -1176,10 +1181,10 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
 }
 
 /// Checks if the build.zig file is accessible in dir.
-fn buildDotZigExists(dir_path: []const u8) bool {
-    var dir = std.fs.openDirAbsolute(dir_path, .{}) catch return false;
-    defer dir.close();
-    dir.access("build.zig", .{}) catch return false;
+fn buildDotZigExists(io: std.Io, dir_path: []const u8) bool {
+    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return false;
+    defer dir.close(io);
+    dir.access(io, "build.zig", .{}) catch return false;
     return true;
 }
 
@@ -1211,7 +1216,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}
     var current_path: []const u8 = path;
     while (std.fs.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
         if (potential_root_path.len < root_end_index) break;
-        if (!buildDotZigExists(potential_root_path)) continue;
+        if (!buildDotZigExists(self.io, potential_root_path)) continue;
 
         const build_path = try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
         defer self.allocator.free(build_path);
@@ -1244,7 +1249,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 
     errdefer build_file.deinit(self.allocator);
 
-    if (loadBuildAssociatedConfiguration(self.allocator, build_file)) |cfg| {
+    if (loadBuildAssociatedConfiguration(self.io, self.allocator, build_file)) |cfg| {
         build_file.build_associated_config = cfg;
 
         if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
@@ -1490,7 +1495,7 @@ pub fn collectIncludeDirs(
         .ofmt = comptime std.Target.ObjectFormat.default(builtin.os.tag, builtin.cpu.arch),
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
-    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), &target_info);
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), store.io, &target_info);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {

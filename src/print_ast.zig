@@ -13,11 +13,12 @@ pub const RenderOptions = struct {
 
 pub fn renderToFile(
     tree: *const Ast,
+    io: std.Io,
     options: RenderOptions,
-    file: std.fs.File,
-) (std.fs.File.WriteError || std.fs.File.SetEndPosError || std.mem.Allocator.Error)!void {
+    file: std.Io.File,
+) (std.Io.File.Writer.Error || std.Io.File.Writer.EndError || std.mem.Allocator.Error)!void {
     var buffer: [4096]u8 = undefined;
-    var file_writer = file.writer(&buffer);
+    var file_writer = file.writer(io, &buffer);
     renderToWriter(tree, options, &file_writer.interface) catch |err| switch (err) {
         error.WriteFailed => return file_writer.err.?,
     };
@@ -885,15 +886,12 @@ pub fn main() !u8 {
     var tree: Ast = try .parse(gpa, source, mode);
     defer tree.deinit(gpa);
 
-    var buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
-
-    renderToWriter(
+    try renderToFile(
         &tree,
+        io,
         .{ .trailing_comments = .{ .filename = file_path } },
-        &stdout_writer.interface,
-    ) catch return stdout_writer.err.?;
-    stdout_writer.interface.flush() catch return stdout_writer.err.?;
+        .stdout(),
+    );
 
     return 0;
 }

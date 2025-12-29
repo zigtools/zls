@@ -39,7 +39,7 @@ pub const Context = struct {
                 config.global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
             }
 
-            var config_manager: zls.configuration.Manager = try .init(cached_config_arena.allocator());
+            var config_manager: zls.configuration.Manager = try .init(io, cached_config_arena.allocator());
             try config_manager.setConfiguration(.frontend, &config);
             _ = try config_manager.resolveConfiguration(cached_config_arena.allocator());
             cached_config_manager = config_manager;

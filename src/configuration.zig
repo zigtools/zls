@@ -8,6 +8,7 @@ const Config = @import("Config.zig");
 const log = std.log.scoped(.config);
 
 pub const Manager = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     config: Config,
     zig_exe: ?struct {
@@ -40,8 +41,9 @@ pub const Manager = struct {
         arena: std.heap.ArenaAllocator.State,
     },
 
-    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Manager {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator) error{OutOfMemory}!Manager {
         return .{
+            .io = io,
             .allocator = allocator,
             .zig_exe = null,
             .zig_lib_dir = null,
@@ -61,6 +63,7 @@ pub const Manager = struct {
     }
 
     pub fn deinit(manager: *Manager) void {
+        const io = manager.io;
         const allocator = manager.allocator;
         switch (builtin.os.tag) {
             .wasi => {
@@ -68,8 +71,8 @@ pub const Manager = struct {
                 allocator.free(manager.wasi_preopens.names);
             },
             else => {
-                if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close();
-                if (manager.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close();
+                if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close(io);
+                if (manager.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close(io);
             },
         }
         manager.impl.arena.promote(allocator).deinit();
@@ -142,6 +145,8 @@ pub const Manager = struct {
         const arena = arena_allocator.allocator();
         defer manager.impl.arena = arena_allocator.state;
 
+        const io = manager.io;
+
         var config: Config = .{
             .zig_lib_path = if (builtin.os.tag == .wasi) "/lib" else null,
             .global_cache_path = if (builtin.os.tag == .wasi) "/cache" else null,
@@ -160,11 +165,11 @@ pub const Manager = struct {
             messages.deinit(result_allocator);
         }
 
-        try validateConfiguration(&config, result_allocator, &messages);
+        try validateConfiguration(io, result_allocator, &config, &messages);
 
         if (config.zig_exe_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
-            const zig_exe_path = try findZig(manager.allocator) orelse break :blk;
+            const zig_exe_path = try findZig(io, manager.allocator) orelse break :blk;
             defer manager.allocator.free(zig_exe_path);
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         }
@@ -172,7 +177,7 @@ pub const Manager = struct {
         if (config.zig_exe_path) |exe_path| unresolved_zig: {
             if (!std.process.can_spawn) break :unresolved_zig;
 
-            const zig_env = try getZigEnv(manager.allocator, arena, exe_path) orelse break :unresolved_zig;
+            const zig_env = try getZigEnv(io, manager.allocator, arena, exe_path) orelse break :unresolved_zig;
 
             const zig_version = std.SemanticVersion.parse(zig_env.version) catch |err| {
                 log.err("zig env returned a zig version that is an invalid semantic version: {}", .{err});
@@ -207,14 +212,14 @@ pub const Manager = struct {
         }
 
         if (config.zig_lib_path) |zig_lib_path| blk: {
-            const zig_lib_dir: std.fs.Dir = switch (builtin.target.os.tag) {
+            const zig_lib_dir: std.Io.Dir = switch (builtin.target.os.tag) {
                 // TODO The `zig_lib_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .fd = manager.wasi_preopens.find(zig_lib_path) orelse {
+                .wasi => .{ .handle = manager.wasi_preopens.find(zig_lib_path) orelse {
                     log.warn("failed to resolve '{s}' WASI preopen", .{zig_lib_path});
                     config.zig_lib_path = null;
                     break :blk;
                 } },
-                else => std.fs.openDirAbsolute(zig_lib_path, .{}) catch |err| {
+                else => std.Io.Dir.openDirAbsolute(io, zig_lib_path, .{}) catch |err| {
                     log.err("failed to open zig library directory '{s}': {}", .{ zig_lib_path, err });
                     config.zig_lib_path = null;
                     break :blk;
@@ -229,14 +234,14 @@ pub const Manager = struct {
         }
 
         if (config.global_cache_path) |global_cache_path| blk: {
-            const global_cache_dir: std.fs.Dir = switch (builtin.target.os.tag) {
+            const global_cache_dir: std.Io.Dir = switch (builtin.target.os.tag) {
                 // TODO The `global_cache_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .fd = manager.wasi_preopens.find(global_cache_path) orelse {
+                .wasi => .{ .handle = manager.wasi_preopens.find(global_cache_path) orelse {
                     log.warn("failed to resolve '{s}' WASI preopen", .{global_cache_path});
                     config.global_cache_path = null;
                     break :blk;
                 } },
-                else => std.fs.cwd().makeOpenPath(global_cache_path, .{}) catch |err| {
+                else => std.Io.Dir.cwd().createDirPathOpen(io, global_cache_path, .{}) catch |err| {
                     log.err("failed to open global cache directory '{s}': {}", .{ global_cache_path, err });
                     config.global_cache_path = null;
                     break :blk;
@@ -276,13 +281,13 @@ pub const Manager = struct {
             defer manager.allocator.free(cache_path);
 
             std.debug.assert(std.fs.path.isAbsolute(cache_path));
-            var cache_dir = std.fs.cwd().makeOpenPath(cache_path, .{}) catch |err| {
+            var cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, cache_path, .{}) catch |err| {
                 log.err("failed to open directory '{s}': {}", .{ cache_path, err });
                 break :blk;
             };
-            defer cache_dir.close();
+            defer cache_dir.close(io);
 
-            cache_dir.writeFile(.{
+            cache_dir.writeFile(io, .{
                 .sub_path = "shared.zig",
                 .data = build_runner_config_source,
                 .flags = .{ .exclusive = true },
@@ -291,7 +296,7 @@ pub const Manager = struct {
                 break :blk;
             };
 
-            cache_dir.writeFile(.{
+            cache_dir.writeFile(io, .{
                 .sub_path = "build_runner.zig",
                 .data = build_runner_source,
                 .flags = .{ .exclusive = true },
@@ -315,11 +320,14 @@ pub const Manager = struct {
                 "--show-builtin",
             };
 
-            const run_result = std.process.Child.run(.{
-                .allocator = manager.allocator,
-                .argv = &argv,
-                .max_output_bytes = 16 * 1024 * 1024,
-            }) catch |err| {
+            const run_result = std.process.Child.run(
+                manager.allocator,
+                io,
+                .{
+                    .argv = &argv,
+                    .max_output_bytes = 16 * 1024 * 1024,
+                },
+            ) catch |err| {
                 const args = std.mem.join(manager.allocator, " ", &argv) catch break :blk;
                 log.err("failed to run command '{s}': {}", .{ args, err });
                 break :blk;
@@ -327,7 +335,7 @@ pub const Manager = struct {
             defer manager.allocator.free(run_result.stdout);
             defer manager.allocator.free(run_result.stderr);
 
-            global_cache_dir.handle.writeFile(.{
+            global_cache_dir.handle.writeFile(io, .{
                 .sub_path = "builtin.zig",
                 .data = run_result.stdout,
             }) catch |err| {
@@ -360,8 +368,9 @@ pub const Manager = struct {
     }
 
     fn validateConfiguration(
-        config: *Config,
+        io: std.Io,
         allocator: std.mem.Allocator,
+        config: *Config,
         messages: *std.ArrayList([]const u8),
     ) error{OutOfMemory}!void {
         if (builtin.os.tag == .wasi) return;
@@ -392,7 +401,7 @@ pub const Manager = struct {
 
                 switch (file_config.kind) {
                     .file => {
-                        const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
+                        const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| {
                             if (file_config.is_accessible) {
                                 try messages.ensureUnusedCapacity(allocator, 1);
                                 messages.appendAssumeCapacity(try std.fmt.allocPrint(
@@ -404,9 +413,9 @@ pub const Manager = struct {
                             }
                             break :ok true;
                         };
-                        defer file.close();
+                        defer file.close(io);
 
-                        const stat = file.stat() catch |err| {
+                        const stat = file.stat(io) catch |err| {
                             try messages.ensureUnusedCapacity(allocator, 1);
                             messages.appendAssumeCapacity(try std.fmt.allocPrint(
                                 allocator,
@@ -433,7 +442,7 @@ pub const Manager = struct {
                         break :ok true;
                     },
                     .directory => {
-                        var dir = std.fs.openDirAbsolute(path, .{}) catch |err| {
+                        var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch |err| {
                             if (file_config.is_accessible) {
                                 try messages.ensureUnusedCapacity(allocator, 1);
                                 messages.appendAssumeCapacity(try std.fmt.allocPrint(
@@ -445,8 +454,8 @@ pub const Manager = struct {
                             }
                             break :ok true;
                         };
-                        defer dir.close();
-                        const stat = dir.stat() catch |err| {
+                        defer dir.close(io);
+                        const stat = dir.stat(io) catch |err| {
                             log.err("failed to get stat of '{s}': {}", .{ path, err });
                             break :ok true;
                         };
@@ -551,14 +560,16 @@ pub const Env = struct {
 };
 
 pub fn getZigEnv(
+    io: std.Io,
     allocator: std.mem.Allocator,
     result_arena: std.mem.Allocator,
     zig_exe_path: []const u8,
 ) error{OutOfMemory}!?Env {
-    const zig_env_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ zig_exe_path, "env" },
-    }) catch |err| {
+    const zig_env_result = std.process.Child.run(
+        allocator,
+        io,
+        .{ .argv = &.{ zig_exe_path, "env" } },
+    ) catch |err| {
         log.err("Failed to run 'zig env': {}", .{err});
         return null;
     };
@@ -674,7 +685,7 @@ pub const DidConfigChange = @Struct(
     &@splat(.{ .default_value_ptr = &false }),
 );
 
-pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
+pub fn findZig(io: std.Io, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;
 
     const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
@@ -705,14 +716,14 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
     var ext_it = if (is_windows) std.mem.tokenizeScalar(u8, env_path_ext, std.fs.path.delimiter);
 
     while (path_it.next()) |path| : (if (is_windows) ext_it.reset()) {
-        var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
+        var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => |e| {
                 log.warn("failed to open entry in PATH '{s}': {}", .{ path, e });
                 continue;
             },
         };
-        defer dir.close();
+        defer dir.close(io);
 
         var cont = true;
         while (cont) : (cont = is_windows) {
@@ -727,7 +738,7 @@ pub fn findZig(allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
                 break :filename filename_buffer.items;
             };
 
-            const stat = dir.statFile(filename) catch |err| switch (err) {
+            const stat = dir.statFile(io, filename, .{}) catch |err| switch (err) {
                 error.FileNotFound => continue,
                 else => |e| {
                     log.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });

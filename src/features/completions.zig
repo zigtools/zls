@@ -685,6 +685,8 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) error{OutOfMemory}!void {
+    const io = builder.server.io;
+
     var completions: CompletionSet = .empty;
     const store = &builder.server.document_store;
     const source = builder.orig_handle.tree.source;
@@ -739,11 +741,11 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         if (!std.fs.path.isAbsolute(path)) continue;
         const dir_path = if (std.fs.path.isAbsolute(completing)) path else try std.fs.path.join(builder.arena, &.{ path, completing });
 
-        var iterable_dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
-        defer iterable_dir.close();
+        var iterable_dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch continue;
+        defer iterable_dir.close(io);
         var it = iterable_dir.iterateAssumeFirstIteration();
 
-        while (it.next() catch null) |entry| {
+        while (it.next(io) catch null) |entry| {
             const expected_extension = switch (pos_context) {
                 .import_string_literal => ".zig",
                 .cinclude_string_literal => ".h",
