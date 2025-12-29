@@ -12,19 +12,29 @@ pub fn main() !void {
     var arena_allocator: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     const arena = arena_allocator.allocator();
 
-    const metadata_source = try std.fs.cwd().readFileAlloc("zig-out/release.json", arena, .limited(std.math.maxInt(u32)));
-    const artifacts_dir = try std.fs.cwd().openDir("zig-out/artifacts", .{ .iterate = true });
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.ioBasic();
+
+    const metadata_source = try std.Io.Dir.cwd().readFileAlloc(io, "zig-out/release.json", arena, .limited(std.math.maxInt(u32)));
+    const artifacts_dir = try std.Io.Dir.cwd().openDir(io, "zig-out/artifacts", .{ .iterate = true });
     const metadata = try std.json.parseFromSliceLeaky(Metadata, arena, metadata_source, .{});
 
     var buffer: [4096]u8 = undefined;
-    var file_writer = std.fs.File.stdout().writer(&buffer);
-    try createRequestBody(&file_writer.interface, artifacts_dir, metadata, "full");
+    var file_writer = std.Io.File.stdout().writer(io, &buffer);
+    try createRequestBody(
+        io,
+        &file_writer.interface,
+        artifacts_dir,
+        metadata,
+        "full",
+    );
     try file_writer.interface.flush();
 }
 
 fn createRequestBody(
+    io: std.Io,
     writer: *std.Io.Writer,
-    artifacts_dir: std.fs.Dir,
+    artifacts_dir: std.Io.Dir,
     metadata: Metadata,
     compatibility: []const u8,
 ) !void {
@@ -58,15 +68,15 @@ fn createRequestBody(
         try write_stream.objectField(file_name);
         try write_stream.beginObject();
 
-        var file = try artifacts_dir.openFile(file_name, .{});
-        defer file.close();
+        var file = try artifacts_dir.openFile(io, file_name, .{});
+        defer file.close(io);
 
-        const stat = try file.stat();
+        const stat = try file.stat(io);
 
         var sha256sum: std.crypto.hash.sha2.Sha256 = .init(.{});
         var read_buffer: [16 * 1024]u8 = undefined;
         while (true) {
-            const amt = try file.read(&read_buffer);
+            const amt = try file.readStreaming(io, &.{&read_buffer});
             if (amt == 0) break;
             sha256sum.update(read_buffer[0..amt]);
         }
