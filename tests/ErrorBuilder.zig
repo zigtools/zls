@@ -167,27 +167,27 @@ fn appendMessage(
 
 pub const FormatContext = struct {
     builder: *const ErrorBuilder,
-    tty_config: ?std.Io.tty.Config,
+    terminal_mode: std.Io.Terminal.Mode,
 };
 
-pub fn fmt(builder: *const ErrorBuilder, tty_config: std.Io.tty.Config) std.fmt.Alt(FormatContext, render) {
+pub fn fmt(builder: *const ErrorBuilder, terminal_mode: std.Io.Terminal.Mode) std.fmt.Alt(FormatContext, render) {
     return .{ .data = .{
         .builder = builder,
-        .tty_config = tty_config,
+        .terminal_mode = terminal_mode,
     } };
 }
 
 pub fn writeDebug(builder: *const ErrorBuilder) void {
     var buffer: [4096]u8 = undefined;
-    const stderr, const tty_config = std.debug.lockStderrWriter(&buffer);
-    defer std.debug.unlockStderrWriter();
+    const stderr = std.debug.lockStderr(&buffer).terminal();
+    defer std.debug.unlockStderr();
     // does zig trim the output or why is this needed?
-    stderr.writeAll(" ") catch return;
-    std.debug.print("\n{f}\n", .{builder.fmt(tty_config)});
+    stderr.writer.writeAll(" ") catch return;
+    std.debug.print("\n{f}\n", .{builder.fmt(stderr.mode)});
 }
 
 pub fn format(builder: *const ErrorBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try render(.{ .builder = builder, .tty_config = null }, writer);
+    try render(.{ .builder = builder, .terminal_mode = .no_color }, writer);
 }
 
 fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -295,15 +295,19 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
                     .info => "info",
                     .debug => "debug",
                 };
-                const color: std.Io.tty.Color = switch (item.level) {
+                const color: std.Io.Terminal.Color = switch (item.level) {
                     .err => .red,
                     .warn => .yellow,
                     .info => .white,
                     .debug => .white,
                 };
-                if (context.tty_config) |tty| tty.setColor(writer, color) catch {};
+                const terminal: std.Io.Terminal = .{
+                    .writer = writer,
+                    .mode = context.terminal_mode,
+                };
+                terminal.setColor(color) catch {};
                 try writer.print(" {s}: ", .{level_txt});
-                if (context.tty_config) |tty| tty.setColor(writer, .reset) catch {};
+                terminal.setColor(.reset) catch {};
                 try writer.writeAll(item.message);
             }
         }

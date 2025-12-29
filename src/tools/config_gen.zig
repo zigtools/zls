@@ -126,7 +126,12 @@ fn fmtDocs(text: []const u8, comment_kind: FormatDocs.CommentKind) std.fmt.Alt(F
     return .{ .data = .{ .text = text, .comment_kind = comment_kind } };
 }
 
-fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) (std.fs.Dir.WriteFileError || std.mem.Allocator.Error)!void {
+fn generateConfigFile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    config: Config,
+    path: []const u8,
+) (std.Io.Dir.WriteFileError || std.mem.Allocator.Error)!void {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
@@ -169,18 +174,23 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
     const source = try tree.renderAlloc(allocator);
     defer allocator.free(source);
 
-    try std.fs.cwd().writeFile(.{
+    try std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = path,
         .data = source,
     });
 }
 
-fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    const schema_file = try std.fs.cwd().createFile(path, .{});
-    defer schema_file.close();
+fn generateSchemaFile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    config: Config,
+    path: []const u8,
+) !void {
+    const schema_file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer schema_file.close(io);
 
     var buffer: [4096]u8 = undefined;
-    var file_writer = schema_file.writer(&buffer);
+    var file_writer = schema_file.writer(io, &buffer);
     const writer = &file_writer.interface;
 
     var schema: Schema = .{ .properties = .{} };
@@ -216,9 +226,14 @@ const ConfigurationProperty = struct {
     default: ?std.json.Value = null,
 };
 
-fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    var config_file = try std.fs.cwd().createFile(path, .{});
-    defer config_file.close();
+fn generateVSCodeConfigFile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    config: Config,
+    path: []const u8,
+) !void {
+    var config_file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer config_file.close(io);
 
     const predefined_configurations: usize = 4;
     var configuration: std.json.ArrayHashMap(ConfigurationProperty) = .{};
@@ -274,7 +289,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     }
 
     var buffer: [4096]u8 = undefined;
-    var file_writer = config_file.writer(&buffer);
+    var file_writer = config_file.writer(io, &buffer);
     const writer = &file_writer.interface;
 
     try std.json.Stringify.value(configuration, .{
@@ -867,9 +882,15 @@ fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
 
 /// Generates data files from the Zig language Reference (https://ziglang.org/documentation/master/)
 /// Output example: https://github.com/zigtools/zls/blob/0.11.0/src/data/master.zig
-fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, output_path: []const u8, langref_path: []const u8) !void {
+fn generateVersionDataFile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    version: []const u8,
+    output_path: []const u8,
+    langref_path: []const u8,
+) !void {
     // const langref_source: []const u8 = @embedFile("langref.html.in");
-    const langref_source = try std.fs.cwd().readFileAlloc(langref_path, allocator, .limited(16 * 1024 * 1024));
+    const langref_source = try std.Io.Dir.cwd().readFileAlloc(io, langref_path, allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(langref_source);
 
     const builtins = try collectBuiltinData(allocator, version, langref_source);
@@ -881,11 +902,11 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         allocator.free(builtins);
     }
 
-    var builtin_file = try std.fs.cwd().createFile(output_path, .{});
-    defer builtin_file.close();
+    var builtin_file = try std.Io.Dir.cwd().createFile(io, output_path, .{});
+    defer builtin_file.close(io);
 
     var buffer: [4096]u8 = undefined;
-    var file_writer = builtin_file.writer(&buffer);
+    var file_writer = builtin_file.writer(io, &buffer);
     const writer = &file_writer.interface;
 
     try writer.writeAll(
@@ -994,6 +1015,9 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
+
     var args_it = try std.process.argsWithAllocator(gpa);
     defer args_it.deinit();
 
@@ -1008,7 +1032,7 @@ pub fn main() !void {
 
     while (args_it.next()) |argname| {
         if (std.mem.eql(u8, argname, "--help")) {
-            try std.fs.File.stdout().writeAll(
+            try std.Io.File.stdout().writeStreamingAll(io,
                 \\Usage: zig build gen -- [command]
                 \\
                 \\Commands:
@@ -1021,7 +1045,7 @@ pub fn main() !void {
                 \\  --langref-version [version]      Input langref.html.in version
                 \\
             );
-            return std.process.cleanExit();
+            return std.process.cleanExit(io);
         } else if (std.mem.eql(u8, argname, "--generate-config")) {
             config_path = args_it.next() orelse {
                 std.process.fatal("Expected output path after --generate-config argument.\n", .{});
@@ -1064,14 +1088,14 @@ pub fn main() !void {
     const config = config_json.value;
 
     if (config_path) |output_path| {
-        try generateConfigFile(gpa, config, output_path);
+        try generateConfigFile(io, gpa, config, output_path);
     }
     if (schema_path) |output_path| {
-        try generateSchemaFile(gpa, config, output_path);
+        try generateSchemaFile(io, gpa, config, output_path);
     }
     if (vscode_config_path) |output_path| {
-        try generateVSCodeConfigFile(gpa, config, output_path);
-        try std.fs.File.stderr().writeAll(
+        try generateVSCodeConfigFile(io, gpa, config, output_path);
+        try std.Io.File.stderr().writeStreamingAll(io,
             \\Changing configuration options may also require editing the `package.json` from ziglang/vscode-zig at https://github.com/ziglang/vscode-zig/blob/master/package.json
             \\You can use `zig build gen -- --vscode-config-path /path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
             \\
@@ -1079,6 +1103,7 @@ pub fn main() !void {
     }
     if (version_data_path) |output_path| {
         try generateVersionDataFile(
+            io,
             gpa,
             langref_version orelse std.process.fatal("--generate-version-data requires --langref-version to be specified", .{}),
             output_path,

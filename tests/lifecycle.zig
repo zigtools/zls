@@ -7,7 +7,7 @@ const io = std.testing.io;
 const allocator = std.testing.allocator;
 
 test "LSP lifecycle" {
-    var config_manager: zls.configuration.Manager = try .init(allocator);
+    var config_manager: zls.configuration.Manager = try .init(io, allocator);
     defer config_manager.deinit();
 
     var server: *zls.Server = try .create(.{

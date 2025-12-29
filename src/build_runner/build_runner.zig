@@ -50,7 +50,7 @@ pub fn main() !void {
 
     const args = try process.argsAlloc(arena);
 
-    var threaded: std.Io.Threaded = .init(arena);
+    var threaded: std.Io.Threaded = .init(arena, .{});
     defer threaded.deinit();
     const io = threaded.ioBasic();
 
@@ -63,24 +63,26 @@ pub fn main() !void {
     const cache_root = nextArg(args, &arg_idx) orelse fatal("missing cache root directory path", .{});
     const global_cache_root = nextArg(args, &arg_idx) orelse fatal("missing global cache root directory path", .{});
 
+    const cwd: std.Io.Dir = .cwd();
+
     const zig_lib_directory: std.Build.Cache.Directory = .{
         .path = zig_lib_dir,
-        .handle = try std.fs.cwd().openDir(zig_lib_dir, .{}),
+        .handle = try cwd.openDir(io, zig_lib_dir, .{}),
     };
 
     const build_root_directory: std.Build.Cache.Directory = .{
         .path = build_root,
-        .handle = try std.fs.cwd().openDir(build_root, .{}),
+        .handle = try cwd.openDir(io, build_root, .{}),
     };
 
     const local_cache_directory: std.Build.Cache.Directory = .{
         .path = cache_root,
-        .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
+        .handle = try cwd.createDirPathOpen(io, cache_root, .{}),
     };
 
     const global_cache_directory: std.Build.Cache.Directory = .{
         .path = global_cache_root,
-        .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
+        .handle = try cwd.createDirPathOpen(io, global_cache_root, .{}),
     };
 
     var graph: std.Build.Graph = .{
@@ -89,7 +91,7 @@ pub fn main() !void {
         .cache = .{
             .io = io,
             .gpa = arena,
-            .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+            .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
         },
         .zig_exe = zig_exe,
         .env_map = try process.getEnvMap(arena),
@@ -102,7 +104,7 @@ pub fn main() !void {
         .time_report = false,
     };
 
-    graph.cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+    graph.cache.addPrefix(.{ .path = null, .handle = cwd });
     graph.cache.addPrefix(build_root_directory);
     graph.cache.addPrefix(local_cache_directory);
     graph.cache.addPrefix(global_cache_directory);
@@ -314,7 +316,7 @@ pub fn main() !void {
         }
     }
 
-    const main_progress_node = std.Progress.start(.{
+    const main_progress_node = std.Progress.start(io, .{
         .disable_printing = true,
     });
     defer main_progress_node.end();
@@ -337,7 +339,7 @@ pub fn main() !void {
         const s = std.fs.path.sep_str;
         const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse fatal("missing -Z arg", .{}));
 
-        std.fs.Dir.writeFile(local_cache_directory.handle, .{
+        local_cache_directory.handle.writeFile(io, .{
             .sub_path = tmp_sub_path,
             .data = buffer.items,
             .flags = .{ .exclusive = true },
@@ -392,9 +394,12 @@ pub fn main() !void {
         fn do(ww: *Watch) void {
             while (true) {
                 var buffer: [1]u8 = undefined;
-                const amt = std.fs.File.stdin().read(&buffer) catch process.exit(1);
-                if (amt == 0) process.exit(0);
-                switch (buffer[0]) {
+                var stdin_reader = std.Io.File.stdin().reader(ww.io, &buffer);
+                const byte = stdin_reader.interface.takeByte() catch |err| switch (err) {
+                    error.ReadFailed => process.exit(1),
+                    error.EndOfStream => process.exit(0),
+                };
+                switch (byte) {
                     '\x00' => ww.trigger(),
                     else => process.exit(1),
                 }
@@ -593,7 +598,10 @@ fn prepare(
 
     for (starting_steps) |s| {
         constructGraphAndCheckForDependencyLoop(b, s, step_stack, rand) catch |err| switch (err) {
-            error.DependencyLoopDetected => return uncleanExit(),
+            error.DependencyLoopDetected => {
+                _ = b.graph.io.lockStderr(&.{}, b.graph.stderr_mode) catch {};
+                process.exit(1);
+            },
             else => |e| return e,
         };
     }
@@ -618,7 +626,6 @@ fn prepare(
             if (run.max_rss_is_default) {
                 std.debug.print("note: use --maxrss to override the default", .{});
             }
-            return uncleanExit();
         }
     }
 }
@@ -656,7 +663,7 @@ fn runSteps(
             // missing fields:
             // - result_error_msgs
             // - result_stderr
-            serveWatchErrorBundle(step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
+            serveWatchErrorBundle(b.graph.io, step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
         }
     }
 }
@@ -775,10 +782,9 @@ fn workerMakeOneStep(
     const make_result = s.make(.{
         .progress_node = sub_prog_node,
         .watch = true,
-        .gpa = gpa,
         .web_server = null,
-        .ttyconf = .no_color,
         .unit_test_timeout_ns = null,
+        .gpa = gpa,
     });
 
     if (run.watch) {
@@ -786,7 +792,7 @@ fn workerMakeOneStep(
         // missing fields:
         // - result_error_msgs
         // - result_stderr
-        serveWatchErrorBundle(step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
+        serveWatchErrorBundle(b.graph.io, step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
     }
 
     handle_result: {
@@ -863,14 +869,6 @@ fn argsRest(args: []const [:0]const u8, idx: usize) ?[]const [:0]const u8 {
 fn cleanExit() void {
     std.debug.lockStdErr();
     process.exit(0);
-}
-
-/// Perhaps in the future there could be an Advanced Options flag such as
-/// --debug-build-runner-leaks which would make this function return instead of
-/// calling exit.
-fn uncleanExit() error{UncleanExit} {
-    std.debug.lockStdErr();
-    process.exit(1);
 }
 
 fn fatal(comptime f: []const u8, args: anytype) noreturn {
@@ -1292,7 +1290,7 @@ fn extractBuildInformation(
         .{ .whitespace = .indent_2 },
     );
 
-    var file_writer = std.fs.File.stdout().writer(&.{});
+    var file_writer = std.Io.File.stdout().writer(b.graph.io, &.{});
     file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
 }
 
@@ -1477,10 +1475,11 @@ const copied_from_zig = struct {
 };
 
 fn serveWatchErrorBundle(
+    io: std.Io,
     step_id: u32,
     cycle: u32,
     error_bundle: std.zig.ErrorBundle,
-) std.posix.WriteError!void {
+) std.Io.File.Writer.Error!void {
     const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + @sizeOf(u32) * error_bundle.extra.len + error_bundle.string_bytes.len;
 
     var header: shared.ServerToClient.Header = .{
@@ -1503,7 +1502,7 @@ fn serveWatchErrorBundle(
         std.mem.byteSwapAllElements(u32, @constCast(error_bundle.extra)); // trust me bro
     }
 
-    var file_writer = std.fs.File.stdout().writer(&.{});
+    var file_writer = std.Io.File.stdout().writer(io, &.{});
     const writer = &file_writer.interface;
 
     var data = [_][]const u8{

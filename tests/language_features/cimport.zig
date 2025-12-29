@@ -125,7 +125,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
             const path = try uri.toFsPath(allocator);
             defer allocator.free(path);
             try std.testing.expect(std.fs.path.isAbsolute(path));
-            try std.fs.accessAbsolute(path, .{});
+            try std.Io.Dir.accessAbsolute(io, path, .{});
         },
         .failure => |message| {
             try std.testing.expect(message.errorMessageCount() != 0);
