@@ -6,10 +6,10 @@ const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) 
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
 /// Specify the minimum Zig version that is usable with ZLS:
-/// Replace uses of `std.Thread.Pool` with `std.Io`, and remove `std.Thread.Pool`
+/// std: migrate all `fs` APIs to `Io`
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.16.0-dev.1657+985a3565c";
+const minimum_runtime_zig_version = "0.16.0-dev.1859+212968c57";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
