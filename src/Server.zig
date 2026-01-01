@@ -1693,7 +1693,7 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
 }
 
 pub fn destroy(server: *Server) void {
-    server.wait_group.wait(server.io);
+    server.wait_group.awaitUncancelable(server.io);
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
@@ -1741,7 +1741,7 @@ pub fn loop(server: *Server) !void {
         errdefer comptime unreachable;
 
         if (isBlockingMessage(message)) {
-            server.wait_group.wait(server.io);
+            server.wait_group.awaitUncancelable(server.io);
             server.wait_group = .init;
             server.processMessageReportError(arena_allocator.state, message);
         } else {
