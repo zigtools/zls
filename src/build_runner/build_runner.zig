@@ -644,7 +644,7 @@ fn runSteps(
     defer step_prog.end();
 
     var group: std.Io.Group = .init;
-    defer group.wait(io);
+    defer group.awaitUncancelable(io);
 
     // Here we spawn the initial set of tasks with a nice heuristic -
     // dependency order. Each worker when it finishes a step will then
