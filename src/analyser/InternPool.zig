@@ -4871,7 +4871,7 @@ test "test thread safety of InternPool" {
     for (0..cpu_count) |_| {
         wait_group.async(io, funcs.do, .{ &ip, gpa, size });
     }
-    wait_group.awaitUncancelable(io);
+    wait_group.await(io) catch {};
 
     try std.testing.expectEqual(index_start + size, ip.map.count());
 
