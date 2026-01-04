@@ -399,7 +399,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     const tree = &handle.tree;
 
     switch (tree.nodeTag(call.ast.fn_expr)) {
-        .identifier, .field_access => try writeCallHint(builder, call),
+        .identifier, .field_access, .enum_literal => try writeCallHint(builder, call),
         else => {
             log.debug("cannot deduce fn expression with tag '{}'", .{tree.nodeTag(call.ast.fn_expr)});
         },

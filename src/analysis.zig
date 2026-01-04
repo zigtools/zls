@@ -2770,7 +2770,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
             return if (value) |v| Type.fromIP(analyser, ty, v) else Type.fromIP(analyser, ty, null);
         },
 
-        .enum_literal => return Type.fromIP(analyser, .enum_literal_type, null),
+        .enum_literal => {
+            const source_token = tree.tokenStart(tree.nodeMainToken(node));
+            const lineage = try ast.nodesOverlappingIndex(analyser.arena, tree, source_token);
+            defer analyser.arena.free(lineage);
+
+            const tag = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(node));
+            const decl = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
+            return decl.resolveType(analyser);
+        },
+
         .unreachable_literal => return Type.fromIP(analyser, .noreturn_type, null),
         .anyframe_literal => return Type.fromIP(analyser, .anyframe_type, null),
 
@@ -5896,7 +5905,7 @@ pub fn lookupSymbolFieldInit(
     }
 
     switch (container_type.getContainerKind() orelse return null) {
-        .keyword_struct => {},
+        .keyword_struct, .keyword_opaque => {},
         .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |ty| return ty,
         .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |ty| return ty,
         else => return null,
