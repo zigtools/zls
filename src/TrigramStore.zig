@@ -3,30 +3,21 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const offsets = @import("offsets.zig");
-const log = std.log.scoped(.store);
 
 pub const TrigramStore = @This();
 
 pub const Trigram = [3]u8;
 
 pub const NameSlice = struct { start: u32, end: u32 };
+pub const Loc = struct { start: u32, end: u32 };
 
 pub const Declaration = struct {
     pub const Index = enum(u32) { _ };
 
     name: NameSlice,
-    range: offsets.Range,
-};
-
-pub const empty: TrigramStore = .{
-    .has_filter = false,
-    .filter_buckets = .empty,
-    .trigram_to_declarations = .empty,
-    .declarations = .empty,
-    .names = .empty,
+    loc: Loc,
 };
 
 has_filter: bool,
@@ -35,43 +26,23 @@ trigram_to_declarations: std.AutoArrayHashMapUnmanaged(Trigram, std.ArrayList(De
 declarations: std.MultiArrayList(Declaration),
 names: std.ArrayList(u8),
 
-pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
-    store.filter_buckets.deinit(allocator);
-    for (store.trigram_to_declarations.values()) |*list| {
-        list.deinit(allocator);
-    }
-    store.trigram_to_declarations.deinit(allocator);
-    store.declarations.deinit(allocator);
-    store.names.deinit(allocator);
-    store.* = undefined;
-}
-
-fn clearRetainingCapacity(store: *TrigramStore) void {
-    store.filter_buckets.clearRetainingCapacity();
-    store.has_filter = false;
-    for (store.trigram_to_declarations.values()) |*list| {
-        list.clearRetainingCapacity();
-    }
-    store.declarations.clearRetainingCapacity();
-    store.names.clearRetainingCapacity();
-}
-
-pub fn fill(
-    store: *TrigramStore,
+pub fn init(
     allocator: std.mem.Allocator,
-    source: [:0]const u8,
-    encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
-    store.clearRetainingCapacity();
-
-    var tree = try Ast.parse(allocator, source, .zig);
-    defer tree.deinit(allocator);
+    tree: *const Ast,
+) error{OutOfMemory}!TrigramStore {
+    var store: TrigramStore = .{
+        .has_filter = false,
+        .filter_buckets = .empty,
+        .trigram_to_declarations = .empty,
+        .declarations = .empty,
+        .names = .empty,
+    };
+    errdefer store.deinit(allocator);
 
     const Context = struct {
         allocator: std.mem.Allocator,
         store: *TrigramStore,
         in_function: bool,
-        encoding: offsets.Encoding,
 
         const Error = error{OutOfMemory};
         fn callback(context: *@This(), cb_tree: *const Ast, node: Ast.Node.Index) Error!void {
@@ -109,10 +80,12 @@ pub fn fill(
                         const name = cb_tree.tokenSlice(token);
 
                         if (name.len >= 3) {
+                            const loc = offsets.tokenToLoc(cb_tree, token);
+
                             try context.store.appendDeclaration(
                                 context.allocator,
                                 name,
-                                offsets.tokenToRange(cb_tree, token, context.encoding),
+                                .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
                             );
                         }
                     }
@@ -125,59 +98,21 @@ pub fn fill(
         }
     };
 
-    var context = Context{
+    var context: Context = .{
         .allocator = allocator,
-        .store = store,
+        .store = &store,
         .in_function = false,
-        .encoding = encoding,
     };
-    try ast.iterateChildren(&tree, .root, &context, Context.Error, Context.callback);
+    try ast.iterateChildren(tree, .root, &context, Context.Error, Context.callback);
 
-    try store.finalize(allocator);
-}
-
-/// Caller must not submit name.len < 3.
-fn appendDeclaration(
-    store: *TrigramStore,
-    allocator: std.mem.Allocator,
-    name: []const u8,
-    range: offsets.Range,
-) error{OutOfMemory}!void {
-    assert(name.len >= 3);
-
-    const name_slice: NameSlice = blk: {
-        const start = store.names.items.len;
-        try store.names.appendSlice(allocator, name);
-        break :blk .{
-            .start = @intCast(start),
-            .end = @intCast(store.names.items.len),
-        };
-    };
-
-    try store.declarations.append(allocator, .{
-        .name = name_slice,
-        .range = range,
-    });
-
-    for (0..name.len - 2) |index| {
-        const trigram = name[index..][0..3].*;
-        const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
-        try gop.value_ptr.append(allocator, @enumFromInt(store.declarations.len - 1));
-    }
-}
-
-/// Must be called before any queries are executed.
-fn finalize(store: *TrigramStore, allocator: std.mem.Allocator) error{OutOfMemory}!void {
-    {
-        const lists = store.trigram_to_declarations.values();
-        var index: usize = 0;
-        while (index < lists.len) {
-            if (lists[index].items.len == 0) {
-                lists[index].deinit(allocator);
-                store.trigram_to_declarations.swapRemoveAt(index);
-            } else {
-                index += 1;
-            }
+    const lists = store.trigram_to_declarations.values();
+    var index: usize = 0;
+    while (index < lists.len) {
+        if (lists[index].items.len == 0) {
+            lists[index].deinit(allocator);
+            store.trigram_to_declarations.swapRemoveAt(index);
+        } else {
+            index += 1;
         }
     }
 
@@ -204,8 +139,52 @@ fn finalize(store: *TrigramStore, allocator: std.mem.Allocator) error{OutOfMemor
             };
         }
     }
+
+    return store;
 }
 
+pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
+    store.filter_buckets.deinit(allocator);
+    for (store.trigram_to_declarations.values()) |*list| {
+        list.deinit(allocator);
+    }
+    store.trigram_to_declarations.deinit(allocator);
+    store.declarations.deinit(allocator);
+    store.names.deinit(allocator);
+    store.* = undefined;
+}
+
+/// Caller must not submit name.len < 3.
+fn appendDeclaration(
+    store: *TrigramStore,
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    loc: Loc,
+) error{OutOfMemory}!void {
+    assert(name.len >= 3);
+
+    const name_slice: NameSlice = blk: {
+        const start = store.names.items.len;
+        try store.names.appendSlice(allocator, name);
+        break :blk .{
+            .start = @intCast(start),
+            .end = @intCast(store.names.items.len),
+        };
+    };
+
+    try store.declarations.append(allocator, .{
+        .name = name_slice,
+        .loc = loc,
+    });
+
+    for (0..name.len - 2) |index| {
+        const trigram = name[index..][0..3].*;
+        const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
+        try gop.value_ptr.append(allocator, @enumFromInt(store.declarations.len - 1));
+    }
+}
+
+/// Asserts query.len >= 3. Asserts declaration_buffer.items.len == 0.
 pub fn declarationsForQuery(
     store: *const TrigramStore,
     allocator: std.mem.Allocator,
@@ -213,6 +192,7 @@ pub fn declarationsForQuery(
     declaration_buffer: *std.ArrayList(Declaration.Index),
 ) error{OutOfMemory}!void {
     assert(query.len >= 3);
+    assert(declaration_buffer.items.len == 0);
 
     const filter: CuckooFilter = .{ .buckets = store.filter_buckets.items };
 
@@ -225,14 +205,9 @@ pub fn declarationsForQuery(
         }
     }
 
-    const first = (store.trigram_to_declarations.get(query[0..3].*) orelse {
-        declaration_buffer.clearRetainingCapacity();
-        return;
-    }).items;
+    const first = (store.trigram_to_declarations.get(query[0..3].*) orelse return).items;
 
-    declaration_buffer.clearRetainingCapacity();
-    try declaration_buffer.ensureTotalCapacity(allocator, first.len * 2);
-    declaration_buffer.items.len = first.len * 2;
+    try declaration_buffer.resize(allocator, first.len * 2);
 
     var len = first.len;
     @memcpy(declaration_buffer.items[0..len], first);
@@ -241,7 +216,7 @@ pub fn declarationsForQuery(
         const trigram = query[index..][0..3].*;
         const old_len = len;
         len = mergeIntersection(
-            (store.trigram_to_declarations.get(trigram[0..3].*) orelse return {
+            (store.trigram_to_declarations.get(trigram[0..3].*) orelse {
                 declaration_buffer.clearRetainingCapacity();
                 return;
             }).items,
@@ -249,10 +224,10 @@ pub fn declarationsForQuery(
             declaration_buffer.items[len..],
         );
         @memcpy(declaration_buffer.items[0..len], declaration_buffer.items[old_len..][0..len]);
-        declaration_buffer.items.len = len * 2;
+        declaration_buffer.shrinkRetainingCapacity(len * 2);
     }
 
-    declaration_buffer.items.len = declaration_buffer.items.len / 2;
+    declaration_buffer.shrinkRetainingCapacity(declaration_buffer.items.len / 2);
 }
 
 /// Asserts `@min(a.len, b.len) <= out.len`.
@@ -261,7 +236,7 @@ fn mergeIntersection(
     b: []const Declaration.Index,
     out: []Declaration.Index,
 ) u32 {
-    std.debug.assert(@min(a.len, b.len) <= out.len);
+    assert(@min(a.len, b.len) <= out.len);
 
     var out_idx: u32 = 0;
 
@@ -460,17 +435,17 @@ test CuckooFilter {
     try entries.ensureTotalCapacity(allocator, element_count);
 
     var buckets: [filter_size]CuckooFilter.Bucket = undefined;
-    var filter = CuckooFilter{ .buckets = &buckets };
-    var filter_prng = std.Random.DefaultPrng.init(42);
+    var filter: CuckooFilter = .{ .buckets = &buckets };
+    var filter_prng: std.Random.DefaultPrng = .init(42);
 
     for (0..2_500) |gen_prng_seed| {
         entries.clearRetainingCapacity();
         filter.reset();
 
-        var gen_prng = std.Random.DefaultPrng.init(gen_prng_seed);
+        var gen_prng: std.Random.DefaultPrng = .init(gen_prng_seed);
         for (0..element_count) |_| {
             const trigram: Trigram = @bitCast(gen_prng.random().int(u24));
-            try entries.put(allocator, trigram, {});
+            entries.putAssumeCapacity(trigram, {});
             try filter.append(filter_prng.random(), trigram);
         }
 
@@ -482,7 +457,7 @@ test CuckooFilter {
         // Reasonable false positive rate
         const fpr_count = 2_500;
         var false_positives: usize = 0;
-        var negative_prng = std.Random.DefaultPrng.init(~gen_prng_seed);
+        var negative_prng: std.Random.DefaultPrng = .init(~gen_prng_seed);
         for (0..fpr_count) |_| {
             var trigram: Trigram = @bitCast(negative_prng.random().int(u24));
             while (entries.contains(trigram)) {
@@ -493,9 +468,8 @@ test CuckooFilter {
         }
 
         const fpr = @as(f32, @floatFromInt(false_positives)) / fpr_count;
-        std.testing.expect(fpr < 0.035) catch |err| {
-            std.log.err("fpr: {d}%", .{fpr * 100});
-            return err;
-        };
+
+        errdefer std.log.err("fpr: {d}%", .{fpr * 100});
+        try std.testing.expect(fpr < 0.035);
     }
 }
