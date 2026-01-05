@@ -336,6 +336,50 @@ test "container decl" {
     });
 }
 
+test "error set" {
+    try testFoldingRange(
+        \\const E = error{
+        \\    Foo,
+        \\    Bar,
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 16, .endLine = 2, .endCharacter = 8 },
+    });
+}
+
+test "array init" {
+    try testFoldingRange(
+        \\const foo = .{
+        \\    1,
+        \\    2,
+        \\},
+    , &.{
+        .{ .startLine = 0, .startCharacter = 14, .endLine = 2, .endCharacter = 6 },
+    });
+}
+
+test "struct init" {
+    try testFoldingRange(
+        \\const foo = .{
+        \\    .alpha = 1,
+        \\    .beta = 2,
+        \\},
+    , &.{
+        .{ .startLine = 0, .startCharacter = 14, .endLine = 2, .endCharacter = 14 },
+    });
+}
+
+test "builtin" {
+    try testFoldingRange(
+        \\const foo = @as(
+        \\    u32,
+        \\    undefined,
+        \\);
+    , &.{
+        .{ .startLine = 0, .startCharacter = 16, .endLine = 2, .endCharacter = 14 },
+    });
+}
+
 test "call" {
     try testFoldingRange(
         \\extern fn foo(a: bool, b: ?usize) void;
