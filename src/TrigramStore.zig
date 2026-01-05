@@ -33,126 +33,96 @@ declarations: std.MultiArrayList(Declaration),
 pub const TrigramIterator = struct {
     buffer: []const u8,
     index: usize,
-    boundary: Boundary,
+
+    trigram_buffer: Trigram,
+    trigram_buffer_index: u2,
 
     pub fn init(buffer: []const u8) TrigramIterator {
         assert(buffer.len != 0);
-        return .{ .buffer = buffer, .index = 0, .boundary = .calculate(buffer, 0) };
+        return .{
+            .buffer = buffer,
+            .index = 0,
+            .trigram_buffer = @splat(0),
+            .trigram_buffer_index = 0,
+        };
     }
 
-    pub const Boundary = struct {
-        end: usize,
-        next_start: ?usize,
+    pub fn next(ti: *TrigramIterator) ?Trigram {
+        while (ti.index < ti.buffer.len) {
+            defer ti.index += 1;
+            const c = std.ascii.toLower(ti.buffer[ti.index]);
+            if (c == '_') continue;
 
-        pub fn calculate(buffer: []const u8, index: usize) Boundary {
-            assert(buffer[index..].len > 0);
-
-            if (std.ascii.isLower(buffer[index])) {
-                // First character lowercase
-                for (buffer[index + 1 ..], index + 1..) |c, i| {
-                    if (!std.ascii.isLower(c)) {
-                        return .{
-                            .end = i,
-                            .next_start = i,
-                        };
-                    }
-                }
-            } else {
-                if (index + 1 >= buffer.len) {
-                    return .{
-                        .end = buffer.len,
-                        .next_start = null,
-                    };
-                }
-
-                if (std.ascii.isLower(buffer[index + 1])) {
-                    // First char is uppercase, second char is lowercase
-                    for (buffer[index + 2 ..], index + 2..) |c, i| {
-                        if (!std.ascii.isLower(c)) {
-                            return .{
-                                .end = i,
-                                .next_start = i,
-                            };
-                        }
-                    }
-                } else {
-                    // First and second chars are uppercase
-                    for (buffer[index + 2 ..], index + 2..) |c, i| {
-                        if (!std.ascii.isUpper(c)) {
-                            return .{
-                                .end = i,
-                                .next_start = i,
-                            };
-                        }
-                    }
-                }
+            if (ti.trigram_buffer_index < 3) {
+                ti.trigram_buffer[ti.trigram_buffer_index] = c;
+                ti.trigram_buffer_index += 1;
+                continue;
             }
 
-            return .{
-                .end = buffer.len,
-                .next_start = null,
-            };
-        }
-    };
-
-    pub fn next(ti: *TrigramIterator) ?Trigram {
-        if (ti.index == ti.buffer.len) return null;
-        assert(ti.index < ti.boundary.end);
-
-        var trigram: [3]u8 = @splat(0);
-        const unpadded = ti.buffer[ti.index..@min(ti.index + 3, ti.boundary.end)];
-        _ = std.ascii.lowerString(&trigram, unpadded);
-
-        if (unpadded.len < 3 or ti.index + 3 >= ti.boundary.end) {
-            ti.index = ti.boundary.next_start orelse {
-                ti.index = ti.buffer.len;
-                return trigram;
-            };
-            ti.boundary = .calculate(ti.buffer, ti.index);
+            defer {
+                @memmove(ti.trigram_buffer[0..2], ti.trigram_buffer[1..3]);
+                ti.trigram_buffer[2] = c;
+            }
+            return ti.trigram_buffer;
+        } else if (ti.trigram_buffer_index > 0) {
+            ti.trigram_buffer_index = 0;
+            return ti.trigram_buffer;
         } else {
-            ti.index += 1;
+            return null;
         }
-
-        return trigram;
     }
 };
 
-test "TrigramIterator.Boundary.calculate" {
-    var boundary: TrigramIterator.Boundary = .calculate("helloWORLD", 0);
-    try std.testing.expectEqual(5, boundary.end);
-    try std.testing.expectEqual(5, boundary.next_start.?);
+test TrigramIterator {
+    try testTrigramIterator("a", &.{"a\x00\x00".*});
+    try testTrigramIterator("ab", &.{"ab\x00".*});
+    try testTrigramIterator("abc", &.{"abc".*});
 
-    boundary = .calculate("helloWORLD", 5);
-    try std.testing.expectEqual(10, boundary.end);
-    try std.testing.expectEqual(null, boundary.next_start);
+    try testTrigramIterator("hello", &.{ "hel".*, "ell".*, "llo".* });
+    try testTrigramIterator("HELLO", &.{ "hel".*, "ell".*, "llo".* });
+    try testTrigramIterator("HellO", &.{ "hel".*, "ell".*, "llo".* });
+
+    try testTrigramIterator("a_", &.{"a\x00\x00".*});
+    try testTrigramIterator("ab_", &.{"ab\x00".*});
+    try testTrigramIterator("abc_", &.{"abc".*});
+
+    try testTrigramIterator("_a", &.{"a\x00\x00".*});
+    try testTrigramIterator("_a_", &.{"a\x00\x00".*});
+    try testTrigramIterator("_a__", &.{"a\x00\x00".*});
+
+    try testTrigramIterator("_", &.{});
+    try testTrigramIterator("__", &.{});
+    try testTrigramIterator("___", &.{});
+
+    try testTrigramIterator("He_ll_O", &.{ "hel".*, "ell".*, "llo".* });
+    try testTrigramIterator("He__ll___O", &.{ "hel".*, "ell".*, "llo".* });
+    try testTrigramIterator("__He__ll__O_", &.{ "hel".*, "ell".*, "llo".* });
+
+    try testTrigramIterator("HellO__World___HelloWorld", &.{
+        "hel".*, "ell".*, "llo".*,
+        "low".*, "owo".*, "wor".*,
+        "orl".*, "rld".*, "ldh".*,
+        "dhe".*, "hel".*, "ell".*,
+        "llo".*, "low".*, "owo".*,
+        "wor".*, "orl".*, "rld".*,
+    });
 }
 
-test TrigramIterator {
+fn testTrigramIterator(
+    input: []const u8,
+    expected: []const Trigram,
+) !void {
     const allocator = std.testing.allocator;
 
-    const matrix: []const struct { []const u8, []const Trigram } = &.{
-        .{ "a", &.{"a\x00\x00".*} },
-        .{ "ab", &.{"ab\x00".*} },
-        .{ "helloWORLD", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
-        .{ "HelloWORLD", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
-        .{ "HelloWorld", &.{ "hel".*, "ell".*, "llo".*, "wor".*, "orl".*, "rld".* } },
-    };
+    var actual_buffer: std.ArrayList(Trigram) = .empty;
+    defer actual_buffer.deinit(allocator);
 
-    var actual: std.ArrayList(Trigram) = .empty;
-    defer actual.deinit(allocator);
-
-    for (matrix) |entry| {
-        const input, const expected = entry;
-
-        actual.clearRetainingCapacity();
-
-        var it: TrigramIterator = .init(input);
-        while (it.next()) |trigram| {
-            try actual.append(allocator, trigram);
-        }
-
-        try @import("testing.zig").expectEqual(expected, actual.items);
+    var it: TrigramIterator = .init(input);
+    while (it.next()) |trigram| {
+        try actual_buffer.append(allocator, trigram);
     }
+
+    try @import("testing.zig").expectEqual(expected, actual_buffer.items);
 }
 
 pub fn init(
@@ -190,7 +160,7 @@ pub fn init(
 
                     try context.store.appendDeclaration(
                         context.allocator,
-                        offsets.identifierTokenToNameSlice(cb_tree, fn_token + 1),
+                        cb_tree,
                         fn_token + 1,
                         .function,
                     );
@@ -227,18 +197,18 @@ pub fn init(
 
                     try context.store.appendDeclaration(
                         context.allocator,
-                        offsets.identifierTokenToNameSlice(cb_tree, main_token + 1),
+                        cb_tree,
                         main_token + 1,
                         kind,
                     );
                 },
 
                 .test_decl => skip: {
-                    const test_name_token, const test_name = ast.testDeclNameAndToken(cb_tree, node) orelse break :skip;
+                    const test_name_token = cb_tree.nodeData(node).opt_token_and_node[0].unwrap() orelse break :skip;
 
                     try context.store.appendDeclaration(
                         context.allocator,
-                        test_name,
+                        cb_tree,
                         test_name_token,
                         .test_function,
                     );
@@ -273,7 +243,7 @@ pub fn init(
     if (trigrams.len > 0) {
         var prng = std.Random.DefaultPrng.init(0);
 
-        const filter_capacity = CuckooFilter.capacityForCount(@intCast(store.trigram_to_declarations.count())) catch unreachable;
+        const filter_capacity = CuckooFilter.capacityForCount(store.trigram_to_declarations.count()) catch unreachable;
         try store.filter_buckets.ensureTotalCapacityPrecise(allocator, filter_capacity);
         store.filter_buckets.items.len = filter_capacity;
 
@@ -308,21 +278,54 @@ pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
 fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
-    name: []const u8,
+    tree: *const Ast,
     name_token: Ast.TokenIndex,
     kind: Declaration.Kind,
 ) error{OutOfMemory}!void {
-    if (name.len < 3) return;
+    const raw_name = tree.tokenSlice(name_token);
+
+    const strategy: enum { raw, smart }, const name = switch (tree.tokenTag(name_token)) {
+        .string_literal => .{ .raw, raw_name[1 .. raw_name.len - 1] },
+        .identifier => if (std.mem.startsWith(u8, raw_name, "@"))
+            .{ .raw, raw_name[2 .. raw_name.len - 1] }
+        else
+            .{ .smart, raw_name },
+        else => unreachable,
+    };
+
+    switch (strategy) {
+        .raw => {
+            if (name.len < 3) return;
+            for (0..name.len - 2) |index| {
+                const trigram = name[index..][0..3].*;
+                try store.appendOneTrigram(allocator, trigram);
+            }
+        },
+        .smart => {
+            var it: TrigramIterator = .init(name);
+            while (it.next()) |trigram| {
+                try store.appendOneTrigram(allocator, trigram);
+            }
+        },
+    }
 
     try store.declarations.append(allocator, .{
         .name = name_token,
         .kind = kind,
     });
+}
 
-    for (0..name.len - 2) |index| {
-        const trigram = name[index..][0..3].*;
-        const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
-        try gop.value_ptr.append(allocator, @enumFromInt(store.declarations.len - 1));
+fn appendOneTrigram(
+    store: *TrigramStore,
+    allocator: std.mem.Allocator,
+    trigram: Trigram,
+) error{OutOfMemory}!void {
+    const declaration_index: Declaration.Index = @enumFromInt(store.declarations.len);
+
+    const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
+
+    if (gop.value_ptr.getLastOrNull() != declaration_index) {
+        try gop.value_ptr.append(allocator, declaration_index);
     }
 }
 
@@ -333,32 +336,33 @@ pub fn declarationsForQuery(
     query: []const u8,
     declaration_buffer: *std.ArrayList(Declaration.Index),
 ) error{OutOfMemory}!void {
-    assert(query.len >= 3);
+    assert(query.len >= 1);
     assert(declaration_buffer.items.len == 0);
 
     const filter: CuckooFilter = .{ .buckets = store.filter_buckets.items };
 
     if (store.has_filter) {
-        for (0..query.len - 2) |index| {
-            const trigram = query[index..][0..3].*;
+        var ti: TrigramIterator = .init(query);
+        while (ti.next()) |trigram| {
             if (!filter.contains(trigram)) {
                 return;
             }
         }
     }
 
-    const first = (store.trigram_to_declarations.get(query[0..3].*) orelse return).items;
+    var ti: TrigramIterator = .init(query);
+
+    const first = (store.trigram_to_declarations.get(ti.next() orelse return) orelse return).items;
 
     try declaration_buffer.resize(allocator, first.len * 2);
 
     var len = first.len;
     @memcpy(declaration_buffer.items[0..len], first);
 
-    for (0..query.len - 2) |index| {
-        const trigram = query[index..][0..3].*;
+    while (ti.next()) |trigram| {
         const old_len = len;
         len = mergeIntersection(
-            (store.trigram_to_declarations.get(trigram[0..3].*) orelse {
+            (store.trigram_to_declarations.get(trigram) orelse {
                 declaration_buffer.clearRetainingCapacity();
                 return;
             }).items,
@@ -493,8 +497,12 @@ pub const CuckooFilter = struct {
         @memset(filter.buckets, [1]Fingerprint{.none} ** @typeInfo(Bucket).array.len);
     }
 
-    pub fn capacityForCount(count: u32) error{Overflow}!u32 {
-        return count + (count & 1);
+    pub fn capacityForCount(count: usize) error{Overflow}!usize {
+        const overallocated_count = std.math.divCeil(usize, try std.math.mul(usize, count, 105), 100) catch |err| switch (err) {
+            error.DivisionByZero => unreachable,
+            else => |e| return e,
+        };
+        return overallocated_count + (overallocated_count & 1);
     }
 
     pub fn append(filter: CuckooFilter, random: std.Random, trigram: Trigram) error{EvictionFailed}!void {

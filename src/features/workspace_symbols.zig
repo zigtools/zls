@@ -11,7 +11,7 @@ const Server = @import("../Server.zig");
 const TrigramStore = @import("../TrigramStore.zig");
 
 pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) error{ OutOfMemory, Canceled }!lsp.ResultType("workspace/symbol") {
-    if (request.query.len < 3) return null;
+    if (request.query.len == 0) return null;
 
     var workspace_paths: std.ArrayList([]const u8) = try .initCapacity(arena, server.workspaces.items.len);
     for (server.workspaces.items) |workspace| {
