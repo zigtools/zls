@@ -13,7 +13,16 @@ const TrigramStore = @import("../TrigramStore.zig");
 pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) error{ OutOfMemory, Canceled }!lsp.ResultType("workspace/symbol") {
     if (request.query.len < 3) return null;
 
-    const handles = try server.document_store.loadTrigramStores();
+    var workspace_paths: std.ArrayList([]const u8) = try .initCapacity(arena, server.workspaces.items.len);
+    for (server.workspaces.items) |workspace| {
+        const path = workspace.uri.toFsPath(arena) catch |err| switch (err) {
+            error.UnsupportedScheme => return null, // https://github.com/microsoft/language-server-protocol/issues/1264
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        workspace_paths.appendAssumeCapacity(path);
+    }
+
+    const handles = try server.document_store.loadTrigramStores(workspace_paths.items);
     defer server.document_store.allocator.free(handles);
 
     var symbols: std.ArrayList(types.workspace.Symbol) = .empty;
