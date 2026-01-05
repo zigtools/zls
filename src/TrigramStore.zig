@@ -148,13 +148,12 @@ pub fn init(
             defer context.in_function = old_in_function;
 
             switch (cb_tree.nodeTag(node)) {
+                .fn_decl => context.in_function = true,
                 .fn_proto,
                 .fn_proto_multi,
                 .fn_proto_one,
                 .fn_proto_simple,
-                => |tag| skip: {
-                    context.in_function = tag == .fn_decl;
-
+                => skip: {
                     const fn_token = cb_tree.nodeMainToken(node);
                     if (cb_tree.tokenTag(fn_token + 1) != .identifier) break :skip;
 
@@ -204,6 +203,8 @@ pub fn init(
                 },
 
                 .test_decl => skip: {
+                    context.in_function = true;
+
                     const test_name_token = cb_tree.nodeData(node).opt_token_and_node[0].unwrap() orelse break :skip;
 
                     try context.store.appendDeclaration(
@@ -297,7 +298,8 @@ fn appendDeclaration(
         .raw => {
             if (name.len < 3) return;
             for (0..name.len - 2) |index| {
-                const trigram = name[index..][0..3].*;
+                var trigram = name[index..][0..3].*;
+                for (&trigram) |*char| char.* = std.ascii.toLower(char.*);
                 try store.appendOneTrigram(allocator, trigram);
             }
         },

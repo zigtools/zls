@@ -9,20 +9,19 @@ const DocumentStore = @import("../DocumentStore.zig");
 const offsets = @import("../offsets.zig");
 const Server = @import("../Server.zig");
 const TrigramStore = @import("../TrigramStore.zig");
+const Uri = @import("../Uri.zig");
 
-pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) error{ OutOfMemory, Canceled }!lsp.ResultType("workspace/symbol") {
+pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) error{ OutOfMemory, Canceled }!?types.workspace.Symbol.Result {
     if (request.query.len == 0) return null;
 
-    var workspace_paths: std.ArrayList([]const u8) = try .initCapacity(arena, server.workspaces.items.len);
+    var workspace_uris: std.ArrayList(std.Uri) = try .initCapacity(arena, server.workspaces.items.len);
+    defer workspace_uris.deinit(arena);
+
     for (server.workspaces.items) |workspace| {
-        const path = workspace.uri.toFsPath(arena) catch |err| switch (err) {
-            error.UnsupportedScheme => return null, // https://github.com/microsoft/language-server-protocol/issues/1264
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-        workspace_paths.appendAssumeCapacity(path);
+        workspace_uris.appendAssumeCapacity(std.Uri.parse(workspace.uri.raw) catch unreachable);
     }
 
-    const handles = try server.document_store.loadTrigramStores(workspace_paths.items);
+    const handles = try server.document_store.loadTrigramStores(workspace_uris.items);
     defer server.document_store.allocator.free(handles);
 
     var symbols: std.ArrayList(types.workspace.Symbol) = .empty;
@@ -60,12 +59,8 @@ pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspa
             const name_token = names[@intFromEnum(declaration)];
             const kind = kinds[@intFromEnum(declaration)];
 
-            const loc = switch (handle.tree.tokenTag(name_token)) {
-                .identifier => offsets.identifierTokenToNameLoc(&handle.tree, name_token),
-                .string_literal => offsets.tokenToLoc(&handle.tree, name_token),
-                else => unreachable,
-            };
-            const name = offsets.locToSlice(handle.tree.source, loc);
+            const loc = offsets.tokenToLoc(&handle.tree, name_token);
+            const name = @import("document_symbol.zig").tokenNameMaybeQuotes(&handle.tree, name_token);
 
             const start_position = offsets.advancePosition(handle.tree.source, last_position, last_index, loc.start, server.offset_encoding);
             const end_position = offsets.advancePosition(handle.tree.source, start_position, loc.start, loc.end, server.offset_encoding);

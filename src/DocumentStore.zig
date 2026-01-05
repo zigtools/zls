@@ -1096,7 +1096,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
 
 pub fn loadTrigramStores(
     store: *DocumentStore,
-    filter_paths: []const []const u8,
+    filter_uris: []const std.Uri,
 ) error{ OutOfMemory, Canceled }![]*DocumentStore.Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1105,17 +1105,11 @@ pub fn loadTrigramStores(
     errdefer handles.deinit(store.allocator);
 
     for (store.handles.values()) |handle| {
-        if (handle.uri.toFsPath(store.allocator)) |path| {
-            defer store.allocator.free(path);
-            for (filter_paths) |filter_path| {
-                if (std.mem.startsWith(u8, path, filter_path)) break;
-            } else break;
-        } else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => {
-                // The URI is either invalid or not a `file` scheme. Either way, we should include it.
-            },
-        }
+        var handle_uri = std.Uri.parse(handle.uri.raw) catch unreachable;
+        for (filter_uris) |filter_uri| {
+            if (!std.ascii.eqlIgnoreCase(handle_uri.scheme, filter_uri.scheme)) continue;
+            if (std.mem.startsWith(u8, handle_uri.path.percent_encoded, filter_uri.path.percent_encoded)) break;
+        } else break;
         handles.appendAssumeCapacity(handle);
     }
 

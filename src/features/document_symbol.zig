@@ -27,7 +27,7 @@ const Context = struct {
     total_symbol_count: *usize,
 };
 
-fn tokenNameMaybeQuotes(tree: *const Ast, token: Ast.TokenIndex) []const u8 {
+pub fn tokenNameMaybeQuotes(tree: *const Ast, token: Ast.TokenIndex) []const u8 {
     const token_slice = tree.tokenSlice(token);
     switch (tree.tokenTag(token)) {
         .identifier => return token_slice,

@@ -865,7 +865,7 @@ fn addWorkspace(server: *Server, uri: Uri) error{OutOfMemory}!void {
     }
 
     const file_count = server.document_store.loadDirectoryRecursive(uri) catch |err| switch (err) {
-        error.UnsupportedScheme => return,
+        error.UnsupportedScheme => return, // https://github.com/microsoft/language-server-protocol/issues/1264
         else => {
             log.err("failed to load files in workspace '{s}': {}", .{ uri.raw, err });
             return;
@@ -1569,7 +1569,7 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) Error!lsp.ResultType("workspace/symbol") {
+fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) Error!?types.workspace.Symbol.Result {
     return @import("features/workspace_symbols.zig").handler(server, arena, request) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.Canceled => return error.InternalError, // TODO
