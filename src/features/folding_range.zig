@@ -317,12 +317,6 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             .call_comma,
             .call_one,
             .call_one_comma,
-            => {
-                const lparen = tree.nodeMainToken(node);
-                try builder.add(null, lparen, ast.lastToken(tree, node), .exclusive, .exclusive_ignore_space);
-            },
-
-            // everything after here is mostly untested
             .array_init,
             .array_init_one,
             .array_init_dot_two,
@@ -331,7 +325,6 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             .array_init_dot,
             .array_init_dot_comma,
             .array_init_comma,
-
             .struct_init,
             .struct_init_one,
             .struct_init_one_comma,
@@ -340,16 +333,21 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             .struct_init_dot,
             .struct_init_dot_comma,
             .struct_init_comma,
-
+            => {
+                const start = tree.nodeMainToken(node);
+                try builder.add(null, start, ast.lastToken(tree, node), .exclusive, .exclusive_ignore_space);
+            },
             .builtin_call,
             .builtin_call_comma,
             .builtin_call_two,
             .builtin_call_two_comma,
-
-            .multiline_string_literal,
             .error_set_decl,
-            .test_decl,
             => {
+                const start = tree.nodeMainToken(node) + 1;
+                try builder.add(null, start, ast.lastToken(tree, node), .exclusive, .exclusive_ignore_space);
+            },
+
+            .multiline_string_literal => {
                 try builder.addNode(null, node, .inclusive, .inclusive);
             },
 
