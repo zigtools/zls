@@ -1693,7 +1693,7 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
 }
 
 pub fn destroy(server: *Server) void {
-    server.wait_group.await(server.io) catch {};
+    server.wait_group.cancel(server.io);
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     for (server.workspaces.items) |*workspace| workspace.deinit(server.allocator);
@@ -1721,6 +1721,7 @@ pub fn keepRunning(server: Server) bool {
 /// The main loop of ZLS
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
+    defer server.wait_group.cancel(server.io);
     while (server.keepRunning()) {
         const json_message = try server.transport.?.readJsonMessage(server.allocator);
         defer server.allocator.free(json_message);
@@ -1738,10 +1739,8 @@ pub fn loop(server: *Server) !void {
             ) catch return error.ParseError;
         };
 
-        errdefer comptime unreachable;
-
         if (isBlockingMessage(message)) {
-            server.wait_group.await(server.io) catch {};
+            try server.wait_group.await(server.io);
             server.wait_group = .init;
             server.processMessageReportError(arena_allocator.state, message);
         } else {

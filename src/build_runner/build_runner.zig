@@ -636,7 +636,7 @@ fn runSteps(
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     parent_prog_node: std.Progress.Node,
     run: *Run,
-) error{ OutOfMemory, UncleanExit }!void {
+) error{ OutOfMemory, UncleanExit, Canceled }!void {
     const io = b.graph.io;
     const steps = steps_stack.keys();
 
@@ -644,7 +644,7 @@ fn runSteps(
     defer step_prog.end();
 
     var group: std.Io.Group = .init;
-    defer group.await(io) catch {};
+    defer group.cancel(io);
 
     // Here we spawn the initial set of tasks with a nice heuristic -
     // dependency order. Each worker when it finishes a step will then
@@ -656,6 +656,8 @@ fn runSteps(
             &group, gpa, b, steps_stack, step, step_prog, run,
         });
     }
+
+    try group.await(io);
 
     if (run.watch) {
         for (steps) |step| {
