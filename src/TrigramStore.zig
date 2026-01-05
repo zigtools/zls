@@ -10,21 +10,25 @@ pub const TrigramStore = @This();
 
 pub const Trigram = [3]u8;
 
-pub const NameSlice = struct { start: u32, end: u32 };
-pub const Loc = struct { start: u32, end: u32 };
-
 pub const Declaration = struct {
     pub const Index = enum(u32) { _ };
 
-    name: NameSlice,
-    loc: Loc,
+    pub const Kind = enum {
+        variable,
+        constant,
+        function,
+        test_function,
+    };
+
+    /// Either `.identifier` or `.string_literal`.
+    name: Ast.TokenIndex,
+    kind: Kind,
 };
 
 has_filter: bool,
 filter_buckets: std.ArrayList(CuckooFilter.Bucket),
 trigram_to_declarations: std.AutoArrayHashMapUnmanaged(Trigram, std.ArrayList(Declaration.Index)),
 declarations: std.MultiArrayList(Declaration),
-names: std.ArrayList(u8),
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -35,7 +39,6 @@ pub fn init(
         .filter_buckets = .empty,
         .trigram_to_declarations = .empty,
         .declarations = .empty,
-        .names = .empty,
     };
     errdefer store.deinit(allocator);
 
@@ -50,10 +53,22 @@ pub fn init(
             defer context.in_function = old_in_function;
 
             switch (cb_tree.nodeTag(node)) {
-                .fn_decl => {
-                    if (!context.in_function) {}
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                => |tag| skip: {
+                    context.in_function = tag == .fn_decl;
 
-                    context.in_function = true;
+                    const fn_token = cb_tree.nodeMainToken(node);
+                    if (cb_tree.tokenTag(fn_token + 1) != .identifier) break :skip;
+
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        offsets.identifierTokenToNameSlice(cb_tree, fn_token + 1),
+                        fn_token + 1,
+                        .function,
+                    );
                 },
                 .root => unreachable,
                 .container_decl,
@@ -74,23 +89,35 @@ pub fn init(
                 .local_var_decl,
                 .simple_var_decl,
                 .aligned_var_decl,
-                => {
-                    if (!context.in_function) {
-                        const token = cb_tree.fullVarDecl(node).?.ast.mut_token + 1;
-                        const name = cb_tree.tokenSlice(token);
+                => skip: {
+                    if (context.in_function) break :skip;
 
-                        if (name.len >= 3) {
-                            const loc = offsets.tokenToLoc(cb_tree, token);
+                    const main_token = cb_tree.nodeMainToken(node);
 
-                            try context.store.appendDeclaration(
-                                context.allocator,
-                                name,
-                                .{ .start = @intCast(loc.start), .end = @intCast(loc.end) },
-                            );
-                        }
-                    }
+                    const kind: Declaration.Kind = switch (cb_tree.tokenTag(main_token)) {
+                        .keyword_var => .variable,
+                        .keyword_const => .constant,
+                        else => unreachable,
+                    };
+
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        offsets.identifierTokenToNameSlice(cb_tree, main_token + 1),
+                        main_token + 1,
+                        kind,
+                    );
                 },
 
+                .test_decl => skip: {
+                    const test_name_token, const test_name = ast.testDeclNameAndToken(cb_tree, node) orelse break :skip;
+
+                    try context.store.appendDeclaration(
+                        context.allocator,
+                        test_name,
+                        test_name_token,
+                        .test_function,
+                    );
+                },
                 else => {},
             }
 
@@ -150,31 +177,21 @@ pub fn deinit(store: *TrigramStore, allocator: std.mem.Allocator) void {
     }
     store.trigram_to_declarations.deinit(allocator);
     store.declarations.deinit(allocator);
-    store.names.deinit(allocator);
     store.* = undefined;
 }
 
-/// Caller must not submit name.len < 3.
 fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
     name: []const u8,
-    loc: Loc,
+    name_token: Ast.TokenIndex,
+    kind: Declaration.Kind,
 ) error{OutOfMemory}!void {
-    assert(name.len >= 3);
-
-    const name_slice: NameSlice = blk: {
-        const start = store.names.items.len;
-        try store.names.appendSlice(allocator, name);
-        break :blk .{
-            .start = @intCast(start),
-            .end = @intCast(store.names.items.len),
-        };
-    };
+    if (name.len < 3) return;
 
     try store.declarations.append(allocator, .{
-        .name = name_slice,
-        .loc = loc,
+        .name = name_token,
+        .kind = kind,
     });
 
     for (0..name.len - 2) |index| {
