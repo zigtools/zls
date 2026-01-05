@@ -1541,9 +1541,12 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) !usize 
     var file_count: usize = 0;
     {
         while (try walker.next(store.io)) |entry| {
-            if (entry.kind == .directory) continue;
-            if (std.mem.indexOf(u8, entry.path, std.fs.path.sep_str ++ ".zig-cache" ++ std.fs.path.sep_str) != null) continue;
-            if (std.mem.startsWith(u8, entry.path, ".zig-cache" ++ std.fs.path.sep_str)) continue;
+            if (entry.kind == .directory) {
+                if (std.mem.startsWith(u8, entry.basename, ".") or std.mem.eql(u8, entry.basename, "zig-cache")) {
+                    walker.leave(store.io);
+                }
+                continue;
+            }
             if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
 
             file_count += 1;
