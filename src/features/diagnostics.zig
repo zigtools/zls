@@ -475,11 +475,16 @@ pub fn getErrorBundleFromStderr(
 pub const BuildOnSave = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
-    child_process: *std.process.Child,
     worker: std.Io.Future(void),
+    worker_state: *WorkerState,
 
     const shared = @import("../build_runner/shared.zig");
     const ServerToClient = shared.ServerToClient;
+
+    const WorkerState = struct {
+        mutex: std.Io.Mutex,
+        child_process: std.process.Child,
+    };
 
     pub const InitOptions = struct {
         io: std.Io,
@@ -495,9 +500,6 @@ pub const BuildOnSave = struct {
     };
 
     pub fn init(options: InitOptions) error{ OutOfMemory, ConcurrencyUnavailable }!?BuildOnSave {
-        const child_process = try options.allocator.create(std.process.Child);
-        errdefer options.allocator.destroy(child_process);
-
         const base_args: []const []const u8 = &.{
             options.zig_exe_path,
             "build",
@@ -517,14 +519,13 @@ pub const BuildOnSave = struct {
         if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
         argv.appendSliceAssumeCapacity(options.build_on_save_args);
 
-        child_process.* = .init(argv.items, options.allocator);
+        var child_process: std.process.Child = .init(argv.items, options.allocator);
         child_process.stdin_behavior = .Pipe;
         child_process.stdout_behavior = .Pipe;
         child_process.stderr_behavior = .Pipe;
         child_process.cwd = options.workspace_path;
 
         child_process.spawn(options.io) catch |err| {
-            options.allocator.destroy(child_process);
             log.err("failed to spawn zig build process: {}", .{err});
             return null;
         };
@@ -536,7 +537,7 @@ pub const BuildOnSave = struct {
             _ = terminateChildProcessReportError(
                 options.io,
                 options.allocator,
-                child_process,
+                &child_process,
                 "zig build runner",
                 .kill,
             );
@@ -545,10 +546,18 @@ pub const BuildOnSave = struct {
         const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
         errdefer options.allocator.free(duped_workspace_path);
 
+        const worker_state = try options.allocator.create(WorkerState);
+        errdefer options.allocator.destroy(worker_state);
+
+        worker_state.* = .{
+            .mutex = .init,
+            .child_process = child_process,
+        };
+
         const worker = try options.io.concurrent(loop, .{
             options.io,
             options.allocator,
-            child_process,
+            worker_state,
             options.collection,
             duped_workspace_path,
         });
@@ -557,38 +566,45 @@ pub const BuildOnSave = struct {
         return .{
             .io = options.io,
             .allocator = options.allocator,
-            .child_process = child_process,
             .worker = worker,
+            .worker_state = worker_state,
         };
     }
 
     pub fn deinit(self: *BuildOnSave) void {
         self.worker.cancel(self.io);
-        self.allocator.destroy(self.child_process);
+        self.allocator.destroy(self.worker_state);
         self.* = undefined;
     }
 
-    pub fn sendManualWatchUpdate(self: *BuildOnSave) void {
-        self.child_process.stdin.?.writeStreamingAll(self.io, "\x00") catch {};
+    pub fn sendManualWatchUpdate(build_on_save: *BuildOnSave) void {
+        build_on_save.worker_state.mutex.lockUncancelable(build_on_save.io);
+        defer build_on_save.worker_state.mutex.unlock(build_on_save.io);
+        if (build_on_save.worker_state.child_process.stdin) |stdin| {
+            stdin.writeStreamingAll(build_on_save.io, "\x00") catch {};
+        }
     }
 
     fn loop(
         io: std.Io,
         allocator: std.mem.Allocator,
-        child_process: *std.process.Child,
+        state: *WorkerState,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
     ) void {
-        defer allocator.free(workspace_path);
-
         defer {
-            child_process.stdin.?.close(io);
-            child_process.stdin = null;
+            allocator.free(workspace_path);
+
+            state.mutex.lockUncancelable(io);
+            defer state.mutex.unlock(io);
+
+            state.child_process.stdin.?.close(io);
+            state.child_process.stdin = null;
 
             _ = terminateChildProcessReportError(
                 io,
                 allocator,
-                child_process,
+                &state.child_process,
                 "zig build runner",
                 .wait,
             );
@@ -603,19 +619,27 @@ pub const BuildOnSave = struct {
         }
 
         var read_buffer: [@sizeOf(ServerToClient.Header)]u8 = undefined;
-        var file_reader = child_process.stdout.?.reader(io, &read_buffer);
+        var file_reader = state.child_process.stdout.?.reader(io, &read_buffer);
         const reader = &file_reader.interface;
 
         while (true) {
             const header = reader.takeStruct(ServerToClient.Header, .little) catch |err| switch (err) {
                 error.ReadFailed => {
-                    log.err("failed to receive message from zig build runner: {}", .{err});
+                    if (file_reader.err.? != error.Canceled) {
+                        log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?});
+                    }
                     return;
                 },
                 error.EndOfStream => break,
             };
             const body = reader.readAlloc(allocator, header.bytes_len) catch |err| switch (err) {
-                error.ReadFailed, error.EndOfStream, error.OutOfMemory => {
+                error.ReadFailed => {
+                    if (file_reader.err.? != error.Canceled) {
+                        log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?});
+                    }
+                    return;
+                },
+                error.EndOfStream, error.OutOfMemory => {
                     log.err("failed to receive message from zig build runner: {}", .{err});
                     return;
                 },
