@@ -345,7 +345,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
         "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
-    const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
+    const git_describe_untrimmed = b.runAllowFail(argv, &code, .ignore) catch |err| {
         const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
         std.log.warn(
             \\Failed to run git describe to resolve ZLS version: {}

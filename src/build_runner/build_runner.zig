@@ -26,6 +26,18 @@ const ArrayList = if (@hasDecl(std, "array_list")) std.ArrayList else std.ArrayL
 const Step = std.Build.Step;
 const Allocator = std.mem.Allocator;
 
+const has_process_env = @import("builtin").zig_version.order(.{
+    .major = 0,
+    .minor = 16,
+    .patch = 0,
+    .pre = "dev.1976",
+}) == .lt;
+const process_stdio_ignore: std.process.SpawnOptions.StdIo =
+    if (@hasField(std.process.SpawnOptions.StdIo, "Ignore"))
+        .Ignore
+    else
+        .ignore;
+
 pub const dependencies = @import("@dependencies");
 
 pub const std_options: std.Options = .{
@@ -34,9 +46,31 @@ pub const std_options: std.Options = .{
     .crypto_fork_safety = false,
 };
 
-///! This is a modified build runner to extract information out of build.zig
-///! Modified version of lib/build_runner.zig
-pub fn main() !void {
+pub const main = if (has_process_env) @"main < dev.1976" else @"main >= dev.1976";
+
+fn @"main >= dev.1976"(init: std.process.Init.Minimal) !void {
+    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
+    // one shot program. We don't need to waste time freeing memory and finding places to squish
+    // bytes into. So we free everything all at once at the very end.
+    var single_threaded_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer single_threaded_arena.deinit();
+
+    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
+        .child_allocator = single_threaded_arena.allocator(),
+    };
+    const arena = thread_safe_arena.allocator();
+
+    const args = try init.args.toSlice(arena);
+
+    var threaded: std.Io.Threaded = .init(arena, .{
+        .environ = init.environ,
+    });
+    defer threaded.deinit();
+
+    try doMain(arena, &threaded, args, try init.environ.createMap(arena));
+}
+
+fn @"main < dev.1976"() !void {
     // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
     // one shot program. We don't need to waste time freeing memory and finding places to squish
     // bytes into. So we free everything all at once at the very end.
@@ -52,6 +86,18 @@ pub fn main() !void {
 
     var threaded: std.Io.Threaded = .init(arena, .{});
     defer threaded.deinit();
+
+    try doMain(arena, &threaded, args, {});
+}
+
+///! This is a modified build runner to extract information out of build.zig
+///! Modified version of lib/build_runner.zig
+fn doMain(
+    arena: std.mem.Allocator,
+    threaded: *std.Io.Threaded,
+    args: []const [:0]const u8,
+    environ_map: if (@hasDecl(std.process, "Environ")) std.process.Environ.Map else void,
+) !void {
     const io = threaded.ioBasic();
 
     // skip my own exe name
@@ -64,6 +110,7 @@ pub fn main() !void {
     const global_cache_root = nextArg(args, &arg_idx) orelse fatal("missing global cache root directory path", .{});
 
     const cwd: std.Io.Dir = .cwd();
+    const cwd_path = try std.process.getCwdAlloc(arena);
 
     const zig_lib_directory: std.Build.Cache.Directory = .{
         .path = zig_lib_dir,
@@ -85,7 +132,7 @@ pub fn main() !void {
         .handle = try cwd.createDirPathOpen(io, global_cache_root, .{}),
     };
 
-    var graph: std.Build.Graph = .{
+    var graph: std.Build.Graph = if (has_process_env) .{
         .io = io,
         .arena = arena,
         .cache = .{
@@ -95,6 +142,24 @@ pub fn main() !void {
         },
         .zig_exe = zig_exe,
         .env_map = try process.getEnvMap(arena),
+        .global_cache_root = global_cache_directory,
+        .zig_lib_directory = zig_lib_directory,
+        .host = .{
+            .query = .{},
+            .result = try std.zig.system.resolveTargetQuery(io, .{}),
+        },
+        .time_report = false,
+    } else .{
+        .io = io,
+        .arena = arena,
+        .cache = .{
+            .io = io,
+            .gpa = arena,
+            .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
+            .cwd = cwd_path,
+        },
+        .zig_exe = zig_exe,
+        .environ_map = environ_map,
         .global_cache_root = global_cache_directory,
         .zig_lib_directory = zig_lib_directory,
         .host = .{
@@ -388,7 +453,7 @@ pub fn main() !void {
         return;
     }
 
-    var w = try Watch.init(io);
+    var w = try Watch.init(io, cwd_path);
 
     const message_thread = try std.Thread.spawn(.{}, struct {
         fn do(ww: *Watch) void {
@@ -475,10 +540,24 @@ const Watch = struct {
     manual_event: std.Io.Event,
     steps: []const *Step,
 
-    fn init(io: std.Io) !Watch {
+    fn init(io: std.Io, cwd_path: []const u8) !Watch {
+        const std_build_watch_status: enum {
+            unimplemented,
+            v1,
+            v2,
+        } = if (@TypeOf(std.Build.Watch) == void)
+            .unimplemented
+        else if (@typeInfo(@TypeOf(std.Build.Watch.init)).@"fn".params.len == 0)
+            .v1
+        else
+            .v2;
         return .{
             .io = io,
-            .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init() else {},
+            .fs_watch = switch (std_build_watch_status) {
+                .unimplemented => {},
+                .v1 => try std.Build.Watch.init(),
+                .v2 => try std.Build.Watch.init(cwd_path),
+            },
             .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
             .manual_event = .unset,
             .steps = &.{},
@@ -1395,7 +1474,7 @@ const copied_from_zig = struct {
             pkg_name,
             "--cflags",
             "--libs",
-        }, &code, .Ignore)) |stdout| stdout else |err| switch (err) {
+        }, &code, process_stdio_ignore)) |stdout| stdout else |err| switch (err) {
             error.ProcessTerminated => return error.PkgConfigCrashed,
             error.ExecNotSupported => return error.PkgConfigFailed,
             error.ExitCodeFailure => return error.PkgConfigFailed,
@@ -1437,7 +1516,7 @@ const copied_from_zig = struct {
     }
 
     fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
-        const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .Ignore);
+        const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, process_stdio_ignore);
         var list = ArrayListManaged(std.Build.PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
