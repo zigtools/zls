@@ -25,16 +25,10 @@ const Error = error{
     CheckFailed,
 };
 
-pub fn main() Error!void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
-
-    var threaded: std.Io.Threaded = .init_single_threaded;
-    defer threaded.deinit();
-    const io = threaded.ioBasic();
-
-    var arg_it = std.process.argsWithAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
+pub fn main(init: std.process.Init) Error!void {
+    const io = init.io;
+    const gpa = init.gpa;
+    var arg_it = init.minimal.args.iterateAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
     defer arg_it.deinit();
 
     _ = arg_it.skip();
@@ -126,6 +120,7 @@ pub fn main() Error!void {
     var document_store: zls.DocumentStore = .{
         .io = io,
         .allocator = gpa,
+        .environ = init.minimal.environ,
         .config = config,
         .diagnostics_collection = &diagnostics_collection,
     };

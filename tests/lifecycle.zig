@@ -7,12 +7,14 @@ const io = std.testing.io;
 const allocator = std.testing.allocator;
 
 test "LSP lifecycle" {
-    var config_manager: zls.configuration.Manager = try .init(io, allocator);
+    const environ = std.testing.io_instance.environ.process_environ;
+    var config_manager: zls.configuration.Manager = try .init(io, allocator, environ);
     defer config_manager.deinit();
 
     var server: *zls.Server = try .create(.{
         .io = io,
         .allocator = allocator,
+        .environ = environ,
         .transport = null,
         .config_manager = &config_manager,
     });
