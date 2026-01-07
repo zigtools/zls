@@ -1018,7 +1018,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
 
-    var args_it = init.args.iterate();
+    var args_it = try init.args.iterateAllocator(gpa);
     _ = args_it.skip();
 
     var config_path: ?[]const u8 = null;
