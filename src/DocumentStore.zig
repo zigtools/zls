@@ -19,7 +19,6 @@ const DocumentStore = @This();
 
 io: std.Io,
 allocator: std.mem.Allocator,
-environ: std.process.Environ,
 /// the DocumentStore assumes that `config` is not modified while calling one of its functions.
 config: Config,
 mutex: std.Io.Mutex = .init,
@@ -52,6 +51,7 @@ pub fn computeHash(bytes: []const u8) Hash {
 }
 
 pub const Config = struct {
+    environ_map: *const std.process.Environ.Map,
     zig_exe_path: ?[]const u8,
     zig_lib_dir: ?std.Build.Cache.Directory,
     build_runner_path: ?[]const u8,
@@ -1497,8 +1497,7 @@ pub fn collectIncludeDirs(
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
     const arena_allocator_allocator = arena_allocator.allocator();
-    var environ_map = try store.environ.createMap(arena_allocator_allocator);
-    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator_allocator, store.io, &target_info, &environ_map);
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator_allocator, store.io, &target_info, @constCast(store.config.environ_map));
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {

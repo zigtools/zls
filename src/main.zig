@@ -107,21 +107,27 @@ fn logFn(
     }
 }
 
-fn defaultLogFilePath(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ) std.mem.Allocator.Error!?[]const u8 {
+fn defaultLogFilePath(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) error{ OutOfMemory, Canceled }!?[]const u8 {
     if (zig_builtin.target.os.tag == .wasi) return null;
-    const cache_path = known_folders.getPath(io, allocator, environ, .cache) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.ParseError, error.Unexpected => return null,
-    } orelse return null;
+    const cache_path = try known_folders.getPath(io, allocator, environ_map.*, .cache) orelse return null;
     defer allocator.free(cache_path);
     return try std.fs.path.join(allocator, &.{ cache_path, "zls", "zls.log" });
 }
 
-fn createLogFile(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ, override_log_file_path: ?[]const u8) ?struct { std.Io.File, []const u8 } {
+fn createLogFile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    override_log_file_path: ?[]const u8,
+) ?struct { std.Io.File, []const u8 } {
     const log_file_path = if (override_log_file_path) |log_file_path|
         allocator.dupe(u8, log_file_path) catch return null
     else
-        defaultLogFilePath(io, allocator, environ) catch null orelse return null;
+        defaultLogFilePath(io, allocator, environ_map) catch null orelse return null;
     errdefer allocator.free(log_file_path);
 
     if (std.fs.path.dirname(log_file_path)) |dirname| {
@@ -162,29 +168,30 @@ const Env = struct {
     log_file: ?[]const u8,
 };
 
-fn @"zls env"(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!noreturn {
-    const global_cache_dir = known_folders.getPath(io, allocator, environ, .cache) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.ParseError, error.Unexpected => null,
+fn @"zls env"(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!noreturn {
+    const global_cache_dir = known_folders.getPath(io, allocator, environ_map.*, .cache) catch |err| switch (err) {
+        error.OutOfMemory, error.Canceled => |e| return e,
     };
     defer if (global_cache_dir) |path| allocator.free(path);
 
     const zls_global_cache_dir = if (global_cache_dir) |cache_dir| try std.fs.path.join(allocator, &.{ cache_dir, "zls" }) else null;
     defer if (zls_global_cache_dir) |path| allocator.free(path);
 
-    const global_config_dir = known_folders.getPath(io, allocator, environ, .global_configuration) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.ParseError, error.Unexpected => null,
+    const global_config_dir = known_folders.getPath(io, allocator, environ_map.*, .global_configuration) catch |err| switch (err) {
+        error.OutOfMemory, error.Canceled => |e| return e,
     };
     defer if (global_config_dir) |path| allocator.free(path);
 
-    const local_config_dir = known_folders.getPath(io, allocator, environ, .local_configuration) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.ParseError, error.Unexpected => null,
+    const local_config_dir = known_folders.getPath(io, allocator, environ_map.*, .local_configuration) catch |err| switch (err) {
+        error.OutOfMemory, error.Canceled => |e| return e,
     };
     defer if (local_config_dir) |path| allocator.free(path);
 
-    var config_result = try loadConfigFromSystem(io, allocator, environ);
+    var config_result = try loadConfigFromSystem(io, allocator, environ_map.*);
     defer config_result.deinit(allocator);
 
     const config_file_path: ?[]const u8 = switch (config_result) {
@@ -199,7 +206,7 @@ fn @"zls env"(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Env
         .not_found => null,
     };
 
-    const log_file_path = try defaultLogFilePath(io, allocator, environ);
+    const log_file_path = try defaultLogFilePath(io, allocator, environ_map);
     defer if (log_file_path) |path| allocator.free(path);
 
     var buffer: [512]u8 = undefined;
@@ -319,20 +326,13 @@ fn loadConfigFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []con
     } };
 }
 
-fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ) error{OutOfMemory}!LoadConfigResult {
+fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ_map: std.process.Environ.Map) error{ OutOfMemory, Canceled }!LoadConfigResult {
     if (zig_builtin.target.os.tag == .wasi) return .not_found;
 
     for (
         [_]known_folders.KnownFolder{ .local_configuration, .global_configuration },
-        [_][]const u8{ "local", "global" },
-    ) |folder, name| {
-        const folder_path = known_folders.getPath(io, allocator, environ, folder) catch |err| switch (err) {
-            error.ParseError, error.Unexpected => {
-                log.warn("failed to resolve {s} configuration path: {}", .{ name, err });
-                continue;
-            },
-            error.OutOfMemory => return error.OutOfMemory,
-        } orelse continue;
+    ) |folder| {
+        const folder_path = try known_folders.getPath(io, allocator, environ_map, folder) orelse continue;
         defer allocator.free(folder_path);
 
         const config_path = try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
@@ -351,7 +351,7 @@ fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ: std.p
 fn loadConfiguration(
     io: std.Io,
     allocator: std.mem.Allocator,
-    environ: std.process.Environ,
+    environ_map: std.process.Environ.Map,
     server: *zls.Server,
     maybe_config_path: ?[]const u8,
 ) error{OutOfMemory}!void {
@@ -369,7 +369,7 @@ fn loadConfiguration(
                 break :blk;
             }
         else
-            loadConfigFromSystem(io, allocator, environ) catch |err| {
+            loadConfigFromSystem(io, allocator, environ_map) catch |err| {
                 log.err("failed to load configuration: {}", .{err});
                 break :blk;
             };
@@ -397,7 +397,7 @@ fn loadConfiguration(
             break :blk;
         }
 
-        const cache_dir_path = known_folders.getPath(io, allocator, environ, .cache) catch null orelse {
+        const cache_dir_path = known_folders.getPath(io, allocator, environ_map, .cache) catch null orelse {
             server.showMessage(.Error, "Failed to resolve global cache directory", .{});
             break :blk;
         };
@@ -426,7 +426,12 @@ const ParseArgsResult = struct {
 
 const ParseArgsError = std.mem.Allocator.Error || std.Io.File.Writer.Error;
 
-fn parseArgs(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ, args: std.process.Args) ParseArgsError!ParseArgsResult {
+fn parseArgs(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    args: std.process.Args,
+) ParseArgsError!ParseArgsResult {
     var result: ParseArgsResult = .{};
     errdefer result.deinit(allocator);
 
@@ -448,7 +453,7 @@ fn parseArgs(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Envi
             try std.Io.File.stdout().writeStreamingAll(io, zls.build_options.version_string ++ "\n");
             std.process.exit(0);
         } else if (arg_index == 0 and std.mem.eql(u8, arg, "env")) {
-            try @"zls env"(io, allocator, environ);
+            try @"zls env"(io, allocator, environ_map);
         }
 
         if (std.mem.eql(u8, arg, "--config-path")) { // --config-path
@@ -518,10 +523,13 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
     defer threaded.deinit();
     const io = threaded.ioBasic();
 
-    const result = try parseArgs(io, allocator, init.environ, init.args);
+    var environ_map = try init.environ.createMap(allocator);
+    defer environ_map.deinit();
+
+    const result = try parseArgs(io, allocator, &environ_map, init.args);
     defer result.deinit(allocator);
 
-    log_file, const log_file_path = createLogFile(io, allocator, init.environ, result.log_file_path) orelse .{ null, null };
+    log_file, const log_file_path = createLogFile(io, allocator, &environ_map, result.log_file_path) orelse .{ null, null };
     defer if (log_file_path) |path| allocator.free(path);
     defer if (log_file) |file| {
         file.close(io);
@@ -553,19 +561,18 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
         log.info("Log File:         none", .{});
     }
 
-    var config_manager: zls.configuration.Manager = try .init(io, allocator, init.environ);
+    var config_manager: zls.configuration.Manager = try .init(io, allocator, &environ_map);
     defer config_manager.deinit();
 
     const server: *zls.Server = try .create(.{
         .io = io,
         .allocator = allocator,
-        .environ = init.environ,
         .transport = transport,
         .config_manager = &config_manager,
     });
     defer server.destroy();
 
-    try loadConfiguration(io, allocator, init.environ, server, result.config_path);
+    try loadConfiguration(io, allocator, environ_map, server, result.config_path);
 
     try server.loop();
 

@@ -1116,6 +1116,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
 
 fn createDocumentStoreConfig(config_manager: *const configuration.Manager) DocumentStore.Config {
     return .{
+        .environ_map = config_manager.environ_map,
         .zig_exe_path = config_manager.config.zig_exe_path,
         .zig_lib_dir = config_manager.zig_lib_dir,
         .build_runner_path = config_manager.config.build_runner_path,
@@ -1654,7 +1655,6 @@ pub const CreateOptions = struct {
     allocator: std.mem.Allocator,
     /// Must be set when running `loop`. Controls how the server will send and receive messages.
     transport: ?*lsp.Transport,
-    environ: std.process.Environ,
     config_manager: *configuration.Manager,
     max_thread_count: usize = 4, // what is a good value here?
 };
@@ -1665,7 +1665,6 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
 
     const io = options.io;
     const allocator = options.allocator;
-    const environ = options.environ;
 
     const server = try allocator.create(Server);
     errdefer allocator.destroy(server);
@@ -1677,7 +1676,6 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
         .document_store = .{
             .io = io,
             .allocator = allocator,
-            .environ = environ,
             .config = undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
         },

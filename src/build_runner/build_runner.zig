@@ -54,8 +54,6 @@ pub fn main(init: process.Init.Minimal) !void {
     defer threaded.deinit();
     const io = threaded.ioBasic();
 
-    const environ_map = try threaded.environ.process_environ.createMap(arena);
-
     // skip my own exe name
     var arg_idx: usize = 1;
 
@@ -97,7 +95,7 @@ pub fn main(init: process.Init.Minimal) !void {
             .cwd = "", // FIXME should be something sensible
         },
         .zig_exe = zig_exe,
-        .environ_map = environ_map,
+        .environ_map = try init.environ.createMap(arena),
         .global_cache_root = global_cache_directory,
         .zig_lib_directory = zig_lib_directory,
         .host = .{

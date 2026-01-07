@@ -97,7 +97,10 @@ pub fn main(init: std.process.Init) Error!void {
     };
     defer diagnostics_collection.deinit();
 
+    var environ_map: std.process.Environ.Map = .init(std.testing.failing_allocator);
+
     var config: zls.DocumentStore.Config = .{
+        .environ_map = &environ_map,
         .zig_exe_path = zig_exe_path,
         .zig_lib_dir = zig_lib_dir,
         .build_runner_path = null,
@@ -120,7 +123,6 @@ pub fn main(init: std.process.Init) Error!void {
     var document_store: zls.DocumentStore = .{
         .io = io,
         .allocator = gpa,
-        .environ = init.minimal.environ,
         .config = config,
         .diagnostics_collection = &diagnostics_collection,
     };

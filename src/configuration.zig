@@ -10,7 +10,7 @@ const log = std.log.scoped(.config);
 pub const Manager = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
-    environ: std.process.Environ,
+    environ_map: *const std.process.Environ.Map,
     config: Config,
     zig_exe: ?struct {
         /// Same as `Manager.config.zig_exe_path.?`
@@ -42,11 +42,11 @@ pub const Manager = struct {
         arena: std.heap.ArenaAllocator.State,
     },
 
-    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ) error{OutOfMemory}!Manager {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) error{OutOfMemory}!Manager {
         return .{
             .io = io,
             .allocator = allocator,
-            .environ = environ,
+            .environ_map = environ_map,
             .zig_exe = null,
             .zig_lib_dir = null,
             .global_cache_dir = null,
@@ -171,7 +171,7 @@ pub const Manager = struct {
 
         if (config.zig_exe_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
-            const zig_exe_path = try findZig(io, manager.allocator, manager.environ) orelse break :blk;
+            const zig_exe_path = try findZig(io, manager.allocator, manager.environ_map) orelse break :blk;
             defer manager.allocator.free(zig_exe_path);
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         }
@@ -687,28 +687,15 @@ pub const DidConfigChange = @Struct(
     &@splat(.{ .default_value_ptr = &false }),
 );
 
-pub fn findZig(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ) error{OutOfMemory}!?[]const u8 {
+pub fn findZig(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) error{OutOfMemory}!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;
 
-    const env_path = environ.getAlloc(allocator, "PATH") catch |err| switch (err) {
-        error.EnvironmentVariableMissing => return null,
-        error.OutOfMemory => |e| return e,
-        error.InvalidWtf8 => |e| {
-            log.err("failed to load 'PATH' environment variable: {}", .{e});
-            return null;
-        },
-    };
-    defer allocator.free(env_path);
-
-    const env_path_ext = if (is_windows) environ.getAlloc(allocator, "PATHEXT") catch |err| switch (err) {
-        error.EnvironmentVariableMissing => return null,
-        error.OutOfMemory => |e| return e,
-        error.InvalidWtf8 => |e| {
-            log.err("failed to load 'PATH' environment variable: {}", .{e});
-            return null;
-        },
-    };
-    defer if (is_windows) allocator.free(env_path_ext);
+    const env_path = environ_map.get("PATH") orelse return null;
+    const env_path_ext = if (is_windows) environ_map.get("PATHEXT") orelse return null;
 
     var filename_buffer: std.ArrayList(u8) = .empty;
     defer filename_buffer.deinit(allocator);
