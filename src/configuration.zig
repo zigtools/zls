@@ -10,6 +10,7 @@ const log = std.log.scoped(.config);
 pub const Manager = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
     config: Config,
     zig_exe: ?struct {
         /// Same as `Manager.config.zig_exe_path.?`
@@ -41,10 +42,11 @@ pub const Manager = struct {
         arena: std.heap.ArenaAllocator.State,
     },
 
-    pub fn init(io: std.Io, allocator: std.mem.Allocator) error{OutOfMemory}!Manager {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) error{OutOfMemory}!Manager {
         return .{
             .io = io,
             .allocator = allocator,
+            .environ_map = environ_map,
             .zig_exe = null,
             .zig_lib_dir = null,
             .global_cache_dir = null,
@@ -169,7 +171,7 @@ pub const Manager = struct {
 
         if (config.zig_exe_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
-            const zig_exe_path = try findZig(io, manager.allocator) orelse break :blk;
+            const zig_exe_path = try findZig(io, manager.allocator, manager.environ_map) orelse break :blk;
             defer manager.allocator.free(zig_exe_path);
             config.zig_exe_path = try arena.dupe(u8, zig_exe_path);
         }
@@ -320,7 +322,7 @@ pub const Manager = struct {
                 "--show-builtin",
             };
 
-            const run_result = std.process.Child.run(
+            const run_result = std.process.run(
                 manager.allocator,
                 io,
                 .{
@@ -565,7 +567,7 @@ pub fn getZigEnv(
     result_arena: std.mem.Allocator,
     zig_exe_path: []const u8,
 ) error{OutOfMemory}!?Env {
-    const zig_env_result = std.process.Child.run(
+    const zig_env_result = std.process.run(
         allocator,
         io,
         .{ .argv = &.{ zig_exe_path, "env" } },
@@ -580,7 +582,7 @@ pub fn getZigEnv(
     }
 
     switch (zig_env_result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code != 0) {
                 log.err("zig env command exited with error code {d}.", .{code});
                 if (zig_env_result.stderr.len != 0) {
@@ -589,7 +591,7 @@ pub fn getZigEnv(
                 return null;
             }
         },
-        .Signal, .Stopped, .Unknown => {
+        .signal, .stopped, .unknown => {
             log.err("zig env command terminated unexpectedly.", .{});
             if (zig_env_result.stderr.len != 0) {
                 log.err("stderr: {s}", .{zig_env_result.stderr});
@@ -685,29 +687,15 @@ pub const DidConfigChange = @Struct(
     &@splat(.{ .default_value_ptr = &false }),
 );
 
-pub fn findZig(io: std.Io, allocator: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
+pub fn findZig(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) error{OutOfMemory}!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;
 
-    const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return null,
-        error.OutOfMemory => |e| return e,
-        error.InvalidWtf8 => |e| {
-            log.err("failed to load 'PATH' environment variable: {}", .{e});
-            return null;
-        },
-    };
-    defer allocator.free(env_path);
-
-    const env_path_ext = if (is_windows)
-        std.process.getEnvVarOwned(allocator, "PATHEXT") catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => return null,
-            error.OutOfMemory => |e| return e,
-            error.InvalidWtf8 => |e| {
-                log.err("failed to load 'PATH' environment variable: {}", .{e});
-                return null;
-            },
-        };
-    defer if (is_windows) allocator.free(env_path_ext);
+    const env_path = environ_map.get("PATH") orelse return null;
+    const env_path_ext = if (is_windows) environ_map.get("PATHEXT") orelse return null;
 
     var filename_buffer: std.ArrayList(u8) = .empty;
     defer filename_buffer.deinit(allocator);

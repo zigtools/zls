@@ -6,10 +6,10 @@ const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) 
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
 /// Specify the minimum Zig version that is usable with ZLS:
-/// std.Io.Threaded: performance enhancements, bugfixes, and better Windows and NetBSD support
+/// std: delete `os.environ`, `os.argv`, add new parameter to `main`, move process API to `std.Io`
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.16.0-dev.1910+8226d706e";
+const minimum_runtime_zig_version = "0.16.0-dev.1974+de25a6ffe";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
@@ -345,7 +345,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
         "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
-    const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
+    const git_describe_untrimmed = b.runAllowFail(argv, &code, .ignore) catch |err| {
         const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
         std.log.warn(
             \\Failed to run git describe to resolve ZLS version: {}

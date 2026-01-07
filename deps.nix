@@ -11,17 +11,17 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "known_folders-0.0.0-Fy-PJoPNAACH-fVI5tF-Z9GpkQke98LCVU01rxv09Kwy";
+    name = "known_folders-0.0.0-Fy-PJs_KAAAI2L9hC8gAY7Zwc_-QkeC6nN2n5xuSOaUQ";
     path = fetchzip {
-      url = "https://github.com/ziglibs/known-folders/archive/ffe1e44e1e7fa5dcac0ce5da1cd91e52cf054107.tar.gz";
-      hash = "sha256-PJZXupqVmzDKWX07f0h6Z7x4d0U2pXCNHlASsIj8ssA=";
+      url = "https://github.com/ziglibs/known-folders/archive/84bfe726c8f94bb8e90ac2e96a6949b794a185a0.tar.gz";
+      hash = "sha256-KB2zvnQPF4Lk9oGNModmqdWhHZBSO2VIpsbhj8/5FxA=";
     };
   }
   {
-    name = "lsp_kit-0.1.0-bi_PL7stDADM03s6vUGZPk4GsWNC7BruKNsrn3ukhFI_";
+    name = "lsp_kit-0.1.0-bi_PL8gtDADzuOHLTfjrx-LNFVzWF5GIx-lMKjWMjQAU";
     path = fetchzip {
-      url = "https://github.com/zigtools/lsp-kit/archive/1d4a41092286029f541082fe15fc45f0bbf1d210.tar.gz";
-      hash = "sha256-ko8SvkpOt1H+9DDDVzrRZdiZRXcG4TjK9D/78PL0Lk0=";
+      url = "https://github.com/zigtools/lsp-kit/archive/f34a177f3a9bd7c0328c468889316868b884e84e.tar.gz";
+      hash = "sha256-97Qf3v3v6jwwxfFsgdgkKQtI9TAd8BYQuq4r5v5GTLo=";
     };
   }
 ]

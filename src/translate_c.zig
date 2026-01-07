@@ -172,17 +172,17 @@ pub fn translate(
 
     argv.appendAssumeCapacity(file_path);
 
-    var process: std.process.Child = .init(argv.items, allocator);
-    process.stdin_behavior = .Pipe;
-    process.stdout_behavior = .Pipe;
-    process.stderr_behavior = .Ignore;
-
-    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
-
-    process.spawn(io) catch |err| {
+    var process = std.process.spawn(io, .{
+        .argv = argv.items,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch |err| {
         log.err("failed to spawn zig translate-c process, error: {}", .{err});
         return null;
     };
+
+    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
 
     defer _ = process.wait(io) catch |wait_err| {
         log.err("zig translate-c process did not terminate, error: {}", .{wait_err});

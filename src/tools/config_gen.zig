@@ -1010,7 +1010,7 @@ fn generateVersionDataFile(
     try file_writer.end();
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
@@ -1018,9 +1018,7 @@ pub fn main() !void {
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
 
-    var args_it = try std.process.argsWithAllocator(gpa);
-    defer args_it.deinit();
-
+    var args_it = try init.args.iterateAllocator(gpa);
     _ = args_it.skip();
 
     var config_path: ?[]const u8 = null;

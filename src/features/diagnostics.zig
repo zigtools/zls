@@ -326,12 +326,12 @@ fn getErrorBundleFromAstCheck(
     defer allocator.free(stderr_bytes);
 
     {
-        var process: std.process.Child = .init(&.{ zig_exe_path, "ast-check", "--color", "off" }, allocator);
-        process.stdin_behavior = .Pipe;
-        process.stdout_behavior = .Ignore;
-        process.stderr_behavior = .Pipe;
-
-        process.spawn(io) catch |err| {
+        var process = std.process.spawn(io, .{
+            .argv = &.{ zig_exe_path, "ast-check", "--color", "off" },
+            .stdin = .pipe,
+            .stdout = .ignore,
+            .stderr = .pipe,
+        }) catch |err| {
             log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
             return .empty;
         };
@@ -347,7 +347,7 @@ fn getErrorBundleFromAstCheck(
             return .empty;
         };
 
-        if (term != .Exited) return .empty;
+        if (term != .exited) return .empty;
     }
 
     return try getErrorBundleFromStderr(allocator, stderr_bytes, true, .{ .single_source_file = source });
@@ -519,13 +519,13 @@ pub const BuildOnSave = struct {
         if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
         argv.appendSliceAssumeCapacity(options.build_on_save_args);
 
-        var child_process: std.process.Child = .init(argv.items, options.allocator);
-        child_process.stdin_behavior = .Pipe;
-        child_process.stdout_behavior = .Pipe;
-        child_process.stderr_behavior = .Pipe;
-        child_process.cwd = options.workspace_path;
-
-        child_process.spawn(options.io) catch |err| {
+        var child_process = std.process.spawn(options.io, .{
+            .argv = argv.items,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .cwd = options.workspace_path,
+        }) catch |err| {
             log.err("failed to spawn zig build process: {}", .{err});
             return null;
         };
@@ -723,16 +723,19 @@ fn terminateChildProcessReportError(
         "";
     defer allocator.free(stderr);
 
-    const term = (switch (kind) {
-        .wait => child_process.wait(io),
-        .kill => child_process.kill(io),
-    }) catch |err| {
-        log.warn("Failed to await {s}: {}", .{ name, err });
-        return false;
+    const term = switch (kind) {
+        .wait => child_process.wait(io) catch |err| {
+            log.warn("Failed to await {s}: {}", .{ name, err });
+            return false;
+        },
+        .kill => blk: {
+            child_process.kill(io);
+            break :blk std.process.Child.Term{ .exited = 0 };
+        },
     };
 
     switch (term) {
-        .Exited => |code| if (code != 0) {
+        .exited => |code| if (code != 0) {
             if (stderr.len != 0) {
                 log.warn("{s} exited with non-zero status: {}\nstderr:\n{s}", .{ name, code, stderr });
             } else {

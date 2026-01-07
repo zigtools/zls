@@ -25,16 +25,10 @@ const Error = error{
     CheckFailed,
 };
 
-pub fn main() Error!void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
-
-    var threaded: std.Io.Threaded = .init_single_threaded;
-    defer threaded.deinit();
-    const io = threaded.ioBasic();
-
-    var arg_it = std.process.argsWithAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
+pub fn main(init: std.process.Init) Error!void {
+    const io = init.io;
+    const gpa = init.gpa;
+    var arg_it = init.minimal.args.iterateAllocator(gpa) catch |err| std.debug.panic("failed to collect args: {}", .{err});
     defer arg_it.deinit();
 
     _ = arg_it.skip();
@@ -103,7 +97,10 @@ pub fn main() Error!void {
     };
     defer diagnostics_collection.deinit();
 
+    var environ_map: std.process.Environ.Map = .init(std.testing.failing_allocator);
+
     var config: zls.DocumentStore.Config = .{
+        .environ_map = &environ_map,
         .zig_exe_path = zig_exe_path,
         .zig_lib_dir = zig_lib_dir,
         .build_runner_path = null,

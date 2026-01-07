@@ -51,6 +51,7 @@ pub fn computeHash(bytes: []const u8) Hash {
 }
 
 pub const Config = struct {
+    environ_map: *const std.process.Environ.Map,
     zig_exe_path: ?[]const u8,
     zig_lib_dir: ?std.Build.Cache.Directory,
     build_runner_path: ?[]const u8,
@@ -1108,7 +1109,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     const zig_run_result = blk: {
         const tracy_zone2 = tracy.trace(@src());
         defer tracy_zone2.end();
-        break :blk try std.process.Child.run(
+        break :blk try std.process.run(
             self.allocator,
             self.io,
             .{
@@ -1122,7 +1123,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     defer self.allocator.free(zig_run_result.stderr);
 
     const is_ok = switch (zig_run_result.term) {
-        .Exited => |exit_code| exit_code == 0,
+        .exited => |exit_code| exit_code == 0,
         else => false,
     };
 
@@ -1495,7 +1496,8 @@ pub fn collectIncludeDirs(
         .ofmt = comptime std.Target.ObjectFormat.default(builtin.os.tag, builtin.cpu.arch),
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
-    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator.allocator(), store.io, &target_info);
+    const arena_allocator_allocator = arena_allocator.allocator();
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator_allocator, store.io, &target_info, @constCast(store.config.environ_map));
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {

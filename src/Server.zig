@@ -1116,6 +1116,7 @@ pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
 
 fn createDocumentStoreConfig(config_manager: *const configuration.Manager) DocumentStore.Config {
     return .{
+        .environ_map = config_manager.environ_map,
         .zig_exe_path = config_manager.config.zig_exe_path,
         .zig_lib_dir = config_manager.zig_lib_dir,
         .build_runner_path = config_manager.config.build_runner_path,

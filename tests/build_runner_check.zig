@@ -5,16 +5,11 @@
 const std = @import("std");
 const zls = @import("zls");
 
-pub fn main() !u8 {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
-
-    var threaded: std.Io.Threaded = .init_single_threaded;
-    const io = threaded.ioBasic();
-
-    const args = try std.process.argsAlloc(gpa);
-    defer std.process.argsFree(gpa, args);
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    const gpa = init.gpa;
+    const arena_allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(arena_allocator);
 
     if (args.len != 4) @panic("invalid arguments");
 
