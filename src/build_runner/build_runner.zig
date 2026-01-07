@@ -95,7 +95,7 @@ pub fn main(init: process.Init.Minimal) !void {
             .io = io,
             .gpa = arena,
             .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
-            .cwd = "", // FIXME should be something sensible
+            .cwd = try process.getCwdAlloc(single_threaded_arena.allocator()),
         },
         .zig_exe = zig_exe,
         .environ_map = try init.environ.createMap(arena),
@@ -392,7 +392,7 @@ pub fn main(init: process.Init.Minimal) !void {
         return;
     }
 
-    var w = try Watch.init(io);
+    var w = try Watch.init(io, graph.cache.cwd);
 
     const message_thread = try std.Thread.spawn(.{}, struct {
         fn do(ww: *Watch) void {
@@ -479,10 +479,10 @@ const Watch = struct {
     manual_event: std.Io.Event,
     steps: []const *Step,
 
-    fn init(io: std.Io) !Watch {
+    fn init(io: std.Io, cwd_path: []const u8) !Watch {
         return .{
             .io = io,
-            .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init("") else {},
+            .fs_watch = if (@TypeOf(std.Build.Watch) != void) try std.Build.Watch.init(cwd_path) else {},
             .supports_fs_watch = @TypeOf(std.Build.Watch) != void and shared.BuildOnSaveSupport.isSupportedRuntime(builtin.zig_version) == .supported,
             .manual_event = .unset,
             .steps = &.{},
