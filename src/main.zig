@@ -519,7 +519,10 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
     var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.testing.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else {};
     const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
-    var threaded: std.Io.Threaded = .init(allocator, .{ .environ = init.environ });
+    var threaded: std.Io.Threaded = .init(allocator, .{
+        .environ = init.environ,
+        .argv0 = .init(init.args),
+    });
     defer threaded.deinit();
     const io = threaded.ioBasic();
 

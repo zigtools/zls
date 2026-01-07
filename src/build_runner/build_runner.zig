@@ -50,7 +50,10 @@ pub fn main(init: process.Init.Minimal) !void {
 
     const args = try init.args.toSlice(arena);
 
-    var threaded: std.Io.Threaded = .init(arena, .{ .environ = init.environ });
+    var threaded: std.Io.Threaded = .init(arena, .{
+        .environ = init.environ,
+        .argv0 = .init(init.args),
+    });
     defer threaded.deinit();
     const io = threaded.ioBasic();
 
