@@ -10,7 +10,7 @@
     // nix flake update --commit-lock-file
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    .minimum_zig_version = "0.16.0-dev.2009+9d08eba2e",
+    .minimum_zig_version = "0.16.0-dev.1976+8e091047b",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
@@ -19,16 +19,16 @@
     // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
-            .url = "git+https://github.com/jozip/known-folders.git#146c29a398157435a63061ece3fbe50d05c0b9ba",
-            .hash = "known_folders-0.0.0-Fy-PJi7YAABDAhkc9SLqxm72DAzrQtRJ6QWeTSa73rzz",
+            .url = "git+https://github.com/ziglibs/known-folders.git#84bfe726c8f94bb8e90ac2e96a6949b794a185a0",
+            .hash = "known_folders-0.0.0-Fy-PJs_KAAAI2L9hC8gAY7Zwc_-QkeC6nN2n5xuSOaUQ",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/669e6ed7470100bfd9d2aa9f6f96b93c45996179.tar.gz",
             .hash = "diffz-0.0.1-G2tlISLPAQDzXkUIRWWUfdgIsIb1dAyVwRPXMt5kRpui",
         },
         .lsp_kit = .{
-            .url = "git+https://github.com/jozip/lsp-kit.git#f82c6ec781c2945a5a18422d92e61d4ac1d53f5a",
-            .hash = "lsp_kit-0.1.0-bi_PL8gtDACTYtV87InLO3MFdP2QVdXSoxlgDa1JgQmG",
+            .url = "git+https://github.com/zigtools/lsp-kit.git#f34a177f3a9bd7c0328c468889316868b884e84e",
+            .hash = "lsp_kit-0.1.0-bi_PL8gtDADzuOHLTfjrx-LNFVzWF5GIx-lMKjWMjQAU",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",
