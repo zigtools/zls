@@ -1456,6 +1456,8 @@ fn iterateChildrenTypeErased(
             for (asm_node.inputs) |input_node| {
                 try callback(context, tree, tree.nodeData(input_node).node_and_token[0]);
             }
+
+            if (asm_node.ast.clobbers.unwrap()) |clobbers| try callback(context, tree, clobbers);
         },
 
         .asm_output,

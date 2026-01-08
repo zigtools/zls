@@ -1852,6 +1852,11 @@ const FindBreaks = struct {
     }
 };
 
+pub fn resolveInstanceOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+    const ty = try analyser.resolveTypeOfNode(options) orelse return null;
+    return ty.instanceTypeVal(analyser);
+}
+
 /// Resolves the type of an Ast Node.
 /// Returns `null` if the type could not be resolved.
 pub fn resolveTypeOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
@@ -6004,6 +6009,22 @@ pub fn resolveExpressionTypeFromAncestors(
             if (node.toOptional() == var_decl.ast.init_node) {
                 return try analyser.resolveTypeOfNode(.of(ancestors[0], handle));
             }
+            if (node.toOptional() == var_decl.ast.addrspace_node) {
+                return analyser.instanceStdBuiltinType("AddressSpace");
+            }
+            if (node.toOptional() == var_decl.ast.section_node) {
+                return .{
+                    .data = .{
+                        .pointer = .{
+                            .size = .slice,
+                            .sentinel = .none,
+                            .is_const = true,
+                            .elem_ty = try analyser.allocType(.fromIP(analyser, .type_type, .u8_type)),
+                        },
+                    },
+                    .is_type_val = false,
+                };
+            }
         },
         .if_simple,
         .@"if",
@@ -6106,6 +6127,25 @@ pub fn resolveExpressionTypeFromAncestors(
             const lhs, const rhs = tree.nodeData(ancestors[0]).node_and_node;
             if (node == rhs) {
                 return try analyser.resolveTypeOfNode(.of(lhs, handle));
+            }
+        },
+        .ptr_type_aligned,
+        .ptr_type_sentinel,
+        .ptr_type,
+        .ptr_type_bit_range,
+        => {
+            const ptr = tree.fullPtrType(ancestors[0]).?;
+            if (node.toOptional() == ptr.ast.sentinel) {
+                return analyser.resolveInstanceOfNode(.of(ptr.ast.child_type, handle));
+            }
+            if (node.toOptional() == ptr.ast.addrspace_node) {
+                return analyser.instanceStdBuiltinType("AddressSpace");
+            }
+        },
+        .array_type_sentinel => {
+            const array_type = tree.fullArrayType(ancestors[0]).?;
+            if (node.toOptional() == array_type.ast.sentinel) {
+                return analyser.resolveInstanceOfNode(.of(array_type.ast.elem_type, handle));
             }
         },
 
@@ -6261,6 +6301,41 @@ pub fn resolveExpressionTypeFromAncestors(
             }
 
             return null;
+        },
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto,
+        => {
+            var buf: [1]Ast.Node.Index = undefined;
+            const proto = tree.fullFnProto(&buf, ancestors[0]).?;
+            if (node.toOptional() == proto.ast.addrspace_expr) {
+                return analyser.instanceStdBuiltinType("AddressSpace");
+            }
+            if (node.toOptional() == proto.ast.callconv_expr) {
+                return analyser.instanceStdBuiltinType("CallingConvention");
+            }
+            if (node.toOptional() == proto.ast.section_expr) {
+                return .{
+                    .data = .{
+                        .pointer = .{
+                            .size = .slice,
+                            .sentinel = .none,
+                            .is_const = true,
+                            .elem_ty = try analyser.allocType(.fromIP(analyser, .type_type, .u8_type)),
+                        },
+                    },
+                    .is_type_val = false,
+                };
+            }
+        },
+        .asm_simple,
+        .@"asm",
+        => {
+            const full = tree.fullAsm(ancestors[0]).?;
+            if (node.toOptional() == full.ast.clobbers) {
+                return analyser.instanceStdBuiltinType("assembly.Clobbers");
+            }
         },
 
         else => {}, // TODO: Implement more expressions; better safe than sorry
