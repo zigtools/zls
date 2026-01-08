@@ -27,6 +27,12 @@ const string_literal_2_indexing = string_literal_2[0];
 const string_literal_3_indexing = string_literal_3[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^ (u8)()
 
+const slice_closed = string_literal_0[0..5];
+//    ^^^^^^^^^^^^ (*const [5]u8)()
+
+const slice_open = string_literal_0[7..];
+//    ^^^^^^^^^^ (*const [4:0]u8)()
+
 pub fn main() void {
     for (string_literal_0) |elem| {
         _ = elem;

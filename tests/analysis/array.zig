@@ -3,6 +3,10 @@ const ArrayType = [3]u8;
 const ArrayTypeWithSentinel = [3:0]u8;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)([3:0]u8)
 
+const ArrayTypeWithSentinel2 = [3:.{}]struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3]struct {})
+//                                ^ (struct {})()
+
 const InvalidArrayTypeAccess0 = ArrayType[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
 const InvalidArrayTypeAccess1 = ArrayType[1];
@@ -110,6 +114,29 @@ const array_mult_1 = [1]u8{0} ** 2;
 
 const array_mult_2 = &[3]u8{ 0, 1, 2 } ** 2;
 //    ^^^^^^^^^^^^ (*const [6]u8)()
+
+const array = [_:0]u8{ 1, 2, 3, 4 };
+//    ^^^^^ ([4:0]u8)()
+
+const slice0: [:0]i1 = undefined;
+//    ^^^^^^ ([:0]i1)()
+
+const slice1: [:42]u8 = undefined;
+//    ^^^^^^ ([:42]u8)()
+
+const slice2 = array[0..2];
+//    ^^^^^^ (*const [2]u8)()
+
+const slice3 = array[1..];
+//    ^^^^^^ (*const [3:0]u8)()
+
+//
+// invalid operations
+//
+
+const unknown_type: type = undefined;
+const invalid_array_access = unknown_type[5];
+//    ^^^^^^^^^^^^^^^^^^^^ (unknown)()
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler:

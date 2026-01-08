@@ -234,6 +234,15 @@ const c_minus_slice = c_u32 - slice_u32;
 const c_minus_c = c_u32 - c_u32;
 //    ^^^^^^^^^ (usize)()
 
+//
+// pointer with sentinel
+//
+
+const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)([*]const struct {})
+//                                 ^ (struct {})()
+//                                               ^^^^^^^^ (AddressSpace)()
+
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
