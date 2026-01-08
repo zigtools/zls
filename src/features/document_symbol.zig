@@ -169,6 +169,11 @@ pub fn getDocumentSymbols(
 
                 const decl_name_token = container_field.ast.main_token;
 
+                if (tree.tokenTag(decl_name_token) != .identifier) {
+                    _ = ast.identifierTokenFromIdentifierNode; // possibly related
+                    continue;
+                }
+
                 const guessed_container_name = if (stack_entry.last_var_decl_name_token.unwrap()) |name_token|
                     offsets.identifierTokenToNameSlice(tree, name_token)
                 else

@@ -74,6 +74,13 @@ test "invalid tuple-like container" {
         \\Constant E
     );
     try testDocumentSymbol(
+        \\const E = enum {
+        \\    @src
+        \\};
+    ,
+        \\Constant E
+    );
+    try testDocumentSymbol(
         \\const U = union {
         \\    '=',
         \\};
