@@ -22,6 +22,13 @@ const TaggedUnionType = union(EnumType) {
     const baz: TaggedUnionType = .{ .foo = 1 };
 };
 
+const OpaqueType = opaque {
+    pub fn init() *OpaqueType {
+        var value: void = {};
+        return @ptrCast(&value);
+    }
+};
+
 const some_struct: StructType = .baz;
 //                              ^^^^ (StructType)()
 
@@ -33,3 +40,6 @@ const some_union: UnionType = .baz;
 
 const some_tagged_union: TaggedUnionType = .baz;
 //                                         ^^^^ (TaggedUnionType)()
+
+const some_opaque: *OpaqueType = .init();
+//                               ^^^^^ (fn () *OpaqueType)()

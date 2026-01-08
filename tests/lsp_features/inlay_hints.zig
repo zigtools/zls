@@ -584,6 +584,15 @@ test "tuple fields" {
     , .{ .kind = .Type });
 }
 
+test "declaration literals" {
+    try testInlayHints(
+        \\const X = opaque { fn init(a_thing: u32, b_thing: u32) *X { _ = .{a_thing, b_thing}; const ignore: void = {}; return @ptrCast(&ignore); } };
+        \\test {
+        \\    const x: *X = .init(<a_thing>0, <b_thing>1);
+        \\}
+    , .{ .kind = .Parameter });
+}
+
 const Options = struct {
     kind: types.InlayHint.Kind,
     show_builtin: bool = true,
