@@ -31,7 +31,6 @@ pub const dependencies = @import("@dependencies");
 pub const std_options: std.Options = .{
     .side_channels_mitigations = .none,
     .http_disable_tls = true,
-    .crypto_fork_safety = false,
 };
 
 ///! This is a modified build runner to extract information out of build.zig
