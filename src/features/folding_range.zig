@@ -182,7 +182,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
     // TODO add folding range normal comments
 
     // Folding range for top level imports
-    {
+    if (tree.mode == .zig) {
         var start_import: ?Ast.Node.Index = null;
         var end_import: ?Ast.Node.Index = null;
 
