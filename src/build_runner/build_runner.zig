@@ -1,31 +1,41 @@
 //! PLEASE READ THE FOLLOWING MESSAGE BEFORE EDITING THIS FILE:
 //!
-//! This build runner is targeting compatibility with the following Zig versions:
-//!   - 0.15.1 or later
+//! To support the Zig build system, ZLS uses a custom build runner which
+//! interfaces with the compiler that is installed on the user's system.
+//!
+//! The Zig version on the user's system may not be the same version that ZLS
+//! has been built with. The minimum runtime Zig version in the `build.zig`
+//! specifies which Zig versions need to be supported by this build runner.
+//!
+//! When a breaking change occurs, this is what need to be done:
+//!   - If it is a tagged release      (e.g 0.x.y)    , update the build runner code to handle multiple Zig versions.
+//!   - If it is a development version (e.g 0.x.y-dev), bump the minimum runtime Zig version.
 //!
 //! Handling multiple Zig versions can be achieved with one of the following strategies:
 //!   - use `@hasDecl` or `@hasField` (recommended)
 //!   - use `builtin.zig_version`
 //!
-//! You can test out the build runner on ZLS's `build.zig` with the following command:
+//! The build runner can be tested on ZLS's `build.zig` with the following command:
 //! `zig build --build-runner src/build_runner/build_runner.zig`
 //!
-//! You can also test the build runner on any other `build.zig` with the following command:
+//! To test with a different `build.zig`, use one of the following commands:
 //! `zig build --build-file /path/to/build.zig --build-runner /path/to/zls/src/build_runner/build_runner.zig`
 //! `zig build --build-runner /path/to/zls/src/build_runner/build_runner.zig` (if the cwd contains build.zig)
 //!
 
-const root = @import("@build");
 const std = @import("std");
 const builtin = @import("builtin");
+const Io = std.Io;
 const assert = std.debug.assert;
 const mem = std.mem;
 const process = std.process;
-const ArrayListManaged = if (@hasDecl(std, "array_list")) std.array_list.Managed else std.ArrayList;
-const ArrayList = if (@hasDecl(std, "array_list")) std.ArrayList else std.ArrayList;
+const File = Io.File;
 const Step = std.Build.Step;
 const Allocator = std.mem.Allocator;
+const fatal = std.process.fatal;
+const runner = @This();
 
+pub const root = @import("@build");
 pub const dependencies = @import("@dependencies");
 
 pub const std_options: std.Options = .{
@@ -33,23 +43,22 @@ pub const std_options: std.Options = .{
     .http_disable_tls = true,
 };
 
-///! This is a modified build runner to extract information out of build.zig
-///! Modified version of lib/build_runner.zig
 pub fn main(init: process.Init.Minimal) !void {
-    // Here we use an ArenaAllocator backed by a DirectAllocator because a build is a short-lived,
-    // one shot program. We don't need to waste time freeing memory and finding places to squish
-    // bytes into. So we free everything all at once at the very end.
-    var single_threaded_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer single_threaded_arena.deinit();
+    // The build runner is often short-lived, but thanks to `--watch` and `--webui`, that's not
+    // always the case. So, we do need a true gpa for some things.
+    var debug_gpa_state: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_gpa_state.deinit();
+    const gpa = debug_gpa_state.allocator();
 
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = single_threaded_arena.allocator(),
-    };
+    // ...but we'll back our arena by `std.heap.page_allocator` for efficiency.
+    var single_threaded_arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer single_threaded_arena.deinit();
+    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{ .child_allocator = single_threaded_arena.allocator() };
     const arena = thread_safe_arena.allocator();
 
     const args = try init.args.toSlice(arena);
 
-    var threaded: std.Io.Threaded = .init(arena, .{
+    var threaded: Io.Threaded = .init(gpa, .{
         .environ = init.environ,
         .argv0 = .init(init.args),
     });
@@ -65,7 +74,7 @@ pub fn main(init: process.Init.Minimal) !void {
     const cache_root = nextArg(args, &arg_idx) orelse fatal("missing cache root directory path", .{});
     const global_cache_root = nextArg(args, &arg_idx) orelse fatal("missing global cache root directory path", .{});
 
-    const cwd: std.Io.Dir = .cwd();
+    const cwd: Io.Dir = .cwd();
 
     const zig_lib_directory: std.Build.Cache.Directory = .{
         .path = zig_lib_dir,
@@ -92,7 +101,7 @@ pub fn main(init: process.Init.Minimal) !void {
         .arena = arena,
         .cache = .{
             .io = io,
-            .gpa = arena,
+            .gpa = gpa,
             .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
             .cwd = try process.getCwdAlloc(single_threaded_arena.allocator()),
         },
@@ -120,27 +129,25 @@ pub fn main(init: process.Init.Minimal) !void {
         dependencies.root_deps,
     );
 
-    var targets = ArrayListManaged([]const u8).init(arena);
-    var debug_log_scopes = ArrayListManaged([]const u8).init(arena);
+    var targets: std.ArrayList([]const u8) = .empty;
 
     var install_prefix: ?[]const u8 = null;
     var dir_list: std.Build.DirList = .{};
     var max_rss: u64 = 0;
     var skip_oom_steps = false;
-    var seed: u32 = 0;
     var output_tmp_nonce: ?[16]u8 = null;
-    var debounce_interval_ms: u16 = 50;
     var watch = false;
     var check_step_only = false;
+    var debounce_interval_ms: u16 = 50;
 
     while (nextArg(args, &arg_idx)) |arg| {
         if (mem.startsWith(u8, arg, "-Z")) {
-            if (arg.len != 18) fatal("bad argument: '{s}'", .{arg});
+            if (arg.len != 18) fatalWithHint("bad argument: '{s}'", .{arg});
             output_tmp_nonce = arg[2..18].*;
         } else if (mem.startsWith(u8, arg, "-D")) {
             const option_contents = arg[2..];
             if (option_contents.len == 0)
-                fatal("expected option name after '-D'", .{});
+                fatalWithHint("expected option name after '-D'", .{});
             if (mem.indexOfScalar(u8, option_contents, '=')) |name_end| {
                 const option_name = option_contents[0..name_end];
                 const option_value = option_contents[name_end + 1 ..];
@@ -170,7 +177,7 @@ pub fn main(init: process.Init.Minimal) !void {
             } else if (mem.startsWith(u8, arg, "--release=")) {
                 const text = arg["--release=".len..];
                 builder.release_mode = std.meta.stringToEnum(std.Build.ReleaseMode, text) orelse {
-                    fatal("expected [off|any|fast|safe|small] in '{s}', found '{s}'", .{
+                    fatalWithHint("expected [off|any|fast|safe|small] in '{s}', found '{s}'", .{
                         arg, text,
                     });
                 };
@@ -192,6 +199,9 @@ pub fn main(init: process.Init.Minimal) !void {
                 };
             } else if (mem.eql(u8, arg, "--skip-oom-steps")) {
                 skip_oom_steps = true;
+            } else if (mem.eql(u8, arg, "--test-timeout")) {
+                const next_arg = nextArgOrFatal(args, &arg_idx);
+                _ = next_arg;
             } else if (mem.eql(u8, arg, "--search-prefix")) {
                 const search_prefix = nextArgOrFatal(args, &arg_idx);
                 builder.addSearchPrefix(search_prefix);
@@ -199,46 +209,67 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.libc_file = nextArgOrFatal(args, &arg_idx);
             } else if (mem.eql(u8, arg, "--color")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
-                    fatal("expected [auto|on|off] after '{s}'", .{arg});
+                    fatalWithHint("expected [auto|on|off] after '{s}'", .{arg});
+                _ = next_arg;
+            } else if (mem.eql(u8, arg, "--error-style")) {
+                const next_arg = nextArg(args, &arg_idx) orelse
+                    fatalWithHint("expected style after '{s}'", .{arg});
+                _ = next_arg;
+            } else if (mem.eql(u8, arg, "--multiline-errors")) {
+                const next_arg = nextArg(args, &arg_idx) orelse
+                    fatalWithHint("expected style after '{s}'", .{arg});
                 _ = next_arg;
             } else if (mem.eql(u8, arg, "--summary")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
-                    fatal("expected [all|new|failures|none] after '{s}'", .{arg});
+                    fatalWithHint("expected [all|new|failures|line|none] after '{s}'", .{arg});
                 _ = next_arg;
             } else if (mem.eql(u8, arg, "--seed")) {
                 const next_arg = nextArg(args, &arg_idx) orelse
-                    fatal("expected u32 after '{s}'", .{arg});
-                seed = std.fmt.parseUnsigned(u32, next_arg, 0) catch |err| {
+                    fatalWithHint("expected u32 after '{s}'", .{arg});
+                graph.random_seed = std.fmt.parseUnsigned(u32, next_arg, 0) catch |err| {
                     fatal("unable to parse seed '{s}' as unsigned 32-bit integer: {s}\n", .{
                         next_arg, @errorName(err),
                     });
                 };
-            } else if (mem.eql(u8, arg, "--debounce")) {
-                const next_arg = nextArg(args, &arg_idx) orelse
-                    fatal("expected u16 after '{s}'", .{arg});
-                debounce_interval_ms = std.fmt.parseUnsigned(u16, next_arg, 0) catch |err| {
-                    fatal("unable to parse debounce interval '{s}' as unsigned 16-bit integer: {s}\n", .{
-                        next_arg, @errorName(err),
+            } else if (mem.eql(u8, arg, "--build-id")) {
+                builder.build_id = .fast;
+            } else if (mem.startsWith(u8, arg, "--build-id=")) {
+                const style = arg["--build-id=".len..];
+                builder.build_id = std.zig.BuildId.parse(style) catch |err| {
+                    fatal("unable to parse --build-id style '{s}': {s}", .{
+                        style, @errorName(err),
                     });
                 };
+            } else if (mem.eql(u8, arg, "--debounce")) {
+                const next_arg = nextArg(args, &arg_idx) orelse
+                    fatalWithHint("expected u16 after '{s}'", .{arg});
+                debounce_interval_ms = std.fmt.parseUnsigned(u16, next_arg, 0) catch |err| {
+                    fatal("unable to parse debounce interval '{s}' as unsigned 16-bit integer: {t}\n", .{
+                        next_arg, err,
+                    });
+                };
+            } else if (mem.eql(u8, arg, "--webui")) {
+                fatal("argument '{s}' is not available", .{arg});
+            } else if (mem.startsWith(u8, arg, "--webui=")) {
+                fatal("argument '{s}' is not available", .{arg});
             } else if (mem.eql(u8, arg, "--debug-log")) {
-                const next_arg = nextArgOrFatal(args, &arg_idx);
-                try debug_log_scopes.append(next_arg);
+                fatal("argument '{s}' is not available", .{arg});
             } else if (mem.eql(u8, arg, "--debug-pkg-config")) {
                 builder.debug_pkg_config = true;
+            } else if (mem.eql(u8, arg, "--debug-rt")) {
+                graph.debug_compiler_runtime_libs = true;
             } else if (mem.eql(u8, arg, "--debug-compile-errors")) {
                 builder.debug_compile_errors = true;
+            } else if (mem.eql(u8, arg, "--debug-incremental")) {
+                builder.debug_incremental = true;
             } else if (mem.eql(u8, arg, "--system")) {
                 // The usage text shows another argument after this parameter
                 // but it is handled by the parent process. The build runner
                 // only sees this flag.
                 graph.system_package_mode = true;
             } else if (mem.eql(u8, arg, "--libc-runtimes") or mem.eql(u8, arg, "--glibc-runtimes")) {
-                if (@hasField(std.Build, "glibc_runtimes_dir")) {
-                    builder.glibc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
-                } else {
-                    builder.libc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
-                }
+                // --glibc-runtimes was the old name of the flag; kept for compatibility for now.
+                builder.libc_runtimes_dir = nextArgOrFatal(args, &arg_idx);
             } else if (mem.eql(u8, arg, "--verbose-link")) {
                 builder.verbose_link = true;
             } else if (mem.eql(u8, arg, "--verbose-air")) {
@@ -247,7 +278,7 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.verbose_llvm_ir = "-";
             } else if (mem.startsWith(u8, arg, "--verbose-llvm-ir=")) {
                 builder.verbose_llvm_ir = arg["--verbose-llvm-ir=".len..];
-            } else if (mem.eql(u8, arg, "--verbose-llvm-bc=")) {
+            } else if (mem.startsWith(u8, arg, "--verbose-llvm-bc=")) {
                 builder.verbose_llvm_bc = arg["--verbose-llvm-bc=".len..];
             } else if (mem.eql(u8, arg, "--verbose-cimport")) {
                 builder.verbose_cimport = true;
@@ -255,12 +286,14 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.verbose_cc = true;
             } else if (mem.eql(u8, arg, "--verbose-llvm-cpu-features")) {
                 builder.verbose_llvm_cpu_features = true;
-            } else if (mem.eql(u8, arg, "--prominent-compile-errors")) {
-                // prominent_compile_errors = true;
             } else if (mem.eql(u8, arg, "--watch")) {
                 watch = true;
             } else if (mem.eql(u8, arg, "--check-only")) { // ZLS only
                 check_step_only = true;
+            } else if (mem.eql(u8, arg, "--time-report")) {
+                fatal("argument '{s}' is not available", .{arg});
+            } else if (mem.startsWith(u8, arg, "--fuzz")) {
+                fatal("argument '{s}' is not available", .{arg});
             } else if (mem.eql(u8, arg, "-fincremental")) {
                 graph.incremental = true;
             } else if (mem.eql(u8, arg, "-fno-incremental")) {
@@ -285,6 +318,10 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.enable_darling = true;
             } else if (mem.eql(u8, arg, "-fno-darling")) {
                 builder.enable_darling = false;
+            } else if (mem.eql(u8, arg, "-fallow-so-scripts")) {
+                graph.allow_so_scripts = true;
+            } else if (mem.eql(u8, arg, "-fno-allow-so-scripts")) {
+                graph.allow_so_scripts = false;
             } else if (mem.eql(u8, arg, "-freference-trace")) {
                 builder.reference_trace = 256;
             } else if (mem.startsWith(u8, arg, "-freference-trace=")) {
@@ -295,27 +332,19 @@ pub fn main(init: process.Init.Minimal) !void {
                 };
             } else if (mem.eql(u8, arg, "-fno-reference-trace")) {
                 builder.reference_trace = null;
-            } else if (mem.startsWith(u8, arg, "-j")) {
-                const num = arg["-j".len..];
-                const n_jobs = std.fmt.parseUnsigned(u32, num, 10) catch |err| {
-                    std.debug.print("unable to parse jobs count '{s}': {s}", .{
-                        num, @errorName(err),
-                    });
-                    process.exit(1);
-                };
-                if (n_jobs < 1) {
-                    std.debug.print("number of jobs must be at least 1\n", .{});
-                    process.exit(1);
-                }
-                threaded.setAsyncLimit(.limited(n_jobs));
+            } else if (mem.cutPrefix(u8, arg, "-j")) |text| {
+                const n = std.fmt.parseUnsigned(u32, text, 10) catch |err|
+                    fatal("unable to parse jobs count '{s}': {t}", .{ text, err });
+                if (n < 1) fatal("number of jobs must be at least 1", .{});
+                threaded.setAsyncLimit(.limited(n));
             } else if (mem.eql(u8, arg, "--")) {
                 builder.args = argsRest(args, arg_idx);
                 break;
             } else {
-                fatal("unrecognized argument: '{s}'", .{arg});
+                fatalWithHint("unrecognized argument: '{s}'", .{arg});
             }
         } else {
-            try targets.append(arg);
+            try targets.append(arena, arg);
         }
     }
 
@@ -324,7 +353,6 @@ pub fn main(init: process.Init.Minimal) !void {
     });
     defer main_progress_node.end();
 
-    builder.debug_log_scopes = debug_log_scopes.items;
     builder.resolveInstallPrefix(install_prefix, dir_list);
     {
         var prog_node = main_progress_node.start("Configure", 0);
@@ -334,24 +362,22 @@ pub fn main(init: process.Init.Minimal) !void {
     }
 
     if (graph.needed_lazy_dependencies.entries.len != 0) {
-        var buffer: ArrayList(u8) = .{};
+        var buffer: std.ArrayList(u8) = .empty;
         for (graph.needed_lazy_dependencies.keys()) |k| {
             try buffer.appendSlice(arena, k);
             try buffer.append(arena, '\n');
         }
         const s = std.fs.path.sep_str;
         const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse fatal("missing -Z arg", .{}));
-
         local_cache_directory.handle.writeFile(io, .{
             .sub_path = tmp_sub_path,
             .data = buffer.items,
             .flags = .{ .exclusive = true },
         }) catch |err| {
-            fatal("unable to write configuration results to '{f}{s}': {}", .{
-                local_cache_directory, tmp_sub_path, err,
+            fatal("unable to write configuration results to '{f}{s}': {s}", .{
+                local_cache_directory, tmp_sub_path, @errorName(err),
             });
         };
-
         process.exit(3); // Indicate configure phase failed with meaningful stdout.
     }
 
@@ -362,16 +388,18 @@ pub fn main(init: process.Init.Minimal) !void {
     validateSystemLibraryOptions(builder);
 
     var run: Run = .{
-        .gpa = arena,
+        .gpa = gpa,
+
         .available_rss = max_rss,
         .max_rss_is_default = false,
         .max_rss_mutex = .init,
         .skip_oom_steps = skip_oom_steps,
-        .memory_blocked_steps = .init(arena),
-
         .watch = watch,
+        .memory_blocked_steps = .empty,
+
         .cycle = 0,
     };
+    defer run.memory_blocked_steps.deinit(gpa);
 
     if (run.available_rss == 0) {
         run.available_rss = process.totalSystemMemory() catch std.math.maxInt(u64);
@@ -380,14 +408,12 @@ pub fn main(init: process.Init.Minimal) !void {
 
     if (!watch) {
         try extractBuildInformation(
-            arena,
             builder,
             arena,
             main_progress_node,
             &run,
-            seed,
         );
-        return;
+        std.process.exit(0);
     }
 
     var w = try Watch.init(io, graph.cache.cwd);
@@ -396,7 +422,7 @@ pub fn main(init: process.Init.Minimal) !void {
         fn do(ww: *Watch) void {
             while (true) {
                 var buffer: [1]u8 = undefined;
-                var stdin_reader = std.Io.File.stdin().reader(ww.io, &buffer);
+                var stdin_reader = Io.File.stdin().reader(ww.io, &buffer);
                 const byte = stdin_reader.interface.takeByte() catch |err| switch (err) {
                     error.ReadFailed => process.exit(1),
                     error.EndOfStream => process.exit(0),
@@ -410,30 +436,28 @@ pub fn main(init: process.Init.Minimal) !void {
     }.do, .{&w});
     message_thread.detach();
 
-    const gpa = arena;
-
-    var step_stack = try stepNamesToStepStack(gpa, builder, targets.items, check_step_only);
+    var step_stack = try resolveStepNames(gpa, builder, targets.items, check_step_only);
+    defer step_stack.deinit(gpa);
     if (step_stack.count() == 0) {
         // This means that `enable_build_on_save == null` and the project contains no "check" step.
         return;
     }
 
-    prepare(gpa, builder, &step_stack, &run, seed) catch |err| switch (err) {
-        error.UncleanExit => process.exit(1),
-        else => return err,
+    const starting_steps = try gpa.dupe(*Step, step_stack.keys());
+    defer gpa.free(starting_steps);
+
+    prepare(builder, &step_stack, &run) catch |err| switch (err) {
+        error.DependencyLoopDetected => process.exit(1),
+        else => |e| return e,
     };
 
     rebuild: while (true) : (run.cycle += 1) {
-        runSteps(
-            gpa,
+        try runSteps(
             builder,
             &step_stack,
             main_progress_node,
             &run,
-        ) catch |err| switch (err) {
-            error.UncleanExit => process.exit(1),
-            else => return err,
-        };
+        );
 
         try w.update(gpa, step_stack.keys());
 
@@ -442,7 +466,7 @@ pub fn main(init: process.Init.Minimal) !void {
         // if any more events come in. After the debounce interval has passed,
         // trigger a rebuild on all steps with modified inputs, as well as their
         // recursive dependants.
-        var debounce_timeout: std.Io.Timeout = .none;
+        var debounce_timeout: Io.Timeout = .none;
         while (true) switch (try w.wait(gpa, debounce_timeout)) {
             .timeout => {
                 markFailedStepsDirty(gpa, step_stack.keys());
@@ -474,7 +498,7 @@ const Watch = struct {
     io: std.Io,
     fs_watch: std.Build.Watch,
     supports_fs_watch: bool,
-    manual_event: std.Io.Event,
+    manual_event: Io.Event,
     steps: []const *Step,
 
     fn init(io: std.Io, cwd_path: []const u8) !Watch {
@@ -501,7 +525,7 @@ const Watch = struct {
         w.manual_event.set(w.io);
     }
 
-    fn wait(w: *Watch, gpa: Allocator, timeout: std.Io.Timeout) !std.Build.Watch.WaitResult {
+    fn wait(w: *Watch, gpa: Allocator, timeout: Io.Timeout) !std.Build.Watch.WaitResult {
         if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
             return try w.fs_watch.wait(gpa, switch (timeout) {
                 .none => .none,
@@ -518,15 +542,15 @@ const Watch = struct {
         return .dirty;
     }
 
-    /// Copy of `std.Io.Event.waitTimeout` but a compile error has been fixed.
-    pub fn waitTimeout(event: *std.Io.Event, io: std.Io, timeout: std.Io.Timeout) (error{Timeout} || std.Io.Cancelable)!void {
-        if (@cmpxchgStrong(std.Io.Event, event, .unset, .waiting, .acquire, .acquire)) |prev| switch (prev) {
+    /// Copy of `Io.Event.waitTimeout` but a compile error has been fixed.
+    pub fn waitTimeout(event: *Io.Event, io: std.Io, timeout: Io.Timeout) (error{Timeout} || Io.Cancelable)!void {
+        if (@cmpxchgStrong(Io.Event, event, .unset, .waiting, .acquire, .acquire)) |prev| switch (prev) {
             .unset => unreachable,
             .waiting => assert(!builtin.single_threaded), // invalid state
             .is_set => return,
         };
-        try io.futexWaitTimeout(std.Io.Event, event, .waiting, timeout);
-        switch (@atomicLoad(std.Io.Event, event, .acquire)) {
+        try io.futexWaitTimeout(Io.Event, event, .waiting, timeout);
+        switch (@atomicLoad(Io.Event, event, .acquire)) {
             .unset => unreachable, // `reset` called before pending `wait` returned
             .waiting => return error.Timeout,
             .is_set => return,
@@ -543,69 +567,66 @@ const Watch = struct {
 
 const Run = struct {
     gpa: Allocator,
+
     available_rss: usize,
     max_rss_is_default: bool,
-    max_rss_mutex: std.Io.Mutex,
+    max_rss_mutex: Io.Mutex,
     skip_oom_steps: bool,
-    memory_blocked_steps: ArrayListManaged(*Step),
-
     watch: bool,
+    /// Allocated into `gpa`.
+    memory_blocked_steps: std.ArrayList(*Step),
+
     cycle: u32,
 };
 
-fn stepNamesToStepStack(
+fn resolveStepNames(
     gpa: Allocator,
     b: *std.Build,
     step_names: []const []const u8,
     check_step_only: bool,
 ) !std.AutoArrayHashMapUnmanaged(*Step, void) {
-    var step_stack: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
-    errdefer step_stack.deinit(gpa);
+    var starting_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
+    errdefer starting_steps.deinit(gpa);
 
     if (step_names.len == 0) {
         if (b.top_level_steps.get("check")) |tls| {
-            try step_stack.put(gpa, &tls.step, {});
+            try starting_steps.put(gpa, &tls.step, {});
         } else if (!check_step_only) {
-            try step_stack.put(gpa, b.default_step, {});
+            try starting_steps.put(gpa, b.default_step, {});
         }
     } else {
-        try step_stack.ensureUnusedCapacity(gpa, step_names.len);
+        try starting_steps.ensureUnusedCapacity(gpa, step_names.len);
         for (0..step_names.len) |i| {
             const step_name = step_names[step_names.len - i - 1];
             const s = b.top_level_steps.get(step_name) orelse {
                 std.debug.print("no step named '{s}'\n  access the help menu with 'zig build -h'\n", .{step_name});
                 process.exit(1);
             };
-            step_stack.putAssumeCapacity(&s.step, {});
+            starting_steps.putAssumeCapacity(&s.step, {});
         }
     }
 
-    return step_stack;
+    return starting_steps;
 }
 
 fn prepare(
-    gpa: Allocator,
     b: *std.Build,
-    step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
+    unpopulated_step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
     run: *Run,
-    seed: u32,
-) error{ OutOfMemory, UncleanExit }!void {
-    const starting_steps = try gpa.dupe(*Step, step_stack.keys());
+) error{ OutOfMemory, DependencyLoopDetected }!void {
+    const gpa = run.gpa;
+
+    const starting_steps = try gpa.dupe(*Step, unpopulated_step_stack.keys());
     defer gpa.free(starting_steps);
 
-    var rng = std.Random.DefaultPrng.init(seed);
+    var rng = std.Random.DefaultPrng.init(b.graph.random_seed);
     const rand = rng.random();
     rand.shuffle(*Step, starting_steps);
 
     for (starting_steps) |s| {
-        constructGraphAndCheckForDependencyLoop(b, s, step_stack, rand) catch |err| switch (err) {
-            error.DependencyLoopDetected => {
-                _ = b.graph.io.lockStderr(&.{}, b.graph.stderr_mode) catch {};
-                process.exit(1);
-            },
-            else => |e| return e,
-        };
+        try constructGraphAndCheckForDependencyLoop(gpa, b, s, unpopulated_step_stack, rand);
     }
+    const step_stack = unpopulated_step_stack;
 
     {
         // Check that we have enough memory to complete the build.
@@ -635,40 +656,35 @@ fn prepare(
 }
 
 fn runSteps(
-    gpa: std.mem.Allocator,
     b: *std.Build,
-    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    step_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     parent_prog_node: std.Progress.Node,
     run: *Run,
-) error{ OutOfMemory, UncleanExit, Canceled }!void {
+) (Io.Cancelable || mem.Allocator.Error)!void {
+    const gpa = run.gpa;
     const io = b.graph.io;
-    const steps = steps_stack.keys();
 
-    {
-        // Collect the initial set of tasks (those with no outstanding dependencies) into a buffer,
-        // then spawn them. The buffer is so that we don't race with `makeStep` and end up thinking
-        // a step is initial when it actually became ready due to an earlier initial step.
-        var initial_set: std.ArrayList(*Step) = .empty;
-        defer initial_set.deinit(gpa);
-        try initial_set.ensureUnusedCapacity(gpa, steps_stack.count());
-        for (steps_stack.keys()) |s| {
-            if (s.state == .precheck_done and s.pending_deps == 0) {
-                initial_set.appendAssumeCapacity(s);
-            }
+    // Collect the initial set of tasks (those with no outstanding dependencies) into a buffer,
+    // then spawn them. The buffer is so that we don't race with `makeStep` and end up thinking
+    // a step is initial when it actually became ready due to an earlier initial step.
+    var initial_set: std.ArrayList(*Step) = .empty;
+    defer initial_set.deinit(gpa);
+    try initial_set.ensureUnusedCapacity(gpa, step_stack.count());
+    for (step_stack.keys()) |s| {
+        if (s.state == .precheck_done and s.pending_deps == 0) {
+            initial_set.appendAssumeCapacity(s);
         }
-
-        var step_prog = parent_prog_node.start("steps", steps.len);
-        defer step_prog.end();
-
-        var group: std.Io.Group = .init;
-        defer group.cancel(io);
-
-        // Start working on all of the initial steps...
-        for (initial_set.items) |s| try stepReady(&group, b, steps_stack, s, step_prog, run);
-        // ...and `makeStep` will trigger every other step when their last dependency finishes.    }
-
-        try group.await(io);
     }
+
+    const step_prog = parent_prog_node.start("steps", step_stack.count());
+    defer step_prog.end();
+
+    var group: Io.Group = .init;
+    defer group.cancel(io);
+    // Start working on all of the initial steps...
+    for (initial_set.items) |s| try stepReady(&group, b, step_stack, s, step_prog, run);
+    // ...and `makeStep` will trigger every other step when their last dependency finishes.
+    try group.await(io);
 }
 
 /// Traverse the dependency graph depth-first and make it undirected by having
@@ -678,32 +694,39 @@ fn runSteps(
 /// Each step has its dependencies traversed in random order, this accomplishes
 /// two things:
 /// - `step_stack` will be in randomized-depth-first order, so the build runner
-///   spawns steps in a random (but optimized) order
+///   spawns initial steps in a random order
 /// - each step's `dependants` list is also filled in a random order, so that
-///   when it finishes executing in `workerMakeOneStep`, it spawns next steps
-///   to run in random order
+///   when it finishes executing in `makeStep`, it spawns next steps to run in
+///   random order
 fn constructGraphAndCheckForDependencyLoop(
+    gpa: Allocator,
     b: *std.Build,
     s: *Step,
     step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
     rand: std.Random,
-) error{ OutOfMemory, DependencyLoopDetected }!void {
+) !void {
     switch (s.state) {
-        .precheck_started => return error.DependencyLoopDetected,
+        .precheck_started => {
+            return error.DependencyLoopDetected;
+        },
         .precheck_unstarted => {
             s.state = .precheck_started;
 
-            try step_stack.ensureUnusedCapacity(b.allocator, s.dependencies.items.len);
+            try step_stack.ensureUnusedCapacity(gpa, s.dependencies.items.len);
 
             // We dupe to avoid shuffling the steps in the summary, it depends
             // on s.dependencies' order.
-            const deps = b.allocator.dupe(*Step, s.dependencies.items) catch @panic("OOM");
+            const deps = gpa.dupe(*Step, s.dependencies.items) catch @panic("OOM");
+            defer gpa.free(deps);
+
             rand.shuffle(*Step, deps);
 
             for (deps) |dep| {
-                try step_stack.put(b.allocator, dep, {});
+                try step_stack.put(gpa, dep, {});
                 try dep.dependants.append(b.allocator, s);
-                try constructGraphAndCheckForDependencyLoop(b, dep, step_stack, rand);
+                constructGraphAndCheckForDependencyLoop(gpa, b, dep, step_stack, rand) catch |err| {
+                    return err;
+                };
             }
 
             s.state = .precheck_done;
@@ -712,12 +735,11 @@ fn constructGraphAndCheckForDependencyLoop(
         .precheck_done => {},
 
         // These don't happen until we actually run the step graph.
-        .dependency_failure,
-        .success,
-        .failure,
-        .skipped,
-        .skipped_oom,
-        => {},
+        .dependency_failure => unreachable,
+        .success => unreachable,
+        .failure => unreachable,
+        .skipped => unreachable,
+        .skipped_oom => unreachable,
     }
 }
 
@@ -727,13 +749,13 @@ fn constructGraphAndCheckForDependencyLoop(
 /// claim (i.e. add `s.max_rss` back into `run.available_rss`) and queue any viable memory-blocked
 /// steps after "make" completes for `s`.
 fn makeStep(
-    group: *std.Io.Group,
+    group: *Io.Group,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
     root_prog_node: std.Progress.Node,
     run: *Run,
-) std.Io.Cancelable!void {
+) Io.Cancelable!void {
     const io = b.graph.io;
     const gpa = run.gpa;
 
@@ -826,7 +848,7 @@ fn makeStep(
 }
 
 fn stepReady(
-    group: *std.Io.Group,
+    group: *Io.Group,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
@@ -839,7 +861,7 @@ fn stepReady(
         defer run.max_rss_mutex.unlock(io);
         if (run.available_rss < s.max_rss) {
             // Running this step right now could possibly exceed the allotted RSS.
-            run.memory_blocked_steps.append(s) catch @panic("OOM");
+            run.memory_blocked_steps.append(run.gpa, s) catch @panic("OOM");
             return;
         }
         run.available_rss -= s.max_rss;
@@ -865,16 +887,8 @@ fn argsRest(args: []const [:0]const u8, idx: usize) ?[]const [:0]const u8 {
     return args[idx..];
 }
 
-/// Perhaps in the future there could be an Advanced Options flag such as
-/// --debug-build-runner-leaks which would make this function return instead of
-/// calling exit.
-fn cleanExit() void {
-    std.debug.lockStdErr();
-    process.exit(0);
-}
-
-fn fatal(comptime f: []const u8, args: anytype) noreturn {
-    std.debug.print(f ++ "\n", args);
+fn fatalWithHint(comptime f: []const u8, args: anytype) noreturn {
+    std.debug.print(f ++ "\n  access the help menu with 'zig build -h'\n", args);
     process.exit(1);
 }
 
@@ -952,7 +966,7 @@ fn createModuleDependenciesForStep(step: *Step) Allocator.Error!void {
                 step.dependOn(&other.step);
             },
 
-            .config_header_step => |config_header| step.dependOn(&config_header.step),
+            .config_header_step => |other| step.dependOn(&other.step),
         };
         for (mod.lib_paths.items) |lp| lp.addStepDependencies(step);
         for (mod.rpaths.items) |rpath| switch (rpath) {
@@ -986,12 +1000,10 @@ const Transport = shared.Transport;
 const BuildConfig = shared.BuildConfig;
 
 fn extractBuildInformation(
-    gpa: Allocator,
     b: *std.Build,
     arena: Allocator,
     main_progress_node: std.Progress.Node,
     run: *Run,
-    seed: u32,
 ) !void {
     const helper = struct {
         fn addLazyPathStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
@@ -1036,7 +1048,7 @@ fn extractBuildInformation(
             allocator: Allocator,
             modules: *std.StringArrayHashMapUnmanaged(shared.BuildConfig.Module),
             module: *std.Build.Module,
-            compile: ?*std.Build.Step.Compile,
+            compile: ?*Step.Compile,
         ) !void {
             const root_source_file = module.root_source_file orelse return;
 
@@ -1112,6 +1124,7 @@ fn extractBuildInformation(
             gop.value_ptr.include_dirs = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.include_dirs, include_dirs.keys() });
         }
     };
+    const gpa = run.gpa;
 
     // The value tracks whether the step is a decendant of the "install" step.
     var all_steps: std.AutoArrayHashMapUnmanaged(*Step, bool) = .empty;
@@ -1177,13 +1190,12 @@ fn extractBuildInformation(
             try helper.addModuleDependencies(gpa, &needed_steps, module);
         }
 
-        prepare(gpa, b, &needed_steps, run, seed) catch |err| switch (err) {
-            error.UncleanExit => process.exit(1),
-            else => return err,
+        prepare(b, &needed_steps, run) catch |err| switch (err) {
+            error.DependencyLoopDetected => process.exit(1),
+            else => |e| return e,
         };
 
         try runSteps(
-            gpa,
             b,
             &needed_steps,
             main_progress_node,
@@ -1267,12 +1279,12 @@ fn extractBuildInformation(
         .{ .whitespace = .indent_2 },
     );
 
-    var file_writer = std.Io.File.stdout().writer(b.graph.io, &.{});
+    var file_writer = Io.File.stdout().writer(b.graph.io, &.{});
     file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
 }
 
 fn processPkgConfig(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     c_macros: *std.StringArrayHashMapUnmanaged(void),
     exe: *Step.Compile,
@@ -1378,7 +1390,7 @@ const copied_from_zig = struct {
             else => return err,
         };
 
-        var zig_args = ArrayListManaged([]const u8).init(b.allocator);
+        var zig_args = std.array_list.Managed([]const u8).init(b.allocator);
         defer zig_args.deinit();
 
         var it = mem.tokenizeAny(u8, stdout, " \r\n\t");
@@ -1413,7 +1425,7 @@ const copied_from_zig = struct {
 
     fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
         const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .ignore);
-        var list = ArrayListManaged(std.Build.PkgConfigPkg).init(self.allocator);
+        var list = std.array_list.Managed(std.Build.PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
         while (line_it.next()) |line| {
@@ -1456,7 +1468,7 @@ fn serveWatchErrorBundle(
     step_id: u32,
     cycle: u32,
     error_bundle: std.zig.ErrorBundle,
-) std.Io.File.Writer.Error!void {
+) Io.File.Writer.Error!void {
     const bytes_len = @sizeOf(shared.ServerToClient.ErrorBundle) + @sizeOf(u32) * error_bundle.extra.len + error_bundle.string_bytes.len;
 
     var header: shared.ServerToClient.Header = .{
@@ -1479,7 +1491,7 @@ fn serveWatchErrorBundle(
         std.mem.byteSwapAllElements(u32, @constCast(error_bundle.extra)); // trust me bro
     }
 
-    var file_writer = std.Io.File.stdout().writer(io, &.{});
+    var file_writer = Io.File.stdout().writer(io, &.{});
     const writer = &file_writer.interface;
 
     var data = [_][]const u8{
