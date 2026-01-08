@@ -122,7 +122,7 @@ pub fn translate(
     const global_cache_dir = config.global_cache_dir.?;
 
     var random_bytes: [16]u8 = undefined;
-    std.crypto.random.bytes(&random_bytes);
+    io.random(&random_bytes);
     var sub_path: [std.fs.base64_encoder.calcSize(16)]u8 = undefined;
     _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
 

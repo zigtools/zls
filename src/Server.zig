@@ -620,7 +620,9 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
         try server.resolveConfiguration();
     }
 
-    if (std.crypto.random.intRangeLessThan(usize, 0, 32768) == 0) {
+    const rng_impl: std.Random.IoSource = .{ .io = server.io };
+    const rng = rng_impl.interface();
+    if (rng.intRangeLessThan(usize, 0, 32768) == 0) {
         server.showMessage(.Warning, "HELP ME, I AM STUCK INSIDE AN LSP!", .{});
     }
 }
