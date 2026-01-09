@@ -4852,24 +4852,51 @@ pub const PositionContext = union(enum) {
     }
 };
 
-const StackState = struct {
-    ctx: PositionContext,
-    stack_id: StackId,
+const Stack = struct {
+    states: std.ArrayList(State),
 
-    /// Indicates whether the current context is an ErrorSet definition, ie `error{...}`
-    pub fn isErrSetDef(self: StackState) bool {
-        return (self.stack_id == .brace and self.ctx == .error_access);
+    const State = struct {
+        ctx: PositionContext,
+        scope: State.Scope,
+
+        const Scope = enum { parens, brackets, braces, global };
+
+        /// Indicates whether the current context is an ErrorSet definition, ie `error{...}`
+        pub fn isErrSetDef(self: *Stack.State) bool {
+            return (self.scope == .braces and self.ctx == .error_access);
+        }
+    };
+
+    pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) error{OutOfMemory}!Stack {
+        return .{ .states = try .initCapacity(allocator, capacity) };
+    }
+
+    pub fn deinit(self: *Stack, allocator: std.mem.Allocator) void {
+        self.states.deinit(allocator);
+    }
+
+    pub fn push(self: *Stack, allocator: std.mem.Allocator, state: *const State) error{OutOfMemory}!void {
+        try self.states.append(allocator, state.*);
+    }
+
+    pub fn peek(self: *Stack, allocator: std.mem.Allocator) error{OutOfMemory}!*Stack.State {
+        if (self.states.items.len == 0) {
+            try self.states.append(allocator, .{ .ctx = .empty, .scope = .global });
+        }
+        return &self.states.items[self.states.items.len - 1];
+    }
+
+    /// Pops the last state off the stack. Sets previous state's ctx to .empty if !scopes_match
+    pub fn pop(
+        self: *Stack,
+        allocator: std.mem.Allocator,
+        /// Indicate whether the current state's scope matches the one being closed
+        scopes_match: bool,
+    ) error{OutOfMemory}!void {
+        if (self.states.items.len != 0) self.states.items.len -= 1;
+        if (!scopes_match) (try self.peek(allocator)).ctx = .empty;
     }
 };
-
-const StackId = enum { paren, bracket, brace, global };
-
-fn peek(allocator: std.mem.Allocator, arr: *std.ArrayList(StackState)) !*StackState {
-    if (arr.items.len == 0) {
-        try arr.append(allocator, .{ .ctx = .empty, .stack_id = .global });
-    }
-    return &arr.items[arr.items.len - 1];
-}
 
 fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
     return .{
@@ -4941,7 +4968,7 @@ pub fn getPositionContext(
         break;
     }
 
-    var stack: std.ArrayList(StackState) = try .initCapacity(allocator, 8);
+    var stack: Stack = try .initCapacity(allocator, 8);
     defer stack.deinit(allocator);
     var should_do_lookahead = lookahead;
 
@@ -4968,7 +4995,7 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             should_do_lookahead = false;
-            const curr_ctx = try peek(allocator, &stack);
+            const curr_ctx = try stack.peek(allocator);
             switch (tok.tag) {
                 .identifier,
                 .builtin,
@@ -4999,7 +5026,7 @@ pub fn getPositionContext(
         }
 
         // State changes
-        var curr_ctx = try peek(allocator, &stack);
+        var curr_ctx = try stack.peek(allocator);
         switch (tok.tag) {
             .string_literal, .multiline_string_literal_line => string_lit_block: {
                 curr_ctx.ctx = .{ .string_literal = tok.loc };
@@ -5017,10 +5044,10 @@ pub fn getPositionContext(
 
                 if (source_index < content_loc.start or content_loc.end < source_index) break :string_lit_block;
 
-                if (curr_ctx.stack_id == .paren and
-                    stack.items.len >= 2)
+                if (curr_ctx.scope == .parens and
+                    stack.states.items.len >= 2)
                 {
-                    const perhaps_builtin = stack.items[stack.items.len - 2];
+                    const perhaps_builtin = stack.states.items[stack.states.items.len - 2];
 
                     switch (perhaps_builtin.ctx) {
                         .builtin => |loc| {
@@ -5075,41 +5102,20 @@ pub fn getPositionContext(
             },
             .l_paren => {
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
-                const stack_id: StackId = switch (curr_ctx.ctx) {
-                    .keyword => |token_index| switch (tree.tokenTag(token_index)) {
-                        .keyword_for,
-                        .keyword_if,
-                        .keyword_while,
-                        => .global,
-                        else => .paren,
-                    },
-                    else => .paren,
-                };
-                try stack.append(allocator, .{ .ctx = .empty, .stack_id = stack_id });
+                const scope: Stack.State.Scope = if (curr_ctx.ctx == .keyword) switch (tree.tokenTag(curr_ctx.ctx.keyword)) {
+                    .keyword_for,
+                    .keyword_if,
+                    .keyword_while,
+                    => .global,
+                    else => .parens,
+                } else .parens;
+                try stack.push(allocator, &.{ .ctx = .empty, .scope = scope });
             },
-            .r_paren => {
-                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
-                if (stack.items.len != 0) stack.items.len -= 1;
-                if (curr_ctx.stack_id != .paren) {
-                    (try peek(allocator, &stack)).ctx = .empty;
-                }
-            },
-            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
-            .r_bracket => {
-                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
-                if (stack.items.len != 0) stack.items.len -= 1;
-                if (curr_ctx.stack_id != .bracket) {
-                    (try peek(allocator, &stack)).ctx = .empty;
-                }
-            },
-            .l_brace => try stack.append(allocator, .{ .ctx = if (curr_ctx.ctx == .error_access) curr_ctx.ctx else .empty, .stack_id = .brace }),
-            .r_brace => {
-                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
-                if (stack.items.len != 0) stack.items.len -= 1;
-                if (curr_ctx.stack_id != .brace) {
-                    (try peek(allocator, &stack)).ctx = .empty;
-                }
-            },
+            .r_paren => try stack.pop(allocator, curr_ctx.scope == .parens),
+            .l_bracket => try stack.push(allocator, &.{ .ctx = .empty, .scope = .brackets }),
+            .r_bracket => try stack.pop(allocator, curr_ctx.scope == .brackets),
+            .l_brace => try stack.push(allocator, &.{ .ctx = if (curr_ctx.ctx == .error_access) curr_ctx.ctx else .empty, .scope = .braces }),
+            .r_brace => try stack.pop(allocator, curr_ctx.scope == .braces),
             .keyword_error => curr_ctx.ctx = .error_access,
             .number_literal => {
                 if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
@@ -5143,14 +5149,14 @@ pub fn getPositionContext(
             else => curr_ctx.ctx = .empty,
         }
 
-        curr_ctx = try peek(allocator, &stack);
+        curr_ctx = try stack.peek(allocator);
         switch (curr_ctx.ctx) {
             .field_access => |r| curr_ctx.ctx = .{ .field_access = tokenLocAppend(r, tok) },
             else => {},
         }
     }
 
-    if (stack.pop()) |state| {
+    if (stack.states.pop()) |state| {
         switch (state.ctx) {
             .parens_expr => |loc| return .{ .var_access = loc },
             .var_access => |loc| {
