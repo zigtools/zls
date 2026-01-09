@@ -4922,6 +4922,25 @@ pub fn getPositionContext(
         break;
     }
 
+    // Check if the previous line ends with a ',', ie a continuation - targets multiline ErrorSet definitions
+    var lloc = line_loc;
+    while (true) {
+        while (lloc.start > 0) {
+            if (tree.source[lloc.start] != '\n') lloc.start -= 1 else break;
+        } else break;
+        while (lloc.start > 0 and tree.source[lloc.start] == '\n') lloc.start -= 1;
+        if (lloc.start == 0) break;
+        lloc = offsets.lineLocAtIndex(tree.source, lloc.start);
+        // Check if it's a comment first
+        while (lloc.start > 0 and std.mem.startsWith(u8, std.mem.trimStart(u8, offsets.locToSlice(tree.source, lloc), " \t"), "//")) {
+            const prev_line_loc = offsets.lineLocAtIndex(tree.source, lloc.start - 1); // `- 1` => prev line's `\n`
+            lloc = prev_line_loc;
+        }
+        if (std.mem.endsWith(u8, std.mem.trimEnd(u8, offsets.locToSlice(tree.source, lloc), " \t\r\n"), ",")) continue;
+        line_loc.start = lloc.start;
+        break;
+    }
+
     var stack: std.ArrayList(StackState) = try .initCapacity(allocator, 8);
     defer stack.deinit(allocator);
     var should_do_lookahead = lookahead;
@@ -5114,7 +5133,10 @@ pub fn getPositionContext(
                 std.debug.assert(tree.tokenTag(current_token) == tag);
                 curr_ctx.ctx = .{ .keyword = current_token };
             },
-            .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
+            .container_doc_comment => curr_ctx.ctx = .comment,
+            .doc_comment => {
+                if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .comment; // Intent is to skip everything between the `error{...}` braces
+            },
             .comma => {
                 if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .empty; // Intent is to skip everything between the `error{...}` braces
             },

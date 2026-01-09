@@ -422,6 +422,19 @@ test "global error set" {
     try testContext(
         \\fn foo() error{OutOfMemory, <cursor>}!void {
     , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{
+        \\  OutOfMemory,
+        \\  <cursor>
+        \\}!void {
+    , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{
+        \\  /// Doc Comment
+        \\  OutOfMemory,
+        \\  <cursor>
+        \\}!void {
+    , .global_error_set, .{});
 }
 
 test "number literal" {
