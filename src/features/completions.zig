@@ -877,7 +877,7 @@ pub fn completionAtIndex(
         .builtin => try completeBuiltin(&builder),
         .var_access, .empty => try completeGlobal(&builder),
         .field_access => |loc| try completeFieldAccess(&builder, loc),
-        .global_error_set => try globalSetCompletions(&builder, .error_set),
+        .error_access => try globalSetCompletions(&builder, .error_set),
         .enum_literal => |loc| try completeDot(&builder, loc),
         .label_access, .label_decl => try completeLabel(&builder),
         .import_string_literal,

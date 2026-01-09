@@ -400,41 +400,41 @@ test "multi-line string literal" {
     , .string_literal, .{});
 }
 
-test "global error set" {
+test "error access" {
     try testContext(
         \\fn foo() <cursor>error!void {
-    , .global_error_set, .{ .lookahead = true });
+    , .error_access, .{ .lookahead = true });
     try testContext(
         \\fn foo() erro<cursor>r!void {
-    , .global_error_set, .{ .lookahead = true });
+    , .error_access, .{ .lookahead = true });
     try testContext(
         \\fn foo() error<cursor>!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error<cursor>.!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error.<cursor>!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error{<cursor>}!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error{OutOfMemory, <cursor>}!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error{
         \\  OutOfMemory,
         \\  <cursor>
         \\}!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
     try testContext(
         \\fn foo() error{
         \\  /// Doc Comment
         \\  OutOfMemory,
         \\  <cursor>
         \\}!void {
-    , .global_error_set, .{});
+    , .error_access, .{});
 }
 
 test "number literal" {
