@@ -4794,7 +4794,7 @@ pub const PositionContext = union(enum) {
     /// XXX: Internal use only, currently points to the loc of the first l_paren
     parens_expr: offsets.Loc,
     keyword: Ast.TokenIndex,
-    global_error_set,
+    error_access,
     comment,
     other,
     empty,
@@ -4816,7 +4816,7 @@ pub const PositionContext = union(enum) {
             .parens_expr,
             => |l| return l,
             .keyword => |token_index| return offsets.tokenToLoc(tree, token_index),
-            .global_error_set,
+            .error_access,
             .comment,
             .other,
             .empty,
@@ -4858,7 +4858,7 @@ const StackState = struct {
 
     /// Indicates whether the current context is an ErrorSet definition, ie `error{...}`
     pub fn isErrSetDef(self: StackState) bool {
-        return (self.stack_id == .brace and self.ctx == .global_error_set);
+        return (self.stack_id == .brace and self.ctx == .error_access);
     }
 };
 
@@ -5057,7 +5057,7 @@ pub fn getPositionContext(
                     .keyword_break => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                     else => curr_ctx.ctx = .other,
                 },
-                .comment, .other, .field_access, .global_error_set => {},
+                .comment, .other, .field_access, .error_access => {},
                 else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
             },
             .question_mark => switch (curr_ctx.ctx) {
@@ -5102,7 +5102,7 @@ pub fn getPositionContext(
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
-            .l_brace => try stack.append(allocator, .{ .ctx = if (curr_ctx.ctx == .global_error_set) curr_ctx.ctx else .empty, .stack_id = .brace }),
+            .l_brace => try stack.append(allocator, .{ .ctx = if (curr_ctx.ctx == .error_access) curr_ctx.ctx else .empty, .stack_id = .brace }),
             .r_brace => {
                 // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
                 if (stack.items.len != 0) stack.items.len -= 1;
@@ -5110,7 +5110,7 @@ pub fn getPositionContext(
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
-            .keyword_error => curr_ctx.ctx = .global_error_set,
+            .keyword_error => curr_ctx.ctx = .error_access,
             .number_literal => {
                 if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
                     return .{ .number_literal = tok.loc };
