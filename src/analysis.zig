@@ -4855,9 +4855,14 @@ pub const PositionContext = union(enum) {
 const StackState = struct {
     ctx: PositionContext,
     stack_id: StackId,
+
+    /// Indicates whether the current context is an ErrorSet definition, ie `error{...}`
+    pub fn isErrSetDef(self: StackState) bool {
+        return (self.stack_id == .brace and self.ctx == .global_error_set);
+    }
 };
 
-const StackId = enum { paren, bracket, global };
+const StackId = enum { paren, bracket, brace, global };
 
 fn peek(allocator: std.mem.Allocator, arr: *std.ArrayList(StackState)) !*StackState {
     if (arr.items.len == 0) {
@@ -5013,7 +5018,9 @@ pub fn getPositionContext(
                     }
                 }
             },
-            .identifier => switch (curr_ctx.ctx) {
+            .identifier => if (curr_ctx.isErrSetDef()) {
+                // Intent is to skip everything between the `error{...}` braces
+            } else switch (curr_ctx.ctx) {
                 .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
                 .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
                 .label_access => |loc| curr_ctx.ctx = if (loc.start == loc.end)
@@ -5061,7 +5068,6 @@ pub fn getPositionContext(
                 };
                 try stack.append(allocator, .{ .ctx = .empty, .stack_id = stack_id });
             },
-            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
             .r_paren => {
                 // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
                 if (stack.items.len != 0) stack.items.len -= 1;
@@ -5069,10 +5075,19 @@ pub fn getPositionContext(
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
+            .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .bracket }),
             .r_bracket => {
                 // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
                 if (stack.items.len != 0) stack.items.len -= 1;
                 if (curr_ctx.stack_id != .bracket) {
+                    (try peek(allocator, &stack)).ctx = .empty;
+                }
+            },
+            .l_brace => try stack.append(allocator, .{ .ctx = if (curr_ctx.ctx == .global_error_set) curr_ctx.ctx else .empty, .stack_id = .brace }),
+            .r_brace => {
+                // Do this manually, as .pop() sets `stack.items[stack.items.len - 1]` to `undefined` which currently curr_ctx points to
+                if (stack.items.len != 0) stack.items.len -= 1;
+                if (curr_ctx.stack_id != .brace) {
                     (try peek(allocator, &stack)).ctx = .empty;
                 }
             },
@@ -5100,6 +5115,9 @@ pub fn getPositionContext(
                 curr_ctx.ctx = .{ .keyword = current_token };
             },
             .doc_comment, .container_doc_comment => curr_ctx.ctx = .comment,
+            .comma => {
+                if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .empty; // Intent is to skip everything between the `error{...}` braces
+            },
             else => curr_ctx.ctx = .empty,
         }
 
