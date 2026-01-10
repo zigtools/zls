@@ -401,10 +401,9 @@ test "multi-line string literal" {
 }
 
 test "global error set" {
-    // TODO why is this a .var_access instead of a .global_error_set?
-    // try testContext(
-    //     \\fn foo() <cursor>error!void {
-    // , .global_error_set, .{});
+    try testContext(
+        \\fn foo() <cursor>error!void {
+    , .global_error_set, .{ .lookahead = true });
     try testContext(
         \\fn foo() erro<cursor>r!void {
     , .global_error_set, .{ .lookahead = true });
@@ -417,14 +416,25 @@ test "global error set" {
     try testContext(
         \\fn foo() error.<cursor>!void {
     , .global_error_set, .{});
-
-    // TODO this should probably also be .global_error_set
-    // try testContext(
-    //     \\fn foo() error{<cursor>}!void {
-    // , .global_error_set, .{});
-    // try testContext(
-    //     \\fn foo() error{OutOfMemory, <cursor>}!void {
-    // , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{<cursor>}!void {
+    , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{OutOfMemory, <cursor>}!void {
+    , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{
+        \\  OutOfMemory,
+        \\  <cursor>
+        \\}!void {
+    , .global_error_set, .{});
+    try testContext(
+        \\fn foo() error{
+        \\  /// Doc Comment
+        \\  OutOfMemory,
+        \\  <cursor>
+        \\}!void {
+    , .global_error_set, .{});
 }
 
 test "number literal" {
