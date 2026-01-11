@@ -58,7 +58,7 @@ pub const Config = struct {
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
-        .wasi => std.fs.wasi.Preopens,
+        .wasi => if (@hasDecl(std.fs, "wasi")) std.fs.wasi.Preopens else void,
         else => void,
     },
 };
@@ -1770,10 +1770,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
 }
 
 fn resolveFileImportString(allocator: std.mem.Allocator, base_path: []const u8, import_str: []const u8) error{OutOfMemory}!?Uri {
-    const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return null,
-    };
+    const joined_path = try std.fs.path.resolve(allocator, &.{ base_path, "..", import_str });
     defer allocator.free(joined_path);
 
     return try .fromPath(allocator, joined_path);
