@@ -1358,6 +1358,21 @@ test "opaque" {
     });
 }
 
+test "opaque with container field" {
+    try testSemanticTokens(
+        \\const Foo = opaque {
+        \\    invalid: u32,
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "opaque", .keyword, .{} },
+        .{ "invalid", .property, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+    });
+}
+
 test "function" {
     try testSemanticTokens(
         \\fn foo() void {}

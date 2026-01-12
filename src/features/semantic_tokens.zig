@@ -222,8 +222,7 @@ fn fieldTokenType(
     handle: *DocumentStore.Handle,
     is_static_access: bool,
 ) ?TokenType {
-    if (!ast.isContainer(&handle.tree, container_decl))
-        return null;
+    std.debug.assert(ast.isContainer(&handle.tree, container_decl));
     if (handle.tree.nodeTag(container_decl) == .root) return .property;
     if (is_static_access and ast.isTaggedUnion(&handle.tree, container_decl))
         return .enumMember;
@@ -233,7 +232,8 @@ fn fieldTokenType(
         .keyword_struct, .keyword_union => .property,
         .keyword_enum => .enumMember,
         .keyword_error => .errorTag,
-        else => null,
+        .keyword_opaque => .property, // opaque can't have fields but it's still syntactically valid
+        else => unreachable,
     };
 }
 
@@ -1130,18 +1130,13 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!
             if (!decl_type.handle.tree.nodeTag(decl_node).isContainerField()) break :field_blk;
             if (lhs_type.data != .container) break :field_blk;
             const scope_handle = lhs_type.data.container.scope_handle;
-            const tt = fieldTokenType(
+            const field_token_type = fieldTokenType(
                 scope_handle.toNode(),
                 scope_handle.handle,
                 lhs_type.is_type_val,
             ).?;
-            switch (tt) {
-                //These are the only token types returned by fieldTokenType
-                .property, .enumMember, .errorTag => {},
-                else => unreachable,
-            }
 
-            try writeTokenMod(builder, field_name_token, tt, .{});
+            try writeTokenMod(builder, field_name_token, field_token_type, .{});
             return;
         }
 
