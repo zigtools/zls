@@ -91,19 +91,28 @@ fn logFn(
         (writer.writableArray(trailing.len) catch unreachable).* = trailing;
     }
 
-    const stderr = std.debug.lockStderr(&.{});
-    defer std.debug.unlockStderr();
-
-    const io = stderr.file_writer.io;
+    const io = std.Options.debug_io;
+    const prev = io.swapCancelProtection(.blocked);
+    defer _ = io.swapCancelProtection(prev);
 
     if (log_stderr) {
+        const stderr = io.lockStderr(&.{}, null) catch |err| switch (err) {
+            error.Canceled => unreachable,
+        };
+        defer io.unlockStderr();
         stderr.file_writer.interface.writeAll(writer.buffered()) catch {};
     }
 
     if (log_file) |file| {
-        var log_writer = file.writerStreaming(io, &.{});
-        log_writer.seekTo(0) catch {};
-        log_writer.interface.writeAll(writer.buffered()) catch {};
+        const is_locked = if (file.lock(io, .exclusive)) |_| true else |_| false;
+        defer if (is_locked) file.unlock(io);
+        if (file.length(io)) |length| {
+            file.writePositionalAll(io, writer.buffered(), length) catch {};
+        } else |_| {
+            // Io currently provides no way to seek to the end of a file. This
+            // may clobber logs from other processes.
+            file.writeStreamingAll(io, writer.buffered()) catch {};
+        }
     }
 }
 
