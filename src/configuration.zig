@@ -209,60 +209,44 @@ pub const Manager = struct {
             }
         }
 
-        if (config.zig_lib_path) |zig_lib_path| blk: {
-            const zig_lib_dir: std.Io.Dir = switch (builtin.target.os.tag) {
-                // TODO The `zig_lib_path` could be a subdirectory of a preopen directory
-                .wasi => dir: {
-                    if (manager.wasi_preopens.get(zig_lib_path)) |value| {
-                        switch (value) {
-                            .dir => break :dir value.dir,
-                            else => {},
-                        }
-                    }
-                    log.warn("failed to resolve '{s}' WASI preopen", .{zig_lib_path});
-                    config.zig_lib_path = null;
-                    break :blk;
-                },
-                else => std.Io.Dir.openDirAbsolute(io, zig_lib_path, .{}) catch |err| {
-                    log.err("failed to open zig library directory '{s}': {}", .{ zig_lib_path, err });
-                    config.zig_lib_path = null;
-                    break :blk;
-                },
-            };
-            errdefer if (builtin.target.os.tag != .wasi) zig_lib_dir.close();
-
-            manager.zig_lib_dir = .{
-                .handle = zig_lib_dir,
-                .path = zig_lib_path,
-            };
-        }
-
-        if (config.global_cache_path) |global_cache_path| blk: {
-            const global_cache_dir: std.Io.Dir = switch (builtin.target.os.tag) {
-                // TODO The `global_cache_path` could be a subdirectory of a preopen directory
-                .wasi => dir: {
-                    if (manager.wasi_preopens.get(global_cache_path)) |value| {
-                        switch (value) {
-                            .dir => break :dir value.dir,
-                            else => {},
-                        }
-                    }
-                    log.warn("failed to resolve '{s}' WASI preopen", .{global_cache_path});
-                    config.global_cache_path = null;
-                    break :blk;
-                },
-                else => std.Io.Dir.cwd().createDirPathOpen(io, global_cache_path, .{}) catch |err| {
-                    log.err("failed to open global cache directory '{s}': {}", .{ global_cache_path, err });
-                    config.global_cache_path = null;
-                    break :blk;
-                },
-            };
-            errdefer if (builtin.target.os.tag != .wasi) global_cache_dir.close();
-
-            manager.global_cache_dir = .{
-                .handle = global_cache_dir,
-                .path = global_cache_path,
-            };
+        for (
+            [_]*?[]const u8{ &config.zig_lib_path, &config.global_cache_path },
+            [_]*?std.Build.Cache.Directory{ &manager.zig_lib_dir, &manager.global_cache_dir },
+            [_]enum { open, create }{ .open, .create },
+            [_][]const u8{ "zig library", "global cache" },
+        ) |opt_path, result_dir, action, name| {
+            const path = opt_path.* orelse continue;
+            if (builtin.target.os.tag == .wasi) {
+                // TODO The path could be a subdirectory of a preopen directory
+                const resource = manager.wasi_preopens.get(path) orelse {
+                    log.warn("failed to resolve '{s}' WASI preopen", .{path});
+                    opt_path.* = null;
+                    continue;
+                };
+                switch (resource) {
+                    .dir => |dir| {
+                        result_dir.* = .{ .handle = dir, .path = path };
+                        continue;
+                    },
+                    .file => {
+                        log.err("failed to resolve {s} directory '{s}': {}", .{ name, path, std.Io.File.OpenError.NotDir });
+                        opt_path.* = null;
+                        continue;
+                    },
+                }
+            } else {
+                const dir = switch (action) {
+                    .open => std.Io.Dir.cwd().openDir(io, path, .{}),
+                    .create => std.Io.Dir.cwd().createDirPathOpen(io, path, .{}),
+                } catch |err| {
+                    log.err("failed to open {s} directory '{s}': {}", .{ name, path, err });
+                    opt_path.* = null;
+                    continue;
+                };
+                result_dir.* = .{ .handle = dir, .path = path };
+                continue;
+            }
+            comptime unreachable;
         }
 
         if (config.build_runner_path == null) blk: {
