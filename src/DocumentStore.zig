@@ -817,7 +817,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
     } else {
         if (self.handles.get(uri)) |handle| {
             if (handle.isLspSynced()) return false;
-        }
+        } else return false;
         const file_contents = self.readFile(uri) orelse return false;
         _ = try self.createAndStoreDocument(uri, file_contents, false);
     }
