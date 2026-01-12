@@ -766,7 +766,7 @@ fn makeStep(
             }
         } else if (s.make(.{
             .progress_node = step_prog_node,
-            .watch = false,
+            .watch = run.watch,
             .web_server = null,
             .unit_test_timeout_ns = null,
             .gpa = gpa,
