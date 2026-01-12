@@ -23,6 +23,7 @@ const Error = error{
     OutOfMemory,
     InvalidTestItem,
     CheckFailed,
+    Unexpected,
 };
 
 pub fn main(init: std.process.Init) Error!void {
@@ -107,17 +108,17 @@ pub fn main(init: std.process.Init) Error!void {
         .builtin_path = null,
         .global_cache_dir = null,
         .wasi_preopens = switch (builtin.target.os.tag) {
-            .wasi => try std.fs.wasi.preopensAlloc(arena),
+            .wasi => try std.process.Preopens.init(arena),
             else => {},
         },
     };
 
     if (builtin.target.os.tag == .wasi) {
-        const zig_lib_dir_fd = config.wasi_preopens.find("/lib") orelse {
+        const zig_lib_dir_fd = config.wasi_preopens.get("/lib") orelse {
             std.log.err("failed to resolve '/lib' WASI preopen", .{});
             std.process.exit(1);
         };
-        config.zig_lib_dir = .{ .handle = .{ .handle = zig_lib_dir_fd }, .path = "/lib" };
+        config.zig_lib_dir = .{ .handle = zig_lib_dir_fd.dir, .path = "/lib" };
     }
 
     var document_store: zls.DocumentStore = .{

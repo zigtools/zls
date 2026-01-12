@@ -362,20 +362,19 @@ pub fn main(init: process.Init.Minimal) !void {
     validateSystemLibraryOptions(builder);
 
     var run: Run = .{
-        .max_rss = max_rss,
+        .gpa = arena,
+        .available_rss = max_rss,
         .max_rss_is_default = false,
         .max_rss_mutex = .init,
         .skip_oom_steps = skip_oom_steps,
         .memory_blocked_steps = .init(arena),
 
-        .claimed_rss = 0,
-
         .watch = watch,
         .cycle = 0,
     };
 
-    if (run.max_rss == 0) {
-        run.max_rss = process.totalSystemMemory() catch std.math.maxInt(u64);
+    if (run.available_rss == 0) {
+        run.available_rss = process.totalSystemMemory() catch std.math.maxInt(u64);
         run.max_rss_is_default = true;
     }
 
@@ -459,7 +458,7 @@ pub fn main(init: process.Init.Minimal) !void {
 
 fn markFailedStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
     for (all_steps) |step| switch (step.state) {
-        .dependency_failure, .failure, .skipped => step.recursiveReset(gpa),
+        .dependency_failure, .failure, .skipped => _ = step.invalidateResult(gpa),
         else => continue,
     };
     // Now that all dirty steps have been found, the remaining steps that
@@ -537,19 +536,18 @@ const Watch = struct {
     fn markStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
         for (all_steps) |step| switch (step.state) {
             .precheck_done => continue,
-            else => step.recursiveReset(gpa),
+            else => _ = step.invalidateResult(gpa),
         };
     }
 };
 
 const Run = struct {
-    max_rss: u64,
+    gpa: Allocator,
+    available_rss: usize,
     max_rss_is_default: bool,
     max_rss_mutex: std.Io.Mutex,
     skip_oom_steps: bool,
     memory_blocked_steps: ArrayListManaged(*Step),
-
-    claimed_rss: usize,
 
     watch: bool,
     cycle: u32,
@@ -614,12 +612,15 @@ fn prepare(
         var any_problems = false;
         for (step_stack.keys()) |s| {
             if (s.max_rss == 0) continue;
-            if (s.max_rss > run.max_rss) {
+            if (s.max_rss > run.available_rss) {
                 if (run.skip_oom_steps) {
                     s.state = .skipped_oom;
+                    for (s.dependants.items) |dependant| {
+                        dependant.pending_deps -= 1;
+                    }
                 } else {
                     std.debug.print("{s}{s}: this step declares an upper bound of {d} bytes of memory, exceeding the available {d} bytes of memory\n", .{
-                        s.owner.dep_prefix, s.name, s.max_rss, run.max_rss,
+                        s.owner.dep_prefix, s.name, s.max_rss, run.available_rss,
                     });
                     any_problems = true;
                 }
@@ -643,24 +644,31 @@ fn runSteps(
     const io = b.graph.io;
     const steps = steps_stack.keys();
 
-    var step_prog = parent_prog_node.start("steps", steps.len);
-    defer step_prog.end();
+    {
+        // Collect the initial set of tasks (those with no outstanding dependencies) into a buffer,
+        // then spawn them. The buffer is so that we don't race with `makeStep` and end up thinking
+        // a step is initial when it actually became ready due to an earlier initial step.
+        var initial_set: std.ArrayList(*Step) = .empty;
+        defer initial_set.deinit(gpa);
+        try initial_set.ensureUnusedCapacity(gpa, steps_stack.count());
+        for (steps_stack.keys()) |s| {
+            if (s.state == .precheck_done and s.pending_deps == 0) {
+                initial_set.appendAssumeCapacity(s);
+            }
+        }
 
-    var group: std.Io.Group = .init;
-    defer group.cancel(io);
+        var step_prog = parent_prog_node.start("steps", steps.len);
+        defer step_prog.end();
 
-    // Here we spawn the initial set of tasks with a nice heuristic -
-    // dependency order. Each worker when it finishes a step will then
-    // check whether it should run any dependants.
-    for (steps) |step| {
-        if (step.state == .skipped_oom) continue;
+        var group: std.Io.Group = .init;
+        defer group.cancel(io);
 
-        group.async(io, workerMakeOneStep, .{
-            &group, gpa, b, steps_stack, step, step_prog, run,
-        });
+        // Start working on all of the initial steps...
+        for (initial_set.items) |s| try stepReady(&group, b, steps_stack, s, step_prog, run);
+        // ...and `makeStep` will trigger every other step when their last dependency finishes.    }
+
+        try group.await(io);
     }
-
-    try group.await(io);
 
     if (run.watch) {
         for (steps) |step| {
@@ -709,12 +717,12 @@ fn constructGraphAndCheckForDependencyLoop(
             }
 
             s.state = .precheck_done;
+            s.pending_deps = @intCast(s.dependencies.items.len);
         },
         .precheck_done => {},
 
         // These don't happen until we actually run the step graph.
         .dependency_failure,
-        .running,
         .success,
         .failure,
         .skipped,
@@ -723,74 +731,71 @@ fn constructGraphAndCheckForDependencyLoop(
     }
 }
 
-fn workerMakeOneStep(
+/// Runs the "make" function of the single step `s`, updates its state, and then spawns newly-ready
+/// dependant steps in `group`. If `s` makes an RSS claim (i.e. `s.max_rss != 0`), the caller must
+/// have already subtracted this value from `run.available_rss`. This function will release the RSS
+/// claim (i.e. add `s.max_rss` back into `run.available_rss`) and queue any viable memory-blocked
+/// steps after "make" completes for `s`.
+fn makeStep(
     group: *std.Io.Group,
-    gpa: std.mem.Allocator,
     b: *std.Build,
     steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
     s: *Step,
-    prog_node: std.Progress.Node,
+    root_prog_node: std.Progress.Node,
     run: *Run,
-) void {
+) std.Io.Cancelable!void {
     const io = b.graph.io;
+    const gpa = run.gpa;
 
-    // First, check the conditions for running this step. If they are not met,
-    // then we return without doing the step, relying on another worker to
-    // queue this step up again when dependencies are met.
-    for (s.dependencies.items) |dep| {
-        switch (@atomicLoad(Step.State, &dep.state, .seq_cst)) {
-            .success, .skipped => continue,
-            .failure, .dependency_failure, .skipped_oom => {
-                @atomicStore(Step.State, &s.state, .dependency_failure, .seq_cst);
-                return;
-            },
-            .precheck_done, .running => {
-                // dependency is not finished yet.
-                return;
-            },
+    {
+        const step_prog_node = root_prog_node.start(s.name, 0);
+        defer step_prog_node.end();
+
+        const new_state: Step.State = for (s.dependencies.items) |dep| {
+            switch (@atomicLoad(Step.State, &dep.state, .monotonic)) {
+                .precheck_unstarted => unreachable,
+                .precheck_started => unreachable,
+                .precheck_done => unreachable,
+
+                .failure,
+                .dependency_failure,
+                .skipped_oom,
+                => break .dependency_failure,
+
+                .success, .skipped => {},
+            }
+        } else if (s.make(.{
+            .progress_node = step_prog_node,
+            .watch = run.watch,
+            .web_server = null,
+            .unit_test_timeout_ns = null,
+            .gpa = gpa,
+        })) state: {
+            break :state .success;
+        } else |err| switch (err) {
+            error.MakeFailed => .failure,
+            error.MakeSkipped => .skipped,
+        };
+
+        @atomicStore(Step.State, &s.state, new_state, .monotonic);
+
+        switch (new_state) {
             .precheck_unstarted => unreachable,
             .precheck_started => unreachable,
+            .precheck_done => unreachable,
+
+            .failure,
+            .dependency_failure,
+            .skipped_oom,
+            => {
+                std.Progress.setStatus(.failure_working);
+            },
+
+            .success,
+            .skipped,
+            => {},
         }
     }
-
-    if (s.max_rss != 0) {
-        run.max_rss_mutex.lockUncancelable(io);
-        defer run.max_rss_mutex.unlock(io);
-
-        // Avoid running steps twice.
-        if (s.state != .precheck_done) {
-            // Another worker got the job.
-            return;
-        }
-
-        const new_claimed_rss = run.claimed_rss + s.max_rss;
-        if (new_claimed_rss > run.max_rss) {
-            // Running this step right now could possibly exceed the allotted RSS.
-            // Add this step to the queue of memory-blocked steps.
-            run.memory_blocked_steps.append(s) catch @panic("OOM");
-            return;
-        }
-
-        run.claimed_rss = new_claimed_rss;
-        s.state = .running;
-    } else {
-        // Avoid running steps twice.
-        if (@cmpxchgStrong(Step.State, &s.state, .precheck_done, .running, .seq_cst, .seq_cst) != null) {
-            // Another worker got the job.
-            return;
-        }
-    }
-
-    var sub_prog_node = prog_node.start(s.name, 0);
-    defer sub_prog_node.end();
-
-    const make_result = s.make(.{
-        .progress_node = sub_prog_node,
-        .watch = true,
-        .web_server = null,
-        .unit_test_timeout_ns = null,
-        .gpa = gpa,
-    });
 
     if (run.watch) {
         const step_id: u32 = @intCast(steps_stack.getIndex(s).?);
@@ -800,54 +805,56 @@ fn workerMakeOneStep(
         serveWatchErrorBundle(b.graph.io, step_id, run.cycle, s.result_error_bundle) catch @panic("failed to send watch errors");
     }
 
-    handle_result: {
-        if (make_result) |_| {
-            @atomicStore(Step.State, &s.state, .success, .seq_cst);
-        } else |err| switch (err) {
-            error.MakeFailed => {
-                @atomicStore(Step.State, &s.state, .failure, .seq_cst);
-                break :handle_result;
-            },
-            error.MakeSkipped => @atomicStore(Step.State, &s.state, .skipped, .seq_cst),
-        }
-
-        // Successful completion of a step, so we queue up its dependants as well.
-        for (s.dependants.items) |dep| {
-            group.async(io, workerMakeOneStep, .{
-                group, gpa, b, steps_stack, dep, prog_node, run,
-            });
-        }
-    }
-
-    // If this is a step that claims resources, we must now queue up other
-    // steps that are waiting for resources.
     if (s.max_rss != 0) {
-        run.max_rss_mutex.lockUncancelable(io);
-        defer run.max_rss_mutex.unlock(io);
+        var dispatch_set: std.ArrayList(*Step) = .empty;
+        defer dispatch_set.deinit(gpa);
 
-        // Give the memory back to the scheduler.
-        run.claimed_rss -= s.max_rss;
-        // Avoid kicking off too many tasks that we already know will not have
-        // enough resources.
-        var remaining = run.max_rss - run.claimed_rss;
-        var i: usize = 0;
-        var j: usize = 0;
-        while (j < run.memory_blocked_steps.items.len) : (j += 1) {
-            const dep = run.memory_blocked_steps.items[j];
-            assert(dep.max_rss != 0);
-            if (dep.max_rss <= remaining) {
-                remaining -= dep.max_rss;
-
-                group.async(io, workerMakeOneStep, .{
-                    group, gpa, b, steps_stack, dep, prog_node, run,
-                });
-            } else {
-                run.memory_blocked_steps.items[i] = dep;
-                i += 1;
+        // Release our RSS claim and kick off some blocked steps if possible. We use `dispatch_set`
+        // as a staging buffer to avoid recursing into `makeStep` while `run.max_rss_mutex` is held.
+        {
+            try run.max_rss_mutex.lock(io);
+            defer run.max_rss_mutex.unlock(io);
+            run.available_rss += s.max_rss;
+            dispatch_set.ensureUnusedCapacity(gpa, run.memory_blocked_steps.items.len) catch @panic("OOM");
+            while (run.memory_blocked_steps.getLastOrNull()) |candidate| {
+                if (run.available_rss < candidate.max_rss) break;
+                assert(run.memory_blocked_steps.pop() == candidate);
+                dispatch_set.appendAssumeCapacity(candidate);
             }
         }
-        run.memory_blocked_steps.shrinkRetainingCapacity(i);
+        for (dispatch_set.items) |candidate| {
+            group.async(io, makeStep, .{ group, b, steps_stack, candidate, root_prog_node, run });
+        }
     }
+
+    for (s.dependants.items) |dependant| {
+        // `.acq_rel` synchronizes with itself to ensure all dependencies' final states are visible when this hits 0.
+        if (@atomicRmw(u32, &dependant.pending_deps, .Sub, 1, .acq_rel) == 1) {
+            try stepReady(group, b, steps_stack, dependant, root_prog_node, run);
+        }
+    }
+}
+
+fn stepReady(
+    group: *std.Io.Group,
+    b: *std.Build,
+    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    s: *Step,
+    root_prog_node: std.Progress.Node,
+    run: *Run,
+) !void {
+    const io = b.graph.io;
+    if (s.max_rss != 0) {
+        try run.max_rss_mutex.lock(io);
+        defer run.max_rss_mutex.unlock(io);
+        if (run.available_rss < s.max_rss) {
+            // Running this step right now could possibly exceed the allotted RSS.
+            run.memory_blocked_steps.append(s) catch @panic("OOM");
+            return;
+        }
+        run.available_rss -= s.max_rss;
+    }
+    group.async(io, makeStep, .{ group, b, steps_stack, s, root_prog_node, run });
 }
 
 fn nextArg(args: []const [:0]const u8, idx: *usize) ?[:0]const u8 {

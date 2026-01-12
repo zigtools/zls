@@ -58,7 +58,7 @@ pub const Config = struct {
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
-        .wasi => std.fs.wasi.Preopens,
+        .wasi => std.process.Preopens,
         else => void,
     },
 };
@@ -656,7 +656,7 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
 
     const dir, const sub_path = blk: {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
-            for (self.config.wasi_preopens.names, 0..) |name, i| {
+            for (self.config.wasi_preopens.map.keys()[3..], 3..) |name, i| {
                 const preopen_dir: std.Io.Dir = .{ .handle = @intCast(i) };
                 const preopen_path = std.mem.trimEnd(u8, name, "/");
 
@@ -1770,10 +1770,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
 }
 
 fn resolveFileImportString(allocator: std.mem.Allocator, base_path: []const u8, import_str: []const u8) error{OutOfMemory}!?Uri {
-    const joined_path = std.fs.path.resolve(allocator, &.{ base_path, "..", import_str }) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return null,
-    };
+    const joined_path = try std.fs.path.resolve(allocator, &.{ base_path, "..", import_str });
     defer allocator.free(joined_path);
 
     return try .fromPath(allocator, joined_path);
