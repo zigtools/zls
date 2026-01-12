@@ -21,7 +21,7 @@ pub const Manager = struct {
     zig_lib_dir: ?std.Build.Cache.Directory,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
-        .wasi => std.fs.wasi.Preopens,
+        .wasi => std.process.Preopens,
         else => void,
     },
     build_runner_supported: union(enum) {
@@ -42,7 +42,9 @@ pub const Manager = struct {
         arena: std.heap.ArenaAllocator.State,
     },
 
-    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) error{OutOfMemory}!Manager {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) error{ OutOfMemory, Unexpected }!Manager {
+        const arena_state = std.heap.ArenaAllocator.State{};
+        var arena_allocator = arena_state.promote(allocator);
         return .{
             .io = io,
             .allocator = allocator,
@@ -52,14 +54,14 @@ pub const Manager = struct {
             .global_cache_dir = null,
             .build_runner_supported = .no_dont_error,
             .wasi_preopens = switch (builtin.os.tag) {
-                .wasi => try std.fs.wasi.preopensAlloc(allocator),
+                .wasi => try std.process.Preopens.init(arena_allocator.allocator()),
                 else => {},
             },
             .config = .{},
             .impl = .{
                 .is_dirty = true,
                 .configs = .initFill(.{}),
-                .arena = .{},
+                .arena = arena_allocator.state,
             },
         };
     }
@@ -67,15 +69,9 @@ pub const Manager = struct {
     pub fn deinit(manager: *Manager) void {
         const io = manager.io;
         const allocator = manager.allocator;
-        switch (builtin.os.tag) {
-            .wasi => {
-                for (manager.wasi_preopens.names[3..]) |name| allocator.free(name);
-                allocator.free(manager.wasi_preopens.names);
-            },
-            else => {
-                if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close(io);
-                if (manager.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close(io);
-            },
+        if (builtin.os.tag != .wasi) {
+            if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close(io);
+            if (manager.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close(io);
         }
         manager.impl.arena.promote(allocator).deinit();
         manager.* = undefined;
@@ -216,11 +212,17 @@ pub const Manager = struct {
         if (config.zig_lib_path) |zig_lib_path| blk: {
             const zig_lib_dir: std.Io.Dir = switch (builtin.target.os.tag) {
                 // TODO The `zig_lib_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .handle = manager.wasi_preopens.find(zig_lib_path) orelse {
+                .wasi => dir: {
+                    if (manager.wasi_preopens.get(zig_lib_path)) |value| {
+                        switch (value) {
+                            .dir => break :dir value.dir,
+                            else => {},
+                        }
+                    }
                     log.warn("failed to resolve '{s}' WASI preopen", .{zig_lib_path});
                     config.zig_lib_path = null;
                     break :blk;
-                } },
+                },
                 else => std.Io.Dir.openDirAbsolute(io, zig_lib_path, .{}) catch |err| {
                     log.err("failed to open zig library directory '{s}': {}", .{ zig_lib_path, err });
                     config.zig_lib_path = null;
@@ -238,11 +240,17 @@ pub const Manager = struct {
         if (config.global_cache_path) |global_cache_path| blk: {
             const global_cache_dir: std.Io.Dir = switch (builtin.target.os.tag) {
                 // TODO The `global_cache_path` could be a subdirectory of a preopen directory
-                .wasi => .{ .handle = manager.wasi_preopens.find(global_cache_path) orelse {
+                .wasi => dir: {
+                    if (manager.wasi_preopens.get(global_cache_path)) |value| {
+                        switch (value) {
+                            .dir => break :dir value.dir,
+                            else => {},
+                        }
+                    }
                     log.warn("failed to resolve '{s}' WASI preopen", .{global_cache_path});
                     config.global_cache_path = null;
                     break :blk;
-                } },
+                },
                 else => std.Io.Dir.cwd().createDirPathOpen(io, global_cache_path, .{}) catch |err| {
                     log.err("failed to open global cache directory '{s}': {}", .{ global_cache_path, err });
                     config.global_cache_path = null;

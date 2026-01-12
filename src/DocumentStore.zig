@@ -58,7 +58,7 @@ pub const Config = struct {
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
-        .wasi => if (@hasDecl(std.fs, "wasi")) std.fs.wasi.Preopens else void,
+        .wasi => std.process.Preopens,
         else => void,
     },
 };
@@ -656,8 +656,17 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
 
     const dir, const sub_path = blk: {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
-            for (self.config.wasi_preopens.names, 0..) |name, i| {
-                const preopen_dir: std.Io.Dir = .{ .handle = @intCast(i) };
+            const names = self.config.wasi_preopens.map.keys();
+            for (names) |name| {
+                const preopen_dir: std.Io.Dir = dir: {
+                    if (self.config.wasi_preopens.get(name)) |value| {
+                        switch (value) {
+                            .dir => break :dir value.dir,
+                            else => {},
+                        }
+                    }
+                    continue;
+                };
                 const preopen_path = std.mem.trimEnd(u8, name, "/");
 
                 if (!std.mem.startsWith(u8, file_path, preopen_path)) continue;
