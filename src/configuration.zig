@@ -43,8 +43,8 @@ pub const Manager = struct {
     },
 
     pub fn init(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) error{ OutOfMemory, Unexpected }!Manager {
-        const arena_state = std.heap.ArenaAllocator.State{};
-        var arena_allocator = arena_state.promote(allocator);
+        var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
+        errdefer arena_allocator.deinit();
         return .{
             .io = io,
             .allocator = allocator,
