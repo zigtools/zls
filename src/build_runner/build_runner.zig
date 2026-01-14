@@ -669,16 +669,6 @@ fn runSteps(
 
         try group.await(io);
     }
-
-    if (run.watch) {
-        for (steps) |step| {
-            const step_id: u32 = @intCast(steps_stack.getIndex(step).?);
-            // missing fields:
-            // - result_error_msgs
-            // - result_stderr
-            serveWatchErrorBundle(b.graph.io, step_id, run.cycle, step.result_error_bundle) catch @panic("failed to send watch errors");
-        }
-    }
 }
 
 /// Traverse the dependency graph depth-first and make it undirected by having
