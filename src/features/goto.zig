@@ -232,7 +232,7 @@ fn gotoDefinitionString(
     pos_context: Analyser.PositionContext,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) error{OutOfMemory}!?[]const types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -242,14 +242,17 @@ fn gotoDefinitionString(
     if (loc.start == loc.end) return null;
     const import_str = offsets.locToSlice(handle.tree.source, loc);
 
-    const uri: ?Uri = switch (pos_context) {
+    const result: DocumentStore.UriFromImportStringResult = switch (pos_context) {
         .import_string_literal,
         .embedfile_string_literal,
         => try document_store.uriFromImportStr(arena, handle, import_str),
         .cinclude_string_literal => blk: {
             if (!DocumentStore.supports_build_system) return null;
 
-            if (std.fs.path.isAbsolute(import_str)) break :blk try Uri.fromPath(arena, import_str);
+            if (std.fs.path.isAbsolute(import_str)) {
+                break :blk .{ .one = try .fromPath(arena, import_str) };
+            }
+
             var include_dirs: std.ArrayList([]const u8) = .empty;
             _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
                 log.err("failed to resolve include paths: {}", .{err});
@@ -258,7 +261,7 @@ fn gotoDefinitionString(
             for (include_dirs.items) |dir| {
                 const path = try std.fs.path.join(arena, &.{ dir, import_str });
                 std.Io.Dir.accessAbsolute(io, path, .{}) catch continue;
-                break :blk try Uri.fromPath(arena, path);
+                break :blk .{ .one = try .fromPath(arena, path) };
             }
             return null;
         },
@@ -269,12 +272,27 @@ fn gotoDefinitionString(
         .start = .{ .line = 0, .character = 0 },
         .end = .{ .line = 0, .character = 0 },
     };
-    return .{
-        .originSelectionRange = offsets.locToRange(handle.tree.source, loc, offset_encoding),
-        .targetUri = if (uri) |u| u.raw else return null,
-        .targetRange = target_range,
-        .targetSelectionRange = target_range,
-    };
+    switch (result) {
+        .none => return null,
+        .one => |uri| return try arena.dupe(types.Definition.Link, &.{.{
+            .originSelectionRange = offsets.locToRange(handle.tree.source, loc, offset_encoding),
+            .targetUri = uri.raw,
+            .targetRange = target_range,
+            .targetSelectionRange = target_range,
+        }}),
+        .many => |uris| {
+            const links = try arena.alloc(types.Definition.Link, uris.len);
+            for (links, uris) |*link, uri| {
+                link.* = .{
+                    .originSelectionRange = offsets.locToRange(handle.tree.source, loc, offset_encoding),
+                    .targetUri = uri.raw,
+                    .targetRange = target_range,
+                    .targetSelectionRange = target_range,
+                };
+            }
+            return links;
+        },
+    }
 }
 
 pub fn gotoHandler(
@@ -296,10 +314,13 @@ pub fn gotoHandler(
     const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
     const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
-    const response = switch (pos_context) {
+    const response: types.Definition.Link = blk: switch (pos_context) {
         .builtin => |loc| try gotoDefinitionBuiltin(&analyser, handle, loc, server.offset_encoding),
         .var_access => try gotoDefinitionGlobal(&analyser, handle, source_index, kind, server.offset_encoding),
-        .field_access => |loc| blk: {
+        .label_access, .label_decl => |loc| try gotoDefinitionLabel(&analyser, handle, source_index, loc, kind, server.offset_encoding),
+        .enum_literal => try gotoDefinitionEnumLiteral(&analyser, handle, source_index, kind, server.offset_encoding),
+
+        .field_access => |loc| {
             const links = try gotoDefinitionFieldAccess(&analyser, arena, handle, source_index, loc, kind, server.offset_encoding) orelse return null;
             if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
                 return .{ .definition_links = links };
@@ -313,10 +334,28 @@ pub fn gotoHandler(
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding),
-        .label_access, .label_decl => |loc| try gotoDefinitionLabel(&analyser, handle, source_index, loc, kind, server.offset_encoding),
-        .enum_literal => try gotoDefinitionEnumLiteral(&analyser, handle, source_index, kind, server.offset_encoding),
-        else => null,
+        => {
+            const links = try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding) orelse return null;
+            if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
+                return .{ .definition_links = links };
+            }
+            switch (links.len) {
+                0 => unreachable,
+                1 => break :blk links[0],
+                else => return null,
+            }
+        },
+
+        .string_literal,
+        .number_literal,
+        .char_literal,
+        .parens_expr,
+        .keyword,
+        .error_access,
+        .comment,
+        .other,
+        .empty,
+        => return null,
     } orelse return null;
 
     if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
@@ -325,10 +364,8 @@ pub fn gotoHandler(
         };
     }
 
-    return .{
-        .definition = .{ .location = .{
-            .uri = response.targetUri,
-            .range = response.targetSelectionRange,
-        } },
-    };
+    return .{ .definition = .{ .location = .{
+        .uri = response.targetUri,
+        .range = response.targetSelectionRange,
+    } } };
 }

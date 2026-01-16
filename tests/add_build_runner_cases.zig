@@ -58,13 +58,19 @@ pub fn addCases(
         build_cmd.addArg("--zig-lib-dir");
         build_cmd.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
 
+        build_cmd.addFileInput(b.path("src/build_runner/shared.zig"));
+
         const actual_build_config_json = build_cmd.captureStdOut(.{});
 
         const run_diff = b.addRunArtifact(check_exe);
         run_diff.setName(b.fmt("run {s} ({s})", .{ check_exe.name, entry.name }));
+        run_diff.setCwd(cases_dir);
         run_diff.addFileArg(expected_build_config_json);
         run_diff.addFileArg(actual_build_config_json);
-        run_diff.addDirectoryArg(cases_dir);
+        run_diff.addArg("--cache-dir");
+        run_diff.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.cache_root}) });
+        run_diff.addArg("--global-cache-dir");
+        run_diff.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.global_cache_root}) });
 
         test_step.dependOn(&run_diff.step);
     }
