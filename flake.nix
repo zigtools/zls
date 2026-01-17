@@ -10,27 +10,42 @@
     self,
     nixpkgs,
     zig-overlay,
-  }:
-    builtins.foldl' nixpkgs.lib.recursiveUpdate {} (
+  }: let
+    lib = nixpkgs.lib;
+    parseVersionFieldFromZon = name:
+      lib.pipe ./build.zig.zon [
+        builtins.readFile
+        (builtins.match ".*\n[[:space:]]*\.${name}[[:space:]]=[[:space:]]\"([^\"]+)\".*")
+        builtins.head
+      ];
+    zlsVersionShort = parseVersionFieldFromZon "version";
+    zlsVersionFull =
+      zlsVersionShort
+      + (
+        if (builtins.length (builtins.splitVersion zlsVersionShort)) == 3
+        then ""
+        else "+" + lib.replaceString "-" "." (self.dirtyShortRev or self.shortRev)
+      );
+  in
+    builtins.foldl' lib.recursiveUpdate {} (
       builtins.map
       (
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
-          fs = pkgs.lib.fileset;
+          fs = lib.fileset;
           zig = zig-overlay.packages.${system}.master;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
-          revision = self;
         in {
           formatter.${system} = pkgs.alejandra;
           packages.${system} = rec {
             default = zls;
             zls = pkgs.stdenvNoCC.mkDerivation {
               name = "zls";
-              version = "master";
+              version = zlsVersionShort;
               meta.mainProgram = "zls";
               src = fs.toSource {
                 root = ./.;
-                fileset = fs.intersection (fs.fromSource (pkgs.lib.sources.cleanSource ./.)) (
+                fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource ./.)) (
                   fs.unions [
                     ./src
                     ./tests
@@ -48,10 +63,10 @@
                 PACKAGE_DIR=${pkgs.callPackage ./deps.nix {}}
               '';
               buildPhase = ''
-                zig build install --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe --color off --prefix $out
+                zig build install --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe -Dversion-string=${zlsVersionFull} --color off --prefix $out
               '';
               checkPhase = ''
-                zig build test --system $PACKAGE_DIR -Dtarget=${target} --color off
+                zig build test --system $PACKAGE_DIR -Dtarget=${target} -Dversion-string=${zlsVersionFull} --color off
               '';
             };
           };
