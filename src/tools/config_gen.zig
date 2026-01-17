@@ -442,7 +442,7 @@ const Tokenizer = struct {
 
 const Builtin = struct {
     name: []const u8,
-    signature: [:0]const u8,
+    signature: []const u8,
     documentation: std.ArrayList(u8),
 };
 
@@ -469,7 +469,6 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
     var builtins: std.ArrayList(Builtin) = .empty;
     errdefer {
         for (builtins.items) |*builtin| {
-            allocator.free(builtin.signature);
             builtin.documentation.deinit(allocator);
         }
         builtins.deinit(allocator);
@@ -551,7 +550,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
 
                     switch (state) {
                         .builtin_begin => {
-                            builtins.items[builtins.items.len - 1].signature = try allocator.dupeZ(u8, content_name);
+                            builtins.items[builtins.items.len - 1].signature = content_name;
                             state = .builtin_content;
                         },
                         .builtin_content => {
@@ -795,8 +794,13 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
 }
 
 const Parameter = struct {
+    documentation: ?[]const u8,
     signature: []const u8,
-    type: ?[]const u8,
+
+    fn deinit(param: *Parameter, allocator: std.mem.Allocator) void {
+        if (param.documentation) |doc| allocator.free(doc);
+        param.* = undefined;
+    }
 };
 
 /// takes in a signature (without name or leading parenthesis) like this:
@@ -805,11 +809,15 @@ const Parameter = struct {
 /// `comptime DestType: type`, `integer: anytype`, `DestType`
 fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, signature: [:0]const u8) error{OutOfMemory}!struct { []Parameter, []const u8 } {
     var parameters: std.ArrayList(Parameter) = .empty;
-    defer parameters.deinit(allocator);
+    errdefer {
+        for (parameters.items) |*param| param.deinit(allocator);
+        defer parameters.deinit(allocator);
+    }
 
     var tokenizer: std.zig.Tokenizer = .init(signature);
+    var documentation: std.ArrayList(u8) = .empty;
+    defer documentation.deinit(allocator);
     var argument_start: ?usize = null;
-    var colon_index: ?usize = null;
     while (true) {
         const token = tokenizer.next();
         switch (token.tag) {
@@ -825,27 +833,22 @@ fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, sig
                 }
                 continue;
             },
-            .colon => {
-                std.debug.assert(argument_start != null);
-                std.debug.assert(colon_index == null);
-                colon_index = token.loc.start;
-            },
             .comma, .r_paren => |tag| {
                 if (argument_start) |start| {
                     try parameters.append(allocator, .{
+                        .documentation = if (documentation.items.len != 0) try documentation.toOwnedSlice(allocator) else null,
                         .signature = std.mem.trim(u8, signature[start..token.loc.start], &std.ascii.whitespace),
-                        .type = if (colon_index) |i| std.mem.trim(u8, signature[1 + i .. token.loc.start], &std.ascii.whitespace) else null,
                     });
                 }
                 argument_start = null;
-                colon_index = null;
                 if (tag == .r_paren) break;
             },
-            .doc_comment, .container_doc_comment => {},
+            .doc_comment, .container_doc_comment => {
+                try documentation.print(allocator, "{s}\n", .{signature[token.loc.start + "///".len .. token.loc.end]});
+            },
             else => {
                 if (argument_start == null) {
                     argument_start = token.loc.start;
-                    std.debug.assert(colon_index == null);
                 }
             },
         }
@@ -853,39 +856,6 @@ fn extractParametersAndReturnTypeFromSignature(allocator: std.mem.Allocator, sig
 
     const return_type = signature[tokenizer.index + 1 ..];
     return .{ try parameters.toOwnedSlice(allocator), return_type };
-}
-
-fn createSignatureSnippet(
-    allocator: std.mem.Allocator,
-    builtin_name: []const u8,
-    parameters: []const Parameter,
-) error{OutOfMemory}![]const u8 {
-    var snippet: std.ArrayList(u8) = .empty;
-    defer snippet.deinit(allocator);
-
-    try snippet.print(allocator, "{s}(", .{builtin_name});
-    for (parameters, 1..) |param, i| {
-        if (i != 1) try snippet.print(allocator, ", ", .{});
-        try snippet.print(allocator, "${{{d}:", .{i});
-        for (param.signature) |c| {
-            switch (c) {
-                // escaped character
-                '$', '}', '\\' => try snippet.print(allocator, "\\{c}", .{c}),
-                else => try snippet.append(allocator, c),
-            }
-        }
-        try snippet.append(allocator, '}');
-    }
-    try snippet.append(allocator, ')');
-
-    return try snippet.toOwnedSlice(allocator);
-}
-
-fn withoutStdBuiltinPrefix(type_str: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, type_str, "std.builtin.")) {
-        return type_str["std.builtin.".len..];
-    }
-    return type_str;
 }
 
 /// Generates data files from the Zig language Reference (https://ziglang.org/documentation/master/)
@@ -904,7 +874,6 @@ fn generateVersionDataFile(
     const builtins = try collectBuiltinData(allocator, version, langref_source);
     defer {
         for (builtins) |*builtin| {
-            allocator.free(builtin.signature);
             builtin.documentation.deinit(allocator);
         }
         allocator.free(builtins);
@@ -924,42 +893,41 @@ fn generateVersionDataFile(
         \\const std = @import("std");
         \\
         \\pub const Builtin = struct {
-        \\    signature: []const u8,
         \\    return_type: []const u8,
-        \\    snippet: []const u8,
         \\    documentation: []const u8,
         \\    parameters: []const Parameter,
         \\
         \\    pub const Parameter = struct {
         \\        signature: []const u8,
-        \\        type: ?[]const u8,
+        \\        documentation: ?[]const u8,
         \\    };
         \\};
         \\
-        \\pub const builtins: std.StaticStringMap(Builtin) = .initComptime(&.{
+        \\pub const builtins: std.StaticStringMap(Builtin) = .initComptime(&[_]struct { []const u8, Builtin }{
         \\
     );
 
     for (builtins) |builtin| {
-        const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, builtin.signature[builtin.name.len + 1 ..]);
-        defer allocator.free(parameters);
+        const signature = try std.mem.replaceOwned(u8, allocator, builtin.signature[builtin.name.len + 1 ..], "std.builtin.", "");
+        defer allocator.free(signature);
+        const signature_with_sentinel = try allocator.dupeZ(u8, signature);
+        defer allocator.free(signature_with_sentinel);
 
-        const snippet = try createSignatureSnippet(allocator, builtin.name, parameters);
-        defer allocator.free(snippet);
+        const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, signature_with_sentinel);
+        defer {
+            for (parameters) |*param| param.deinit(allocator);
+            defer allocator.free(parameters);
+        }
 
         try writer.print(
             \\    .{{
             \\        "{f}",
-            \\        Builtin{{
-            \\            .signature = "{f}",
+            \\        .{{
             \\            .return_type = "{f}",
-            \\            .snippet = "{f}",
             \\
         , .{
             std.zig.fmtString(builtin.name),
-            std.zig.fmtString(builtin.signature),
-            std.zig.fmtString(withoutStdBuiltinPrefix(return_type)),
-            std.zig.fmtString(snippet),
+            std.zig.fmtString(return_type),
         });
 
         const html = builtin.documentation.items["</pre>".len..];
@@ -975,7 +943,7 @@ fn generateVersionDataFile(
 
         try writer.writeAll(
             \\            ,
-            \\            .parameters = &[_]Builtin.Parameter{
+            \\            .parameters = &.{
         );
 
         if (parameters.len != 0) {
@@ -988,12 +956,12 @@ fn generateVersionDataFile(
                 , .{
                     std.zig.fmtString(param.signature),
                 });
-                if (param.type) |t| {
-                    try writer.print("                    .type = \"{f}\",\n", .{
-                        std.zig.fmtString(withoutStdBuiltinPrefix(t)),
+                if (param.documentation) |doc| {
+                    try writer.print("                    .documentation = \"{f}\",\n", .{
+                        std.zig.fmtString(doc),
                     });
                 } else {
-                    try writer.writeAll("                    .type = null,\n");
+                    try writer.writeAll("                    .documentation = null,\n");
                 }
                 try writer.writeAll("                },\n");
             }

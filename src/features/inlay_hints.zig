@@ -162,20 +162,24 @@ const Builder = struct {
         node_tag: Ast.Node.Tag,
         token_index: Ast.TokenIndex,
         label: []const u8,
-        tooltip: []const u8,
+        tooltip_text: []const u8,
         tooltip_noalias: bool,
         tooltip_comptime: bool,
     ) !void {
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
-        const tooltip_text = blk: {
-            if (tooltip.len == 0) break :blk "";
-            const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
+        const tooltip: ?types.MarkupContent = tooltip: {
+            if (tooltip_text.len == 0) break :tooltip null;
+            const prefix = if (tooltip_noalias) "noalias " else if (tooltip_comptime) "comptime " else "";
 
-            if (self.hover_kind == .markdown) {
-                break :blk try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
-            }
+            const text = switch (self.hover_kind) {
+                .markdown => try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip_text }),
+                .plaintext, .unknown_value => try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip_text }),
+            };
 
-            break :blk try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip });
+            break :tooltip .{
+                .kind = self.hover_kind,
+                .value = text,
+            };
         };
 
         try self.hints.append(self.arena, .{
@@ -185,10 +189,7 @@ const Builder = struct {
                 self.handle.tree.tokenStart(token_index),
             .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
             .kind = .Parameter,
-            .tooltip = .{
-                .kind = self.hover_kind,
-                .value = tooltip_text,
-            },
+            .tooltip = tooltip,
         });
     }
 
@@ -292,36 +293,31 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, param
 
     const len = @min(params.len, parameters.len);
     for (params[0..len], parameters[0..len]) |param, parameter| {
-        const signature = param.signature;
-        if (signature.len == 0) continue;
+        var signature = param.signature;
+        if (std.mem.eql(u8, signature, "...")) return;
 
-        const colonIndex = std.mem.findScalar(u8, signature, ':');
-        const type_expr = param.type orelse "";
-
-        // TODO: parse noalias/comptime/label in config_gen.zig
-        var maybe_label: ?[]const u8 = null;
-        var no_alias = false;
-        var comp_time = false;
-
-        var it = std.mem.splitScalar(u8, signature[0 .. colonIndex orelse signature.len], ' ');
-        while (it.next()) |item| {
-            if (item.len == 0) continue;
-            maybe_label = item;
-
-            no_alias = no_alias or std.mem.eql(u8, item, "noalias");
-            comp_time = comp_time or std.mem.eql(u8, item, "comptime");
+        var is_comptime = false;
+        var is_noalias = false;
+        if (std.mem.cutPrefix(u8, signature, "comptime")) |rest| {
+            signature = rest;
+            is_comptime = true;
+        } else if (std.mem.cutPrefix(u8, signature, "noalias")) |rest| {
+            signature = rest;
+            is_noalias = true;
         }
+        signature = std.mem.trimStart(u8, signature, &std.ascii.whitespace);
 
-        const label = maybe_label orelse return;
-        if (label.len == 0 or std.mem.eql(u8, label, "...")) return;
+        const colon_index = std.mem.findScalar(u8, signature, ':');
+        const label = signature[0 .. colon_index orelse signature.len];
+        const tooltip = if (colon_index) |i| signature[i + 1 ..] else "";
 
         try builder.appendParameterHint(
             tree.nodeTag(parameter),
             tree.firstToken(parameter),
             label,
-            std.mem.trim(u8, type_expr, " \t\n"),
-            no_alias,
-            comp_time,
+            tooltip,
+            is_noalias,
+            is_comptime,
         );
     }
 }

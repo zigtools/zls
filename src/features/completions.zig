@@ -540,7 +540,16 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
                 // The generated snippet is not being escaped here because we can
                 // assume that the builtin name has no characters that need to be escaped.
                 if (builtin.parameters.len == 0) break :snippet try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
-                if (use_placeholders) break :snippet builtin.snippet;
+                if (use_placeholders) {
+                    var snippet: std.ArrayList(u8) = .empty;
+                    try snippet.print(builder.arena, "{s}(", .{name});
+                    for (builtin.parameters, 1..) |param, i| {
+                        if (i != 1) try snippet.appendSlice(builder.arena, ", ");
+                        try snippet.print(builder.arena, "${{{d}:{f}}}", .{ i, Analyser.fmtEscapedSnippet(param.signature) });
+                    }
+                    try snippet.append(builder.arena, ')');
+                    break :snippet snippet.items;
+                }
                 break :snippet try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name});
             },
         };
@@ -548,12 +557,18 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .only_name => .PlainText,
             .snippet => .Snippet,
         };
+        const detail = try Analyser.renderBuiltinFunctionSignature(
+            builder.arena,
+            name,
+            builtin,
+            builtin.parameters.len > 3,
+        );
 
         builder.completions.appendAssumeCapacity(.{
             .label = name,
             .kind = .Function,
             .filterText = name[1..],
-            .detail = builtin.signature,
+            .detail = detail,
             .insertTextFormat = insert_text_format,
             .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
                 .{ .insert_replace_edit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
@@ -561,7 +576,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
                 .{ .text_edit = .{ .newText = new_text[1..], .range = insert_range } },
             .documentation = .{
                 .markup_content = .{
-                    .kind = .markdown,
+                    .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
                     .value = builtin.documentation,
                 },
             },
@@ -1618,7 +1633,8 @@ fn resolveBuiltinFnArg(
     const builtin = version_data.builtins.get(name) orelse return null;
     if (arg_index >= builtin.parameters.len) return null;
     const param = builtin.parameters[arg_index];
-    const builtin_name = param.type orelse return null;
+    const colon_index = std.mem.findScalar(u8, param.signature, ':') orelse return null;
+    const builtin_name = param.signature[colon_index + 2 ..];
     return analyser.instanceStdBuiltinType(builtin_name);
 }
 

@@ -386,6 +386,32 @@ pub fn fmtEscapedSnippet(raw_text: []const u8) std.fmt.Alt([]const u8, SnippetEs
     return .{ .data = raw_text };
 }
 
+pub fn renderBuiltinFunctionSignature(
+    arena: std.mem.Allocator,
+    name: []const u8,
+    builtin_data: version_data.Builtin,
+    multi_line: bool,
+) error{OutOfMemory}![]u8 {
+    var signature: std.ArrayList(u8) = .empty;
+    try signature.appendSlice(arena, name);
+    try signature.append(arena, '(');
+    if (multi_line) try signature.append(arena, '\n');
+    for (builtin_data.parameters, 0..) |parameter, i| {
+        if (multi_line) {
+            try signature.appendSlice(arena, "  ");
+        } else if (i != 0) {
+            try signature.appendSlice(arena, ", ");
+        }
+        try signature.appendSlice(arena, parameter.signature);
+        if (multi_line) {
+            try signature.appendSlice(arena, ",\n");
+        }
+    }
+    try signature.appendSlice(arena, ") ");
+    try signature.appendSlice(arena, builtin_data.return_type);
+    return signature.items;
+}
+
 pub fn isInstanceCall(
     analyser: *Analyser,
     call_handle: *DocumentStore.Handle,
@@ -6338,7 +6364,8 @@ pub fn resolveExpressionTypeFromAncestors(
                 const index = std.mem.findScalar(Ast.Node.Index, params, node) orelse return null;
                 if (index >= data.parameters.len) return null;
                 const parameter = data.parameters[index];
-                const type_str = parameter.type orelse return null;
+                const colon_index = std.mem.findScalar(u8, parameter.signature, ':') orelse return null;
+                const type_str = parameter.signature[colon_index + 2 ..];
                 return analyser.instanceStdBuiltinType(type_str);
             }
         },
