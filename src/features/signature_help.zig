@@ -193,21 +193,30 @@ pub fn getSignatureInfo(
 
                 const expr_last_token = curr_token - 1;
                 if (tree.tokenTag(expr_last_token) == .builtin) {
-                    // Builtin token, find the builtin and construct signature information.
-                    const builtin = data.builtins.get(tree.tokenSlice(expr_last_token)) orelse return null;
-                    const param_infos = try arena.alloc(
-                        types.SignatureHelp.Signature.Parameter,
-                        builtin.parameters.len,
-                    );
+                    const builtin_name = tree.tokenSlice(expr_last_token);
+                    const builtin = data.builtins.get(builtin_name) orelse return null;
+
+                    const param_infos = try arena.alloc(types.SignatureHelp.Signature.Parameter, builtin.parameters.len);
                     for (param_infos, builtin.parameters) |*info, parameter| {
                         info.* = .{
                             .label = .{ .string = parameter.signature },
-                            .documentation = null,
+                            .documentation = if (parameter.documentation) |doc|
+                                .{ .markup_content = .{ .kind = markup_kind, .value = doc } }
+                            else
+                                null,
                         };
                     }
                     return types.SignatureHelp.Signature{
-                        .label = builtin.signature,
-                        .documentation = .{ .string = builtin.documentation },
+                        .label = try Analyser.renderBuiltinFunctionSignature(
+                            arena,
+                            builtin_name,
+                            builtin,
+                            false,
+                        ),
+                        .documentation = .{ .markup_content = .{
+                            .kind = markup_kind,
+                            .value = builtin.documentation,
+                        } },
                         .parameters = param_infos,
                         .activeParameter = paren_commas,
                     };

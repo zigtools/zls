@@ -221,6 +221,21 @@ test "builtin" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "builtin with multi line parameters" {
+    try testHoverWithOptions(
+        \\@Un<cursor>ion()
+    ,
+        \\@Union(
+        \\  comptime layout: Type.ContainerLayout,
+        \\  comptime ArgType: ?type,
+        \\  comptime field_names: []const []const u8,
+        \\  comptime field_types: *const [field_names.len]type,
+        \\  comptime field_attrs: *const [field_names.len]Type.UnionField.Attributes,
+        \\) type
+        \\Returns a [union](https://ziglang.org/documentation/master/#union) type with the properties specified by the arguments.
+    , .{ .markup_kind = .plaintext });
+}
+
 test "struct" {
     try testHover(
         \\const Str<cursor>uct = packed struct(u32) {};
