@@ -44,11 +44,9 @@ fn fnProtoToSignatureInfo(
     for (info.parameters) |param| {
         const param_label = try analyser.stringifyParameter(.{
             .info = param,
-            .index = 0, // we don't want a comma in the label
             .include_modifier = true,
             .include_name = true,
             .include_type = true,
-            .snippet_placeholders = false,
         });
 
         try params.append(arena, .{

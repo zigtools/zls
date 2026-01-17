@@ -3930,6 +3930,24 @@ test "insert replace behaviour - function with snippets" {
     });
 }
 
+test "insert replace behaviour - function with escaped snippet" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn @"${}"(e: error{}) void {}
+        \\const foo = <cursor>;
+        ,
+        .label = "@\"${}\"",
+        .expected_insert_line =
+        \\const foo = @"\${\}"(${1:e: error{\}});
+        ,
+        .expected_replace_line =
+        \\const foo = @"\${\}"(${1:e: error{\}});
+        ,
+        .enable_snippets = true,
+        .enable_argument_placeholders = true,
+    });
+}
+
 test "insert replace behaviour - function with snippets - 'self parameter' with placeholder" {
     try testCompletionTextEdit(.{
         .source =
@@ -4119,8 +4137,25 @@ test "insert replace behaviour - struct literal" {
         \\const foo: S = .<cursor>
         ,
         .label = "alpha",
-        .expected_insert_line = "const foo: S = .{ .alpha = $1 }$0",
-        .expected_replace_line = "const foo: S = .{ .alpha = $1 }$0",
+        .expected_insert_line = "const foo: S = .{ .alpha = $1 \\}$0",
+        .expected_replace_line = "const foo: S = .{ .alpha = $1 \\}$0",
+        .enable_snippets = true,
+    });
+}
+
+test "insert replace behaviour - struct literal with escaped snippet" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const S = struct { @"${}": u32 };
+        \\const foo: S = .<cursor>
+        ,
+        .label = "@\"${}\"",
+        .expected_insert_line =
+        \\const foo: S = .{ .@"\${\}" = $1 \}$0
+        ,
+        .expected_replace_line =
+        \\const foo: S = .{ .@"\${\}" = $1 \}$0
+        ,
         .enable_snippets = true,
     });
 }
@@ -4166,8 +4201,8 @@ test "insert replace behaviour - tagged union" {
         \\const foo: U = .<cursor>
         ,
         .label = "alpha",
-        .expected_insert_line = "const foo: U = .{ .alpha = $1 }$0",
-        .expected_replace_line = "const foo: U = .{ .alpha = $1 }$0",
+        .expected_insert_line = "const foo: U = .{ .alpha = $1 \\}$0",
+        .expected_replace_line = "const foo: U = .{ .alpha = $1 \\}$0",
         .enable_snippets = true,
     });
     try testCompletionTextEdit(.{
@@ -4412,6 +4447,11 @@ fn testCompletionWithOptions(
         return error.InvalidResponse;
     }).completion_list;
 
+    for (completion_list.items) |item| {
+        std.debug.assert(!(!options.enable_snippets and item.insertTextFormat == .Snippet));
+        std.debug.assert(!(item.kind == .Snippet and item.insertTextFormat != .Snippet));
+    }
+
     var actual = try extractCompletionLabels(completion_list.items);
     defer actual.deinit(allocator);
 
@@ -4652,6 +4692,8 @@ fn testCompletionTextEdit(
         const completion_item = try searchCompletionItemWithLabel(response.completion_list, options.label);
 
         std.debug.assert(completion_item.additionalTextEdits == null); // unsupported
+        std.debug.assert(!(!options.enable_snippets and completion_item.insertTextFormat == .Snippet));
+        std.debug.assert(!(completion_item.kind == .Snippet and completion_item.insertTextFormat != .Snippet));
 
         const TextEditOrInsertReplace = std.meta.Child(@TypeOf(completion_item.textEdit));
 

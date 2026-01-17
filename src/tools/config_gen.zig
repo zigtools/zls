@@ -866,7 +866,15 @@ fn createSignatureSnippet(
     try snippet.print(allocator, "{s}(", .{builtin_name});
     for (parameters, 1..) |param, i| {
         if (i != 1) try snippet.print(allocator, ", ", .{});
-        try snippet.print(allocator, "${{{d}:{s}}}", .{ i, param.signature });
+        try snippet.print(allocator, "${{{d}:", .{i});
+        for (param.signature) |c| {
+            switch (c) {
+                // escaped character
+                '$', '}', '\\' => try snippet.print(allocator, "\\{c}", .{c}),
+                else => try snippet.append(allocator, c),
+            }
+        }
+        try snippet.append(allocator, '}');
     }
     try snippet.append(allocator, ')');
 

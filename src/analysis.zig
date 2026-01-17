@@ -158,30 +158,13 @@ pub fn getFunctionSignature(tree: *const Ast, func: Ast.full.FnProto) []const u8
     return offsets.tokensToSlice(tree, first_token, last_token);
 }
 
-fn formatSnippetPlaceholder(data: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    var split_it = std.mem.splitScalar(u8, data, '}');
-    while (split_it.next()) |segment| {
-        try writer.writeAll(segment);
-        if (split_it.index) |index|
-            if (data[index - 1] == '}') {
-                try writer.writeAll("\\}");
-            };
-    }
-}
-
-fn fmtSnippetPlaceholder(bytes: []const u8) std.fmt.Alt([]const u8, formatSnippetPlaceholder) {
-    return .{ .data = bytes };
-}
-
 pub const FormatParameterOptions = struct {
     referenced: ?*ReferencedType.Set = null,
     info: Type.Data.Parameter,
-    index: usize,
 
     include_modifier: bool,
     include_name: bool,
     include_type: bool,
-    snippet_placeholders: bool,
 };
 
 pub fn stringifyParameter(analyser: *Analyser, options: FormatParameterOptions) error{OutOfMemory}![]u8 {
@@ -201,14 +184,6 @@ fn rawStringifyParameter(
     const referenced = options.referenced;
     const info = options.info;
 
-    if (options.index != 0) {
-        try writer.writeAll(", ");
-    }
-
-    if (options.snippet_placeholders) {
-        try writer.print("${{{d}:", .{options.index + 1});
-    }
-
     // Note that parameter doc comments are being skipped
 
     if (options.include_modifier) {
@@ -222,11 +197,7 @@ fn rawStringifyParameter(
 
     if (options.include_name) {
         if (info.name) |name| {
-            if (options.snippet_placeholders) {
-                try writer.print("{f}", .{fmtSnippetPlaceholder(name)});
-            } else {
-                try writer.writeAll(name);
-            }
+            try writer.writeAll(name);
         }
     }
 
@@ -238,10 +209,6 @@ fn rawStringifyParameter(
             .referenced = referenced,
             .truncate_container_decls = true,
         });
-    }
-
-    if (options.snippet_placeholders) {
-        try writer.writeByte('}');
     }
 }
 
@@ -284,16 +251,16 @@ fn rawStringifyFunction(
     const info = options.info;
     var parameters = info.parameters;
 
+    var snippet_escaping_writer: SnippetEscapingWriter = .init(writer);
+    const escaping_writer = if (options.snippet_placeholders) &snippet_escaping_writer.interface else writer;
+
     if (options.include_fn_keyword) {
         try writer.writeAll("fn ");
     }
 
-    if (options.include_name) {
-        if (options.override_name) |name| {
-            try writer.writeAll(name);
-        } else if (info.name) |name| {
-            try writer.writeAll(name);
-        }
+    if (options.include_name) no_name: {
+        const name = options.override_name orelse info.name orelse break :no_name;
+        try escaping_writer.writeAll(name);
     }
 
     try writer.writeByte('(');
@@ -317,15 +284,21 @@ fn rawStringifyFunction(
         },
         .show => |parameter_options| {
             for (parameters, 0..) |param_info, index| {
-                try analyser.rawStringifyParameter(writer, .{
+                if (index != 0) try writer.writeAll(", ");
+                if (options.snippet_placeholders) {
+                    try writer.print("${{{d}:", .{index + 1});
+                }
+
+                try analyser.rawStringifyParameter(escaping_writer, .{
                     .referenced = referenced,
                     .info = param_info,
-                    .index = index,
                     .include_modifier = parameter_options.include_modifiers,
                     .include_name = parameter_options.include_names,
                     .include_type = parameter_options.include_types,
-                    .snippet_placeholders = options.snippet_placeholders,
                 });
+                if (options.snippet_placeholders) {
+                    try writer.writeByte('}');
+                }
             }
         },
     }
@@ -348,11 +321,69 @@ fn rawStringifyFunction(
         try writer.writeByte(' ');
 
         const return_type = try options.info.return_value.typeOf(analyser);
-        try return_type.rawStringify(writer, analyser, .{
+        try return_type.rawStringify(escaping_writer, analyser, .{
             .referenced = referenced,
             .truncate_container_decls = true,
         });
     }
+}
+
+const SnippetEscapingWriter = struct {
+    out: *std.Io.Writer,
+    interface: std.Io.Writer,
+
+    pub fn init(writer: *std.Io.Writer) SnippetEscapingWriter {
+        return .{
+            .out = writer,
+            .interface = .{
+                .vtable = &.{
+                    .drain = &drain,
+                    .flush = std.Io.Writer.noopFlush,
+                    .rebase = std.Io.Writer.failingRebase,
+                },
+                .buffer = &.{},
+            },
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *SnippetEscapingWriter = @fieldParentPtr("interface", w);
+        const out = self.out;
+        std.debug.assert(w.buffer.len == 0);
+        for (data, 0..) |vec, i| {
+            const segment_index = std.mem.findAny(u8, vec, "$}\\") orelse continue;
+            if (i != 0) {
+                return try out.writeSplat(data[0..i], splat);
+            }
+            const segment = vec[0..segment_index];
+            const unescaped_char = vec[segment_index];
+            const bytes_written = try out.write(segment);
+            if (bytes_written < segment.len) return bytes_written;
+            try out.writeAll(&.{ '\\', unescaped_char });
+            return bytes_written + 1;
+        } else {
+            return try out.writeSplat(data, splat);
+        }
+    }
+
+    fn writeAll(raw_text: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        var written: usize = 0;
+        for (raw_text, 0..) |c, i| {
+            switch (c) {
+                '$', '}', '\\' => {
+                    try writer.writeAll(raw_text[written..i]);
+                    try writer.writeAll(&.{ '\\', c });
+                    written = i + 1;
+                },
+                else => continue,
+            }
+        }
+        try writer.writeAll(raw_text[written..]);
+    }
+};
+
+pub fn fmtEscapedSnippet(raw_text: []const u8) std.fmt.Alt([]const u8, SnippetEscapingWriter.writeAll) {
+    return .{ .data = raw_text };
 }
 
 pub fn isInstanceCall(
