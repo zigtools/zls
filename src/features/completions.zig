@@ -16,7 +16,7 @@ const DocumentScope = @import("../DocumentScope.zig");
 const analyser_completions = @import("../analyser/completions.zig");
 
 const version_data = @import("version_data");
-const snipped_data = @import("../snippets.zig");
+const snippets = @import("../snippets.zig");
 
 const Builder = struct {
     server: *Server,
@@ -435,20 +435,43 @@ fn completeLabel(builder: *Builder) error{OutOfMemory}!void {
     try Analyser.iterateLabels(builder.orig_handle, builder.source_index, labelDeclToCompletion, builder);
 }
 
-fn populateSnippedCompletions(builder: *Builder, snippets: []const snipped_data.Snipped) error{OutOfMemory}!void {
-    try builder.completions.ensureUnusedCapacity(builder.arena, snippets.len);
-
+fn populateSnippedCompletions(builder: *Builder, kind: enum { generic, top_level }) error{OutOfMemory}!void {
     const config = &builder.server.config_manager.config;
     const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    for (snippets) |snipped| {
-        if (!use_snippets and snipped.kind == .Snippet) continue;
 
+    const items: []const snippets.Item = if (use_snippets) switch (kind) {
+        .generic => snippets.generic,
+        .top_level => snippets.top_level,
+    } else &.{};
+
+    try builder.completions.ensureUnusedCapacity(builder.arena, items.len + std.zig.Token.keywords.keys().len + std.zig.primitives.names.keys().len);
+
+    for (items) |item| {
+        std.debug.assert(use_snippets);
         builder.completions.appendAssumeCapacity(.{
-            .label = snipped.label,
-            .kind = snipped.kind,
-            .detail = if (use_snippets) snipped.text else null,
-            .insertText = if (use_snippets) snipped.text else null,
-            .insertTextFormat = if (use_snippets and snipped.text != null) .Snippet else .PlainText,
+            .label = item.label,
+            .kind = .Snippet,
+            .detail = item.snippet,
+            .insertText = item.snippet,
+            .insertTextFormat = .Snippet,
+        });
+    }
+
+    for (std.zig.Token.keywords.keys(), std.zig.Token.keywords.values()) |name, tag| {
+        const keyword_snippet = if (use_snippets) snippets.keywords.get(tag) else null;
+        builder.completions.appendAssumeCapacity(.{
+            .label = name,
+            .kind = .Keyword,
+            .detail = keyword_snippet,
+            .insertText = keyword_snippet,
+            .insertTextFormat = if (keyword_snippet != null) .Snippet else null,
+        });
+    }
+
+    for (std.zig.primitives.names.keys()) |name| {
+        builder.completions.appendAssumeCapacity(.{
+            .label = name,
+            .kind = .Keyword,
         });
     }
 }
@@ -555,7 +578,7 @@ fn completeGlobal(builder: *Builder) error{OutOfMemory}!void {
     for (decls.items) |decl_with_handle| {
         try declToCompletion(builder, decl_with_handle);
     }
-    try populateSnippedCompletions(builder, &snipped_data.generic);
+    try populateSnippedCompletions(builder, .generic);
 }
 
 fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
@@ -878,7 +901,7 @@ pub fn completionAtIndex(
     const line_until_index = offsets.lineSliceUntilIndex(source, source_index);
 
     if (line_until_index.len == 0 or std.zig.isValidId(line_until_index)) {
-        try populateSnippedCompletions(&builder, &snipped_data.top_level_decl_data);
+        try populateSnippedCompletions(&builder, .top_level);
         return .{ .isIncomplete = false, .items = builder.completions.items };
     }
 
