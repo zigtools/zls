@@ -323,9 +323,11 @@ fn functionTypeCompletion(
 
     const new_text = switch (new_text_format) {
         .only_name => func_name,
-        .snippet => blk: {
-            if (use_snippets and config.enable_argument_placeholders) {
-                break :blk try builder.analyser.stringifyFunction(.{
+        .snippet => snippet: {
+            std.debug.assert(use_snippets);
+
+            if (config.enable_argument_placeholders) {
+                break :snippet try builder.analyser.stringifyFunction(.{
                     .info = info,
                     .include_fn_keyword = false,
                     .include_name = true,
@@ -341,26 +343,16 @@ fn functionTypeCompletion(
                 });
             }
 
-            if (!use_snippets) break :blk func_name;
-
-            switch (info.parameters.len) {
-                // No arguments, leave cursor at the end
-                0 => break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name}),
-                1 => {
-                    if (has_self_param) {
-                        // The one argument is a self parameter, leave cursor at the end
-                        break :blk try std.fmt.allocPrint(builder.arena, "{s}()", .{func_name});
-                    }
-
-                    // Non-self parameter, leave the cursor in the parentheses
-                    break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                },
-                else => {
-                    // At least one non-self parameter, leave the cursor in the parentheses
-                    break :blk try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{func_name});
-                },
+            if (info.parameters.len -| @intFromBool(has_self_param) == 0) {
+                break :snippet try std.fmt.allocPrint(builder.arena, "{f}()", .{Analyser.fmtEscapedSnippet(func_name)});
+            } else {
+                break :snippet try std.fmt.allocPrint(builder.arena, "{f}(${{1:}})", .{Analyser.fmtEscapedSnippet(func_name)});
             }
         },
+    };
+    const insert_text_format: types.InsertTextFormat = switch (new_text_format) {
+        .only_name => .PlainText,
+        .snippet => .Snippet,
     };
 
     const kind: types.completion.Item.Kind = if (func_ty.isTypeFunc())
@@ -419,7 +411,7 @@ fn functionTypeCompletion(
         .labelDetails = label_details,
         .kind = kind,
         .detail = details,
-        .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+        .insertTextFormat = insert_text_format,
         .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
             .{ .insert_replace_edit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
         else
@@ -518,14 +510,20 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
 
     try builder.completions.ensureUnusedCapacity(builder.arena, version_data.builtins.kvs.len);
     for (version_data.builtins.keys(), version_data.builtins.values()) |name, builtin| {
-        const new_text, const insertTextFormat: types.InsertTextFormat = switch (new_text_format) {
-            .only_name => .{ name, .PlainText },
-            .snippet => blk: {
+        const new_text = switch (new_text_format) {
+            .only_name => name,
+            .snippet => snippet: {
                 std.debug.assert(use_snippets);
-                if (builtin.parameters.len == 0) break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}()", .{name}), .PlainText };
-                if (use_placeholders) break :blk .{ builtin.snippet, .Snippet };
-                break :blk .{ try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name}), .Snippet };
+                // The generated snippet is not being escaped here because we can
+                // assume that the builtin name has no characters that need to be escaped.
+                if (builtin.parameters.len == 0) break :snippet try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
+                if (use_placeholders) break :snippet builtin.snippet;
+                break :snippet try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name});
             },
+        };
+        const insert_text_format: types.InsertTextFormat = switch (new_text_format) {
+            .only_name => .PlainText,
+            .snippet => .Snippet,
         };
 
         builder.completions.appendAssumeCapacity(.{
@@ -533,7 +531,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .kind = .Function,
             .filterText = name[1..],
             .detail = builtin.signature,
-            .insertTextFormat = insertTextFormat,
+            .insertTextFormat = insert_text_format,
             .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
                 .{ .insert_replace_edit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
             else
@@ -1416,7 +1414,7 @@ fn collectContainerFields(
             => blk: {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
-                const insert_text = insert_text: {
+                const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
                         if (container.isTaggedUnion() and
                             maybe_resolved_ty != null and
@@ -1424,19 +1422,27 @@ fn collectContainerFields(
                             maybe_resolved_ty.?.data.ip_index.type != .unknown_type and
                             builder.analyser.ip.onePossibleValue(maybe_resolved_ty.?.data.ip_index.type) != .none)
                         {
-                            break :insert_text name;
+                            break :insert_text .{ name, .PlainText };
                         }
-                        if (use_snippets)
-                            break :insert_text try std.fmt.allocPrint(builder.arena, "{{ .{s} = $1 }}$0", .{name})
-                        else
-                            break :insert_text try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name});
+
+                        if (!use_snippets) {
+                            break :insert_text .{
+                                try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
+                                .PlainText,
+                            };
+                        }
+
+                        break :insert_text .{
+                            try std.fmt.allocPrint(builder.arena, "{{ .{f} = $1 \\}}$0", .{Analyser.fmtEscapedSnippet(name)}),
+                            .Snippet,
+                        };
                     }
 
                     if (!use_snippets)
-                        break :insert_text name;
+                        break :insert_text .{ name, .PlainText };
 
                     if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
-                        break :insert_text name;
+                        break :insert_text .{ name, .PlainText };
 
                     const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(&builder.orig_handle.tree, builder.source_index)) {
                         .none => |data| if (data.right) |right| builder.orig_handle.tree.tokenTag(right) == .equal else false,
@@ -1444,9 +1450,12 @@ fn collectContainerFields(
                         .between => |data| builder.orig_handle.tree.tokenTag(data.right) == .equal,
                     };
                     if (is_following_by_equal_token)
-                        break :insert_text name;
+                        break :insert_text .{ name, .PlainText };
 
-                    break :insert_text try std.fmt.allocPrint(builder.arena, "{s} = ", .{name});
+                    break :insert_text .{
+                        try std.fmt.allocPrint(builder.arena, "{f} = ", .{Analyser.fmtEscapedSnippet(name)}),
+                        .Snippet,
+                    };
                 };
 
                 const detail = if (maybe_resolved_ty) |ty| detail: {
@@ -1461,11 +1470,12 @@ fn collectContainerFields(
                     if (std.mem.eql(u8, name, signature) and field.ast.tuple_like) break :detail null;
                     break :detail signature;
                 } else null;
+
                 break :blk .{
                     .label = name,
                     .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                     .detail = detail,
-                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+                    .insertTextFormat = insert_text_format,
                     .insertText = insert_text,
                 };
             },
