@@ -40,9 +40,8 @@ pub fn generateSelectionRanges(
                 .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
                     var buffer: [1]Ast.Node.Index = undefined;
                     const fn_proto = handle.tree.fullFnProto(&buffer, node).?;
-                    var it = fn_proto.iterate(&handle.tree);
-
-                    while (ast.nextFnParam(&it)) |param| {
+                    var it: ast.FnParamIterator = .init(&fn_proto, &handle.tree);
+                    while (it.next()) |param| {
                         const param_loc = ast.paramLoc(&handle.tree, param, true);
                         if (param_loc.start <= index and index <= param_loc.end) {
                             try locs.append(arena, param_loc);

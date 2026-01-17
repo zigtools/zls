@@ -927,667 +927,634 @@ pub fn errorSetFieldCount(tree: *const Ast, node: Ast.Node.Index) usize {
     return count;
 }
 
-/// Iterates over FnProto Params w/ added bounds check to support incomplete ast nodes
-pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
-    while (true) {
-        var first_doc_comment: ?Ast.TokenIndex = null;
-        var comptime_noalias: ?Ast.TokenIndex = null;
-        var name_token: ?Ast.TokenIndex = null;
-        if (!it.tok_flag) {
-            if (it.param_i >= it.fn_proto.ast.params.len) {
-                return null;
-            }
-            const param_type = it.fn_proto.ast.params[it.param_i];
-            const last_param_type_token = lastToken(it.tree, param_type);
-            var tok_i = it.tree.firstToken(param_type) - 1;
-            while (true) : (tok_i -= 1) switch (it.tree.tokenTag(tok_i)) {
-                .colon => continue,
-                .identifier => name_token = tok_i,
-                .doc_comment => first_doc_comment = tok_i,
-                .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
-                else => break,
-            };
-            it.param_i += 1;
-            it.tok_i = last_param_type_token + 1;
+pub const FnParamIterator = struct {
+    tree: *const Ast,
+    params: []const Ast.Node.Index,
+    param_i: u32,
+    tok_i: Ast.TokenIndex,
+    tok_flag: bool,
 
-            // #boundsCheck
-            // https://github.com/zigtools/zls/issues/567
-            if (last_param_type_token >= it.tree.tokens.len - 1)
+    pub fn init(fn_proto: *const Ast.full.FnProto, tree: *const Ast) FnParamIterator {
+        return .{
+            .tree = tree,
+            .params = fn_proto.ast.params,
+            .param_i = 0,
+            .tok_i = fn_proto.lparen + 1,
+            .tok_flag = true,
+        };
+    }
+
+    /// Iterates over FnProto Params w/ added bounds check to support incomplete ast nodes
+    pub fn next(it: *FnParamIterator) ?Ast.full.FnProto.Param {
+        while (true) {
+            var first_doc_comment: ?Ast.TokenIndex = null;
+            var comptime_noalias: ?Ast.TokenIndex = null;
+            var name_token: ?Ast.TokenIndex = null;
+            if (!it.tok_flag) {
+                if (it.param_i >= it.params.len) {
+                    return null;
+                }
+                const param_type = it.params[it.param_i];
+                const last_param_type_token = lastToken(it.tree, param_type);
+                var tok_i = it.tree.firstToken(param_type) - 1;
+                while (true) : (tok_i -= 1) switch (it.tree.tokenTag(tok_i)) {
+                    .colon => continue,
+                    .identifier => name_token = tok_i,
+                    .doc_comment => first_doc_comment = tok_i,
+                    .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
+                    else => break,
+                };
+                it.param_i += 1;
+                it.tok_i = last_param_type_token + 1;
+
+                // #boundsCheck
+                // https://github.com/zigtools/zls/issues/567
+                if (last_param_type_token >= it.tree.tokens.len - 1)
+                    return .{
+                        .first_doc_comment = first_doc_comment,
+                        .comptime_noalias = comptime_noalias,
+                        .name_token = name_token,
+                        .anytype_ellipsis3 = null,
+                        .type_expr = null,
+                    };
+
+                // Look for anytype and ... params afterwards.
+                if (it.tree.tokenTag(it.tok_i) == .comma) {
+                    it.tok_i += 1;
+                }
+                it.tok_flag = true;
                 return .{
                     .first_doc_comment = first_doc_comment,
                     .comptime_noalias = comptime_noalias,
                     .name_token = name_token,
                     .anytype_ellipsis3 = null,
-                    .type_expr = null,
+                    .type_expr = param_type,
                 };
-
-            // Look for anytype and ... params afterwards.
+            }
             if (it.tree.tokenTag(it.tok_i) == .comma) {
                 it.tok_i += 1;
             }
-            it.tok_flag = true;
-            return .{
-                .first_doc_comment = first_doc_comment,
-                .comptime_noalias = comptime_noalias,
-                .name_token = name_token,
-                .anytype_ellipsis3 = null,
-                .type_expr = param_type,
-            };
-        }
-        if (it.tree.tokenTag(it.tok_i) == .comma) {
-            it.tok_i += 1;
-        }
-        if (it.tree.tokenTag(it.tok_i) == .r_paren) {
-            return null;
-        }
-        if (it.tree.tokenTag(it.tok_i) == .doc_comment) {
-            first_doc_comment = it.tok_i;
-            while (it.tree.tokenTag(it.tok_i) == .doc_comment) {
-                it.tok_i += 1;
+            if (it.tree.tokenTag(it.tok_i) == .r_paren) {
+                return null;
             }
-        }
-        switch (it.tree.tokenTag(it.tok_i)) {
-            .ellipsis3 => {
-                it.tok_flag = false; // Next iteration should return null.
-                return .{
-                    .first_doc_comment = first_doc_comment,
-                    .comptime_noalias = null,
-                    .name_token = null,
-                    .anytype_ellipsis3 = it.tok_i,
-                    .type_expr = null,
-                };
-            },
-            .keyword_noalias, .keyword_comptime => {
-                comptime_noalias = it.tok_i;
-                it.tok_i += 1;
-            },
-            else => {},
-        }
-        if (it.tree.tokenTag(it.tok_i) == .identifier and
-            it.tree.tokenTag(it.tok_i + 1) == .colon)
-        {
-            name_token = it.tok_i;
-            it.tok_i += 2;
-        }
-        if (it.tree.tokenTag(it.tok_i) == .keyword_anytype) {
-            it.tok_i += 1;
-            return .{
-                .first_doc_comment = first_doc_comment,
-                .comptime_noalias = comptime_noalias,
-                .name_token = name_token,
-                .anytype_ellipsis3 = it.tok_i - 1,
-                .type_expr = null,
-            };
-        }
-        it.tok_flag = false;
-    }
-}
-
-/// calls the given `callback` on every child of the given node
-/// see `nodeChildrenAlloc` for a non-callback, allocating variant.
-/// see `iterateChildrenRecursive` for recursive-iteration.
-/// the order in which children are given corresponds to the order in which they are found in the source text
-pub fn iterateChildren(
-    tree: *const Ast,
-    node: Ast.Node.Index,
-    context: anytype,
-    comptime Error: type,
-    comptime callback: fn (@TypeOf(context), *const Ast, Ast.Node.Index) Error!void,
-) Error!void {
-    const ctx = struct {
-        fn inner(ctx: *const anyopaque, t: *const Ast, n: Ast.Node.Index) anyerror!void {
-            return callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, t, n);
-        }
-    };
-    if (iterateChildrenTypeErased(tree, node, @ptrCast(&context), &ctx.inner)) |_| {
-        return;
-    } else |err| {
-        return @as(Error, @errorCast(err));
-    }
-}
-
-test "iterateChildren - fn_proto_* inside of fn_proto" {
-    const allocator = std.testing.allocator;
-
-    var tree: std.zig.Ast = try .parse(
-        allocator,
-        \\pub fn nextAge(age: u32) u32 {
-        \\  return age + 1;
-        \\}
-    ,
-        .zig,
-    );
-    defer tree.deinit(allocator);
-
-    var children_tags: std.ArrayList(Ast.Node.Tag) = .empty;
-    defer children_tags.deinit(allocator);
-
-    const Context = struct {
-        accumulator: *std.ArrayList(Ast.Node.Tag),
-        ally: std.mem.Allocator,
-
-        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) !void {
-            try self.accumulator.append(self.ally, ast.nodeTag(child_node));
-        }
-    };
-
-    const fn_decl = tree.rootDecls()[0];
-    try iterateChildren(
-        &tree,
-        fn_decl,
-        Context{ .accumulator = &children_tags, .ally = allocator },
-        error{OutOfMemory},
-        Context.callback,
-    );
-
-    try std.testing.expectEqualSlices(Ast.Node.Tag, &.{
-        .fn_proto_simple, // i.e., `pub fn nextAge(age: u32) u32`
-        .block_two_semicolon, // i.e., `return { return age + 1; }`
-    }, children_tags.items);
-}
-
-fn iterateChildrenTypeErased(
-    tree: *const Ast,
-    node: Ast.Node.Index,
-    context: *const anyopaque,
-    callback: *const fn (*const anyopaque, *const Ast, Ast.Node.Index) anyerror!void,
-) anyerror!void {
-    switch (tree.nodeTag(node)) {
-        .bool_not,
-        .negation,
-        .bit_not,
-        .negation_wrap,
-        .address_of,
-        .@"try",
-        .optional_type,
-        .deref,
-        .@"suspend",
-        .@"resume",
-        .@"comptime",
-        .@"nosuspend",
-        .@"defer",
-        => {
-            try callback(context, tree, tree.nodeData(node).node);
-        },
-
-        .@"return" => {
-            if (tree.nodeData(node).opt_node.unwrap()) |lhs| {
-                try callback(context, tree, lhs);
-            }
-        },
-
-        .@"catch",
-        .equal_equal,
-        .bang_equal,
-        .less_than,
-        .greater_than,
-        .less_or_equal,
-        .greater_or_equal,
-        .assign_mul,
-        .assign_div,
-        .assign_mod,
-        .assign_add,
-        .assign_sub,
-        .assign_shl,
-        .assign_shl_sat,
-        .assign_shr,
-        .assign_bit_and,
-        .assign_bit_xor,
-        .assign_bit_or,
-        .assign_mul_wrap,
-        .assign_add_wrap,
-        .assign_sub_wrap,
-        .assign_mul_sat,
-        .assign_add_sat,
-        .assign_sub_sat,
-        .assign,
-        .merge_error_sets,
-        .mul,
-        .div,
-        .mod,
-        .array_mult,
-        .mul_wrap,
-        .mul_sat,
-        .add,
-        .sub,
-        .array_cat,
-        .add_wrap,
-        .sub_wrap,
-        .add_sat,
-        .sub_sat,
-        .shl,
-        .shl_sat,
-        .shr,
-        .bit_and,
-        .bit_xor,
-        .bit_or,
-        .@"orelse",
-        .bool_and,
-        .bool_or,
-        .array_type,
-        .array_access,
-        .array_init_one,
-        .array_init_one_comma,
-        .switch_range,
-        .container_field_align,
-        .error_union,
-        => {
-            const lhs, const rhs = tree.nodeData(node).node_and_node;
-            try callback(context, tree, lhs);
-            try callback(context, tree, rhs);
-        },
-
-        .call_one,
-        .call_one_comma,
-        .struct_init_one,
-        .struct_init_one_comma,
-        .container_field_init,
-        .for_range,
-        => {
-            const lhs, const opt_rhs = tree.nodeData(node).node_and_opt_node;
-            try callback(context, tree, lhs);
-            if (opt_rhs.unwrap()) |rhs| {
-                try callback(context, tree, rhs);
-            }
-        },
-
-        .array_init_dot_two,
-        .array_init_dot_two_comma,
-        .struct_init_dot_two,
-        .struct_init_dot_two_comma,
-        .block_two,
-        .block_two_semicolon,
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        => {
-            const opt_lhs, const opt_rhs = tree.nodeData(node).opt_node_and_opt_node;
-            if (opt_lhs.unwrap()) |lhs| {
-                try callback(context, tree, lhs);
-            }
-            if (opt_rhs.unwrap()) |rhs| {
-                try callback(context, tree, rhs);
-            }
-        },
-
-        .field_access,
-        .unwrap_optional,
-        .grouped_expression,
-        .asm_simple,
-        => {
-            try callback(context, tree, tree.nodeData(node).node_and_token[0]);
-        },
-        .test_decl, .@"errdefer" => try callback(context, tree, tree.nodeData(node).opt_token_and_node[1]),
-        .anyframe_type => try callback(context, tree, tree.nodeData(node).token_and_node[1]),
-        .@"break",
-        .@"continue",
-        => {
-            if (tree.nodeData(node).opt_token_and_opt_node[1].unwrap()) |rhs| {
-                try callback(context, tree, rhs);
-            }
-        },
-
-        .root => {
-            for (tree.rootDecls()) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .array_init_dot,
-        .array_init_dot_comma,
-        .struct_init_dot,
-        .struct_init_dot_comma,
-        .builtin_call,
-        .builtin_call_comma,
-        .container_decl,
-        .container_decl_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .block,
-        .block_semicolon,
-        => {
-            for (tree.extraDataSlice(tree.nodeData(node).extra_range, Ast.Node.Index)) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .global_var_decl,
-        .local_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        => {
-            const var_decl = tree.fullVarDecl(node).?.ast;
-            if (var_decl.type_node.unwrap()) |type_node| try callback(context, tree, type_node);
-            if (var_decl.align_node.unwrap()) |align_node| try callback(context, tree, align_node);
-            if (var_decl.addrspace_node.unwrap()) |addrspace_node| try callback(context, tree, addrspace_node);
-            if (var_decl.section_node.unwrap()) |section_node| try callback(context, tree, section_node);
-            if (var_decl.init_node.unwrap()) |init_node| try callback(context, tree, init_node);
-        },
-
-        .assign_destructure => {
-            const assign_destructure = tree.assignDestructure(node);
-            for (assign_destructure.ast.variables) |lhs_node| {
-                try callback(context, tree, lhs_node);
-            }
-            try callback(context, tree, assign_destructure.ast.value_expr);
-        },
-
-        .array_type_sentinel => {
-            const array_type = tree.arrayTypeSentinel(node).ast;
-            try callback(context, tree, array_type.elem_count);
-            if (array_type.sentinel.unwrap()) |sentinel| try callback(context, tree, sentinel);
-            try callback(context, tree, array_type.elem_type);
-        },
-
-        .ptr_type_aligned,
-        .ptr_type_sentinel,
-        .ptr_type,
-        .ptr_type_bit_range,
-        => {
-            const ptr_type = fullPtrType(tree, node).?.ast;
-            if (ptr_type.sentinel.unwrap()) |sentinel| try callback(context, tree, sentinel);
-            if (ptr_type.align_node.unwrap()) |align_node| try callback(context, tree, align_node);
-            if (ptr_type.bit_range_start.unwrap()) |bit_range_start| try callback(context, tree, bit_range_start);
-            if (ptr_type.bit_range_end.unwrap()) |bit_range_end| try callback(context, tree, bit_range_end);
-            if (ptr_type.addrspace_node.unwrap()) |addrspace_node| try callback(context, tree, addrspace_node);
-            try callback(context, tree, ptr_type.child_type);
-        },
-
-        .slice_open,
-        .slice,
-        .slice_sentinel,
-        => {
-            const slice = tree.fullSlice(node).?;
-            try callback(context, tree, slice.ast.sliced);
-            try callback(context, tree, slice.ast.start);
-            if (slice.ast.end.unwrap()) |end| try callback(context, tree, end);
-            if (slice.ast.sentinel.unwrap()) |sentinel| try callback(context, tree, sentinel);
-        },
-
-        .array_init,
-        .array_init_comma,
-        => {
-            const array_init = tree.arrayInit(node).ast;
-            if (array_init.type_expr.unwrap()) |type_expr| try callback(context, tree, type_expr);
-            for (array_init.elements) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .struct_init,
-        .struct_init_comma,
-        => {
-            const struct_init = tree.structInit(node).ast;
-            if (struct_init.type_expr.unwrap()) |type_expr| try callback(context, tree, type_expr);
-            for (struct_init.fields) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .call,
-        .call_comma,
-        => {
-            const call = tree.callFull(node).ast;
-            try callback(context, tree, call.fn_expr);
-            for (call.params) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .@"switch",
-        .switch_comma,
-        => {
-            const switch_ast = tree.fullSwitch(node).?;
-            try callback(context, tree, switch_ast.ast.condition);
-            for (switch_ast.ast.cases) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .switch_case_one,
-        .switch_case_inline_one,
-        .switch_case,
-        .switch_case_inline,
-        => {
-            const switch_case = tree.fullSwitchCase(node).?.ast;
-            for (switch_case.values) |child| {
-                try callback(context, tree, child);
-            }
-            try callback(context, tree, switch_case.target_expr);
-        },
-
-        .while_simple,
-        .while_cont,
-        .@"while",
-        => {
-            const while_ast = fullWhile(tree, node).?.ast;
-            try callback(context, tree, while_ast.cond_expr);
-            if (while_ast.cont_expr.unwrap()) |cont_expr| try callback(context, tree, cont_expr);
-            try callback(context, tree, while_ast.then_expr);
-            if (while_ast.else_expr.unwrap()) |else_expr| try callback(context, tree, else_expr);
-        },
-        .for_simple,
-        .@"for",
-        => {
-            const for_ast = fullFor(tree, node).?.ast;
-            for (for_ast.inputs) |child| {
-                try callback(context, tree, child);
-            }
-            try callback(context, tree, for_ast.then_expr);
-            if (for_ast.else_expr.unwrap()) |else_expr| try callback(context, tree, else_expr);
-        },
-
-        .@"if",
-        .if_simple,
-        => {
-            const if_ast = fullIf(tree, node).?.ast;
-            try callback(context, tree, if_ast.cond_expr);
-            try callback(context, tree, if_ast.then_expr);
-            if (if_ast.else_expr.unwrap()) |else_expr| try callback(context, tree, else_expr);
-        },
-        .fn_decl => {
-            try callback(context, tree, tree.nodeData(node).node_and_node[0]);
-            try callback(context, tree, tree.nodeData(node).node_and_node[1]);
-        },
-        .fn_proto_simple,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto,
-        => {
-            var buffer: [1]Node.Index = undefined;
-            const fn_proto = tree.fullFnProto(&buffer, node).?;
-
-            var it = fn_proto.iterate(tree);
-            while (nextFnParam(&it)) |param| {
-                try callback(context, tree, param.type_expr orelse continue);
-            }
-            if (fn_proto.ast.align_expr.unwrap()) |align_expr| try callback(context, tree, align_expr);
-            if (fn_proto.ast.addrspace_expr.unwrap()) |addrspace_expr| try callback(context, tree, addrspace_expr);
-            if (fn_proto.ast.section_expr.unwrap()) |section_expr| try callback(context, tree, section_expr);
-            if (fn_proto.ast.callconv_expr.unwrap()) |callconv_expr| try callback(context, tree, callconv_expr);
-            if (fn_proto.ast.return_type.unwrap()) |return_type| try callback(context, tree, return_type);
-        },
-
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        => {
-            const decl = tree.containerDeclArg(node).ast;
-            if (decl.arg.unwrap()) |arg| try callback(context, tree, arg);
-            for (decl.members) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        => {
-            const decl = tree.taggedUnionEnumTag(node).ast;
-            if (decl.arg.unwrap()) |arg| try callback(context, tree, arg);
-            for (decl.members) |child| {
-                try callback(context, tree, child);
-            }
-        },
-
-        .container_field => {
-            const field = tree.containerField(node).ast;
-            try callback(context, tree, field.type_expr.unwrap().?);
-            if (field.align_expr.unwrap()) |align_expr| try callback(context, tree, align_expr);
-            if (field.value_expr.unwrap()) |value_expr| try callback(context, tree, value_expr);
-        },
-
-        .@"asm",
-        => {
-            const asm_node = tree.asmFull(node);
-
-            try callback(context, tree, asm_node.ast.template);
-
-            for (asm_node.outputs) |output_node| {
-                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
-                if (has_arrow) {
-                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
-                        try callback(context, tree, lhs);
-                    }
+            if (it.tree.tokenTag(it.tok_i) == .doc_comment) {
+                first_doc_comment = it.tok_i;
+                while (it.tree.tokenTag(it.tok_i) == .doc_comment) {
+                    it.tok_i += 1;
                 }
             }
-
-            for (asm_node.inputs) |input_node| {
-                try callback(context, tree, tree.nodeData(input_node).node_and_token[0]);
+            switch (it.tree.tokenTag(it.tok_i)) {
+                .ellipsis3 => {
+                    it.tok_flag = false; // Next iteration should return null.
+                    return .{
+                        .first_doc_comment = first_doc_comment,
+                        .comptime_noalias = null,
+                        .name_token = null,
+                        .anytype_ellipsis3 = it.tok_i,
+                        .type_expr = null,
+                    };
+                },
+                .keyword_noalias, .keyword_comptime => {
+                    comptime_noalias = it.tok_i;
+                    it.tok_i += 1;
+                },
+                else => {},
             }
-
-            if (asm_node.ast.clobbers.unwrap()) |clobbers| try callback(context, tree, clobbers);
-        },
-
-        .asm_output,
-        .asm_input,
-        => unreachable,
-
-        .anyframe_literal,
-        .char_literal,
-        .number_literal,
-        .unreachable_literal,
-        .identifier,
-        .enum_literal,
-        .string_literal,
-        .multiline_string_literal,
-        .error_set_decl,
-        .error_value,
-        => {},
+            if (it.tree.tokenTag(it.tok_i) == .identifier and
+                it.tree.tokenTag(it.tok_i + 1) == .colon)
+            {
+                name_token = it.tok_i;
+                it.tok_i += 2;
+            }
+            if (it.tree.tokenTag(it.tok_i) == .keyword_anytype) {
+                it.tok_i += 1;
+                return .{
+                    .first_doc_comment = first_doc_comment,
+                    .comptime_noalias = comptime_noalias,
+                    .name_token = name_token,
+                    .anytype_ellipsis3 = it.tok_i - 1,
+                    .type_expr = null,
+                };
+            }
+            it.tok_flag = false;
+        }
     }
-}
+};
 
-/// calls the given `callback` on every child of the given node and their children
-/// see `nodeChildrenRecursiveAlloc` for a non-iterator allocating variant.
-pub fn iterateChildrenRecursive(
-    tree: *const Ast,
-    node: Ast.Node.Index,
-    context: anytype,
-    comptime Error: type,
-    comptime callback: fn (@TypeOf(context), *const Ast, Ast.Node.Index) Error!void,
-) Error!void {
-    const RecursiveContext = struct {
-        fn recursive_callback(ctx: *const anyopaque, ast: *const Ast, child_node: Ast.Node.Index) anyerror!void {
-            std.debug.assert(child_node != .root);
-            try callback(@as(*const @TypeOf(context), @ptrCast(@alignCast(ctx))).*, ast, child_node);
-            try iterateChildrenTypeErased(ast, child_node, ctx, recursive_callback);
-        }
-    };
+pub const Iterator = union(enum) {
+    array: [6]Ast.Node.OptionalIndex,
+    sub_range: struct {
+        prefix: Ast.Node.OptionalIndex = .none,
+        items: Ast.Node.SubRange,
+        suffix: [2]Ast.Node.OptionalIndex = @splat(.none),
+    },
+    fn_proto: struct {
+        node: Ast.Node.Index,
+        param_i: u32,
+        tok_i: Ast.TokenIndex,
+        tok_flag: bool,
+    },
+    @"asm": struct {
+        template: Ast.Node.OptionalIndex,
+        items: Ast.Node.SubRange,
+        clobbers: Ast.Node.OptionalIndex,
+    },
 
-    if (iterateChildrenTypeErased(tree, node, @ptrCast(&context), RecursiveContext.recursive_callback)) |_| {
-        return;
-    } else |err| {
-        return @as(Error, @errorCast(err));
+    pub fn init(tree: *const Ast, node: Ast.Node.Index) Iterator {
+        return switch (tree.nodeTag(node)) {
+            .bool_not,
+            .negation,
+            .bit_not,
+            .negation_wrap,
+            .address_of,
+            .@"try",
+            .optional_type,
+            .deref,
+            .@"suspend",
+            .@"resume",
+            .@"comptime",
+            .@"nosuspend",
+            .@"defer",
+            => return .initArray(.{tree.nodeData(node).node}),
+            .@"return" => return .initArray(.{tree.nodeData(node).opt_node}),
+
+            .@"catch",
+            .equal_equal,
+            .bang_equal,
+            .less_than,
+            .greater_than,
+            .less_or_equal,
+            .greater_or_equal,
+            .assign_mul,
+            .assign_div,
+            .assign_mod,
+            .assign_add,
+            .assign_sub,
+            .assign_shl,
+            .assign_shl_sat,
+            .assign_shr,
+            .assign_bit_and,
+            .assign_bit_xor,
+            .assign_bit_or,
+            .assign_mul_wrap,
+            .assign_add_wrap,
+            .assign_sub_wrap,
+            .assign_mul_sat,
+            .assign_add_sat,
+            .assign_sub_sat,
+            .assign,
+            .merge_error_sets,
+            .mul,
+            .div,
+            .mod,
+            .array_mult,
+            .mul_wrap,
+            .mul_sat,
+            .add,
+            .sub,
+            .array_cat,
+            .add_wrap,
+            .sub_wrap,
+            .add_sat,
+            .sub_sat,
+            .shl,
+            .shl_sat,
+            .shr,
+            .bit_and,
+            .bit_xor,
+            .bit_or,
+            .@"orelse",
+            .bool_and,
+            .bool_or,
+            .array_type,
+            .array_access,
+            .array_init_one,
+            .array_init_one_comma,
+            .switch_range,
+            .fn_decl,
+            .container_field_align,
+            .error_union,
+            => {
+                const lhs, const rhs = tree.nodeData(node).node_and_node;
+                return .initArray(.{ lhs, rhs });
+            },
+
+            .call_one,
+            .call_one_comma,
+            .struct_init_one,
+            .struct_init_one_comma,
+            .container_field_init,
+            .for_range,
+            => {
+                const lhs, const opt_rhs = tree.nodeData(node).node_and_opt_node;
+                return .initArray(.{ lhs, opt_rhs });
+            },
+
+            .array_init_dot_two,
+            .array_init_dot_two_comma,
+            .struct_init_dot_two,
+            .struct_init_dot_two_comma,
+            .block_two,
+            .block_two_semicolon,
+            .builtin_call_two,
+            .builtin_call_two_comma,
+            .container_decl_two,
+            .container_decl_two_trailing,
+            .tagged_union_two,
+            .tagged_union_two_trailing,
+            => {
+                const opt_lhs, const opt_rhs = tree.nodeData(node).opt_node_and_opt_node;
+                return .initArray(.{ opt_lhs, opt_rhs });
+            },
+
+            .field_access,
+            .unwrap_optional,
+            .grouped_expression,
+            .asm_simple,
+            => .initArray(.{tree.nodeData(node).node_and_token[0]}),
+            .test_decl, .@"errdefer" => .initArray(.{tree.nodeData(node).opt_token_and_node[1]}),
+            .anyframe_type => .initArray(.{tree.nodeData(node).token_and_node[1]}),
+            .@"break", .@"continue" => .initArray(.{tree.nodeData(node).opt_token_and_opt_node[1]}),
+
+            .root => {
+                switch (tree.mode) {
+                    .zig => return .{ .sub_range = .{ .items = tree.nodeData(.root).extra_range } },
+                    .zon => return .{ .array = .{ tree.nodeData(.root).node.toOptional(), .none, .none, .none, .none, .none } },
+                }
+            },
+
+            .array_init_dot,
+            .array_init_dot_comma,
+            .struct_init_dot,
+            .struct_init_dot_comma,
+            .builtin_call,
+            .builtin_call_comma,
+            .container_decl,
+            .container_decl_trailing,
+            .tagged_union,
+            .tagged_union_trailing,
+            .block,
+            .block_semicolon,
+            => .{ .sub_range = .{
+                .items = tree.nodeData(node).extra_range,
+            } },
+
+            .global_var_decl,
+            .local_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            => {
+                const var_decl = tree.fullVarDecl(node).?.ast;
+                return .initArray(.{
+                    var_decl.type_node,
+                    var_decl.align_node,
+                    var_decl.addrspace_node,
+                    var_decl.section_node,
+                    var_decl.init_node,
+                });
+            },
+
+            .assign_destructure => {
+                const extra_index, const value_expr = tree.nodeData(node).extra_and_node;
+                const variable_count = tree.extra_data[@intFromEnum(extra_index)];
+                const sub_range_start: Ast.ExtraIndex = @enumFromInt(@intFromEnum(extra_index) + 1);
+                const sub_range_end: Ast.ExtraIndex = @enumFromInt(@intFromEnum(sub_range_start) + variable_count);
+                return .{ .sub_range = .{
+                    .items = .{ .start = sub_range_start, .end = sub_range_end },
+                    .suffix = .{ value_expr.toOptional(), .none },
+                } };
+            },
+
+            .array_type_sentinel => {
+                const array_type = tree.arrayTypeSentinel(node).ast;
+                return .initArray(.{
+                    array_type.elem_count,
+                    array_type.sentinel,
+                    array_type.elem_type,
+                });
+            },
+
+            .ptr_type_aligned,
+            .ptr_type_sentinel,
+            .ptr_type,
+            .ptr_type_bit_range,
+            => {
+                const ptr_type = fullPtrType(tree, node).?.ast;
+                return .initArray(.{
+                    ptr_type.sentinel,
+                    ptr_type.align_node,
+                    ptr_type.bit_range_start,
+                    ptr_type.bit_range_end,
+                    ptr_type.addrspace_node,
+                    ptr_type.child_type,
+                });
+            },
+
+            .slice_open,
+            .slice,
+            .slice_sentinel,
+            => {
+                const slice = tree.fullSlice(node).?;
+                return .initArray(.{
+                    slice.ast.sliced,
+                    slice.ast.start,
+                    slice.ast.end,
+                    slice.ast.sentinel,
+                });
+            },
+
+            .array_init,
+            .array_init_comma,
+            .struct_init,
+            .struct_init_comma,
+            .call,
+            .call_comma,
+            .@"switch",
+            .switch_comma,
+            .container_decl_arg,
+            .container_decl_arg_trailing,
+            .tagged_union_enum_tag,
+            .tagged_union_enum_tag_trailing,
+            => {
+                const prefix, const extra_index = tree.nodeData(node).node_and_extra;
+                return .{ .sub_range = .{
+                    .prefix = prefix.toOptional(),
+                    .items = tree.extraData(extra_index, Node.SubRange),
+                } };
+            },
+
+            .switch_case_one, .switch_case_inline_one => {
+                const first_value, const target_expr = tree.nodeData(node).opt_node_and_node;
+                return .initArray(.{ first_value, target_expr });
+            },
+            .switch_case,
+            .switch_case_inline,
+            => {
+                const extra_index, const target_expr = tree.nodeData(node).extra_and_node;
+                return .{ .sub_range = .{
+                    .items = tree.extraData(extra_index, Node.SubRange),
+                    .suffix = .{ target_expr.toOptional(), .none },
+                } };
+            },
+
+            .while_simple,
+            .while_cont,
+            .@"while",
+            => {
+                const while_ast = fullWhile(tree, node).?.ast;
+                return .initArray(.{
+                    while_ast.cond_expr,
+                    while_ast.cont_expr,
+                    while_ast.then_expr,
+                    while_ast.else_expr,
+                });
+            },
+            .for_simple => {
+                const input, const then_expr = tree.nodeData(node).node_and_node;
+                return .initArray(.{ input, then_expr });
+            },
+            .@"for",
+            => {
+                const extra_index, const extra = tree.nodeData(node).@"for";
+                const then_expr: Node.Index = @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs]);
+                const else_expr: Node.OptionalIndex = if (extra.has_else) @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs + 1]) else .none;
+                return .{ .sub_range = .{
+                    .items = .{ .start = extra_index, .end = @enumFromInt(@intFromEnum(extra_index) + extra.inputs) },
+                    .suffix = .{ then_expr.toOptional(), else_expr },
+                } };
+            },
+
+            .@"if",
+            .if_simple,
+            => {
+                const if_ast = fullIf(tree, node).?.ast;
+                return .initArray(.{
+                    if_ast.cond_expr,
+                    if_ast.then_expr,
+                    if_ast.else_expr,
+                });
+            },
+            .fn_proto_simple,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto,
+            => return .{ .fn_proto = .{
+                .node = node,
+                .param_i = 0,
+                .tok_i = tree.nodeMainToken(node) + 1,
+                .tok_flag = true,
+            } },
+
+            .container_field => {
+                const field = tree.containerField(node).ast;
+                return .initArray(.{
+                    field.type_expr,
+                    field.align_expr,
+                    field.value_expr,
+                });
+            },
+
+            .@"asm" => {
+                const template, const extra_index = tree.nodeData(node).node_and_extra;
+                const extra = tree.extraData(extra_index, Node.Asm);
+                return .{ .@"asm" = .{
+                    .template = template.toOptional(),
+                    .items = .{ .start = extra.items_start, .end = extra.items_end },
+                    .clobbers = extra.clobbers,
+                } };
+            },
+
+            .asm_output,
+            .asm_input,
+            => unreachable,
+
+            .anyframe_literal,
+            .char_literal,
+            .number_literal,
+            .unreachable_literal,
+            .identifier,
+            .enum_literal,
+            .string_literal,
+            .multiline_string_literal,
+            .error_set_decl,
+            .error_value,
+            => return .{ .array = @splat(.none) },
+        };
     }
-}
 
-/// returns the children of the given node.
-/// see `iterateChildren` for a callback variant
-/// see `nodeChildrenRecursiveAlloc` for a recursive variant.
-/// caller owns the returned memory
-pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
-    const Context = struct {
-        allocator: std.mem.Allocator,
-        children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
-            _ = ast;
-            try self.children.append(self.allocator, child_node);
+    pub fn next(it: *Iterator, tree: *const Ast) ?Ast.Node.Index {
+        sw: switch (it.*) {
+            .array => |*array| {
+                const result = array[0].unwrap() orelse return null;
+                @memmove(array[0 .. array.len - 1], array[1..]);
+                return result;
+            },
+            .sub_range => |*sub_range| {
+                if (sub_range.prefix.unwrap()) |result| {
+                    sub_range.prefix = .none;
+                    return result;
+                }
+                const items = tree.extraDataSlice(sub_range.items, Ast.Node.Index);
+                if (items.len > 0) {
+                    defer sub_range.items.start = @enumFromInt(@intFromEnum(sub_range.items.start) + 1);
+                    return items[0];
+                }
+                const first = sub_range.suffix[0].unwrap() orelse return null;
+                sub_range.suffix[0] = sub_range.suffix[1];
+                sub_range.suffix[1] = .none;
+                return first;
+            },
+            .fn_proto => |*fn_proto| {
+                var buffer: [1]Ast.Node.Index = undefined;
+                const func = tree.fullFnProto(&buffer, fn_proto.node).?;
+                var func_it: FnParamIterator = .{
+                    .tree = tree,
+                    .params = func.ast.params,
+                    .param_i = fn_proto.param_i,
+                    .tok_i = fn_proto.tok_i,
+                    .tok_flag = fn_proto.tok_flag,
+                };
+                while (func_it.next()) |param| {
+                    fn_proto.param_i = func_it.param_i;
+                    fn_proto.tok_i = func_it.tok_i;
+                    fn_proto.tok_flag = func_it.tok_flag;
+                    return param.type_expr orelse continue;
+                } else {
+                    it.* = .initArray(.{
+                        func.ast.align_expr,
+                        func.ast.addrspace_expr,
+                        func.ast.section_expr,
+                        func.ast.callconv_expr,
+                        func.ast.return_type,
+                    });
+                    continue :sw it.*;
+                }
+            },
+            .@"asm" => |*asm_state| {
+                @branchHint(.unlikely);
+
+                if (asm_state.template.unwrap()) |template| {
+                    asm_state.template = .none;
+                    return template;
+                }
+                const items = tree.extraDataSlice(asm_state.items, Ast.Node.Index);
+
+                var i: usize = 0;
+                defer asm_state.items.start = @enumFromInt(@intFromEnum(asm_state.items.start) + i);
+                while (i < items.len) {
+                    defer i += 1;
+                    switch (tree.nodeTag(items[i])) {
+                        .asm_output => {
+                            const output_node = items[i];
+                            const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
+                            if (!has_arrow) continue;
+                            const lhs = tree.nodeData(output_node).opt_node_and_token[0].unwrap() orelse continue;
+                            return lhs;
+                        },
+                        .asm_input => {
+                            const input_node = items[i];
+                            return tree.nodeData(input_node).node_and_token[0];
+                        },
+                        else => unreachable,
+                    }
+                }
+
+                if (asm_state.clobbers.unwrap()) |clobbers| {
+                    asm_state.clobbers = .none;
+                    return clobbers;
+                }
+
+                return null;
+            },
         }
+    }
+
+    fn initArray(tuple: anytype) Iterator {
+        var array: @FieldType(Iterator, "array") = @splat(.none);
+        comptime std.debug.assert(tuple.len <= array.len);
+        var i: usize = 0;
+        inline for (tuple) |item| {
+            std.debug.assert(item != .root);
+            switch (@TypeOf(item)) {
+                Ast.Node.OptionalIndex => {
+                    if (item != .none) {
+                        array[i] = item;
+                        i += 1;
+                    }
+                },
+                Ast.Node.Index => {
+                    array[i] = item.toOptional();
+                    i += 1;
+                },
+                else => comptime unreachable,
+            }
+        }
+        return .{ .array = array };
+    }
+};
+
+pub const Walker = struct {
+    stack: std.ArrayList(Stack),
+
+    pub fn init(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!Walker {
+        var stack: std.ArrayList(Stack) = .empty;
+        try stack.append(allocator, .{
+            .node = node,
+            .it = .init(tree, node),
+        });
+        return .{ .stack = stack };
+    }
+
+    pub fn deinit(walker: *Walker, allocator: std.mem.Allocator) void {
+        walker.stack.deinit(allocator);
+        walker.* = undefined;
+    }
+
+    pub const Event = union(enum) {
+        open: Ast.Node.Index,
+        close: Ast.Node.Index,
     };
 
-    var children: std.ArrayList(Ast.Node.Index) = .empty;
-    errdefer children.deinit(allocator);
-    try iterateChildren(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
-    return children.toOwnedSlice(allocator);
-}
+    pub fn next(walker: *Walker, allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!?Event {
+        while (walker.stack.items.len != 0) {
+            const stack: *Stack = &walker.stack.items[walker.stack.items.len - 1];
+            const node = stack.it.next(tree) orelse {
+                const node = stack.node;
+                walker.stack.items.len -= 1;
+                return .{ .close = node };
+            };
+            std.debug.assert(node != .root);
+            try walker.stack.append(allocator, .{
+                .node = node,
+                .it = .init(tree, node),
+            });
+            return .{ .open = node };
+        } else return null;
+    }
 
-test nodeChildrenAlloc {
-    const allocator = std.testing.allocator;
-
-    var tree = try std.zig.Ast.parse(
-        allocator,
-        "const namespace = struct { field_a: u32 };",
-        .zig,
-    );
-    defer tree.deinit(allocator);
-
-    const namespace = tree.rootDecls()[0];
-
-    const children = try nodeChildrenAlloc(
-        allocator,
-        &tree,
-        namespace,
-    );
-    defer allocator.free(children);
-
-    try std.testing.expectEqual(1, children.len);
-    try std.testing.expectEqualStrings("struct { field_a: u32 }", tree.getNodeSource(children[0]));
-}
-
-/// returns the children of the given node.
-/// see `iterateChildrenRecursive` for a callback variant
-/// caller owns the returned memory
-pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
-    const Context = struct {
-        allocator: std.mem.Allocator,
-        children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), ast: *const Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
-            _ = ast;
-            try self.children.append(self.allocator, child_node);
+    pub fn nextIgnoreClose(walker: *Walker, allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!?Ast.Node.Index {
+        while (true) {
+            switch (try walker.next(allocator, tree) orelse return null) {
+                .open => |node| return node,
+                .close => continue,
+            }
         }
+    }
+
+    pub fn skip(walker: *Walker) void {
+        walker.stack.items.len -= 1;
+    }
+
+    /// Returns the parent node after a `Event.open` has been returned from `next`.
+    pub fn parentNode(walker: *const Walker) Ast.Node.Index {
+        return walker.stack.items[walker.stack.items.len - 2].node;
+    }
+
+    const Stack = struct {
+        node: Ast.Node.Index,
+        it: Iterator,
     };
-
-    var children: std.ArrayList(Ast.Node.Index) = .empty;
-    errdefer children.deinit(allocator);
-    try iterateChildrenRecursive(tree, node, Context{ .allocator = allocator, .children = &children }, error{OutOfMemory}, Context.callback);
-    return children.toOwnedSlice(allocator);
-}
-
-test nodeChildrenRecursiveAlloc {
-    const allocator = std.testing.allocator;
-
-    var tree = try std.zig.Ast.parse(
-        allocator,
-        "const namespace = struct { field_a: u32 };",
-        .zig,
-    );
-    defer tree.deinit(allocator);
-
-    const namespace = tree.rootDecls()[0];
-
-    const children = try nodeChildrenRecursiveAlloc(
-        allocator,
-        &tree,
-        namespace,
-    );
-    defer allocator.free(children);
-
-    try std.testing.expectEqual(3, children.len);
-    try std.testing.expectEqualStrings("struct { field_a: u32 }", tree.getNodeSource(children[0]));
-    try std.testing.expectEqualStrings("field_a: u32", tree.getNodeSource(children[1]));
-    try std.testing.expectEqualStrings("u32", tree.getNodeSource(children[2]));
-}
+};
 
 /// returns a list of nodes that overlap with the given source code index.
 /// sorted from smallest to largest.
@@ -1595,26 +1562,24 @@ test nodeChildrenRecursiveAlloc {
 pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: *const Ast, index: usize) error{OutOfMemory}![]Ast.Node.Index {
     std.debug.assert(index <= tree.source.len);
 
-    const Context = struct {
-        index: usize,
-        allocator: std.mem.Allocator,
-        nodes: std.ArrayList(Ast.Node.Index) = .empty,
+    var nodes: std.ArrayList(Ast.Node.Index) = .empty;
+    defer nodes.deinit(allocator);
 
-        pub fn append(self: *@This(), ast: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
-            std.debug.assert(node != .root);
-            const loc = offsets.nodeToLoc(ast, node);
-            if (loc.start <= self.index and self.index <= loc.end) {
-                try iterateChildren(ast, node, self, error{OutOfMemory}, append);
-                try self.nodes.append(self.allocator, node);
-            }
+    var walker: Walker = try .init(allocator, tree, .root);
+    defer walker.deinit(allocator);
+
+    while (try walker.nextIgnoreClose(allocator, tree)) |node| {
+        const loc = offsets.nodeToLoc(tree, node);
+        if (loc.start <= index and index <= loc.end) {
+            try nodes.append(allocator, node);
+        } else {
+            walker.skip();
         }
-    };
+    }
 
-    var context: Context = .{ .index = index, .allocator = allocator };
-    defer context.nodes.deinit(allocator);
-    try iterateChildren(tree, .root, &context, error{OutOfMemory}, Context.append);
-    try context.nodes.append(allocator, .root);
-    return try context.nodes.toOwnedSlice(allocator);
+    std.mem.reverse(Ast.Node.Index, nodes.items);
+    try nodes.append(allocator, .root);
+    return try nodes.toOwnedSlice(allocator);
 }
 
 /// returns a list of nodes that overlap with the given source code index.
@@ -1675,7 +1640,8 @@ pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: *const Ast, loc: offsets.L
 
     var parent: Ast.Node.Index = .root;
     while (true) {
-        try iterateChildren(tree, parent, &context, error{OutOfMemory}, Context.append);
+        var it: Iterator = .init(tree, parent);
+        while (it.next(tree)) |child| try context.append(tree, child);
 
         if (smallestEnclosingSubrange(context.locs.items, loc)) |subslice| {
             std.debug.assert(subslice.len != 0);

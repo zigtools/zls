@@ -101,7 +101,9 @@ const Builder = struct {
             .handle = handle,
         };
         try referenceNode(&context, &handle.tree, node);
-        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        var walker: ast.Walker = try .init(self.allocator, &handle.tree, node);
+        defer walker.deinit(self.allocator);
+        while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
     fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
@@ -345,69 +347,6 @@ fn symbolReferences(
     return builder.locations;
 }
 
-const ControlFlowBuilder = struct {
-    const Error = error{OutOfMemory};
-    locations: std.ArrayList(types.Location) = .empty,
-    encoding: offsets.Encoding,
-    token_handle: Analyser.TokenWithHandle,
-    allocator: std.mem.Allocator,
-    label: ?[]const u8 = null,
-    last_loop: Ast.TokenIndex,
-    nodes: []const Ast.Node.Index,
-    fn iter(builder: *ControlFlowBuilder, tree: *const Ast, node: Ast.Node.Index) Error!void {
-        const main_token = tree.nodeMainToken(node);
-        switch (tree.nodeTag(node)) {
-            .@"break", .@"continue" => {
-                if (tree.nodeData(node).opt_token_and_opt_node[0].unwrap()) |label_token| {
-                    const loop_or_switch_label = builder.label orelse return;
-                    const label = offsets.identifierTokenToNameSlice(tree, label_token);
-                    if (std.mem.eql(u8, loop_or_switch_label, label)) {
-                        try builder.add(main_token);
-                    }
-                } else for (builder.nodes) |n| switch (tree.nodeTag(n)) {
-                    .for_simple,
-                    .@"for",
-                    .while_cont,
-                    .while_simple,
-                    .@"while",
-                    => if (tree.nodeMainToken(n) == builder.last_loop)
-                        try builder.add(main_token),
-                    // break/continue on a switch must be labeled
-                    .@"switch",
-                    .switch_comma,
-                    => {},
-                    else => {},
-                };
-            },
-
-            .@"while",
-            .while_simple,
-            .while_cont,
-            .@"for",
-            .for_simple,
-            => {
-                const last_loop = builder.last_loop;
-                defer builder.last_loop = last_loop;
-                builder.last_loop = main_token;
-                try ast.iterateChildren(tree, node, builder, Error, iter);
-            },
-            else => try ast.iterateChildren(tree, node, builder, Error, iter),
-        }
-    }
-
-    fn add(builder: *ControlFlowBuilder, token_index: Ast.TokenIndex) Error!void {
-        const handle = builder.token_handle.handle;
-        try builder.locations.append(builder.allocator, .{
-            .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(&handle.tree, token_index, builder.encoding),
-        });
-    }
-
-    fn deinit(builder: *ControlFlowBuilder) void {
-        builder.locations.deinit(builder.allocator);
-    }
-};
-
 fn controlFlowReferences(
     allocator: std.mem.Allocator,
     token_handle: Analyser.TokenWithHandle,
@@ -418,27 +357,16 @@ fn controlFlowReferences(
     const tree = &handle.tree;
     const kw_token = token_handle.token;
 
-    const source_index = handle.tree.tokenStart(kw_token);
-    const nodes = try ast.nodesOverlappingIndex(allocator, tree, source_index);
-    defer allocator.free(nodes);
-
-    var builder: ControlFlowBuilder = .{
-        .allocator = allocator,
-        .token_handle = token_handle,
-        .encoding = encoding,
-        .last_loop = kw_token,
-        .nodes = nodes,
-    };
-    defer builder.deinit();
-
-    if (include_decl) {
-        try builder.add(kw_token);
-    }
+    var results: std.ArrayList(Ast.TokenIndex) = .empty;
+    defer results.deinit(allocator);
 
     switch (tree.tokenTag(kw_token)) {
         .keyword_continue,
         .keyword_break,
         => {
+            const nodes = try ast.nodesOverlappingIndex(allocator, tree, handle.tree.tokenStart(kw_token));
+            defer allocator.free(nodes);
+
             const maybe_label = blk: {
                 if (kw_token + 2 >= tree.tokens.len) break :blk null;
                 if (tree.tokenTag(kw_token + 1) != .colon) break :blk null;
@@ -454,13 +382,13 @@ fn controlFlowReferences(
                 => {
                     // if the break/continue is unlabeled it must belong to the first loop we encounter
                     const main_token = tree.nodeMainToken(node);
-                    const label = maybe_label orelse break try builder.add(main_token);
+                    const label = maybe_label orelse break try results.append(allocator, main_token);
                     const loop_label = if (tree.isTokenPrecededByTags(main_token, &.{ .identifier, .colon }))
                         offsets.identifierTokenToNameSlice(tree, main_token - 2)
                     else
                         continue;
                     if (std.mem.eql(u8, label, loop_label)) {
-                        try builder.add(main_token);
+                        try results.append(allocator, main_token);
                     }
                 },
                 .switch_comma,
@@ -473,7 +401,8 @@ fn controlFlowReferences(
                     else
                         continue;
                     if (std.mem.eql(u8, label, switch_label)) {
-                        try builder.add(
+                        try results.append(
+                            allocator,
                             // we already know the switch is labeled so we can just offset
                             main_token + 2,
                         );
@@ -485,16 +414,88 @@ fn controlFlowReferences(
         .keyword_for,
         .keyword_while,
         .keyword_switch,
-        => {
-            if (tree.isTokenPrecededByTags(kw_token, &.{ .identifier, .colon }))
-                builder.label = tree.tokenSlice(kw_token - 2);
-            try ast.iterateChildren(tree, nodes[0], &builder, ControlFlowBuilder.Error, ControlFlowBuilder.iter);
+        => |tag| {
+            const maybe_label = if (tree.isTokenPrecededByTags(kw_token, &.{ .identifier, .colon }))
+                offsets.identifierTokenToNameSlice(tree, kw_token - 2)
+            else
+                null;
+
+            if (tag == .keyword_switch and maybe_label == null) return .empty;
+
+            const nodes = try ast.nodesOverlappingIndex(allocator, tree, tree.tokenStart(kw_token));
+            defer allocator.free(nodes);
+
+            var walker: ast.Walker = try .init(allocator, tree, nodes[0]);
+            defer walker.deinit(allocator);
+
+            _ = try walker.nextIgnoreClose(allocator, tree);
+
+            var loop_depth: usize = 1;
+
+            while (try walker.next(allocator, tree)) |event| {
+                switch (event) {
+                    .open => |node| switch (tree.nodeTag(node)) {
+                        .@"break", .@"continue" => {
+                            const label_token = tree.nodeData(node).opt_token_and_opt_node[0].unwrap();
+                            if (label_token) |actual_label_token| {
+                                const actual_label = offsets.identifierTokenToNameSlice(tree, actual_label_token);
+                                if (maybe_label) |expected_label| {
+                                    if (!std.mem.eql(u8, expected_label, actual_label)) continue;
+                                }
+                            } else if (loop_depth > 1) continue;
+                            try results.append(allocator, tree.nodeMainToken(node));
+                        },
+
+                        .@"while",
+                        .while_simple,
+                        .while_cont,
+                        .@"for",
+                        .for_simple,
+                        => {
+                            if (maybe_label == null) {
+                                walker.skip();
+                            } else {
+                                loop_depth += 1;
+                            }
+                        },
+                        else => {},
+                    },
+                    .close => |node| switch (tree.nodeTag(node)) {
+                        .@"while",
+                        .while_simple,
+                        .while_cont,
+                        .@"for",
+                        .for_simple,
+                        => {
+                            if (maybe_label != null) {
+                                loop_depth -= 1;
+                            }
+                        },
+                        else => {},
+                    },
+                }
+            }
         },
-        else => {},
+        else => return .empty,
     }
 
-    defer builder.locations = .empty;
-    return builder.locations;
+    var locations: std.ArrayList(types.Location) = try .initCapacity(allocator, results.items.len + @intFromBool(include_decl));
+    errdefer locations.deinit(allocator);
+
+    if (include_decl) {
+        locations.appendAssumeCapacity(.{
+            .uri = handle.uri.raw,
+            .range = offsets.tokenToRange(tree, kw_token, encoding),
+        });
+    }
+
+    for (results.items) |token| {
+        locations.appendAssumeCapacity(.{
+            .uri = handle.uri.raw,
+            .range = offsets.tokenToRange(tree, token, encoding),
+        });
+    }
+    return locations;
 }
 
 pub const Callsite = struct {
@@ -530,7 +531,9 @@ const CallBuilder = struct {
             .builder = self,
             .handle = handle,
         };
-        try ast.iterateChildrenRecursive(&handle.tree, node, &context, error{OutOfMemory}, referenceNode);
+        var walker: ast.Walker = try .init(self.allocator, &handle.tree, node);
+        defer walker.deinit(self.allocator);
+        while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
     fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {

@@ -14,7 +14,7 @@ test "container decl" {
         \\};
     ,
         \\Constant S
-        \\  Function f
+        \\  Function f (fn f() void)
     );
     try testDocumentSymbol(
         \\const S = struct {
@@ -23,8 +23,8 @@ test "container decl" {
         \\};
     ,
         \\Constant S
-        \\  Field alpha
-        \\  Function f
+        \\  Field alpha (S)
+        \\  Function f (fn f() void)
     );
 }
 
@@ -47,8 +47,8 @@ test "union" {
         \\};
     ,
         \\Constant U
-        \\  Field alpha
-        \\  Field beta
+        \\  Field alpha (U)
+        \\  Field beta (U)
     );
 }
 
@@ -60,8 +60,8 @@ test "enum" {
         \\};
     ,
         \\Constant E
-        \\  EnumMember alpha
-        \\  EnumMember beta
+        \\  EnumMember alpha (E)
+        \\  EnumMember beta (E)
     );
 }
 
@@ -69,6 +69,13 @@ test "invalid tuple-like container" {
     try testDocumentSymbol(
         \\const E = enum {
         \\    '=',
+        \\};
+    ,
+        \\Constant E
+    );
+    try testDocumentSymbol(
+        \\const E = enum {
+        \\    @src
         \\};
     ,
         \\Constant E
@@ -133,7 +140,7 @@ test "nested struct with self" {
     ,
         \\Constant Foo
         \\  Constant Self
-        \\  Function foo
+        \\  Function foo (fn foo() !Self)
         \\  Constant Bar
     );
 }
@@ -191,7 +198,9 @@ fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
         const top = stack.items[depth];
         if (top.len > 0) {
             try actual.appendNTimes(allocator, ' ', depth * 2);
-            try actual.print(allocator, "{t} {s}\n", .{ top[0].kind, top[0].name });
+            try actual.print(allocator, "{t} {s}", .{ top[0].kind, top[0].name });
+            if (top[0].detail) |detail| try actual.print(allocator, " ({s})", .{detail});
+            try actual.append(allocator, '\n');
             if (top[0].children) |children| {
                 try stack.appendBounded(children);
             }
