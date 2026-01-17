@@ -45,9 +45,9 @@
               doCheck = true;
               configurePhase = ''
                 export ZIG_GLOBAL_CACHE_DIR=$TEMP/.cache
+                PACKAGE_DIR=${pkgs.callPackage ./deps.nix {}}
               '';
               buildPhase = ''
-                PACKAGE_DIR=${pkgs.callPackage ./deps.nix {}}
                 zig build install --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe --color off --prefix $out
               '';
               checkPhase = ''
