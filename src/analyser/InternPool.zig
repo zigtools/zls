@@ -3956,6 +3956,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                 .c => try writer.writeAll("[*c]"),
                 .slice => try writer.writeAll("[]"),
             }
+            if (pointer_info.flags.is_allowzero and pointer_info.flags.size != .c) try writer.writeAll("allowzero ");
 
             if (pointer_info.flags.alignment != 0) {
                 try writer.print("align({d}", .{pointer_info.flags.alignment});
@@ -3973,7 +3974,6 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
 
             if (pointer_info.flags.is_const) try writer.writeAll("const ");
             if (pointer_info.flags.is_volatile) try writer.writeAll("volatile ");
-            if (pointer_info.flags.is_allowzero and pointer_info.flags.size != .c) try writer.writeAll("allowzero ");
 
             return pointer_info.elem_type;
         },
@@ -4454,11 +4454,12 @@ test "pointer type" {
             .host_size = 3,
         },
     } });
-    const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*allowzero addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
             .is_const = true,
+            .is_allowzero = true,
             .address_space = .shared,
         },
     } });
@@ -4489,7 +4490,7 @@ test "pointer type" {
     try expect(@"*i32" != @"*u32");
     try expect(@"*u32" != @"*const volatile u32");
     try expect(@"*const volatile u32" != @"*align(4:2:3) u32");
-    try expect(@"*align(4:2:3) u32" != @"*addrspace(.shared) const u32");
+    try expect(@"*align(4:2:3) u32" != @"*allowzero addrspace(.shared) const u32");
 
     try expect(@"[*]u32" != @"[*:0]u32");
     try expect(@"[*:0]u32" != @"[]u32");
@@ -4500,7 +4501,7 @@ test "pointer type" {
     try expectFmt("*u32", "{f}", .{@"*u32".fmt(&ip)});
     try expectFmt("*const volatile u32", "{f}", .{@"*const volatile u32".fmt(&ip)});
     try expectFmt("*align(4:2:3) u32", "{f}", .{@"*align(4:2:3) u32".fmt(&ip)});
-    try expectFmt("*addrspace(.shared) const u32", "{f}", .{@"*addrspace(.shared) const u32".fmt(&ip)});
+    try expectFmt("*allowzero addrspace(.shared) const u32", "{f}", .{@"*allowzero addrspace(.shared) const u32".fmt(&ip)});
 
     try expectFmt("[*]u32", "{f}", .{@"[*]u32".fmt(&ip)});
     try expectFmt("[*:0]u32", "{f}", .{@"[*:0]u32".fmt(&ip)});
