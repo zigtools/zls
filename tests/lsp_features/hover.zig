@@ -1398,6 +1398,20 @@ test "pointer dereference" {
     });
 }
 
+test "doctest" {
+    try testHover(
+        \\fn foo() void {}
+        \\test <cursor>foo {}
+    ,
+        \\```zig
+        \\fn foo() void
+        \\```
+        \\```zig
+        \\(fn () void)
+        \\```
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     try testHoverWithOptions(source, expected, .{ .markup_kind = .markdown });
 }

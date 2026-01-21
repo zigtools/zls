@@ -4886,6 +4886,7 @@ pub const PositionContext = union(enum) {
     parens_expr: offsets.Loc,
     keyword: Ast.TokenIndex,
     error_access,
+    test_doctest_name,
     comment,
     other,
     empty,
@@ -4908,6 +4909,7 @@ pub const PositionContext = union(enum) {
             => |l| return l,
             .keyword => |token_index| return offsets.tokenToLoc(tree, token_index),
             .error_access,
+            .test_doctest_name,
             .comment,
             .other,
             .empty,
@@ -5164,6 +5166,7 @@ pub fn getPositionContext(
                     .{ .label_access = tok.loc }
                 else
                     .{ .var_access = tok.loc },
+                .test_doctest_name => curr_ctx.ctx = .test_doctest_name,
                 else => curr_ctx.ctx = .{ .var_access = tok.loc },
             },
             .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
@@ -5230,6 +5233,7 @@ pub fn getPositionContext(
                 std.debug.assert(tree.tokenTag(current_token) == tag);
                 curr_ctx.ctx = .{ .keyword = current_token };
             },
+            .keyword_test => curr_ctx.ctx = .test_doctest_name,
             .container_doc_comment => curr_ctx.ctx = .comment,
             .doc_comment => {
                 if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .comment; // Intent is to skip everything between the `error{...}` braces

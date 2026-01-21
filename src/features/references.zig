@@ -682,7 +682,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
         const decl = switch (pos_context) {
-            .var_access => try analyser.lookupSymbolGlobal(handle, name, source_index),
+            .var_access, .test_doctest_name => try analyser.lookupSymbolGlobal(handle, name, source_index),
             .field_access => |loc| z: {
                 const held_loc = offsets.locMerge(loc, name_loc);
                 const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
