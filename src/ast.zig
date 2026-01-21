@@ -1042,7 +1042,7 @@ pub const FnParamIterator = struct {
 };
 
 pub const Iterator = union(enum) {
-    array: [6]Ast.Node.OptionalIndex,
+    array: [5]Ast.Node.OptionalIndex,
     sub_range: struct {
         prefix: Ast.Node.OptionalIndex = .none,
         items: Ast.Node.SubRange,
@@ -1179,7 +1179,7 @@ pub const Iterator = union(enum) {
             .root => {
                 switch (tree.mode) {
                     .zig => return .{ .sub_range = .{ .items = tree.nodeData(.root).extra_range } },
-                    .zon => return .{ .array = .{ tree.nodeData(.root).node.toOptional(), .none, .none, .none, .none, .none } },
+                    .zon => return .{ .array = .{ tree.nodeData(.root).node.toOptional(), .none, .none, .none, .none } },
                 }
             },
 
@@ -1237,16 +1237,29 @@ pub const Iterator = union(enum) {
             .ptr_type_aligned,
             .ptr_type_sentinel,
             .ptr_type,
-            .ptr_type_bit_range,
             => {
                 const ptr_type = fullPtrType(tree, node).?.ast;
+                std.debug.assert(ptr_type.bit_range_start == .none);
+                std.debug.assert(ptr_type.bit_range_end == .none);
                 return .initArray(.{
                     ptr_type.sentinel,
                     ptr_type.align_node,
-                    ptr_type.bit_range_start,
-                    ptr_type.bit_range_end,
                     ptr_type.addrspace_node,
                     ptr_type.child_type,
+                });
+            },
+            .ptr_type_bit_range => {
+                const ptr_type = tree.ptrTypeBitRange(node);
+                std.debug.assert(ptr_type.size == .one);
+                std.debug.assert(ptr_type.ast.sentinel == .none);
+                std.debug.assert(ptr_type.ast.bit_range_start != .none);
+                std.debug.assert(ptr_type.ast.bit_range_end != .none);
+                return .initArray(.{
+                    ptr_type.ast.align_node,
+                    ptr_type.ast.bit_range_start,
+                    ptr_type.ast.bit_range_end,
+                    ptr_type.ast.addrspace_node,
+                    ptr_type.ast.child_type,
                 });
             },
 
@@ -1387,6 +1400,7 @@ pub const Iterator = union(enum) {
             .array => |*array| {
                 const result = array[0].unwrap() orelse return null;
                 @memmove(array[0 .. array.len - 1], array[1..]);
+                array[array.len - 1] = .none;
                 return result;
             },
             .sub_range => |*sub_range| {
