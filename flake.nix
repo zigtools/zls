@@ -2,14 +2,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    zig-flake.url = "github:silversquirl/zig-flake";
+    zig-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
     self,
     nixpkgs,
-    zig-overlay,
+    zig-flake,
   }: let
     lib = nixpkgs.lib;
     parseVersionFieldFromZon = name:
@@ -18,6 +18,7 @@
         (builtins.match ".*\n[[:space:]]*\.${name}[[:space:]]=[[:space:]]\"([^\"]+)\".*")
         builtins.head
       ];
+    minimum_zig_version = parseVersionFieldFromZon "minimum_zig_version";
     zlsVersionShort = parseVersionFieldFromZon "version";
     zlsVersionFull =
       zlsVersionShort
@@ -33,7 +34,12 @@
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
           fs = lib.fileset;
-          zig = zig-overlay.packages.${system}.master;
+          zigVersion = lib.pipe minimum_zig_version [
+            builtins.splitVersion
+            (lib.sublist 0 5)
+            (lib.concatStringsSep "_")
+          ];
+          zig = zig-flake.packages.${system}."zig_${zigVersion}";
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
         in {
           formatter.${system} = pkgs.alejandra;

@@ -53,43 +53,26 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "zig-overlay": "zig-overlay"
+        "zig-flake": "zig-flake"
       }
     },
-    "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
-      }
-    },
-    "zig-overlay": {
+    "zig-flake": {
       "inputs": {
-        "flake-compat": "flake-compat",
-        "flake-utils": "flake-utils",
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1768178421,
-        "narHash": "sha256-OKN0ZVTMEv1LbTHw8qe494yOc67IrnE+9qPO6ztvlTg=",
-        "owner": "mitchellh",
-        "repo": "zig-overlay",
-        "rev": "943011b7a2beab0af976ad9b60f0d5953cefbd30",
+        "lastModified": 1768326649,
+        "narHash": "sha256-zdd7aN+qCD792jPpsprraTsrGL/IBeUsWMF1Tz1V3kA=",
+        "owner": "silversquirl",
+        "repo": "zig-flake",
+        "rev": "63aa638b551cbf53469e966a6f073b7f7e6320a3",
         "type": "github"
       },
       "original": {
-        "owner": "mitchellh",
-        "repo": "zig-overlay",
+        "owner": "silversquirl",
+        "repo": "zig-flake",
         "type": "github"
       }
     }
