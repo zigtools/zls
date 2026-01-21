@@ -42,6 +42,8 @@ max_conditional_combos: usize = 200,
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
+pub const Error = std.mem.Allocator.Error || std.Io.Cancelable;
+
 pub fn init(
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
@@ -417,7 +419,7 @@ pub fn isInstanceCall(
     call_handle: *DocumentStore.Handle,
     call: Ast.full.Call,
     func_ty: Type,
-) error{OutOfMemory}!bool {
+) Error!bool {
     std.debug.assert(!func_ty.is_type_val);
     if (call_handle.tree.nodeTag(call.ast.fn_expr) != .field_access) return false;
 
@@ -433,7 +435,7 @@ pub fn isInstanceCall(
     return analyser.firstParamIs(func_ty, container_ty);
 }
 
-pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) !bool {
+pub fn hasSelfParam(analyser: *Analyser, func_ty: Type) error{OutOfMemory}!bool {
     std.debug.assert(func_ty.isFunc());
     const container = func_ty.data.function.container_type.*;
     if (container.is_type_val) return false;
@@ -781,7 +783,7 @@ test identifierLocFromIndex {
 /// const decl = @import("decl-file.zig").decl;
 /// const other = decl.middle.other;
 ///```
-pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?DeclWithHandle {
+pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) Error!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -790,7 +792,7 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) error{O
     return try analyser.resolveVarDeclAliasInternal(options, &node_trail);
 }
 
-fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, node_trail: *NodeSet) Error!?DeclWithHandle {
     const node_handle = options.node_handle;
     const node_with_uri: NodeWithUri = .{
         .node = node_handle.node,
@@ -870,12 +872,12 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, nod
 }
 
 /// resolves `@field(lhs, field_name)`
-pub fn resolveFieldAccess(analyser: *Analyser, lhs: Type, field_name: []const u8) !?Type {
+pub fn resolveFieldAccess(analyser: *Analyser, lhs: Type, field_name: []const u8) Error!?Type {
     const binding = try analyser.resolveFieldAccessBinding(.{ .type = lhs, .is_const = false }, field_name) orelse return null;
     return binding.type;
 }
 
-pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, field_name: []const u8) !?Binding {
+pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, field_name: []const u8) Error!?Binding {
     const lhs = lhs_binding.type;
 
     if (try analyser.resolveUnionTagAccess(lhs, field_name)) |t|
@@ -899,7 +901,7 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
     return null;
 }
 
-pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) !Type {
+pub fn resolveGenericType(analyser: *Analyser, ty: Type, bound_params: TokenToTypeMap) error{OutOfMemory}!Type {
     var visiting: Type.Data.GenericSet = .empty;
     defer visiting.deinit(analyser.gpa);
     return analyser.resolveGenericTypeInternal(ty, bound_params, &visiting);
@@ -960,7 +962,7 @@ fn resolveReturnValueOfFuncNode(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     func_node: Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) Error!?Type {
     const tree = &handle.tree;
 
     var buf: [1]Ast.Node.Index = undefined;
@@ -1050,7 +1052,7 @@ pub fn resolveUnwrapErrorUnionType(analyser: *Analyser, ty: Type, side: ErrorUni
     };
 }
 
-fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
+fn resolveUnionTag(analyser: *Analyser, ty: Type) Error!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1079,7 +1081,7 @@ fn resolveUnionTag(analyser: *Analyser, ty: Type) error{OutOfMemory}!?Type {
     return null;
 }
 
-fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) error{OutOfMemory}!?Type {
+fn resolveUnionTagAccess(analyser: *Analyser, ty: Type, symbol: []const u8) Error!?Type {
     if (!ty.is_type_val)
         return null;
 
@@ -1154,7 +1156,7 @@ pub const BracketAccess = union(enum) {
         analyser: *Analyser,
         handle: *DocumentStore.Handle,
         slice: Ast.full.Slice,
-    ) error{OutOfMemory}!BracketAccess {
+    ) Error!BracketAccess {
         const start_node = slice.ast.start;
         const end_node = slice.ast.end.unwrap() orelse
             return .{
@@ -1192,7 +1194,7 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
 }
 
 // TODO: copy indexing logic from Zig compiler to InternPool, and then delete bracketAccessTypeFromIPIndex
-fn bracketAccessTypeFromIPIndex(analyser: *Analyser, ip_index: InternPool.Index) !Type {
+fn bracketAccessTypeFromIPIndex(analyser: *Analyser, ip_index: InternPool.Index) error{OutOfMemory}!Type {
     std.debug.assert(analyser.ip.typeOf(ip_index) == .type_type);
     return switch (analyser.ip.indexToKey(ip_index)) {
         .vector_type => |info| .{
@@ -1429,12 +1431,12 @@ fn resolveOptionalIPValue(
     analyser: *Analyser,
     optional_node: Ast.Node.OptionalIndex,
     handle: *DocumentStore.Handle,
-) error{OutOfMemory}!?InternPool.Index {
+) Error!?InternPool.Index {
     const node = optional_node.unwrap() orelse return null;
     return try analyser.resolveInternPoolValue(.of(node, handle));
 }
 
-fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
+fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) Error!?InternPool.Index {
     const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
     analyser.resolve_number_literal_values = true;
     defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
@@ -1446,7 +1448,7 @@ fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) error{Ou
     }
 }
 
-fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: ResolveOptions) error{OutOfMemory}!?T {
+fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: ResolveOptions) Error!?T {
     const ip_index = try analyser.resolveInternPoolValue(options) orelse return null;
     return analyser.ip.toInt(ip_index, T);
 }
@@ -1531,7 +1533,7 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
     } });
 }
 
-fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const u8 {
+fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) Error!?[]const u8 {
     var node_with_handle = options.node_handle;
     if (try analyser.resolveVarDeclAlias(options)) |decl_with_handle| {
         if (decl_with_handle.decl == .ast_node) {
@@ -1563,7 +1565,7 @@ fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) !?[]const 
     return field_name[1 .. field_name.len - 1];
 }
 
-fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?InternPool.Index {
+fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) Error!?InternPool.Index {
     const ty = try analyser.resolveTypeOfNodeInternal(options) orelse return null;
     if (!ty.is_type_val) return null;
     const ip_index = switch (ty.data) {
@@ -1595,7 +1597,7 @@ fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.In
     return resolved;
 }
 
-fn resolvePeerErrorSets(analyser: *Analyser, a: Type, b: Type) !?Type {
+fn resolvePeerErrorSets(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
     if (a.data != .ip_index) return null;
     if (b.data != .ip_index) return null;
     if (a.data.ip_index.type != .type_type) return null;
@@ -1725,7 +1727,7 @@ fn resolvePeerTypesInternal(analyser: *Analyser, a: Type, b: Type) error{OutOfMe
     return null;
 }
 
-fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !?Type {
+fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) Error!?Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1770,8 +1772,6 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
     var possible: std.ArrayList(Type.TypeWithDescriptor) = .empty;
 
     for (refs.items) |ref| {
-        const handle = analyser.store.getOrLoadHandle(ref.uri).?;
-
         var call_buf: [1]Ast.Node.Index = undefined;
         const call = tree.fullCall(&call_buf, ref.call_node).?;
 
@@ -1787,6 +1787,8 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
             const old_collect_callsite_references = analyser.collect_callsite_references;
             defer analyser.collect_callsite_references = old_collect_callsite_references;
             analyser.collect_callsite_references = false;
+
+            const handle = try analyser.store.getOrLoadHandle(ref.uri) orelse continue;
 
             break :resolve_ty try analyser.resolveTypeOfNode(.of(
                 // TODO?: this is a """heuristic based approach"""
@@ -1804,7 +1806,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) !
         const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
         try possible.append(analyser.arena, .{
             .type = ty,
-            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri.raw, loc.line + 1, loc.character + 1 }),
+            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ ref.uri.raw, loc.line + 1, loc.character + 1 }),
         });
     }
 
@@ -1818,7 +1820,7 @@ fn resolveFunctionTypeFromCall(
     handle: *DocumentStore.Handle,
     call: Ast.full.Call,
     func_ty: Type,
-) !Type {
+) Error!Type {
     if (!func_ty.isGenericType()) {
         return func_ty;
     }
@@ -1924,31 +1926,31 @@ const BreakIterator = struct {
     }
 };
 
-pub fn resolveInstanceOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+pub fn resolveInstanceOfNode(analyser: *Analyser, options: ResolveOptions) Error!?Type {
     const ty = try analyser.resolveTypeOfNode(options) orelse return null;
     return ty.instanceTypeVal(analyser);
 }
 
 /// Resolves the type of an Ast Node.
 /// Returns `null` if the type could not be resolved.
-pub fn resolveTypeOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+pub fn resolveTypeOfNode(analyser: *Analyser, options: ResolveOptions) Error!?Type {
     const binding = try analyser.resolveBindingOfNode(options) orelse return null;
     return binding.type;
 }
 
-fn resolveTypeOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+fn resolveTypeOfNodeInternal(analyser: *Analyser, options: ResolveOptions) Error!?Type {
     const binding = try analyser.resolveBindingOfNodeInternal(options) orelse return null;
     return binding.type;
 }
 
-pub fn resolveBindingOfNode(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+pub fn resolveBindingOfNode(analyser: *Analyser, options: ResolveOptions) Error!?Binding {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     return analyser.resolveBindingOfNodeInternal(options);
 }
 
-fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) Error!?Binding {
     const node_handle = options.node_handle;
     const node_with_uri: NodeWithUri = .{
         .node = node_handle.node,
@@ -1968,7 +1970,7 @@ fn resolveBindingOfNodeInternal(analyser: *Analyser, options: ResolveOptions) er
     return binding;
 }
 
-fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Type {
+fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error!?Type {
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -2376,7 +2378,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
                     if (!DocumentStore.supports_build_system) return null;
                     const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
 
-                    const new_handle = analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
+                    const new_handle = try analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
 
                     return .{
                         .data = .{ .container = .root(new_handle) },
@@ -3025,7 +3027,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error
     return null;
 }
 
-fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) error{OutOfMemory}!?Binding {
+fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error!?Binding {
     const node_handle = options.node_handle;
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -3782,7 +3784,7 @@ pub const Type = struct {
     }
 
     /// Returns true if we have reached the limit for analyzing combinations
-    pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) !bool {
+    pub fn getAllTypesWithHandlesArraySet(ty: Type, analyser: *Analyser, all_types: *ArraySet) error{OutOfMemory}!bool {
         if (all_types.count() >= analyser.max_conditional_combos) {
             return true;
         }
@@ -3933,7 +3935,7 @@ pub const Type = struct {
         fn init(
             arena: std.mem.Allocator,
             possible_types: *const ArrayMap([]const Type),
-        ) !ComboIterator {
+        ) error{OutOfMemory}!ComboIterator {
             var current_combo: ArrayMap(Type) = .empty;
             try current_combo.entries.resize(arena, possible_types.count());
             @memcpy(current_combo.keys(), possible_types.keys());
@@ -4164,7 +4166,7 @@ pub const Type = struct {
         };
     }
 
-    pub fn typeDefinitionToken(self: Type) !?TokenWithHandle {
+    pub fn typeDefinitionToken(self: Type) ?TokenWithHandle {
         return switch (self.data) {
             .container => |info| .{
                 .token = info.scope_handle.handle.tree.firstToken(info.scope_handle.toNode()),
@@ -4193,7 +4195,7 @@ pub const Type = struct {
         self: Type,
         analyser: *Analyser,
         symbol: []const u8,
-    ) error{OutOfMemory}!?DeclWithHandle {
+    ) Error!?DeclWithHandle {
         switch (self.data) {
             .either => |entries| {
                 // TODO: Return all options instead of first valid one
@@ -4337,7 +4339,10 @@ pub const Type = struct {
 
                 switch (handle.tree.nodeTag(node)) {
                     .root => {
-                        const path = handle.uri.toFsPath(analyser.arena) catch handle.uri.raw;
+                        const path = handle.uri.toFsPath(analyser.arena) catch |err| switch (err) {
+                            error.OutOfMemory => return error.OutOfMemory,
+                            error.UnsupportedScheme => handle.uri.raw,
+                        };
                         const str = std.fs.path.stem(path);
                         try writer.writeAll(str);
                         if (referenced) |r| try r.put(analyser.arena, .of(str, handle, tree.firstToken(node)), {});
@@ -4502,12 +4507,12 @@ pub const ScopeWithHandle = struct {
     }
 };
 
-pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, import_string: []const u8) error{OutOfMemory}!?Type {
+pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, import_string: []const u8) Error!?Type {
     const result = try analyser.store.uriFromImportStr(analyser.arena, handle, import_string);
     switch (result) {
         .none => return null,
         .one => |uri| {
-            const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
+            const node_handle = try analyser.store.getOrLoadHandle(uri) orelse return null;
             return .{
                 .data = .{ .container = .root(node_handle) },
                 .is_type_val = true,
@@ -4516,7 +4521,7 @@ pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, i
         .many => |uris| {
             var entries: std.ArrayList(Type.Data.EitherEntry) = try .initCapacity(analyser.arena, uris.len);
             for (uris) |uri| {
-                const node_handle = analyser.store.getOrLoadHandle(uri) orelse continue;
+                const node_handle = try analyser.store.getOrLoadHandle(uri) orelse continue;
                 entries.appendAssumeCapacity(.{
                     .type_data = .{ .container = .root(node_handle) },
                     .descriptor = "",
@@ -4532,12 +4537,12 @@ pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, i
 
 /// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
-pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) error{OutOfMemory}!?Type {
+pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) Error!?Type {
     const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
     const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "builtin.zig" });
     const builtin_uri: Uri = try .fromPath(analyser.arena, builtin_path);
 
-    const builtin_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
+    const builtin_handle = try analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
     const builtin_root_struct_type: Type = .{
         .data = .{ .container = .root(builtin_handle) },
         .is_type_val = true,
@@ -4647,7 +4652,7 @@ pub fn getFieldAccessType(
     handle: *DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) error{OutOfMemory}!?Type {
+) Error!?Type {
     const held_range = try analyser.arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
     var tokenizer: std.zig.Tokenizer = .init(held_range);
     var current_type: ?Type = null;
@@ -5312,7 +5317,7 @@ pub const DeclWithHandle = struct {
         return self.decl.nameToken(&self.handle.tree);
     }
 
-    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) error{OutOfMemory}!TokenWithHandle {
+    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) Error!TokenWithHandle {
         if (resolve_alias) {
             switch (self.decl) {
                 .ast_node => |node| {
@@ -5327,7 +5332,7 @@ pub const DeclWithHandle = struct {
             }
             if (try self.resolveType(analyser)) |resolved_type| {
                 if (resolved_type.is_type_val) {
-                    if (try resolved_type.typeDefinitionToken()) |token| {
+                    if (resolved_type.typeDefinitionToken()) |token| {
                         return token;
                     }
                 }
@@ -5527,7 +5532,7 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) error{OutOfMemory}!?Type {
+    pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) Error!?Type {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
@@ -5684,7 +5689,7 @@ pub fn collectDeclarationsOfContainer(
     instance_access: bool,
     /// allocated with `analyser.arena`
     decl_collection: *std.ArrayList(DeclWithHandle),
-) error{OutOfMemory}!void {
+) Analyser.Error!void {
     const info = switch (container_type.data) {
         .container => |info| info,
         .either => |entries| {
@@ -6011,7 +6016,7 @@ pub fn lookupSymbolFieldInit(
     field_name: []const u8,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?DeclWithHandle {
+) Error!?DeclWithHandle {
     var container_type = (try analyser.resolveExpressionType(
         handle,
         node,
@@ -6062,7 +6067,7 @@ pub fn resolveExpressionType(
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) Error!?Type {
     return (try analyser.resolveExpressionTypeFromAncestors(
         handle,
         node,
@@ -6075,7 +6080,7 @@ pub fn resolveExpressionTypeFromAncestors(
     handle: *DocumentStore.Handle,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) error{OutOfMemory}!?Type {
+) Error!?Type {
     if (ancestors.len == 0) return null;
 
     const tree = &handle.tree;
@@ -6482,21 +6487,21 @@ pub fn getSymbolEnumLiteral(
     handle: *DocumentStore.Handle,
     source_index: usize,
     name: []const u8,
-) error{OutOfMemory}!?DeclWithHandle {
+) Error!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = &handle.tree;
     const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
     if (nodes.len == 0) return null;
-    return analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
+    return try analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
 }
 
 pub fn resolveStructInitType(
     analyser: *Analyser,
     handle: *DocumentStore.Handle,
     source_index: usize,
-) error{OutOfMemory}!?Type {
+) Error!?Type {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -6522,7 +6527,7 @@ pub fn getSymbolFieldAccesses(
     source_index: usize,
     held_loc: offsets.Loc,
     name: []const u8,
-) error{OutOfMemory}!?[]const DeclWithHandle {
+) Error!?[]const DeclWithHandle {
     var decls_with_handles: std.ArrayList(DeclWithHandle) = .empty;
     var property_types: std.ArrayList(Type) = .empty;
     try analyser.getSymbolFieldAccessesArrayList(arena, handle, source_index, held_loc, name, &decls_with_handles, &property_types);
@@ -6538,7 +6543,7 @@ pub fn getSymbolFieldAccessesArrayList(
     name: []const u8,
     decls_with_handles: *std.ArrayList(DeclWithHandle),
     property_types: *std.ArrayList(Type),
-) error{OutOfMemory}!void {
+) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -6564,7 +6569,7 @@ pub fn getSymbolFieldAccessesHighlight(
     loc: offsets.Loc,
     decls_with_handles: *std.ArrayList(DeclWithHandle),
     property_types: *std.ArrayList(Type),
-) !?offsets.Loc {
+) Error!?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
         const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
             const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;

@@ -2689,7 +2689,7 @@ fn coerceInMemoryAllowedErrorSets(
     arena: Allocator,
     dest_ty: Index,
     src_ty: Index,
-) !InMemoryCoercionResult {
+) Allocator.Error!InMemoryCoercionResult {
     if (dest_ty == src_ty) return .ok;
     if (dest_ty == .anyerror_type) return .ok;
     if (src_ty == .anyerror_type) return .from_anyerror;

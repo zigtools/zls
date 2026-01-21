@@ -207,11 +207,11 @@ const Builder = struct {
     }
 };
 
-fn writeToken(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType) !void {
+fn writeToken(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType) error{OutOfMemory}!void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) !void {
+fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) error{OutOfMemory}!void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
@@ -243,7 +243,7 @@ fn colorIdentifierBasedOnType(
     target_tok: Ast.TokenIndex,
     is_parameter: bool,
     tok_mod: TokenModifiers,
-) !void {
+) error{OutOfMemory}!void {
     if (type_node.is_type_val) {
         const token_type: TokenType = if (type_node.isNamespace())
             .namespace
@@ -281,7 +281,7 @@ fn colorIdentifierBasedOnType(
     }
 }
 
-fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &handle.tree;
 
@@ -957,7 +957,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
     }
 }
 
-fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: Ast.Node.Index) !void {
+fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: Ast.Node.Index) Analyser.Error!void {
     const tree = &builder.handle.tree;
 
     var container_field = tree.fullContainerField(node).?;
@@ -989,7 +989,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     }
 }
 
-fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) error{OutOfMemory}!void {
+fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) Analyser.Error!void {
     const tree = &builder.handle.tree;
 
     const var_decl = tree.fullVarDecl(var_decl_node).?;
@@ -1054,7 +1054,7 @@ fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type:
     }
 }
 
-fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMemory}!void {
+fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &handle.tree;
 
@@ -1103,7 +1103,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) error{OutOfMem
     }
 }
 
-fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!void {
+fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &builder.handle.tree;
     const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
@@ -1176,7 +1176,7 @@ pub fn writeSemanticTokens(
     encoding: offsets.Encoding,
     limited: bool,
     overlappingTokenSupport: bool,
-) error{OutOfMemory}!types.semantic_tokens.Result {
+) Analyser.Error!types.semantic_tokens.Result {
     var builder = Builder{
         .arena = arena,
         .analyser = analyser,

@@ -136,7 +136,7 @@ pub const Builder = struct {
 pub fn generateStringLiteralCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-) !void {
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -179,7 +179,7 @@ pub fn generateStringLiteralCodeActions(
 pub fn generateMultilineStringCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
-) !void {
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -249,7 +249,7 @@ pub fn collectAutoDiscardDiagnostics(
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(types.Diagnostic),
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!void {
+) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
     const tree = &handle.tree;
@@ -306,7 +306,7 @@ pub fn collectAutoDiscardDiagnostics(
     }
 }
 
-fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) !void {
+fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -326,7 +326,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) !void {
     });
 }
 
-fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
+fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -392,7 +392,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     }
 }
 
-fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
+fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -441,7 +441,7 @@ fn handleUnusedCapture(
     builder: *Builder,
     loc: offsets.Loc,
     remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
-) !void {
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -534,7 +534,7 @@ fn handleUnusedCapture(
     try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
 }
 
-fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
+fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -558,7 +558,7 @@ fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
     }
 }
 
-fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) !void {
+fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -610,7 +610,7 @@ fn analyzeImportPlacement(tree: *const Ast, imports: []const ImportDecl) ImportP
     return if (!starts_with_import and ends_with_import) .bottom else .top;
 }
 
-fn handleUnorganizedImport(builder: *Builder) !void {
+fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -964,7 +964,7 @@ fn detectIndentation(source: []const u8) []const u8 {
 }
 
 // attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
-fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
+fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) error{OutOfMemory}![]const u8 {
     // skip initial & ending underscores
     const trimmed_identifier = std.mem.trim(u8, identifier, "_");
 
@@ -1004,7 +1004,7 @@ fn createDiscardText(
     insert_token: Ast.TokenIndex,
     add_block_indentation: bool,
     add_suffix_newline: bool,
-) !struct {
+) error{OutOfMemory}!struct {
     /// insert index
     usize,
     /// new text

@@ -19,7 +19,7 @@ fn fnProtoToSignatureInfo(
     skip_self_param: bool,
     func_type: Analyser.Type,
     markup_kind: types.MarkupKind,
-) !types.SignatureHelp.Signature {
+) error{OutOfMemory}!types.SignatureHelp.Signature {
     const info = func_type.data.function;
 
     const label = try analyser.stringifyFunction(.{
@@ -74,7 +74,7 @@ pub fn getSignatureInfo(
     handle: *DocumentStore.Handle,
     absolute_index: usize,
     markup_kind: types.MarkupKind,
-) !?types.SignatureHelp.Signature {
+) Analyser.Error!?types.SignatureHelp.Signature {
     const document_scope = try handle.getDocumentScope();
     const innermost_block_scope = Analyser.innermostScopeAtIndexWithTag(document_scope, absolute_index, .init(.{
         .block = true,

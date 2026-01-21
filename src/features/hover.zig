@@ -18,7 +18,7 @@ fn hoverSymbol(
     arena: std.mem.Allocator,
     param_decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
-) error{OutOfMemory}!?[]const u8 {
+) Analyser.Error!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -187,7 +187,7 @@ fn hoverDefinitionLabel(
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) Analyser.Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -292,7 +292,7 @@ fn hoverDefinitionGlobal(
     pos_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) Analyser.Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -329,7 +329,7 @@ fn hoverDefinitionStructInit(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) Analyser.Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -368,7 +368,7 @@ fn hoverDefinitionEnumLiteral(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) Analyser.Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -397,7 +397,7 @@ fn hoverDefinitionFieldAccess(
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Hover {
+) Analyser.Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -486,7 +486,7 @@ fn hoverDefinitionNumberLiteral(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) !?types.Hover {
+) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -511,7 +511,7 @@ pub fn hover(
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) !?types.Hover {
+) Analyser.Error!?types.Hover {
     const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
     const response = switch (pos_context) {

@@ -29,7 +29,7 @@ fn gotoDefinitionSymbol(
     decl_handle: Analyser.DeclWithHandle,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) Analyser.Error!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -45,7 +45,7 @@ fn gotoDefinitionSymbol(
                         try analyser.resolveDerefType(resolved_ty) orelse
                         try analyser.resolveOptionalUnwrap(resolved_ty) orelse break;
                 }
-                if (try resolved_ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
+                if (resolved_ty.typeDefinitionToken()) |token_handle| break :blk token_handle;
             }
             const type_declaration = try decl_handle.typeDeclarationNode() orelse return null;
 
@@ -75,7 +75,7 @@ fn gotoDefinitionLabel(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) Analyser.Error!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -91,7 +91,7 @@ fn gotoDefinitionGlobal(
     pos_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) Analyser.Error!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -107,7 +107,7 @@ fn gotoDefinitionStructInit(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) Analyser.Error!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -118,7 +118,7 @@ fn gotoDefinitionStructInit(
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
     const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
-    const token_handle = try resolved_type.typeDefinitionToken() orelse return null;
+    const token_handle = resolved_type.typeDefinitionToken() orelse return null;
     const target_range = offsets.tokenToRange(&token_handle.handle.tree, token_handle.token, offset_encoding);
     return .{
         .originSelectionRange = offsets.tokenToRange(&handle.tree, token, offset_encoding),
@@ -134,7 +134,7 @@ fn gotoDefinitionEnumLiteral(
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?types.Definition.Link {
+) Analyser.Error!?types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -183,7 +183,7 @@ fn gotoDefinitionBuiltin(
         }
     } else if (std.mem.eql(u8, name, "@This")) {
         const ty = try analyser.innermostContainer(handle, name_loc.start);
-        const definition = try ty.typeDefinitionToken() orelse return null;
+        const definition = ty.typeDefinitionToken() orelse return null;
         const token_loc = offsets.tokenToLoc(tree, definition.token);
         const target_range = offsets.locToRange(tree.source, token_loc, offset_encoding);
         return .{
@@ -205,7 +205,7 @@ fn gotoDefinitionFieldAccess(
     loc: offsets.Loc,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]const types.Definition.Link {
+) Analyser.Error!?[]const types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -232,7 +232,7 @@ fn gotoDefinitionString(
     pos_context: Analyser.PositionContext,
     handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]const types.Definition.Link {
+) Analyser.Error!?[]const types.Definition.Link {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -254,13 +254,13 @@ fn gotoDefinitionString(
             }
 
             var include_dirs: std.ArrayList([]const u8) = .empty;
-            _ = document_store.collectIncludeDirs(arena, handle, &include_dirs) catch |err| {
-                log.err("failed to resolve include paths: {}", .{err});
-                return null;
-            };
+            _ = try document_store.collectIncludeDirs(arena, handle, &include_dirs);
             for (include_dirs.items) |dir| {
                 const path = try std.fs.path.join(arena, &.{ dir, import_str });
-                std.Io.Dir.accessAbsolute(io, path, .{}) catch continue;
+                std.Io.Dir.accessAbsolute(io, path, .{}) catch |err| switch (err) {
+                    error.Canceled => return error.Canceled,
+                    else => {},
+                };
                 break :blk .{ .one = try .fromPath(arena, path) };
             }
             return null;

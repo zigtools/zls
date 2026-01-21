@@ -132,9 +132,12 @@ pub fn translate(
     sub_dir.writeFile(io, .{
         .sub_path = "cimport.h",
         .data = source,
-    }) catch |err| {
-        log.warn("failed to write to '{s}/{s}/cimport.h': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
-        return null;
+    }) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.warn("failed to write to '{s}/{s}/cimport.h': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
+            return null;
+        },
     };
 
     defer global_cache_dir.handle.deleteTree(io, &sub_path) catch |err| {
@@ -177,9 +180,12 @@ pub fn translate(
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .ignore,
-    }) catch |err| {
-        log.err("failed to spawn zig translate-c process, error: {}", .{err});
-        return null;
+    }) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.err("failed to spawn zig translate-c process, error: {}", .{err});
+            return null;
+        },
     };
 
     errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
@@ -271,6 +277,8 @@ fn reportTranslateError(io: std.Io, allocator: std.mem.Allocator, stderr: ?std.I
     if (stderr) |file| {
         var buffer: [1024]u8 = undefined;
         var file_reader = file.readerStreaming(io, &buffer);
+        const old_cancel_protect = io.swapCancelProtection(.blocked);
+        defer _ = io.swapCancelProtection(old_cancel_protect);
         const stderr_output = file_reader.interface.allocRemaining(allocator, .limited(16 * 1024 * 1024)) catch return;
         defer allocator.free(stderr_output);
         log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{s}\n", .{ joined, stderr_output, err_name });

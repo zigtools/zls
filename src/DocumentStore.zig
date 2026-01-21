@@ -109,7 +109,7 @@ pub const BuildFile = struct {
         build_file: *BuildFile,
         uri: Uri,
         store: *DocumentStore,
-    ) error{OutOfMemory}!union(enum) {
+    ) error{ Canceled, OutOfMemory }!union(enum) {
         unknown,
         no,
         /// Stores the `root_source_file`. Caller owns returned memory.
@@ -154,7 +154,7 @@ pub const BuildFile = struct {
                 }
                 if (isInStd(source_uri)) continue;
 
-                const handle = store.getOrLoadHandle(source_uri) orelse return .unknown;
+                const handle = try store.getOrLoadHandle(source_uri) orelse return .unknown;
 
                 const import_uris = try handle.getImportUris();
                 try found_uris.ensureUnusedCapacity(arena, import_uris.len);
@@ -436,19 +436,15 @@ pub const Handle = struct {
     ///
     /// `DocumentStore.build_files` is guaranteed to contain this Uri.
     /// Uri memory managed by its build_file
-    pub fn getAssociatedBuildFile(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!GetAssociatedBuildFileResult {
+    pub fn getAssociatedBuildFile(self: *Handle, document_store: *DocumentStore) error{ Canceled, OutOfMemory }!GetAssociatedBuildFileResult {
         comptime std.debug.assert(supports_build_system);
 
-        self.impl.lock.lockUncancelable(document_store.io);
+        try self.impl.lock.lock(document_store.io);
         defer self.impl.lock.unlock(document_store.io);
 
         const unresolved = switch (self.impl.associated_build_file) {
             .init => blk: {
-                const potential_build_files = document_store.collectPotentialBuildFiles(self.uri) catch {
-                    log.err("failed to collect potential build files of '{s}'", .{self.uri.raw});
-                    self.impl.associated_build_file = .none;
-                    return .none;
-                };
+                const potential_build_files = try document_store.collectPotentialBuildFiles(self.uri);
                 errdefer document_store.allocator.free(potential_build_files);
 
                 if (potential_build_files.len == 0) {
@@ -536,7 +532,7 @@ pub const Handle = struct {
     };
 
     /// Returns the root source file of the root module of the given handle. Same as `@import("root")`.
-    pub fn getAssociatedCompilationUnits(self: *Handle, document_store: *DocumentStore) error{OutOfMemory}!GetAssociatedCompilationUnitsResult {
+    pub fn getAssociatedCompilationUnits(self: *Handle, document_store: *DocumentStore) error{ Canceled, OutOfMemory }!GetAssociatedCompilationUnitsResult {
         const allocator = document_store.allocator;
         const io = document_store.io;
 
@@ -724,16 +720,13 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     return self.handles.get(uri);
 }
 
-fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
+fn readFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!?[:0]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const file_path = uri.toFsPath(self.allocator) catch |err| switch (err) {
         error.UnsupportedScheme => return null, // https://github.com/microsoft/language-server-protocol/issues/1264
-        error.OutOfMemory => |e| {
-            log.err("failed to parse Uri '{s}': {}", .{ uri.raw, e });
-            return null;
-        },
+        error.OutOfMemory => return error.OutOfMemory,
     };
     defer self.allocator.free(file_path);
 
@@ -764,9 +757,12 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
         .limited(max_document_size),
         .of(u8),
         0,
-    ) catch |err| {
-        log.err("failed to read document '{s}': {}", .{ file_path, err });
-        return null;
+    ) catch |err| switch (err) {
+        error.Canceled, error.OutOfMemory => |e| return e,
+        else => {
+            log.err("failed to read document '{s}': {}", .{ file_path, err });
+            return null;
+        },
     };
 }
 
@@ -774,16 +770,13 @@ fn readFile(self: *DocumentStore, uri: Uri) ?[:0]u8 {
 /// Will load the document from disk if it hasn't been already
 /// **Thread safe** takes an exclusive lock
 /// This function does not protect against data races from modifying the Handle
-pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!?*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (self.getHandle(uri)) |handle| return handle;
-    const file_contents = self.readFile(uri) orelse return null;
-    return self.createAndStoreDocument(uri, file_contents, false) catch |err| {
-        log.err("failed to store document '{s}': {}", .{ uri.raw, err });
-        return null;
-    };
+    const file_contents = try self.readFile(uri) orelse return null;
+    return try self.createAndStoreDocument(uri, file_contents, false);
 }
 
 /// **Thread safe** takes a shared lock
@@ -798,30 +791,23 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
 /// This function does not protect against data races from modifying the BuildFile
-fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
+fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!*BuildFile {
     comptime std.debug.assert(supports_build_system);
 
     if (self.getBuildFile(uri)) |build_file| return build_file;
 
     const new_build_file: *BuildFile = blk: {
-        self.mutex.lockUncancelable(self.io);
+        try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
 
-        const gop = self.build_files.getOrPut(self.allocator, uri) catch return null;
+        const gop = try self.build_files.getOrPut(self.allocator, uri);
         if (gop.found_existing) return gop.value_ptr.*;
+        errdefer self.build_files.swapRemoveAt(gop.index);
 
-        gop.value_ptr.* = self.allocator.create(BuildFile) catch |err| {
-            self.build_files.swapRemoveAt(gop.index);
-            log.debug("Failed to load build file {s}: {}", .{ uri.raw, err });
-            return null;
-        };
+        gop.value_ptr.* = try self.allocator.create(BuildFile);
+        errdefer self.allocator.destroy(gop.value_ptr.*);
 
-        gop.value_ptr.*.* = self.createBuildFile(uri) catch |err| {
-            self.allocator.destroy(gop.value_ptr.*);
-            self.build_files.swapRemoveAt(gop.index);
-            log.debug("Failed to load build file {s}: {}", .{ uri.raw, err });
-            return null;
-        };
+        gop.value_ptr.*.* = try self.createBuildFile(uri);
         gop.key_ptr.* = gop.value_ptr.*.uri;
         break :blk gop.value_ptr.*;
     };
@@ -835,7 +821,7 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 
 /// Opens a document that is synced over the LSP protocol (`textDocument/didOpen`).
 /// **Not thread safe**
-pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
+pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -871,7 +857,7 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
 /// Updates a document that is synced over the LSP protocol (`textDocument/didChange`).
 /// Takes ownership of `new_text` which has to be allocated with this DocumentStore's allocator.
 /// **Not thread safe**
-pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
+pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -888,7 +874,7 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
 /// **Not thread safe**
-pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_delete: bool) !bool {
+pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_delete: bool) error{ Canceled, OutOfMemory }!bool {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -906,7 +892,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
         if (self.handles.get(uri)) |handle| {
             if (handle.isLspSynced()) return false;
         } else return false;
-        const file_contents = self.readFile(uri) orelse return false;
+        const file_contents = try self.readFile(uri) orelse return false;
         _ = try self.createAndStoreDocument(uri, file_contents, false);
     }
 
@@ -930,15 +916,20 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
 
 const progress_token = "buildProgressToken";
 
-fn sendMessageToClient(allocator: std.mem.Allocator, transport: *lsp.Transport, message: anytype) !void {
-    const serialized = try std.json.Stringify.valueAlloc(
+fn sendMessageToClient(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    transport: *lsp.Transport,
+    message: anytype,
+) !void {
+    const json_message = try std.json.Stringify.valueAlloc(
         allocator,
         message,
         .{ .emit_null_optional_fields = false },
     );
-    defer allocator.free(serialized);
+    defer allocator.free(json_message);
 
-    try transport.writeJsonMessage(serialized);
+    try transport.writeJsonMessageUncancelable(io, json_message);
 }
 
 fn notifyBuildStart(self: *DocumentStore) void {
@@ -952,23 +943,22 @@ fn notifyBuildStart(self: *DocumentStore) void {
     const prev = self.builds_in_progress.fetchAdd(1, .monotonic);
     if (prev != 0) return;
 
-    sendMessageToClient(
-        self.allocator,
-        transport,
-        .{
-            .jsonrpc = "2.0",
-            .id = "progress",
-            .method = "window/workDoneProgress/create",
-            .params = lsp.types.window.work_done_progress.CreateParams{
-                .token = .{ .string = progress_token },
-            },
+    sendMessageToClient(self.io, self.allocator, transport, .{
+        .jsonrpc = "2.0",
+        .id = "progress",
+        .method = "window/workDoneProgress/create",
+        .params = lsp.types.window.work_done_progress.CreateParams{
+            .token = .{ .string = progress_token },
         },
-    ) catch |err| {
-        log.err("Failed to send create work message: {}", .{err});
-        return;
+    }) catch |err| switch (err) {
+        error.Canceled => comptime unreachable,
+        else => |e| {
+            log.err("Failed to send create work message: {}", .{e});
+            return;
+        },
     };
 
-    sendMessageToClient(self.allocator, transport, .{
+    sendMessageToClient(self.io, self.allocator, transport, .{
         .jsonrpc = "2.0",
         .method = "$/progress",
         .params = .{
@@ -977,9 +967,12 @@ fn notifyBuildStart(self: *DocumentStore) void {
                 .title = "Loading build configuration",
             },
         },
-    }) catch |err| {
-        log.err("Failed to send progress start message: {}", .{err});
-        return;
+    }) catch |err| switch (err) {
+        error.Canceled => comptime unreachable,
+        else => |e| {
+            log.err("Failed to send progress start message: {}", .{e});
+            return;
+        },
     };
 }
 
@@ -1001,7 +994,7 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
         .success => "Success",
     };
 
-    sendMessageToClient(self.allocator, transport, .{
+    sendMessageToClient(self.io, self.allocator, transport, .{
         .jsonrpc = "2.0",
         .method = "$/progress",
         .params = .{
@@ -1010,15 +1003,18 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
                 .message = message,
             },
         },
-    }) catch |err| {
-        log.err("Failed to send progress end message: {}", .{err});
-        return;
+    }) catch |err| switch (err) {
+        error.Canceled => comptime unreachable,
+        else => |e| {
+            log.err("Failed to send progress end message: {}", .{e});
+            return;
+        },
     };
 }
 
-fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void {
+fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.Io.Cancelable!void {
     {
-        build_file.impl.mutex.lockUncancelable(self.io);
+        try build_file.impl.mutex.lock(self.io);
         defer build_file.impl.mutex.unlock(self.io);
 
         switch (build_file.impl.build_runner_state) {
@@ -1037,15 +1033,18 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
         build_file.impl.version += 1;
         const new_version = build_file.impl.version;
 
-        const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| {
-            if (err != error.RunFailed) { // already logged
-                log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri.raw, err });
-            }
-            self.notifyBuildEnd(.failed);
-            build_file.impl.mutex.lockUncancelable(self.io);
-            defer build_file.impl.mutex.unlock(self.io);
-            build_file.impl.build_runner_state = .idle;
-            return;
+        const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => |e| {
+                if (e != error.RunFailed) { // already logged
+                    log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri.raw, e });
+                }
+                self.notifyBuildEnd(.failed);
+                build_file.impl.mutex.lockUncancelable(self.io);
+                defer build_file.impl.mutex.unlock(self.io);
+                build_file.impl.build_runner_state = .idle;
+                return;
+            },
         };
 
         build_file.impl.mutex.lockUncancelable(self.io);
@@ -1074,6 +1073,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
     if (self.transport) |transport| {
         if (self.lsp_capabilities.supports_semantic_tokens_refresh) {
             sendMessageToClient(
+                self.io,
                 self.allocator,
                 transport,
                 lsp.TypedJsonRPCRequest(?void){
@@ -1081,10 +1081,14 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
                     .method = "workspace/semanticTokens/refresh",
                     .params = @as(?void, null),
                 },
-            ) catch {};
+            ) catch |err| switch (err) {
+                error.Canceled => comptime unreachable,
+                else => {},
+            };
         }
         if (self.lsp_capabilities.supports_inlay_hints_refresh) {
             sendMessageToClient(
+                self.io,
                 self.allocator,
                 transport,
                 lsp.TypedJsonRPCRequest(?void){
@@ -1092,7 +1096,10 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) void 
                     .method = "workspace/inlayHint/refresh",
                     .params = @as(?void, null),
                 },
-            ) catch {};
+            ) catch |err| switch (err) {
+                error.Canceled => comptime unreachable,
+                else => {},
+            };
         }
     }
 }
@@ -1137,7 +1144,7 @@ fn loadBuildAssociatedConfiguration(io: std.Io, allocator: std.mem.Allocator, bu
     );
 }
 
-fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: Uri) ![][]const u8 {
+fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}![][]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1264,10 +1271,16 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
 }
 
 /// Checks if the build.zig file is accessible in dir.
-fn buildDotZigExists(io: std.Io, dir_path: []const u8) bool {
-    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return false;
+fn buildDotZigExists(io: std.Io, dir_path: []const u8) std.Io.Cancelable!bool {
+    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => return false,
+    };
     defer dir.close(io);
-    dir.access(io, "build.zig", .{}) catch return false;
+    dir.access(io, "build.zig", .{}) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => return false,
+    };
     return true;
 }
 
@@ -1276,7 +1289,7 @@ fn buildDotZigExists(io: std.Io, dir_path: []const u8) bool {
 /// `build.zig` files higher in the filesystem have precedence.
 /// See `Handle.getAssociatedBuildFile`.
 /// Caller owns returned memory.
-fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}![]*BuildFile {
+fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }![]*BuildFile {
     if (isInStd(uri)) return &.{};
 
     var potential_build_files: std.ArrayList(*BuildFile) = .empty;
@@ -1299,7 +1312,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}
     var current_path: []const u8 = path;
     while (std.fs.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
         if (potential_root_path.len < root_end_index) break;
-        if (!buildDotZigExists(self.io, potential_root_path)) continue;
+        if (!try buildDotZigExists(self.io, potential_root_path)) continue;
 
         const build_path = try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
         defer self.allocator.free(build_path);
@@ -1309,7 +1322,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}
         const build_file_uri: Uri = try .fromPath(self.allocator, build_path);
         defer build_file_uri.deinit(self.allocator);
 
-        const build_file = self.getOrLoadBuildFile(build_file_uri) orelse continue;
+        const build_file = try self.getOrLoadBuildFile(build_file_uri);
         potential_build_files.appendAssumeCapacity(build_file);
     }
     // The potential build files that come first should have higher priority.
@@ -1322,7 +1335,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{OutOfMemory}
     return try potential_build_files.toOwnedSlice(self.allocator);
 }
 
-fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile {
+fn createBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!BuildFile {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1337,14 +1350,16 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 
         if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
             const build_file_path = build_file.uri.toFsPath(self.allocator) catch break :blk;
-            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path }) catch break :blk;
+            const absolute_builtin_path = try std.fs.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try .fromPath(self.allocator, absolute_builtin_path);
         }
-    } else |err| {
-        if (err != error.FileNotFound) {
+    } else |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        error.FileNotFound => {},
+        else => {
             log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri.raw, err });
-        }
+        },
     }
 
     log.info("Loaded build file '{s}'", .{build_file.uri.raw});
@@ -1426,13 +1441,15 @@ fn createAndStoreDocument(
     uri: Uri,
     text: [:0]const u8,
     lsp_synced: bool,
-) error{OutOfMemory}!*Handle {
+) error{ Canceled, OutOfMemory }!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_handle = Handle.init(self, uri, text, lsp_synced) catch |err| {
-        self.allocator.free(text);
-        return err;
+    var new_handle = Handle.init(self, uri, text, lsp_synced) catch |err| switch (err) {
+        error.OutOfMemory => {
+            self.allocator.free(text);
+            return err;
+        },
     };
     errdefer new_handle.deinit();
 
@@ -1440,11 +1457,11 @@ fn createAndStoreDocument(
         if (self.getBuildFile(uri)) |build_file| {
             self.invalidateBuildFile(build_file.uri);
         } else {
-            _ = self.getOrLoadBuildFile(uri);
+            _ = try self.getOrLoadBuildFile(uri);
         }
     }
 
-    self.mutex.lockUncancelable(self.io);
+    try self.mutex.lock(self.io);
     defer self.mutex.unlock(self.io);
 
     const gop = try self.handles.getOrPut(self.allocator, uri);
@@ -1532,7 +1549,7 @@ pub fn collectDependencies(
     allocator: std.mem.Allocator,
     handle: *Handle,
     dependencies: *std.ArrayList(Uri),
-) error{OutOfMemory}!void {
+) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1544,7 +1561,7 @@ pub fn collectDependencies(
     }
 
     if (supports_build_system) {
-        store.mutex.lockUncancelable(store.io);
+        try store.mutex.lock(store.io);
         defer store.mutex.unlock(store.io);
         for (handle.cimports.items(.hash)) |hash| {
             const result = store.cimports.get(hash) orelse continue;
@@ -1581,7 +1598,7 @@ pub fn collectIncludeDirs(
     allocator: std.mem.Allocator,
     handle: *Handle,
     include_dirs: *std.ArrayList([]const u8),
-) !bool {
+) error{ Canceled, OutOfMemory }!bool {
     comptime std.debug.assert(supports_build_system);
 
     const tracy_zone = tracy.trace(@src());
@@ -1648,7 +1665,7 @@ pub fn collectCMacros(
     allocator: std.mem.Allocator,
     handle: *Handle,
     c_macros: *std.ArrayList([]const u8),
-) !bool {
+) error{ Canceled, OutOfMemory }!bool {
     comptime std.debug.assert(supports_build_system);
 
     const collected_all = switch (try handle.getAssociatedBuildFile(store)) {
@@ -1676,7 +1693,7 @@ pub fn collectCMacros(
 /// comptime value `resolveCImport` will return null
 /// returned memory is owned by DocumentStore
 /// **Thread safe** takes an exclusive lock
-pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
+pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) error{ Canceled, OutOfMemory }!?Uri {
     comptime std.debug.assert(supports_build_system);
 
     const tracy_zone = tracy.trace(@src());
@@ -1693,7 +1710,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     const source = handle.cimports.items(.source)[index];
 
     {
-        self.mutex.lockUncancelable(self.io);
+        try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
         if (self.cimports.get(hash)) |result| {
             switch (result) {
@@ -1711,9 +1728,12 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         include_dirs.deinit(self.allocator);
     }
 
-    const collected_all_include_dirs = self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
-        log.err("failed to resolve include paths: {}", .{err});
-        return null;
+    const collected_all_include_dirs = self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.err("failed to resolve include paths: {}", .{err});
+            return null;
+        },
     };
 
     var c_macros: std.ArrayList([]const u8) = .empty;
@@ -1724,9 +1744,12 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         c_macros.deinit(self.allocator);
     }
 
-    const collected_all_c_macros = self.collectCMacros(self.allocator, handle, &c_macros) catch |err| {
-        log.err("failed to resolve include paths: {}", .{err});
-        return null;
+    const collected_all_c_macros = self.collectCMacros(self.allocator, handle, &c_macros) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.err("failed to resolve include paths: {}", .{err});
+            return null;
+        },
     };
 
     const maybe_result = translate_c.translate(
@@ -1737,7 +1760,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         c_macros.items,
         source,
     ) catch |err| switch (err) {
-        error.OutOfMemory => |e| return e,
+        error.Canceled, error.OutOfMemory => |e| return e,
         else => |e| {
             log.err("failed to translate cimport: {}", .{e});
             return null;
@@ -1751,7 +1774,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     }
 
     {
-        self.mutex.lockUncancelable(self.io);
+        try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
         const gop = self.cimports.getOrPutValue(self.allocator, hash, result) catch |err| {
             result.deinit(self.allocator);
@@ -1763,8 +1786,11 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
         }
     }
 
-    self.publishCimportDiagnostics(handle) catch |err| {
-        log.err("failed to publish cImport diagnostics: {}", .{err});
+    self.publishCimportDiagnostics(handle) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.err("failed to publish cImport diagnostics: {}", .{err});
+        },
     };
 
     switch (result) {
@@ -1776,7 +1802,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     }
 }
 
-fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
+fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!void {
     var wip: std.zig.ErrorBundle.Wip = undefined;
     try wip.init(self.allocator);
     defer wip.deinit();
@@ -1785,7 +1811,7 @@ fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) !void {
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
         const result = blk: {
-            self.mutex.lockUncancelable(self.io);
+            try self.mutex.lock(self.io);
             defer self.mutex.unlock(self.io);
             break :blk self.cimports.get(hash) orelse continue;
         };
@@ -1861,7 +1887,7 @@ pub fn uriFromImportStr(
     allocator: std.mem.Allocator,
     handle: *Handle,
     import_str: []const u8,
-) error{OutOfMemory}!UriFromImportStringResult {
+) error{ Canceled, OutOfMemory }!UriFromImportStringResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

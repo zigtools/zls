@@ -22,7 +22,7 @@ const Zir = std.zig.Zir;
 pub fn generateDiagnostics(
     server: *Server,
     handle: *DocumentStore.Handle,
-) error{OutOfMemory}!void {
+) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -86,8 +86,9 @@ pub fn generateDiagnostics(
     }
 
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-    server.diagnostics_collection.publishDiagnostics() catch |err| {
-        log.err("failed to publish diagnostics: {}", .{err});
+    server.diagnostics_collection.publishDiagnostics() catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => log.err("failed to publish diagnostics: {}", .{err}),
     };
 }
 
@@ -266,7 +267,7 @@ fn collectGlobalVarDiagnostics(
 }
 
 /// caller owns the returned ErrorBundle
-pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) error{OutOfMemory}!std.zig.ErrorBundle {
+pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) error{ Canceled, OutOfMemory }!std.zig.ErrorBundle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -283,9 +284,12 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             server.allocator,
             config.zig_exe_path.?,
             handle.tree.source,
-        ) catch |err| {
-            log.err("failed to run ast-check: {}", .{err});
-            return .empty;
+        ) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {
+                log.err("failed to run ast-check: {}", .{err});
+                return .empty;
+            },
         };
     } else switch (handle.tree.mode) {
         .zig => {
@@ -331,9 +335,12 @@ fn getErrorBundleFromAstCheck(
             .stdin = .pipe,
             .stdout = .ignore,
             .stderr = .pipe,
-        }) catch |err| {
-            log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-            return .empty;
+        }) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {
+                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+                return .empty;
+            },
         };
         try process.stdin.?.writeStreamingAll(io, source);
         process.stdin.?.close(io);
@@ -342,9 +349,12 @@ fn getErrorBundleFromAstCheck(
 
         stderr_bytes = try readToEndAlloc(io, allocator, process.stderr.?, .limited(16 * 1024 * 1024));
 
-        const term = process.wait(io) catch |err| {
-            log.warn("Failed to await zig ast-check process, error: {}", .{err});
-            return .empty;
+        const term = process.wait(io) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {
+                log.warn("Failed to await zig ast-check process, error: {}", .{err});
+                return .empty;
+            },
         };
 
         if (term != .exited) return .empty;
@@ -402,7 +412,7 @@ pub fn getErrorBundleFromStderr(
                 defer allocator.free(file_path);
                 const file_uri: Uri = try .fromPath(allocator, file_path);
                 defer file_uri.deinit(allocator);
-                const handle = dynamic.document_store.getOrLoadHandle(file_uri) orelse break :source null;
+                const handle = try dynamic.document_store.getOrLoadHandle(file_uri) orelse break :source null;
                 break :source handle.tree.source;
             },
         };
@@ -499,7 +509,7 @@ pub const BuildOnSave = struct {
         collection: *DiagnosticsCollection,
     };
 
-    pub fn init(options: InitOptions) error{ OutOfMemory, ConcurrencyUnavailable }!?BuildOnSave {
+    pub fn init(options: InitOptions) error{ Canceled, ConcurrencyUnavailable, OutOfMemory }!?BuildOnSave {
         const base_args: []const []const u8 = &.{
             options.zig_exe_path,
             "build",
@@ -525,9 +535,12 @@ pub const BuildOnSave = struct {
             .stdout = .pipe,
             .stderr = .pipe,
             .cwd = options.workspace_path,
-        }) catch |err| {
-            log.err("failed to spawn zig build process: {}", .{err});
-            return null;
+        }) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {
+                log.err("failed to spawn zig build process: {}", .{err});
+                return null;
+            },
         };
 
         errdefer {
@@ -578,10 +591,14 @@ pub const BuildOnSave = struct {
     }
 
     pub fn sendManualWatchUpdate(build_on_save: *BuildOnSave) void {
-        build_on_save.worker_state.mutex.lockUncancelable(build_on_save.io);
-        defer build_on_save.worker_state.mutex.unlock(build_on_save.io);
+        const io = build_on_save.io;
+
+        build_on_save.worker_state.mutex.lockUncancelable(io);
+        defer build_on_save.worker_state.mutex.unlock(io);
         if (build_on_save.worker_state.child_process.stdin) |stdin| {
-            stdin.writeStreamingAll(build_on_save.io, "\x00") catch {};
+            const old_cancel_protect = io.swapCancelProtection(.blocked);
+            defer _ = io.swapCancelProtection(old_cancel_protect);
+            stdin.writeStreamingAll(io, "\x00") catch {};
         }
     }
 
@@ -615,7 +632,9 @@ pub const BuildOnSave = struct {
 
         defer {
             for (diagnostic_tags.keys()) |tag| collection.clearErrorBundle(tag);
-            collection.publishDiagnostics() catch {};
+            collection.publishDiagnostics() catch {
+                // cancellation should be fine since we are returning anyway
+            };
         }
 
         var read_buffer: [@sizeOf(ServerToClient.Header)]u8 = undefined;
@@ -624,20 +643,16 @@ pub const BuildOnSave = struct {
 
         while (true) {
             const header = reader.takeStruct(ServerToClient.Header, .little) catch |err| switch (err) {
-                error.ReadFailed => {
-                    if (file_reader.err.? != error.Canceled) {
-                        log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?});
-                    }
-                    return;
+                error.ReadFailed => switch (file_reader.err.?) {
+                    error.Canceled => return,
+                    else => return log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?}),
                 },
                 error.EndOfStream => break,
             };
             const body = reader.readAlloc(allocator, header.bytes_len) catch |err| switch (err) {
-                error.ReadFailed => {
-                    if (file_reader.err.? != error.Canceled) {
-                        log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?});
-                    }
-                    return;
+                error.ReadFailed => switch (file_reader.err.?) {
+                    error.Canceled => return,
+                    else => return log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?}),
                 },
                 error.EndOfStream, error.OutOfMemory => {
                     log.err("failed to receive message from zig build runner: {}", .{err});
@@ -654,9 +669,9 @@ pub const BuildOnSave = struct {
                         collection,
                         workspace_path,
                         &diagnostic_tags,
-                    ) catch |err| {
-                        log.err("failed to handle error bundle message from zig build runner: {}", .{err});
-                        return;
+                    ) catch |err| switch (err) {
+                        error.Canceled => return,
+                        else => |e| log.err("failed to handle error bundle message from zig build runner: {}", .{e}),
                     };
                 },
                 else => |tag| {
@@ -717,6 +732,9 @@ fn terminateChildProcessReportError(
     name: []const u8,
     kind: enum { wait, kill },
 ) bool {
+    const old_cancel_protect = io.swapCancelProtection(.blocked);
+    defer _ = io.swapCancelProtection(old_cancel_protect);
+
     const stderr = if (child_process.stderr) |stderr|
         readToEndAlloc(io, allocator, stderr, .limited(16 * 1024 * 1024)) catch ""
     else

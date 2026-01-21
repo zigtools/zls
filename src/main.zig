@@ -56,6 +56,10 @@ fn logFn(
     var buffer: [4096]u8 = undefined;
     comptime std.debug.assert(buffer.len >= zls.lsp.minimum_logging_buffer_size);
 
+    const io = std.Options.debug_io;
+    const prev = io.swapCancelProtection(.blocked);
+    defer _ = io.swapCancelProtection(prev);
+
     if (log_transport) |transport| {
         const lsp_message_type: zls.lsp.types.window.MessageType = switch (level) {
             .err => .Error,
@@ -64,7 +68,10 @@ fn logFn(
             .debug => .Debug,
         };
         const json_message = zls.lsp.bufPrintLogMessage(&buffer, lsp_message_type, format, args);
-        transport.writeJsonMessage(json_message) catch {};
+        transport.writeJsonMessage(io, json_message) catch |err| switch (err) {
+            error.Canceled => unreachable,
+            else => {},
+        };
     }
 
     if (@intFromEnum(level) > @intFromEnum(log_level)) return;
@@ -91,10 +98,6 @@ fn logFn(
         (writer.writableArray(trailing.len) catch unreachable).* = trailing;
     }
 
-    const io = std.Options.debug_io;
-    const prev = io.swapCancelProtection(.blocked);
-    defer _ = io.swapCancelProtection(prev);
-
     if (log_stderr) {
         const stderr = io.lockStderr(&.{}, null) catch |err| switch (err) {
             error.Canceled => unreachable,
@@ -120,7 +123,7 @@ fn defaultLogFilePath(
     io: std.Io,
     allocator: std.mem.Allocator,
     environ_map: *const std.process.Environ.Map,
-) error{ OutOfMemory, Canceled }!?[]const u8 {
+) error{ Canceled, OutOfMemory }!?[]const u8 {
     if (zig_builtin.target.os.tag == .wasi) return null;
     const cache_path = try known_folders.getPath(io, allocator, environ_map.*, .cache) orelse return null;
     defer allocator.free(cache_path);
@@ -132,20 +135,26 @@ fn createLogFile(
     allocator: std.mem.Allocator,
     environ_map: *const std.process.Environ.Map,
     override_log_file_path: ?[]const u8,
-) ?struct { std.Io.File, []const u8 } {
+) error{ Canceled, OutOfMemory }!?struct { std.Io.File, []const u8 } {
     const log_file_path = if (override_log_file_path) |log_file_path|
-        allocator.dupe(u8, log_file_path) catch return null
+        try allocator.dupe(u8, log_file_path)
     else
-        defaultLogFilePath(io, allocator, environ_map) catch null orelse return null;
+        try defaultLogFilePath(io, allocator, environ_map) orelse return null;
     errdefer allocator.free(log_file_path);
 
     if (std.fs.path.dirname(log_file_path)) |dirname| {
-        std.Io.Dir.cwd().createDirPath(io, dirname) catch {};
+        std.Io.Dir.cwd().createDirPath(io, dirname) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {},
+        };
     }
 
-    const file = std.Io.Dir.cwd().createFile(io, log_file_path, .{ .truncate = false }) catch {
-        allocator.free(log_file_path);
-        return null;
+    const file = std.Io.Dir.cwd().createFile(io, log_file_path, .{ .truncate = false }) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            allocator.free(log_file_path);
+            return null;
+        },
     };
     errdefer file.close(io);
 
@@ -183,7 +192,7 @@ fn @"zls env"(
     environ_map: *const std.process.Environ.Map,
 ) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!noreturn {
     const global_cache_dir = known_folders.getPath(io, allocator, environ_map.*, .cache) catch |err| switch (err) {
-        error.OutOfMemory, error.Canceled => |e| return e,
+        error.Canceled, error.OutOfMemory => |e| return e,
     };
     defer if (global_cache_dir) |path| allocator.free(path);
 
@@ -191,12 +200,12 @@ fn @"zls env"(
     defer if (zls_global_cache_dir) |path| allocator.free(path);
 
     const global_config_dir = known_folders.getPath(io, allocator, environ_map.*, .global_configuration) catch |err| switch (err) {
-        error.OutOfMemory, error.Canceled => |e| return e,
+        error.Canceled, error.OutOfMemory => |e| return e,
     };
     defer if (global_config_dir) |path| allocator.free(path);
 
     const local_config_dir = known_folders.getPath(io, allocator, environ_map.*, .local_configuration) catch |err| switch (err) {
-        error.OutOfMemory, error.Canceled => |e| return e,
+        error.Canceled, error.OutOfMemory => |e| return e,
     };
     defer if (local_config_dir) |path| allocator.free(path);
 
@@ -274,10 +283,10 @@ const LoadConfigResult = union(enum) {
     }
 };
 
-fn loadConfigFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) error{OutOfMemory}!LoadConfigResult {
+fn loadConfigFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []const u8) error{ Canceled, OutOfMemory }!LoadConfigResult {
     const file_buf = std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(16 * 1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => return .not_found,
-        error.OutOfMemory => |e| return e,
+        error.Canceled, error.OutOfMemory => |e| return e,
         else => {
             log.warn("Error while reading configuration file: {}", .{err});
             return .{ .failure = .{ .error_bundle = null } };
@@ -335,7 +344,7 @@ fn loadConfigFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []con
     } };
 }
 
-fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ_map: std.process.Environ.Map) error{ OutOfMemory, Canceled }!LoadConfigResult {
+fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ_map: std.process.Environ.Map) error{ Canceled, OutOfMemory }!LoadConfigResult {
     if (zig_builtin.target.os.tag == .wasi) return .not_found;
 
     for (
@@ -363,7 +372,7 @@ fn loadConfiguration(
     environ_map: std.process.Environ.Map,
     server: *zls.Server,
     maybe_config_path: ?[]const u8,
-) error{OutOfMemory}!void {
+) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -373,15 +382,9 @@ fn loadConfiguration(
 
     blk: {
         var config_result = if (maybe_config_path) |config_path|
-            loadConfigFromFile(io, allocator, config_path) catch |err| {
-                log.err("failed to load configuration from '{s}': {}", .{ config_path, err });
-                break :blk;
-            }
+            try loadConfigFromFile(io, allocator, config_path)
         else
-            loadConfigFromSystem(io, allocator, environ_map) catch |err| {
-                log.err("failed to load configuration: {}", .{err});
-                break :blk;
-            };
+            try loadConfigFromSystem(io, allocator, environ_map);
         defer config_result.deinit(allocator);
 
         switch (config_result) {
@@ -406,7 +409,7 @@ fn loadConfiguration(
             break :blk;
         }
 
-        const cache_dir_path = known_folders.getPath(io, allocator, environ_map, .cache) catch null orelse {
+        const cache_dir_path = try known_folders.getPath(io, allocator, environ_map, .cache) orelse {
             server.showMessage(.Error, "Failed to resolve global cache directory", .{});
             break :blk;
         };
@@ -498,7 +501,7 @@ fn parseArgs(
         }
     }
 
-    if (zig_builtin.target.os.tag != .wasi and std.Io.File.stdin().isTty(io) catch unreachable) {
+    if (zig_builtin.target.os.tag != .wasi and try std.Io.File.stdin().isTty(io)) {
         log.warn("ZLS is not a CLI tool, it communicates over the Language Server Protocol.", .{});
         log.warn("Did you mean to run 'zls --help'?", .{});
         log.warn("", .{});
@@ -541,7 +544,7 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
     const result = try parseArgs(io, allocator, &environ_map, init.args);
     defer result.deinit(allocator);
 
-    log_file, const log_file_path = createLogFile(io, allocator, &environ_map, result.log_file_path) orelse .{ null, null };
+    log_file, const log_file_path = try createLogFile(io, allocator, &environ_map, result.log_file_path) orelse .{ null, null };
     defer if (log_file_path) |path| allocator.free(path);
     defer if (log_file) |file| {
         file.close(io);
@@ -549,7 +552,7 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
     };
 
     var read_buffer: [256]u8 = undefined;
-    var stdio_transport: zls.lsp.Transport.Stdio = .init(io, &read_buffer, .stdin(), .stdout());
+    var stdio_transport: zls.lsp.Transport.Stdio = .init(&read_buffer, .stdin(), .stdout());
 
     var thread_safe_transport: zls.lsp.ThreadSafeTransport(.{
         .thread_safe_read = false,
