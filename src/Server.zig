@@ -1220,7 +1220,7 @@ fn closeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification:
         server.diagnostics_collection.clearSingleDocumentDiagnostics(document_uri);
         server.diagnostics_collection.publishDiagnostics() catch |err| switch (err) {
             error.Canceled => return error.Canceled,
-            else => std.log.err("failed to publish diagnostics: {}", .{err}),
+            else => log.err("failed to publish diagnostics: {}", .{err}),
         };
     }
 }
