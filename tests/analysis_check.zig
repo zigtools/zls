@@ -20,11 +20,10 @@ pub const std_options: std.Options = .{
 };
 
 const Error = error{
-    OutOfMemory,
     InvalidTestItem,
     CheckFailed,
     Unexpected,
-};
+} || std.mem.Allocator.Error || std.Io.Cancelable;
 
 pub fn main(init: std.process.Init) Error!void {
     const io = init.io;
@@ -151,7 +150,7 @@ pub fn main(init: std.process.Init) Error!void {
 
     const annotations = helper.collectAnnotatedSourceLocations(gpa, handle.tree.source) catch |err| switch (err) {
         error.InvalidSourceLoc => std.debug.panic("{s} contains invalid annotated source locations: {}", .{ file_path, err }),
-        error.OutOfMemory => |e| return e,
+        error.OutOfMemory => return error.OutOfMemory,
     };
     defer gpa.free(annotations);
 

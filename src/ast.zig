@@ -1640,7 +1640,7 @@ pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: *const Ast, loc: offsets.L
         nodes: std.ArrayList(Ast.Node.Index) = .empty,
         locs: std.ArrayList(offsets.Loc) = .empty,
 
-        pub fn append(self: *@This(), ast: *const Ast, node: Ast.Node.Index) !void {
+        pub fn append(self: *@This(), ast: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
             std.debug.assert(node != .root);
             try self.nodes.append(self.allocator, node);
             try self.locs.append(self.allocator, offsets.nodeToLoc(ast, node));

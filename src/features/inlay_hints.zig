@@ -165,7 +165,7 @@ const Builder = struct {
         tooltip_text: []const u8,
         tooltip_noalias: bool,
         tooltip_comptime: bool,
-    ) !void {
+    ) error{OutOfMemory}!void {
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
         const tooltip: ?types.MarkupContent = tooltip: {
             if (tooltip_text.len == 0) break :tooltip null;
@@ -230,7 +230,7 @@ fn writeCallHint(
     builder: *Builder,
     /// The function call.
     call: Ast.full.Call,
-) !void {
+) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -284,7 +284,7 @@ fn writeCallHint(
 }
 
 /// takes parameter nodes from the ast and function parameter names from `Builtin.parameters` and writes parameter hints into `builder.hints`
-fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, params: []const data.Builtin.Parameter) !void {
+fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, params: []const data.Builtin.Parameter) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -322,7 +322,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, param
     }
 }
 
-fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
+fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) Analyser.Error!?[]const u8 {
     const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, builder.handle)) orelse return null;
     return try resolved_type.stringifyTypeOf(
         builder.analyser,
@@ -330,7 +330,7 @@ fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
     );
 }
 
-fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
+fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!?[]const u8 {
     const things = try builder.analyser.lookupSymbolGlobal(
         builder.handle,
         offsets.tokenToSlice(&builder.handle.tree, token),
@@ -344,7 +344,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
 }
 
 /// Append a hint in the form `: hint`
-fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) !void {
+fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) error{OutOfMemory}!void {
     const name = offsets.tokenToSlice(&builder.handle.tree, type_token_index);
     if (std.mem.eql(u8, name, "_")) {
         return;
@@ -359,12 +359,12 @@ fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hin
     });
 }
 
-fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) !void {
+fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!void {
     const type_str = try typeStrOfToken(builder, token) orelse return;
     try appendTypeHintString(builder, token, type_str);
 }
 
-fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
+fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -384,7 +384,7 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
-fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
+fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -406,7 +406,7 @@ fn writeNodeInlayHint(
     builder: *Builder,
     tree: *const Ast,
     node: Ast.Node.Index,
-) error{OutOfMemory}!void {
+) Analyser.Error!void {
     switch (tree.nodeTag(node)) {
         .call_one,
         .call_one_comma,
@@ -547,7 +547,7 @@ pub fn writeRangeInlayHint(
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}![]types.InlayHint {
+) Analyser.Error![]types.InlayHint {
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,

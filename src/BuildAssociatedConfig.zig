@@ -7,7 +7,7 @@ pub const BuildOption = struct {
 
     /// Duplicates the `BuildOption`, copying internal strings. Caller owns returned option with contents
     /// allocated using `allocator`.
-    pub fn dupe(self: BuildOption, allocator: std.mem.Allocator) !BuildOption {
+    pub fn dupe(self: BuildOption, allocator: std.mem.Allocator) error{OutOfMemory}!BuildOption {
         const copy_name = try allocator.dupe(u8, self.name);
         errdefer allocator.free(copy_name);
         const copy_value = if (self.value) |val|
@@ -22,7 +22,7 @@ pub const BuildOption = struct {
 
     /// Formats the `BuildOption` as a command line parameter compatible with `zig build`. This will either be
     /// `-Dname=value` or `-Dname`. Caller owns returned slice allocated using `allocator`.
-    pub fn formatParam(self: BuildOption, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn formatParam(self: BuildOption, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
         if (self.value) |val| {
             return try std.fmt.allocPrint(allocator, "-D{s}={s}", .{ self.name, val });
         } else {

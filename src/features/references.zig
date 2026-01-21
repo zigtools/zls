@@ -95,7 +95,7 @@ const Builder = struct {
         });
     }
 
-    fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) Analyser.Error!void {
         const context = Context{
             .builder = self,
             .handle = handle,
@@ -106,7 +106,7 @@ const Builder = struct {
         while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
-    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) Analyser.Error!void {
         const builder = self.builder;
         const handle = self.handle;
         const decl_name = offsets.identifierTokenToNameSlice(
@@ -230,7 +230,7 @@ fn gatherReferences(
     include_decl: bool,
     builder: anytype,
     handle_behavior: enum { get, get_or_load },
-) !void {
+) Analyser.Error!void {
     var dependencies: Uri.ArrayHashMap(void) = .empty;
     defer {
         for (dependencies.keys()) |uri| {
@@ -262,7 +262,7 @@ fn gatherReferences(
         if (uri.eql(curr_handle.uri)) continue;
         const handle = switch (handle_behavior) {
             .get => analyser.store.getHandle(uri),
-            .get_or_load => analyser.store.getOrLoadHandle(uri),
+            .get_or_load => try analyser.store.getOrLoadHandle(uri),
         } orelse continue;
 
         try builder.collectReferences(handle, .root);
@@ -280,7 +280,7 @@ fn symbolReferences(
     /// exclude references from the std library
     skip_std_references: bool,
     curr_handle: *DocumentStore.Handle,
-) error{OutOfMemory}!std.ArrayList(types.Location) {
+) Analyser.Error!std.ArrayList(types.Location) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -526,7 +526,7 @@ const CallBuilder = struct {
         });
     }
 
-    fn collectReferences(self: *CallBuilder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *CallBuilder, handle: *DocumentStore.Handle, node: Ast.Node.Index) Analyser.Error!void {
         const context = Context{
             .builder = self,
             .handle = handle,
@@ -536,7 +536,7 @@ const CallBuilder = struct {
         while (try walker.nextIgnoreClose(self.allocator, &handle.tree)) |child| try referenceNode(&context, &handle.tree, child);
     }
 
-    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: *const Ast, node: Ast.Node.Index) Analyser.Error!void {
         const builder = self.builder;
         const handle = self.handle;
 
@@ -593,7 +593,7 @@ pub fn callsiteReferences(
     skip_std_references: bool,
     /// search other files for references
     workspace: bool,
-) error{OutOfMemory}!std.ArrayList(Callsite) {
+) Analyser.Error!std.ArrayList(Callsite) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

@@ -131,7 +131,7 @@ pub const Manager = struct {
     pub fn resolveConfiguration(
         manager: *Manager,
         result_allocator: std.mem.Allocator,
-    ) error{OutOfMemory}!ResolveConfigurationResult {
+    ) error{ Canceled, OutOfMemory }!ResolveConfigurationResult {
         if (!manager.impl.is_dirty) {
             return .{
                 .did_change = .{},
@@ -238,10 +238,13 @@ pub const Manager = struct {
                 const dir = switch (action) {
                     .open => std.Io.Dir.cwd().openDir(io, path, .{}),
                     .create => std.Io.Dir.cwd().createDirPathOpen(io, path, .{}),
-                } catch |err| {
-                    log.err("failed to open {s} directory '{s}': {}", .{ name, path, err });
-                    opt_path.* = null;
-                    continue;
+                } catch |err| switch (err) {
+                    error.Canceled => return error.Canceled,
+                    else => {
+                        log.err("failed to open {s} directory '{s}': {}", .{ name, path, err });
+                        opt_path.* = null;
+                        continue;
+                    },
                 };
                 result_dir.* = .{ .handle = dir, .path = path };
                 continue;
@@ -275,9 +278,12 @@ pub const Manager = struct {
             defer manager.allocator.free(cache_path);
 
             std.debug.assert(std.fs.path.isAbsolute(cache_path));
-            var cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, cache_path, .{}) catch |err| {
-                log.err("failed to open directory '{s}': {}", .{ cache_path, err });
-                break :blk;
+            var cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, cache_path, .{}) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                else => {
+                    log.err("failed to open directory '{s}': {}", .{ cache_path, err });
+                    break :blk;
+                },
             };
             defer cache_dir.close(io);
 
@@ -285,18 +291,26 @@ pub const Manager = struct {
                 .sub_path = "shared.zig",
                 .data = build_runner_config_source,
                 .flags = .{ .exclusive = true },
-            }) catch |err| if (err != error.PathAlreadyExists) {
-                log.err("failed to write file '{s}/shared.zig': {}", .{ cache_path, err });
-                break :blk;
+            }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.PathAlreadyExists => {},
+                else => {
+                    log.err("failed to write file '{s}/shared.zig': {}", .{ cache_path, err });
+                    break :blk;
+                },
             };
 
             cache_dir.writeFile(io, .{
                 .sub_path = "build_runner.zig",
                 .data = build_runner_source,
                 .flags = .{ .exclusive = true },
-            }) catch |err| if (err != error.PathAlreadyExists) {
-                log.err("failed to write file '{s}/build_runner.zig': {}", .{ cache_path, err });
-                break :blk;
+            }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.PathAlreadyExists => {},
+                else => {
+                    log.err("failed to write file '{s}/build_runner.zig': {}", .{ cache_path, err });
+                    break :blk;
+                },
             };
 
             config.build_runner_path = try std.fs.path.join(arena, &.{ cache_path, "build_runner.zig" });
@@ -321,10 +335,13 @@ pub const Manager = struct {
                     .argv = &argv,
                     .max_output_bytes = 16 * 1024 * 1024,
                 },
-            ) catch |err| {
-                const args = std.mem.join(manager.allocator, " ", &argv) catch break :blk;
-                log.err("failed to run command '{s}': {}", .{ args, err });
-                break :blk;
+            ) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                else => {
+                    const args = std.mem.join(manager.allocator, " ", &argv) catch break :blk;
+                    log.err("failed to run command '{s}': {}", .{ args, err });
+                    break :blk;
+                },
             };
             defer manager.allocator.free(run_result.stdout);
             defer manager.allocator.free(run_result.stderr);
@@ -332,9 +349,12 @@ pub const Manager = struct {
             global_cache_dir.handle.writeFile(io, .{
                 .sub_path = "builtin.zig",
                 .data = run_result.stdout,
-            }) catch |err| {
-                log.err("failed to write file '{f}builtin.zig': {}", .{ global_cache_dir, err });
-                break :blk;
+            }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                else => {
+                    log.err("failed to write file '{f}builtin.zig': {}", .{ global_cache_dir, err });
+                    break :blk;
+                },
             };
 
             config.builtin_path = try global_cache_dir.join(arena, &.{"builtin.zig"});
@@ -366,7 +386,7 @@ pub const Manager = struct {
         allocator: std.mem.Allocator,
         config: *Config,
         messages: *std.ArrayList([]const u8),
-    ) error{OutOfMemory}!void {
+    ) error{ Canceled, OutOfMemory }!void {
         if (builtin.os.tag == .wasi) return;
 
         var values: [file_system_config_options.len]*?[]const u8 = undefined;
@@ -395,28 +415,34 @@ pub const Manager = struct {
 
                 switch (file_config.kind) {
                     .file => {
-                        const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| {
-                            if (file_config.is_accessible) {
-                                try messages.ensureUnusedCapacity(allocator, 1);
-                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                    allocator,
-                                    "config option '{s}': invalid file path '{s}': {}",
-                                    .{ file_config.name, path, err },
-                                ));
-                                break :ok false;
-                            }
-                            break :ok true;
+                        const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| switch (err) {
+                            error.Canceled => return error.Canceled,
+                            else => {
+                                if (file_config.is_accessible) {
+                                    try messages.ensureUnusedCapacity(allocator, 1);
+                                    messages.appendAssumeCapacity(try std.fmt.allocPrint(
+                                        allocator,
+                                        "config option '{s}': invalid file path '{s}': {}",
+                                        .{ file_config.name, path, err },
+                                    ));
+                                    break :ok false;
+                                }
+                                break :ok true;
+                            },
                         };
                         defer file.close(io);
 
-                        const stat = file.stat(io) catch |err| {
-                            try messages.ensureUnusedCapacity(allocator, 1);
-                            messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                allocator,
-                                "config option '{s}': failed to access '{s}': {}",
-                                .{ file_config.name, path, err },
-                            ));
-                            break :ok true;
+                        const stat = file.stat(io) catch |err| switch (err) {
+                            error.Canceled => return error.Canceled,
+                            else => {
+                                try messages.ensureUnusedCapacity(allocator, 1);
+                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
+                                    allocator,
+                                    "config option '{s}': failed to access '{s}': {}",
+                                    .{ file_config.name, path, err },
+                                ));
+                                break :ok true;
+                            },
                         };
                         switch (stat.kind) {
                             .directory => {
@@ -436,22 +462,28 @@ pub const Manager = struct {
                         break :ok true;
                     },
                     .directory => {
-                        var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch |err| {
-                            if (file_config.is_accessible) {
-                                try messages.ensureUnusedCapacity(allocator, 1);
-                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                    allocator,
-                                    "config option '{s}': invalid directory path '{s}': {}",
-                                    .{ file_config.name, path, err },
-                                ));
-                                break :ok false;
-                            }
-                            break :ok true;
+                        var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch |err| switch (err) {
+                            error.Canceled => return error.Canceled,
+                            else => {
+                                if (file_config.is_accessible) {
+                                    try messages.ensureUnusedCapacity(allocator, 1);
+                                    messages.appendAssumeCapacity(try std.fmt.allocPrint(
+                                        allocator,
+                                        "config option '{s}': invalid directory path '{s}': {}",
+                                        .{ file_config.name, path, err },
+                                    ));
+                                    break :ok false;
+                                }
+                                break :ok true;
+                            },
                         };
                         defer dir.close(io);
-                        const stat = dir.stat(io) catch |err| {
-                            log.err("failed to get stat of '{s}': {}", .{ path, err });
-                            break :ok true;
+                        const stat = dir.stat(io) catch |err| switch (err) {
+                            error.Canceled => return error.Canceled,
+                            else => {
+                                log.err("failed to get stat of '{s}': {}", .{ path, err });
+                                break :ok true;
+                            },
                         };
                         switch (stat.kind) {
                             .file => {
@@ -558,14 +590,17 @@ pub fn getZigEnv(
     allocator: std.mem.Allocator,
     result_arena: std.mem.Allocator,
     zig_exe_path: []const u8,
-) error{OutOfMemory}!?Env {
+) error{ Canceled, OutOfMemory }!?Env {
     const zig_env_result = std.process.run(
         allocator,
         io,
         .{ .argv = &.{ zig_exe_path, "env" } },
-    ) catch |err| {
-        log.err("Failed to run 'zig env': {}", .{err});
-        return null;
+    ) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.err("Failed to run 'zig env': {}", .{err});
+            return null;
+        },
     };
 
     defer {
@@ -683,7 +718,7 @@ pub fn findZig(
     io: std.Io,
     allocator: std.mem.Allocator,
     environ_map: *const std.process.Environ.Map,
-) error{OutOfMemory}!?[]const u8 {
+) error{ Canceled, OutOfMemory }!?[]const u8 {
     const is_windows = builtin.target.os.tag == .windows;
 
     const env_path = environ_map.get("PATH") orelse return null;
@@ -697,6 +732,7 @@ pub fn findZig(
 
     while (path_it.next()) |path| : (if (is_windows) ext_it.reset()) {
         var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
             error.FileNotFound => continue,
             else => |e| {
                 log.warn("failed to open entry in PATH '{s}': {}", .{ path, e });
@@ -719,6 +755,7 @@ pub fn findZig(
             };
 
             const stat = dir.statFile(io, filename, .{}) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
                 error.FileNotFound => continue,
                 else => |e| {
                     log.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });

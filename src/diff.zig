@@ -114,7 +114,7 @@ pub fn applyTextEdits(
     text: []const u8,
     text_edits: []const types.TextEdit,
     encoding: offsets.Encoding,
-) ![]const u8 {
+) error{OutOfMemory}![]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

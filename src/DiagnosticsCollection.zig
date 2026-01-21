@@ -264,6 +264,7 @@ fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []c
 }
 
 pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator.Error || std.Io.File.Writer.Error)!void {
+    const io = collection.io;
     const transport = collection.transport orelse return;
 
     var arena_allocator: std.heap.ArenaAllocator = .init(collection.allocator);
@@ -271,8 +272,8 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
 
     while (true) {
         const json_message = blk: {
-            collection.mutex.lockUncancelable(collection.io);
-            defer collection.mutex.unlock(collection.io);
+            try collection.mutex.lock(io);
+            defer collection.mutex.unlock(io);
 
             const entry = collection.outdated_files.pop() orelse break;
             defer entry.key.deinit(collection.allocator);
@@ -296,7 +297,10 @@ pub fn publishDiagnostics(collection: *DiagnosticsCollection) (std.mem.Allocator
         };
         defer collection.allocator.free(json_message);
 
-        try transport.writeJsonMessage(json_message);
+        const old_cancel_protect = io.swapCancelProtection(.blocked);
+        defer _ = io.swapCancelProtection(old_cancel_protect);
+
+        try transport.writeJsonMessageUncancelable(io, json_message);
     }
 }
 

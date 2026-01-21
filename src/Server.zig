@@ -96,7 +96,6 @@ const ClientCapabilities = struct {
 };
 
 pub const Error = error{
-    OutOfMemory,
     ParseError,
     InvalidRequest,
     MethodNotFound,
@@ -130,7 +129,7 @@ pub const Error = error{
     /// The client has canceled a request and a server as detected
     /// the cancel.
     RequestCancelled,
-};
+} || std.mem.Allocator.Error || std.Io.Cancelable;
 
 pub const Status = enum {
     /// the server has not received a `initialize` request
@@ -147,7 +146,7 @@ pub const Status = enum {
     exiting_failure,
 };
 
-fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anytype) error{ Canceled, OutOfMemory }![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientResponse(" ++ @typeName(@TypeOf(result)) ++ ")");
     defer tracy_zone.end();
 
@@ -159,10 +158,10 @@ fn sendToClientResponse(server: *Server, id: lsp.JsonRPCMessage.ID, result: anyt
         .id = id,
         .result_or_error = .{ .result = result },
     };
-    return try sendToClientInternal(server.allocator, server.transport, response);
+    return try sendToClientInternal(server.io, server.allocator, server.transport, response);
 }
 
-fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []const u8, params: anytype) error{ Canceled, OutOfMemory }![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
     defer tracy_zone.end();
 
@@ -175,10 +174,10 @@ fn sendToClientRequest(server: *Server, id: lsp.JsonRPCMessage.ID, method: []con
         .method = method,
         .params = params,
     };
-    return try sendToClientInternal(server.allocator, server.transport, request);
+    return try sendToClientInternal(server.io, server.allocator, server.transport, request);
 }
 
-fn sendToClientNotification(server: *Server, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientNotification(server: *Server, method: []const u8, params: anytype) error{ Canceled, OutOfMemory }![]u8 {
     const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
     defer tracy_zone.end();
 
@@ -190,10 +189,10 @@ fn sendToClientNotification(server: *Server, method: []const u8, params: anytype
         .method = method,
         .params = params,
     };
-    return try sendToClientInternal(server.allocator, server.transport, notification);
+    return try sendToClientInternal(server.io, server.allocator, server.transport, notification);
 }
 
-fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: lsp.JsonRPCMessage.Response.Error) error{OutOfMemory}![]u8 {
+fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: lsp.JsonRPCMessage.Response.Error) error{ Canceled, OutOfMemory }![]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -201,10 +200,10 @@ fn sendToClientResponseError(server: *Server, id: lsp.JsonRPCMessage.ID, err: ls
         .response = .{ .id = id, .result_or_error = .{ .@"error" = err } },
     };
 
-    return try sendToClientInternal(server.allocator, server.transport, response);
+    return try sendToClientInternal(server.io, server.allocator, server.transport, response);
 }
 
-fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport, message: anytype) error{OutOfMemory}![]u8 {
+fn sendToClientInternal(io: std.Io, allocator: std.mem.Allocator, transport: ?*lsp.Transport, message: anytype) error{ Canceled, OutOfMemory }![]u8 {
     const message_stringified = try std.json.Stringify.valueAlloc(allocator, message, .{
         .emit_null_optional_fields = false,
     });
@@ -214,8 +213,9 @@ fn sendToClientInternal(allocator: std.mem.Allocator, transport: ?*lsp.Transport
         const tracy_zone = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
         defer tracy_zone.end();
 
-        t.writeJsonMessage(message_stringified) catch |err| {
-            log.err("failed to write message: {}", .{err});
+        t.writeJsonMessage(io, message_stringified) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => log.err("failed to write message: {}", .{err}),
         };
     }
 
@@ -294,7 +294,7 @@ pub fn autofixWorkaround(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayList(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{ Canceled, OutOfMemory }!std.ArrayList(types.TextEdit) {
     if (handle.tree.errors.len != 0) return .empty;
     if (handle.tree.mode == .zon) return .empty;
 
@@ -327,8 +327,9 @@ fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Han
 fn generateDiagnostics(server: *Server, handle: *DocumentStore.Handle) void {
     if (!server.client_capabilities.supports_publish_diagnostics) return;
     const do = struct {
-        fn do(param_server: *Server, param_handle: *DocumentStore.Handle) void {
+        fn do(param_server: *Server, param_handle: *DocumentStore.Handle) std.Io.Cancelable!void {
             diagnostics_gen.generateDiagnostics(param_server, param_handle) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
                 error.OutOfMemory => {},
             };
         }
@@ -680,7 +681,7 @@ fn requestConfiguration(server: *Server) Error!void {
 }
 
 /// Handle the response of the `workspace/configuration` request.
-fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
+fn handleConfiguration(server: *Server, json: std.json.Value) error{ Canceled, OutOfMemory }!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -792,7 +793,7 @@ const Workspace = struct {
         server: *Server,
         /// Whether the build on save process should be restarted if it is already running.
         restart: bool,
-    }) error{OutOfMemory}!void {
+    }) error{ Canceled, OutOfMemory }!void {
         comptime std.debug.assert(BuildOnSaveSupport.isSupportedComptime());
 
         const config = &args.server.config_manager.config;
@@ -841,16 +842,19 @@ const Workspace = struct {
             .zig_lib_path = zig_lib_path,
             .build_runner_path = build_runner_path,
             .collection = &args.server.diagnostics_collection,
-        }) catch |err| {
-            log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri.raw, err });
-            return;
+        }) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => {
+                log.err("failed to initilize Build-On-Save for '{s}': {}", .{ workspace.uri.raw, err });
+                return;
+            },
         };
 
         log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri.raw});
     }
 };
 
-fn addWorkspace(server: *Server, uri: Uri) error{OutOfMemory}!void {
+fn addWorkspace(server: *Server, uri: Uri) error{ Canceled, OutOfMemory }!void {
     try server.workspaces.ensureUnusedCapacity(server.allocator, 1);
     server.workspaces.appendAssumeCapacity(try Workspace.init(server, uri));
     log.info("added Workspace Folder: {s}", .{uri.raw});
@@ -961,7 +965,7 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
     try server.resolveConfiguration();
 }
 
-pub fn resolveConfiguration(server: *Server) error{OutOfMemory}!void {
+pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void {
     var result = try server.config_manager.resolveConfiguration(server.allocator);
     defer result.deinit(server.allocator);
 
@@ -1214,8 +1218,9 @@ fn closeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification:
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         server.diagnostics_collection.clearSingleDocumentDiagnostics(document_uri);
-        server.diagnostics_collection.publishDiagnostics() catch |err| {
-            std.log.err("failed to publish diagnostics: {}", .{err});
+        server.diagnostics_collection.publishDiagnostics() catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => std.log.err("failed to publish diagnostics: {}", .{err}),
         };
     }
 }
@@ -1721,12 +1726,18 @@ pub fn keepRunning(server: Server) bool {
     }
 }
 
+pub const LoopError = std.mem.Allocator.Error ||
+    std.Io.Cancelable ||
+    std.Io.File.Reader.Error ||
+    lsp.BaseProtocolHeader.ParseError ||
+    error{ EndOfStream, ParseError };
+
 /// The main loop of ZLS
-pub fn loop(server: *Server) !void {
+pub fn loop(server: *Server) LoopError!void {
     std.debug.assert(server.transport != null);
     defer server.wait_group.cancel(server.io);
     while (server.keepRunning()) {
-        const json_message = try server.transport.?.readJsonMessage(server.allocator);
+        const json_message = try server.transport.?.readJsonMessage(server.io, server.allocator);
         defer server.allocator.free(json_message);
 
         var arena_allocator: std.heap.ArenaAllocator = .init(server.allocator);
@@ -1745,7 +1756,7 @@ pub fn loop(server: *Server) !void {
         if (isBlockingMessage(message)) {
             try server.wait_group.await(server.io);
             server.wait_group = .init;
-            server.processMessageReportError(arena_allocator.state, message);
+            try server.processMessageReportError(arena_allocator.state, message);
         } else {
             server.wait_group.async(server.io, processMessageReportError, .{ server, arena_allocator.state, message });
         }
@@ -1854,13 +1865,14 @@ fn processMessage(server: *Server, arena: std.mem.Allocator, message: Message) E
     return null;
 }
 
-fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocator.State, message: Message) void {
+fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocator.State, message: Message) std.Io.Cancelable!void {
     var arena_allocator = arena_state.promote(server.allocator);
     defer arena_allocator.deinit();
 
     if (server.processMessage(arena_allocator.allocator(), message)) |json_message| {
         server.allocator.free(json_message orelse return);
     } else |err| {
+        if (err == error.Canceled) return error.Canceled;
         log.err("failed to process {f}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
             std.debug.dumpStackTrace(trace);
@@ -1870,6 +1882,7 @@ fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocat
             .request => |request| {
                 const json_message = server.sendToClientResponseError(request.id, .{
                     .code = @enumFromInt(switch (err) {
+                        error.Canceled => unreachable, // checked above
                         error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
                         error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
                         error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
@@ -1883,7 +1896,10 @@ fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocat
                         error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
                     }),
                     .message = @errorName(err),
-                }) catch return;
+                }) catch |send_err| switch (send_err) {
+                    error.Canceled => return error.Canceled,
+                    else => return,
+                };
                 server.allocator.free(json_message);
             },
             .notification, .response => return,
