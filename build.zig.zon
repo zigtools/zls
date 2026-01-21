@@ -19,16 +19,16 @@
     // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
-            .url = "git+https://github.com/jozip/known-folders.git#2f6257e5e6a791d8750c3a4dc84464f045ccb275",
-            .hash = "known_folders-0.0.0-Fy-PJqHJAAA33hWpsUnyuK2GEvmCAS5B3yFdsXqlKoJK",
+            .url = "https://github.com/ziglibs/known-folders/archive/82027007c0eb199a3242c167a5cffd83b6ee571b.tar.gz",
+            .hash = "known_folders-0.0.0-Fy-PJqHJAAB43zDJmOdlr3nViu69IFI9pNFt7hkHjKk4",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/669e6ed7470100bfd9d2aa9f6f96b93c45996179.tar.gz",
             .hash = "diffz-0.0.1-G2tlISLPAQDzXkUIRWWUfdgIsIb1dAyVwRPXMt5kRpui",
         },
         .lsp_kit = .{
-            .url = "git+https://github.com/jozip/lsp-kit.git#2096fa92f97c3f9df4be9ec1dc101aa5b3f145c3",
-            .hash = "lsp_kit-0.1.0-bi_PL78tDABeK2ufAUVwW2xOIqwoEK1O_J81KUXNwBkM",
+            .url = "https://github.com/zigtools/lsp-kit/archive/724e6d62b3b1576e797aa2964f2dfcb7222959c8.tar.gz",
+            .hash = "lsp_kit-0.1.0-bi_PL78tDABKTGTLaX078Ckmcez55vSBehbi-R47U-wi",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",
