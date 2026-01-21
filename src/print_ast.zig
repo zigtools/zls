@@ -49,12 +49,7 @@ pub const Formatter = struct {
     tree: *const Ast,
     options: RenderOptions,
 
-    pub fn format(
-        ctx: Formatter,
-        writer: *std.Io.Writer,
-        comptime fmt_spec: []const u8,
-    ) !void {
-        comptime std.debug.assert(fmt_spec.len == 0);
+    pub fn format(ctx: Formatter, writer: *std.Io.Writer) !void {
         try renderToWriter(ctx.tree, ctx.options, writer);
     }
 };
