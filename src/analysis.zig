@@ -4168,9 +4168,33 @@ pub const Type = struct {
 
     pub fn typeDefinitionToken(self: Type) ?TokenWithHandle {
         return switch (self.data) {
-            .container => |info| .{
-                .token = info.scope_handle.handle.tree.firstToken(info.scope_handle.toNode()),
-                .handle = info.scope_handle.handle,
+            .container => |info| {
+                const container = info.scope_handle.toNode();
+                var buf: [2]Ast.Node.Index = undefined;
+                const tree = &info.scope_handle.handle.tree;
+                // try to parse something that looks like (and only looks like) `const X = @This();`
+                if (tree.fullContainerDecl(&buf, container)) |container_decl| {
+                    for (container_decl.ast.members) |decl| {
+                        const full_decl = tree.fullVarDecl(decl) orelse continue;
+
+                        const init_node = full_decl.ast.init_node.unwrap() orelse continue;
+                        if (!ast.isBuiltinCall(tree, init_node)) continue;
+                        const builtin_name = tree.nodeMainToken(init_node);
+                        std.debug.assert(tree.tokenTag(builtin_name) == .builtin);
+                        const builtin_name_text = tree.tokenSlice(builtin_name);
+                        if (!std.mem.eql(u8, builtin_name_text, "@This")) continue;
+
+                        return .{
+                            .token = full_decl.ast.mut_token + 1,
+                            .handle = info.scope_handle.handle,
+                        };
+                    }
+                }
+
+                return .{
+                    .token = info.scope_handle.handle.tree.firstToken(info.scope_handle.toNode()),
+                    .handle = info.scope_handle.handle,
+                };
             },
             .function => |info| .{
                 .token = info.fn_token,
