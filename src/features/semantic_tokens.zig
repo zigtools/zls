@@ -193,7 +193,7 @@ const Builder = struct {
         const length = offsets.locLength(source, loc, self.encoding);
 
         // assert that the `@intCast(length)` below is safe
-        comptime std.debug.assert(DocumentStore.max_document_size == std.math.maxInt(u32));
+        comptime std.debug.assert(std.zig.max_src_size == std.math.maxInt(u32));
 
         try self.token_buffer.appendSlice(self.arena, &.{
             delta.line,

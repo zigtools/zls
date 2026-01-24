@@ -38,8 +38,6 @@ lsp_capabilities: struct {
 pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
 pub const Hash = [Hasher.mac_length]u8;
 
-pub const max_document_size = std.math.maxInt(u32);
-
 pub const supports_build_system = std.process.can_spawn;
 
 pub fn computeHash(bytes: []const u8) Hash {
@@ -754,7 +752,7 @@ fn readFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!?[:0]
         self.io,
         sub_path,
         self.allocator,
-        .limited(max_document_size),
+        .limited(std.zig.max_src_size),
         .of(u8),
         0,
     ) catch |err| switch (err) {
@@ -1825,7 +1823,8 @@ fn publishCimportDiagnostics(self: *DocumentStore, handle: *Handle) (std.mem.All
         const loc = offsets.nodeToLoc(&handle.tree, node);
         const source_loc = std.zig.findLineColumn(handle.tree.source, loc.start);
 
-        comptime std.debug.assert(max_document_size <= std.math.maxInt(u32));
+        // assert that the `@intCast` below is safe
+        comptime std.debug.assert(std.zig.max_src_size <= std.math.maxInt(u32));
 
         const src_loc = try wip.addSourceLocation(.{
             .src_path = src_path,

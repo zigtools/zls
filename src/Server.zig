@@ -1133,11 +1133,11 @@ fn createDocumentStoreConfig(config_manager: *const configuration.Manager) Docum
 }
 
 fn openDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.TextDocument.DidOpenParams) Error!void {
-    if (notification.textDocument.text.len > DocumentStore.max_document_size) {
+    if (notification.textDocument.text.len > std.zig.max_src_size) {
         log.err("open document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
             notification.textDocument.uri,
             notification.textDocument.text.len,
-            DocumentStore.max_document_size,
+            std.zig.max_src_size,
         });
         return error.InternalError;
     }
@@ -1160,11 +1160,11 @@ fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
 
-    if (new_text.len > DocumentStore.max_document_size) {
+    if (new_text.len > std.zig.max_src_size) {
         log.err("change document '{s}' failed: text size ({d}) is above maximum length ({d})", .{
             document_uri.raw,
             new_text.len,
-            DocumentStore.max_document_size,
+            std.zig.max_src_size,
         });
         server.allocator.free(new_text);
         return error.InternalError;
