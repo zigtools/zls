@@ -190,7 +190,6 @@ pub const Handle = struct {
 
         import_uris: ?[]Uri = null,
         document_scope: DocumentScope = undefined,
-        zzoiir: ZirOrZoir = undefined,
 
         associated_build_file: union(enum) {
             /// The initial state. The associated build file (build.zig) is resolved lazily.
@@ -227,11 +226,6 @@ pub const Handle = struct {
         associated_compilation_units: GetAssociatedCompilationUnitsResult = .unresolved,
     },
 
-    const ZirOrZoir = union(Ast.Mode) {
-        zig: std.zig.Zir,
-        zon: std.zig.Zoir,
-    };
-
     const Status = packed struct(u32) {
         /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
         /// `false` indicates the document only exists because it is a dependency of another document
@@ -242,12 +236,7 @@ pub const Handle = struct {
         has_document_scope_lock: bool = false,
         /// true if `handle.impl.document_scope` has been set
         has_document_scope: bool = false,
-        /// true if a thread has acquired the permission to compute the `std.zig.Zir` or `std.zig.Zoir`
-        has_zzoiir_lock: bool = false,
-        /// all other threads will wait until the given thread has computed the `std.zig.Zir` or `std.zig.Zoir` before reading it.
-        /// true if `handle.impl.zir` has been set
-        has_zzoiir: bool = false,
-        _: u27 = 0,
+        _: u29 = 0,
     };
 
     /// Takes ownership of `text` on success.
@@ -288,10 +277,6 @@ pub const Handle = struct {
 
         const allocator = self.impl.store.allocator;
 
-        if (status.has_zzoiir) switch (self.tree.mode) {
-            .zig => self.impl.zzoiir.zig.deinit(allocator),
-            .zon => self.impl.zzoiir.zon.deinit(allocator),
-        };
         if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
@@ -370,50 +355,6 @@ pub const Handle = struct {
             std.debug.assert(self.getStatus().has_document_scope);
         }
         return self.impl.document_scope;
-    }
-
-    pub fn getZir(self: *Handle) error{OutOfMemory}!std.zig.Zir {
-        std.debug.assert(self.tree.mode == .zig);
-        const zir_or_zoir = try self.getZirOrZoir();
-        return zir_or_zoir.zig;
-    }
-
-    pub fn getZoir(self: *Handle) error{OutOfMemory}!std.zig.Zoir {
-        std.debug.assert(self.tree.mode == .zon);
-        const zir_or_zoir = try self.getZirOrZoir();
-        return zir_or_zoir.zon;
-    }
-
-    fn getZirOrZoir(self: *Handle) error{OutOfMemory}!ZirOrZoir {
-        if (self.getStatus().has_zzoiir) return self.impl.zzoiir;
-        return try self.getLazy(ZirOrZoir, "zzoiir", struct {
-            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!ZirOrZoir {
-                switch (handle.tree.mode) {
-                    .zig => {
-                        const tracy_zone = tracy.traceNamed(@src(), "AstGen.generate");
-                        defer tracy_zone.end();
-
-                        var zir = try std.zig.AstGen.generate(allocator, handle.tree);
-                        errdefer zir.deinit(allocator);
-
-                        // remove unused capacity
-                        var instructions = zir.instructions.toMultiArrayList();
-                        try instructions.setCapacity(allocator, instructions.len);
-                        zir.instructions = instructions.slice();
-
-                        return .{ .zig = zir };
-                    },
-                    .zon => {
-                        const tracy_zone = tracy.traceNamed(@src(), "ZonGen.generate");
-                        defer tracy_zone.end();
-
-                        const zoir = try std.zig.ZonGen.generate(allocator, handle.tree, .{});
-
-                        return .{ .zon = zoir };
-                    },
-                }
-            }
-        });
     }
 
     pub const GetAssociatedBuildFileResult = union(enum) {

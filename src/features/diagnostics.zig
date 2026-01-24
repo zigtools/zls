@@ -293,7 +293,9 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
         };
     } else switch (handle.tree.mode) {
         .zig => {
-            const zir = try handle.getZir();
+            var zir = try std.zig.AstGen.generate(server.allocator, handle.tree);
+            defer zir.deinit(server.allocator);
+
             if (!zir.hasCompileErrors()) return .empty;
 
             var eb: std.zig.ErrorBundle.Wip = undefined;
@@ -303,7 +305,9 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             return try eb.toOwnedBundle("");
         },
         .zon => {
-            const zoir = try handle.getZoir();
+            const zoir = try std.zig.ZonGen.generate(server.allocator, handle.tree, .{});
+            defer zoir.deinit(server.allocator);
+
             if (!zoir.hasCompileErrors()) return .empty;
 
             var eb: std.zig.ErrorBundle.Wip = undefined;
