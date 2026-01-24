@@ -21,7 +21,7 @@ pub const top_level: []const Item = &.{
     .{ .label = "union", .snippet = "const $1 = union {$0};" },
     .{ .label = "union tagged", .snippet = "const $1 = union(${2:enum}) {$0};" },
     .{ .label = "test", .snippet = "test \"$1\" {$0}" },
-    .{ .label = "main", .snippet = "pub fn main() !void {$0}" },
+    .{ .label = "main", .snippet = "pub fn main(init: std.process.Init) !void {$0}" },
     .{ .label = "std_options", .snippet = "pub const std_options: std.Options = .{$0};" },
     .{ .label = "panic", .snippet =
     \\pub fn panic(
