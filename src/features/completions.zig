@@ -175,7 +175,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
         }
     }
 
-    const documentation: @FieldType(types.completion.Item, "documentation") = .{
+    const documentation: types.Documentation = .{
         .markup_content = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
             .value = try std.mem.join(builder.arena, "\n\n", doc_comments.items),
