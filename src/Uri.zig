@@ -192,8 +192,8 @@ fn fromPathWithOs(
     buf.appendSliceAssumeCapacity("file:");
     if (is_windows and
         path.len >= 2 and
-        (path[0] == std.fs.path.sep_windows or path[0] == std.fs.path.sep_posix) and
-        path[0] == path[1])
+        std.fs.path.PathType.isSep(.windows, u8, path[0]) and
+        std.fs.path.PathType.isSep(.windows, u8, path[1]))
     {
         // UNC path
     } else if (!std.mem.startsWith(u8, path, "/")) {
@@ -252,7 +252,7 @@ test "fromPath (windows)" {
 }
 
 test "fromPath - UNC (windows)" {
-    const uri = try fromPathWithOs(std.testing.allocator, "\\\\wsl.localhost\\foo\\main.zig", true);
+    const uri = try fromPathWithOs(std.testing.allocator, "\\/wsl.localhost\\foo\\main.zig", true);
     defer uri.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("file://wsl.localhost/foo/main.zig", uri.raw);
