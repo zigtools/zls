@@ -28,7 +28,6 @@ fn isBuildRunnerSupportedInternal(
     if (!version_is_tagged and zig_version.patch != 0) {
         // A zig version like `0.12.2-dev` has the same compatibility as `0.12.1`
         zig_version.patch -= 1;
-        zig_version.build = null;
         zig_version.pre = null;
         version_is_tagged = true;
     }
