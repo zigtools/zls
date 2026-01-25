@@ -26,6 +26,7 @@ const Builder = struct {
     source_index: usize,
     completions: std.ArrayList(types.completion.Item),
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
+    use_snippets: bool,
 };
 
 fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
@@ -311,7 +312,6 @@ fn functionTypeCompletion(
     const info = func_ty.data.function;
 
     const config = &builder.server.config_manager.config;
-    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
 
     const has_self_param = if (parent_container_ty) |container_ty| blk: {
         if (container_ty.is_type_val) break :blk false;
@@ -324,7 +324,7 @@ fn functionTypeCompletion(
     const new_text = switch (new_text_format) {
         .only_name => func_name,
         .snippet => snippet: {
-            std.debug.assert(use_snippets);
+            std.debug.assert(builder.use_snippets);
 
             if (config.enable_argument_placeholders) {
                 break :snippet try builder.analyser.stringifyFunction(.{
@@ -436,10 +436,7 @@ fn completeLabel(builder: *Builder) error{OutOfMemory}!void {
 }
 
 fn populateSnippedCompletions(builder: *Builder, kind: enum { generic, top_level }) error{OutOfMemory}!void {
-    const config = &builder.server.config_manager.config;
-    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-
-    const items: []const snippets.Item = if (use_snippets) switch (kind) {
+    const items: []const snippets.Item = if (builder.use_snippets) switch (kind) {
         .generic => snippets.generic,
         .top_level => snippets.top_level,
     } else &.{};
@@ -447,7 +444,7 @@ fn populateSnippedCompletions(builder: *Builder, kind: enum { generic, top_level
     try builder.completions.ensureUnusedCapacity(builder.arena, items.len + std.zig.Token.keywords.keys().len + std.zig.primitives.names.keys().len);
 
     for (items) |item| {
-        std.debug.assert(use_snippets);
+        std.debug.assert(builder.use_snippets);
         builder.completions.appendAssumeCapacity(.{
             .label = item.label,
             .kind = .Snippet,
@@ -458,7 +455,7 @@ fn populateSnippedCompletions(builder: *Builder, kind: enum { generic, top_level
     }
 
     for (std.zig.Token.keywords.keys(), std.zig.Token.keywords.values()) |name, tag| {
-        const keyword_snippet = if (use_snippets) snippets.keywords.get(tag) else null;
+        const keyword_snippet = if (builder.use_snippets) snippets.keywords.get(tag) else null;
         builder.completions.appendAssumeCapacity(.{
             .label = name,
             .kind = .Keyword,
@@ -482,8 +479,6 @@ const PrepareFunctionCompletionResult = struct { types.Range, types.Range, Funct
 fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult {
     if (builder.cached_prepare_function_completion_result) |result| return result;
 
-    const config = &builder.server.config_manager.config;
-    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     const source = builder.orig_handle.tree.source;
 
     var start_index = builder.source_index;
@@ -501,8 +496,8 @@ fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult 
 
     var format: FunctionCompletionFormat = .only_name;
 
-    const insert_can_be_snippet = use_snippets and std.mem.startsWith(u8, source[insert_loc.end..], "()");
-    const replace_can_be_snippet = use_snippets and std.mem.startsWith(u8, source[replace_loc.end..], "()");
+    const insert_can_be_snippet = builder.use_snippets and std.mem.startsWith(u8, source[insert_loc.end..], "()");
+    const replace_can_be_snippet = builder.use_snippets and std.mem.startsWith(u8, source[replace_loc.end..], "()");
 
     if (insert_can_be_snippet and replace_can_be_snippet) {
         insert_loc.end += 2;
@@ -510,7 +505,7 @@ fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult 
         format = .snippet;
     } else if (insert_can_be_snippet or replace_can_be_snippet) {
         // snippet completions would be possible but insert and replace would need different `newText`
-    } else if (use_snippets and !std.mem.startsWith(u8, source[end_index..], "(")) {
+    } else if (builder.use_snippets and !std.mem.startsWith(u8, source[end_index..], "(")) {
         format = .snippet;
     }
 
@@ -526,8 +521,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
     defer tracy_zone.end();
 
     const config = &builder.server.config_manager.config;
-    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
-    const use_placeholders = use_snippets and config.enable_argument_placeholders;
+    const use_placeholders = builder.use_snippets and config.enable_argument_placeholders;
 
     const insert_range, const replace_range, const new_text_format = prepareFunctionCompletion(builder);
 
@@ -536,7 +530,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
         const new_text = switch (new_text_format) {
             .only_name => name,
             .snippet => snippet: {
-                std.debug.assert(use_snippets);
+                std.debug.assert(builder.use_snippets);
                 // The generated snippet is not being escaped here because we can
                 // assume that the builtin name has no characters that need to be escaped.
                 if (builtin.parameters.len == 0) break :snippet try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
@@ -920,6 +914,7 @@ pub fn completionAtIndex(
         .orig_handle = handle,
         .source_index = source_index,
         .completions = .empty,
+        .use_snippets = server.config_manager.config.enable_snippets and server.client_capabilities.supports_snippets,
     };
     const source = handle.tree.source;
 
@@ -944,6 +939,10 @@ pub fn completionAtIndex(
         .embedfile_string_literal,
         .string_literal,
         => try completeFileSystemStringLiteral(&builder, pos_context),
+        .test_doctest_name => {
+            builder.use_snippets = false;
+            try completeGlobal(&builder);
+        },
         else => return null,
     }
 
@@ -1443,8 +1442,6 @@ fn collectContainerFields(
     const document_scope = try scope_handle.handle.getDocumentScope();
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
 
-    const config = &builder.server.config_manager.config;
-    const use_snippets = config.enable_snippets and builder.server.client_capabilities.supports_snippets;
     for (scope_decls) |decl_index| {
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
@@ -1473,7 +1470,7 @@ fn collectContainerFields(
                             break :insert_text .{ name, .PlainText };
                         }
 
-                        if (!use_snippets) {
+                        if (!builder.use_snippets) {
                             break :insert_text .{
                                 try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
                                 .PlainText,
@@ -1486,7 +1483,7 @@ fn collectContainerFields(
                         };
                     }
 
-                    if (!use_snippets)
+                    if (!builder.use_snippets)
                         break :insert_text .{ name, .PlainText };
 
                     if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)

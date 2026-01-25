@@ -4266,7 +4266,6 @@ test "insert replace behaviour - tagged union - zero-bit field" {
 }
 
 test "insert replace behaviour - doc test name" {
-    if (true) return error.SkipZigTest; // TODO
     try testCompletionTextEdit(.{
         .source =
         \\fn foo() void {};
@@ -4398,6 +4397,15 @@ test "methods of branching type" {
             .kind = .Function,
             .detail = "fn (_: *either type) bool",
         },
+    });
+}
+
+test "doctest name" {
+    try testCompletion(
+        \\fn foo() void {};
+        \\test <cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Function, .detail = "fn () void" },
     });
 }
 

@@ -316,7 +316,7 @@ pub fn gotoHandler(
 
     const response: types.Definition.Link = blk: switch (pos_context) {
         .builtin => |loc| try gotoDefinitionBuiltin(&analyser, handle, loc, server.offset_encoding),
-        .var_access => try gotoDefinitionGlobal(&analyser, handle, source_index, kind, server.offset_encoding),
+        .var_access, .test_doctest_name => try gotoDefinitionGlobal(&analyser, handle, source_index, kind, server.offset_encoding),
         .label_access, .label_decl => |loc| try gotoDefinitionLabel(&analyser, handle, source_index, loc, kind, server.offset_encoding),
         .enum_literal => try gotoDefinitionEnumLiteral(&analyser, handle, source_index, kind, server.offset_encoding),
 
