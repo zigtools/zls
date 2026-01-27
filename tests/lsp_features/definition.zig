@@ -350,9 +350,19 @@ test "type definition unwraps error unions, optionals, pointers" {
 
 test "builtins" {
     try testDefinition(
-        \\const S = <def><decl>struct</decl></def> {
-        \\    const Self = <>@This();
+        \\const S = struct {
+        \\    const <def><decl>Self</decl></def> = <>@This();
         \\};
+    );
+    try testDefinition(
+        \\const <decl>S</decl> = struct {
+        \\    const <def>Self</def> = @This();
+        \\};
+        \\const foo: <>S = .{};
+    );
+    try testDefinition(
+        \\const <def><decl>S</decl></def> = @This();
+        \\const foo: <>S = .{};
     );
 }
 
