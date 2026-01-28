@@ -332,8 +332,8 @@ pub const Handle = struct {
         return self.impl.import_uris.?;
     }
 
-    pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!DocumentScope {
-        if (self.getStatus().has_document_scope) return self.impl.document_scope;
+    pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!*const DocumentScope {
+        if (self.getStatus().has_document_scope) return &self.impl.document_scope;
         return try self.getLazy(DocumentScope, "document_scope", struct {
             fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
                 var document_scope: DocumentScope = try .init(allocator, &handle.tree);
@@ -545,7 +545,7 @@ pub const Handle = struct {
         comptime T: type,
         comptime name: []const u8,
         comptime Context: type,
-    ) error{OutOfMemory}!T {
+    ) error{OutOfMemory}!*const T {
         @branchHint(.cold);
         const tracy_zone = tracy.traceNamed(@src(), "getLazy(" ++ name ++ ")");
         defer tracy_zone.end();
@@ -576,7 +576,7 @@ pub const Handle = struct {
             const old_has_data = self.impl.status.bitSet(@bitOffsetOf(Status, has_data_field_name), .release);
             std.debug.assert(old_has_data == 0); // race condition
         }
-        return @field(self.impl, name);
+        return &@field(self.impl, name);
     }
 
     fn getStatus(self: *const Handle) Status {

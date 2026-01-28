@@ -1038,7 +1038,7 @@ fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) A
     for (dependencies.items) |uri| {
         // not every dependency is loaded which results in incomplete completion
         const dependency_handle = store.getHandle(uri) orelse continue;
-        const document_scope: DocumentScope = try dependency_handle.getDocumentScope();
+        const document_scope = try dependency_handle.getDocumentScope();
         const curr_set: DocumentScope.IdentifierSet = switch (kind) {
             .error_set => @field(document_scope, "global_error_set"),
             .enum_set => @field(document_scope, "global_enum_set"),
