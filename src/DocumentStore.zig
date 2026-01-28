@@ -177,6 +177,10 @@ pub const Handle = struct {
     tree: Ast,
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle),
+    /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
+    /// `false` indicates the document only exists because it is a dependency of another document
+    /// or has been closed with `textDocument/didClose`.
+    lsp_synced: bool,
 
     /// private field
     impl: struct {
@@ -196,16 +200,12 @@ pub const Handle = struct {
     },
 
     const Status = packed struct(u32) {
-        /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
-        /// `false` indicates the document only exists because it is a dependency of another document
-        /// or has been closed with `textDocument/didClose`.
-        lsp_synced: bool = false,
         /// true if a thread has acquired the permission to compute the `DocumentScope`
         /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
         has_document_scope_lock: bool = false,
         /// true if `handle.impl.document_scope` has been set
         has_document_scope: bool = false,
-        _: u29 = 0,
+        _: u30 = 0,
     };
 
     /// Takes ownership of `text` on success.
@@ -228,10 +228,9 @@ pub const Handle = struct {
             .uri = uri,
             .tree = tree,
             .cimports = cimports,
+            .lsp_synced = lsp_synced,
             .impl = .{
-                .status = .init(@bitCast(Status{
-                    .lsp_synced = lsp_synced,
-                })),
+                .status = .init(@bitCast(Status{})),
                 .store = store,
             },
         };
@@ -584,19 +583,6 @@ pub const Handle = struct {
         return @bitCast(self.impl.status.load(.acquire));
     }
 
-    pub fn isLspSynced(self: *const Handle) bool {
-        return self.getStatus().lsp_synced;
-    }
-
-    /// returns the previous value
-    fn setLspSynced(self: *Handle, lsp_synced: bool) bool {
-        if (lsp_synced) {
-            return self.impl.status.bitSet(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
-        } else {
-            return self.impl.status.bitReset(@offsetOf(Handle.Status, "lsp_synced"), .release) == 1;
-        }
-    }
-
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
@@ -766,7 +752,7 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
     defer tracy_zone.end();
 
     if (self.handles.get(uri)) |handle| {
-        if (handle.isLspSynced()) {
+        if (handle.lsp_synced) {
             log.warn("Document already open: {s}", .{uri.raw});
         }
     }
@@ -785,7 +771,7 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
         log.warn("Document not found: {s}", .{uri.raw});
         return;
     };
-    if (!kv.value.isLspSynced()) {
+    if (!kv.value.lsp_synced) {
         log.warn("Document already closed: {s}", .{uri.raw});
     }
 
@@ -802,7 +788,7 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
     defer tracy_zone.end();
 
     if (self.handles.get(uri)) |old_handle| {
-        if (!old_handle.isLspSynced()) {
+        if (!old_handle.lsp_synced) {
             log.warn("Document modified without being opened: {s}", .{uri.raw});
         }
     } else {
@@ -821,7 +807,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
     if (should_delete) {
         const index = self.handles.getIndex(uri) orelse return false;
         const handle = self.handles.values()[index];
-        if (handle.isLspSynced()) return false;
+        if (handle.lsp_synced) return false;
 
         self.handles.swapRemoveAt(index);
         const handle_uri = handle.uri;
@@ -830,7 +816,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
         handle_uri.deinit(self.allocator);
     } else {
         if (self.handles.get(uri)) |handle| {
-            if (handle.isLspSynced()) return false;
+            if (handle.lsp_synced) return false;
         } else return false;
         const file_contents = try self.readFile(uri) orelse return false;
         _ = try self.createAndStoreDocument(uri, file_contents, false);

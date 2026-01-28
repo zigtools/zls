@@ -1030,7 +1030,7 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         server.client_capabilities.supports_publish_diagnostics)
     {
         for (server.document_store.handles.values()) |handle| {
-            if (!handle.isLspSynced()) continue;
+            if (!handle.lsp_synced) continue;
             server.generateDiagnostics(handle);
         }
     }
