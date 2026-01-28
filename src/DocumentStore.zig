@@ -191,38 +191,7 @@ pub const Handle = struct {
         import_uris: ?[]Uri = null,
         document_scope: DocumentScope = undefined,
 
-        associated_build_file: union(enum) {
-            /// The initial state. The associated build file (build.zig) is resolved lazily.
-            init,
-            /// The associated build file (build.zig) has been requested but has not yet been resolved.
-            unresolved: struct {
-                /// The build files are ordered in decreasing priority.
-                potential_build_files: []const *BuildFile,
-                /// to avoid checking build files multiple times, a bitset stores whether or
-                /// not the build file should be skipped because it has previously been
-                /// found to be "unassociated" with the handle.
-                has_been_checked: std.DynamicBitSetUnmanaged,
-            },
-            /// The Handle has no associated build file (build.zig).
-            none,
-            /// The associated build file (build.zig) has been successfully resolved.
-            resolved: GetAssociatedBuildFileResult.Resolved,
-
-            fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-                switch (self.*) {
-                    .init, .none => {},
-                    .unresolved => |*unresolved| {
-                        allocator.free(unresolved.potential_build_files);
-                        unresolved.has_been_checked.deinit(allocator);
-                    },
-                    .resolved => |resolved| {
-                        allocator.free(resolved.root_source_file);
-                    },
-                }
-                self.* = undefined;
-            }
-        } = .init,
-
+        associated_build_file: AssociatedBuildFile.State = .init,
         associated_compilation_units: GetAssociatedCompilationUnitsResult = .unresolved,
     },
 
@@ -357,7 +326,7 @@ pub const Handle = struct {
         return self.impl.document_scope;
     }
 
-    pub const GetAssociatedBuildFileResult = union(enum) {
+    pub const AssociatedBuildFile = union(enum) {
         /// The Handle has no associated build file (build.zig).
         none,
         /// The associated build file (build.zig) has not been resolved yet.
@@ -369,13 +338,45 @@ pub const Handle = struct {
             build_file: *BuildFile,
             root_source_file: []const u8,
         };
+
+        const State = union(enum) {
+            /// The initial state. The associated build file (build.zig) is resolved lazily.
+            init,
+            /// The associated build file (build.zig) has been requested but has not yet been resolved.
+            unresolved: struct {
+                /// The build files are ordered in decreasing priority.
+                potential_build_files: []const *BuildFile,
+                /// to avoid checking build files multiple times, a bitset stores whether or
+                /// not the build file should be skipped because it has previously been
+                /// found to be "unassociated" with the handle.
+                has_been_checked: std.DynamicBitSetUnmanaged,
+            },
+            /// The Handle has no associated build file (build.zig).
+            none,
+            /// The associated build file (build.zig) has been successfully resolved.
+            resolved: Resolved,
+
+            fn deinit(state: *State, allocator: std.mem.Allocator) void {
+                switch (state.*) {
+                    .init, .none => {},
+                    .unresolved => |*unresolved| {
+                        allocator.free(unresolved.potential_build_files);
+                        unresolved.has_been_checked.deinit(allocator);
+                    },
+                    .resolved => |resolved| {
+                        allocator.free(resolved.root_source_file);
+                    },
+                }
+                state.* = undefined;
+            }
+        };
     };
 
     /// Returns the associated build file (build.zig) of the handle.
     ///
     /// `DocumentStore.build_files` is guaranteed to contain this Uri.
     /// Uri memory managed by its build_file
-    pub fn getAssociatedBuildFile(self: *Handle, document_store: *DocumentStore) error{ Canceled, OutOfMemory }!GetAssociatedBuildFileResult {
+    pub fn getAssociatedBuildFile(self: *Handle, document_store: *DocumentStore) error{ Canceled, OutOfMemory }!AssociatedBuildFile {
         comptime std.debug.assert(supports_build_system);
 
         try self.impl.lock.lock(document_store.io);
