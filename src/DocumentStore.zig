@@ -450,8 +450,8 @@ pub const Handle = struct {
     }
 
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
-        const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
-        defer tracy_zone_inner.end();
+        const tracy_zone = tracy.traceNamed(@src(), "Ast.parse");
+        defer tracy_zone.end();
 
         var tree = try Ast.parse(allocator, new_text, mode);
         errdefer tree.deinit(allocator);
@@ -1002,6 +1002,9 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
 }
 
 fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.Io.Cancelable!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     {
         try build_file.impl.mutex.lock(self.io);
         defer build_file.impl.mutex.unlock(self.io);
@@ -1279,6 +1282,9 @@ fn buildDotZigExists(io: std.Io, dir_path: []const u8) std.Io.Cancelable!bool {
 /// See `Handle.getAssociatedBuildFile`.
 /// Caller owns returned memory.
 fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }![]*BuildFile {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (isInStd(uri)) return &.{};
 
     var potential_build_files: std.ArrayList(*BuildFile) = .empty;
