@@ -1720,7 +1720,7 @@ pub fn setTransport(server: *Server, transport: *lsp.Transport) void {
     server.document_store.transport = transport;
 }
 
-pub fn keepRunning(server: Server) bool {
+pub fn keepRunning(server: *const Server) bool {
     switch (server.status) {
         .exiting_success, .exiting_failure => return false,
         else => return true,
