@@ -515,6 +515,7 @@ var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 pub fn main(init: std.process.Init.Minimal) !u8 {
     const base_allocator, const is_debug = gpa: {
         if (exe_options.debug_gpa) break :gpa .{ debug_allocator.allocator(), true };
+        if (zig_builtin.link_libc) break :gpa .{ std.heap.c_allocator, false };
         if (zig_builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (zig_builtin.mode) {
             .Debug => .{ debug_allocator.allocator(), true },
