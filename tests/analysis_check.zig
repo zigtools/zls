@@ -139,7 +139,7 @@ pub fn main(init: std.process.Init) Error!void {
 
     const handle_uri: zls.Uri = try .fromPath(arena, file_path);
     try document_store.openLspSyncedDocument(handle_uri, source);
-    const handle: *zls.DocumentStore.Handle = document_store.handles.get(handle_uri).?;
+    const handle: *zls.DocumentStore.Handle = document_store.getHandle(handle_uri).?;
 
     var error_builder: ErrorBuilder = .init(gpa);
     defer error_builder.deinit();

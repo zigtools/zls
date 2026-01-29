@@ -1029,8 +1029,9 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         (new_zig_exe_path or new_zig_lib_path) and
         server.client_capabilities.supports_publish_diagnostics)
     {
-        for (server.document_store.handles.values()) |handle| {
-            if (!handle.isLspSynced()) continue;
+        var it: DocumentStore.HandleIterator = .{ .store = &server.document_store };
+        while (it.next()) |handle| {
+            if (!handle.lsp_synced) continue;
             server.generateDiagnostics(handle);
         }
     }
@@ -1719,7 +1720,7 @@ pub fn setTransport(server: *Server, transport: *lsp.Transport) void {
     server.document_store.transport = transport;
 }
 
-pub fn keepRunning(server: Server) bool {
+pub fn keepRunning(server: *const Server) bool {
     switch (server.status) {
         .exiting_success, .exiting_failure => return false,
         else => return true,

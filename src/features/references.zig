@@ -239,7 +239,8 @@ fn gatherReferences(
         dependencies.deinit(allocator);
     }
 
-    for (analyser.store.handles.values()) |handle| {
+    var it: DocumentStore.HandleIterator = .{ .store = analyser.store };
+    while (it.next()) |handle| {
         if (skip_std_references and DocumentStore.isInStd(handle.uri)) {
             if (!include_decl or !handle.uri.eql(curr_handle.uri))
                 continue;

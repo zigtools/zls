@@ -4515,7 +4515,7 @@ pub const ScopeWithHandle = struct {
 
     pub fn toNode(scope_handle: ScopeWithHandle) Ast.Node.Index {
         if (scope_handle.scope == Scope.Index.root) return .root;
-        var doc_scope = scope_handle.handle.getDocumentScopeCached();
+        var doc_scope = scope_handle.handle.document_scope.getCached();
         return doc_scope.getScopeAstNode(scope_handle.scope).?;
     }
 
@@ -5806,7 +5806,7 @@ pub fn collectAllSymbolsAtSourceIndex(
     std.debug.assert(source_index <= handle.tree.source.len);
 
     const document_scope = try handle.getDocumentScope();
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         const scope_decls = document_scope.getScopeDeclarationsConst(scope_index);
         for (scope_decls) |decl_index| {
@@ -5862,7 +5862,7 @@ fn iterateEnclosingScopes(document_scope: *const DocumentScope, source_index: us
 
 pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     const document_scope = try handle.getDocumentScope();
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         for (document_scope.getScopeDeclarationsConst(scope_index)) |decl_index| {
             const decl = document_scope.declarations.get(@intFromEnum(decl_index));
@@ -5873,18 +5873,18 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
 }
 
 pub fn innermostScopeAtIndex(
-    document_scope: DocumentScope,
+    document_scope: *const DocumentScope,
     source_index: usize,
 ) Scope.Index {
     return innermostScopeAtIndexWithTag(document_scope, source_index, .initFull()).unwrap().?;
 }
 
 pub fn innermostScopeAtIndexWithTag(
-    document_scope: DocumentScope,
+    document_scope: *const DocumentScope,
     source_index: usize,
     tag_filter: std.EnumSet(Scope.Tag),
 ) Scope.OptionalIndex {
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(document_scope, source_index);
     var scope_index: Scope.OptionalIndex = .none;
     while (scope_iterator.next().unwrap()) |inner_scope| {
         const scope_tag = document_scope.getScopeTag(inner_scope);
@@ -5907,7 +5907,7 @@ pub fn innermostContainer(analyser: *Analyser, handle: *DocumentStore.Handle, so
 
     var current: DocumentScope.Scope.Index = .root;
     var meta_params: TokenToTypeMap = .empty;
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         switch (document_scope.getScopeTag(scope_index)) {
             .container => {
@@ -5954,7 +5954,7 @@ pub fn lookupLabel(
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
     const document_scope = try handle.getDocumentScope();
-    var scope_iterator = iterateEnclosingScopes(&document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         const decl_index = document_scope.getScopeDeclaration(.{
             .scope = scope_index,
