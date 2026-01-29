@@ -23,7 +23,7 @@ allocator: std.mem.Allocator,
 config: Config,
 mutex: std.Io.Mutex = .init,
 wait_group: if (supports_build_system) std.Io.Group else void = if (supports_build_system) .init else {},
-handles: Uri.ArrayHashMap(*Handle) = .empty,
+handles: Uri.ArrayHashMap(*Handle.Future) = .empty,
 build_files: if (supports_build_system) Uri.ArrayHashMap(*BuildFile) else void = if (supports_build_system) .empty else {},
 cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
 diagnostics_collection: *DiagnosticsCollection,
@@ -188,58 +188,11 @@ pub const Handle = struct {
     impl: struct {
         store: *DocumentStore,
         lock: std.Io.Mutex = .init,
+        has_tree_and_source: bool,
+
         associated_build_file: AssociatedBuildFile.State = .init,
         associated_compilation_units: GetAssociatedCompilationUnitsResult = .unresolved,
     },
-
-    /// Takes ownership of `text` on success.
-    pub fn init(
-        store: *DocumentStore,
-        uri: Uri,
-        text: [:0]const u8,
-        lsp_synced: bool,
-    ) error{OutOfMemory}!Handle {
-        const allocator = store.allocator;
-        const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(uri.raw), ".zon")) .zon else .zig;
-
-        var tree = try parseTree(allocator, text, mode);
-        errdefer tree.deinit(allocator);
-
-        var cimports = try collectCIncludes(allocator, &tree);
-        errdefer cimports.deinit(allocator);
-
-        return .{
-            .uri = uri,
-            .tree = tree,
-            .cimports = cimports,
-            .lsp_synced = lsp_synced,
-            .impl = .{
-                .store = store,
-            },
-        };
-    }
-
-    /// Caller must free `Handle.uri` if needed.
-    fn deinit(self: *Handle) void {
-        const tracy_zone = tracy.trace(@src());
-        defer tracy_zone.end();
-
-        const allocator = self.impl.store.allocator;
-
-        allocator.free(self.tree.source);
-        self.tree.deinit(allocator);
-
-        self.document_scope.deinit(allocator);
-        self.import_uris.deinit(allocator);
-
-        for (self.cimports.items(.source)) |source| allocator.free(source);
-        self.cimports.deinit(allocator);
-
-        self.impl.associated_build_file.deinit(allocator);
-        self.impl.associated_compilation_units.deinit(allocator);
-
-        self.* = undefined;
-    }
 
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!*const DocumentScope {
         return try self.document_scope.get(self);
@@ -460,6 +413,42 @@ pub const Handle = struct {
         return self.impl.associated_compilation_units;
     }
 
+    fn refresh(
+        handle: *Handle,
+        /// Old state will be moved into this handle to be deallocated after returning.
+        old_handle: *Handle,
+        /// Takes ownership.
+        text: [:0]const u8,
+        allocator: std.mem.Allocator,
+    ) error{OutOfMemory}!void {
+        const tracy_zone = tracy.traceNamed(@src(), "Handle.refresh");
+        defer tracy_zone.end();
+
+        const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(handle.uri.raw), ".zon")) .zon else .zig;
+        var new_tree = try parseTree(allocator, text, mode);
+        errdefer new_tree.deinit(allocator);
+
+        var new_cimports = try collectCIncludes(allocator, &new_tree);
+        errdefer new_cimports.deinit(allocator);
+
+        errdefer comptime unreachable;
+
+        if (handle.impl.has_tree_and_source) {
+            old_handle.tree = handle.tree;
+            old_handle.impl.has_tree_and_source = true;
+        }
+        old_handle.cimports = handle.cimports;
+
+        handle.tree = new_tree;
+        handle.cimports = new_cimports;
+        handle.impl.has_tree_and_source = true;
+
+        old_handle.document_scope = handle.document_scope;
+        handle.document_scope = .unset;
+        old_handle.import_uris = handle.import_uris;
+        handle.import_uris = .unset;
+    }
+
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
@@ -478,6 +467,51 @@ pub const Handle = struct {
         tree.tokens = tokens.slice();
         return tree;
     }
+
+    /// A handle that can only be deallocated. Keep in sync with `deinit`.
+    const dead: Handle = .{
+        .uri = undefined,
+        .tree = undefined,
+        .cimports = .empty,
+        .lsp_synced = undefined,
+        .impl = .{
+            .store = undefined,
+            .has_tree_and_source = false,
+        },
+    };
+
+    /// Caller must free `Handle.uri` if needed.
+    /// Keep in sync with `dead`.
+    fn deinit(self: *Handle, allocator: std.mem.Allocator) void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        if (self.impl.has_tree_and_source) {
+            allocator.free(self.tree.source);
+            self.tree.deinit(allocator);
+        }
+        self.document_scope.deinit(allocator);
+        self.import_uris.deinit(allocator);
+
+        for (self.cimports.items(.source)) |source| allocator.free(source);
+        self.cimports.deinit(allocator);
+
+        self.impl.associated_build_file.deinit(allocator);
+        self.impl.associated_compilation_units.deinit(allocator);
+
+        self.* = undefined;
+    }
+
+    const Future = struct {
+        event: std.Io.Event,
+        handle: Handle,
+        err: ?ReadFileError,
+
+        pub fn await(f: *Future, io: std.Io) ReadFileError!*Handle {
+            try f.event.wait(io);
+            return f.err orelse return &f.handle;
+        }
+    };
 
     fn Lazy(comptime T: type, comptime Context: type) type {
         return struct {
@@ -569,6 +603,25 @@ pub const Handle = struct {
     };
 };
 
+pub const HandleIterator = struct {
+    store: *DocumentStore,
+    i: usize = 0,
+
+    pub fn next(it: *HandleIterator) ?*Handle {
+        it.store.mutex.lockUncancelable(it.store.io);
+        defer it.store.mutex.unlock(it.store.io);
+        while (true) {
+            defer it.i += 1;
+            switch (std.math.order(it.i, it.store.handles.count())) {
+                .lt => {},
+                .eq => return null,
+                .gt => unreachable, // handle count decreased
+            }
+            return it.store.handles.values()[it.i].await(it.store.io) catch continue;
+        }
+    }
+};
+
 pub const ErrorMessage = struct {
     loc: offsets.Loc,
     code: []const u8,
@@ -580,10 +633,10 @@ pub fn deinit(self: *DocumentStore) void {
         self.wait_group.cancel(self.io);
     }
 
-    for (self.handles.keys(), self.handles.values()) |uri, handle| {
-        handle.deinit();
-        self.allocator.destroy(handle);
+    for (self.handles.keys(), self.handles.values()) |uri, future| {
+        if (future.await(self.io)) |handle| handle.deinit(self.allocator) else |_| {}
         uri.deinit(self.allocator);
+        self.allocator.destroy(future);
     }
     self.handles.deinit(self.allocator);
 
@@ -607,25 +660,26 @@ pub fn deinit(self: *DocumentStore) void {
 /// **Thread safe** takes a shared lock
 /// This function does not protect against data races from modifying the Handle
 pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
-    self.mutex.lockUncancelable(self.io);
-    defer self.mutex.unlock(self.io);
-    return self.handles.get(uri);
+    const future = future: {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        break :future self.handles.get(uri) orelse return null;
+    };
+    return future.await(self.io) catch return null;
 }
 
-fn readFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!?[:0]u8 {
+const ReadFileError = std.mem.Allocator.Error || std.Io.Cancelable || std.Io.File.OpenError || std.Io.File.Reader.Error || error{StreamTooLong};
+
+/// Must satisfy `uri.isFileScheme()`.
+fn readFile(self: *DocumentStore, uri: Uri) ReadFileError![:0]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const file_path = uri.toFsPath(self.allocator) catch |err| switch (err) {
-        error.UnsupportedScheme => return null, // https://github.com/microsoft/language-server-protocol/issues/1264
+        error.UnsupportedScheme => unreachable,
         error.OutOfMemory => return error.OutOfMemory,
     };
     defer self.allocator.free(file_path);
-
-    if (!std.fs.path.isAbsolute(file_path)) {
-        log.err("file path is not absolute '{s}'", .{file_path});
-        return null;
-    }
 
     const dir, const sub_path = blk: {
         if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
@@ -642,20 +696,14 @@ fn readFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!?[:0]
         break :blk .{ std.Io.Dir.cwd(), file_path };
     };
 
-    return dir.readFileAllocOptions(
+    return try dir.readFileAllocOptions(
         self.io,
         sub_path,
         self.allocator,
         .limited(std.zig.max_src_size),
         .of(u8),
         0,
-    ) catch |err| switch (err) {
-        error.Canceled, error.OutOfMemory => |e| return e,
-        else => {
-            log.err("failed to read document '{s}': {}", .{ file_path, err });
-            return null;
-        },
-    };
+    );
 }
 
 /// Returns a handle to the given document
@@ -666,9 +714,19 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMem
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.getHandle(uri)) |handle| return handle;
-    const file_contents = try self.readFile(uri) orelse return null;
-    return try self.createAndStoreDocument(uri, file_contents, false);
+    if (!uri.isFileScheme()) return self.getHandle(uri);
+    return self.createAndStoreDocument(
+        uri,
+        .uri,
+        .{
+            .lsp_synced = false,
+            .override = false,
+            .load_build_file_behaviour = .never,
+        },
+    ) catch |err| switch (err) {
+        error.Canceled, error.OutOfMemory => |e| return e,
+        else => return null,
+    };
 }
 
 /// **Thread safe** takes a shared lock
@@ -717,14 +775,25 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.handles.get(uri)) |handle| {
+    if (self.getHandle(uri)) |handle| {
         if (handle.lsp_synced) {
             log.warn("Document already open: {s}", .{uri.raw});
         }
     }
 
     const duped_text = try self.allocator.dupeZ(u8, text);
-    _ = try self.createAndStoreDocument(uri, duped_text, true);
+    _ = self.createAndStoreDocument(
+        uri,
+        .{ .text = duped_text },
+        .{
+            .lsp_synced = true,
+            .override = true,
+            .load_build_file_behaviour = .load_but_dont_update,
+        },
+    ) catch |err| switch (err) {
+        error.Canceled, error.OutOfMemory => |e| return e,
+        else => unreachable,
+    };
 }
 
 /// Closes a document that has been synced over the LSP protocol (`textDocument/didClose`).
@@ -733,17 +802,24 @@ pub fn closeLspSyncedDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const kv = self.handles.fetchSwapRemove(uri) orelse {
+    const handle_index = self.handles.getIndex(uri) orelse {
         log.warn("Document not found: {s}", .{uri.raw});
         return;
     };
-    if (!kv.value.lsp_synced) {
-        log.warn("Document already closed: {s}", .{uri.raw});
-    }
+    defer self.handles.swapRemoveAt(handle_index);
 
-    kv.key.deinit(self.allocator);
-    kv.value.deinit();
-    self.allocator.destroy(kv.value);
+    const handle_uri = self.handles.keys()[handle_index];
+    defer handle_uri.deinit(self.allocator);
+
+    const handle_future = self.handles.values()[handle_index];
+    defer self.allocator.destroy(handle_future);
+
+    if (handle_future.await(self.io)) |handle| {
+        if (!handle.lsp_synced) {
+            log.warn("Document already closed: {s}", .{uri.raw});
+        }
+        handle.deinit(self.allocator);
+    } else |_| {}
 }
 
 /// Updates a document that is synced over the LSP protocol (`textDocument/didChange`).
@@ -753,7 +829,7 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.handles.get(uri)) |old_handle| {
+    if (self.getHandle(uri)) |old_handle| {
         if (!old_handle.lsp_synced) {
             log.warn("Document modified without being opened: {s}", .{uri.raw});
         }
@@ -761,7 +837,18 @@ pub fn refreshLspSyncedDocument(self: *DocumentStore, uri: Uri, new_text: [:0]co
         log.warn("Document modified without being opened: {s}", .{uri.raw});
     }
 
-    _ = try self.createAndStoreDocument(uri, new_text, true);
+    _ = self.createAndStoreDocument(
+        uri,
+        .{ .text = new_text },
+        .{
+            .lsp_synced = true,
+            .override = true,
+            .load_build_file_behaviour = .only_update,
+        },
+    ) catch |err| switch (err) {
+        error.Canceled, error.OutOfMemory => |e| return e,
+        else => unreachable,
+    };
 }
 
 /// Refreshes a document from the file system, unless said document is synced over the LSP protocol.
@@ -772,20 +859,30 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
 
     if (should_delete) {
         const index = self.handles.getIndex(uri) orelse return false;
-        const handle = self.handles.values()[index];
+        const handle_future = self.handles.values()[index];
+        const handle = handle_future.await(self.io) catch return false;
         if (handle.lsp_synced) return false;
-
         self.handles.swapRemoveAt(index);
-        const handle_uri = handle.uri;
-        handle.deinit();
-        self.allocator.destroy(handle);
-        handle_uri.deinit(self.allocator);
+        handle.uri.deinit(self.allocator);
+        handle.deinit(self.allocator);
+        self.allocator.destroy(handle_future);
     } else {
-        if (self.handles.get(uri)) |handle| {
+        if (self.getHandle(uri)) |handle| {
             if (handle.lsp_synced) return false;
         } else return false;
-        const file_contents = try self.readFile(uri) orelse return false;
-        _ = try self.createAndStoreDocument(uri, file_contents, false);
+        if (uri.isFileScheme()) return false;
+        _ = self.createAndStoreDocument(
+            uri,
+            .uri,
+            .{
+                .lsp_synced = false,
+                .override = true,
+                .load_build_file_behaviour = .only_update,
+            },
+        ) catch |err| switch (err) {
+            error.Canceled, error.OutOfMemory => |e| return e,
+            else => return false,
+        };
     }
 
     return true;
@@ -1326,68 +1423,112 @@ fn uriInImports(
     return false;
 }
 
-/// takes ownership of the `text` passed in.
+const FileSource = union(enum) {
+    text: [:0]const u8,
+    /// Must satisfy `uri.isFileScheme()`.
+    uri,
+};
+
+const CreateAndStoreOptions = struct {
+    lsp_synced: bool,
+    override: bool,
+    load_build_file_behaviour: enum { load_but_dont_update, only_update, never },
+};
+
 /// **Thread safe** takes an exclusive lock
 fn createAndStoreDocument(
-    self: *DocumentStore,
+    store: *DocumentStore,
     uri: Uri,
-    text: [:0]const u8,
-    lsp_synced: bool,
-) error{ Canceled, OutOfMemory }!*Handle {
+    /// Takes ownership.
+    file_source: FileSource,
+    options: CreateAndStoreOptions,
+) ReadFileError!*Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_handle = Handle.init(self, uri, text, lsp_synced) catch |err| switch (err) {
-        error.OutOfMemory => {
-            self.allocator.free(text);
-            return err;
-        },
+    std.debug.assert(!(options.lsp_synced and !options.override));
+
+    switch (file_source) {
+        .text => {},
+        .uri => std.debug.assert(uri.isFileScheme()),
+    }
+    errdefer switch (file_source) {
+        .text => |text| store.allocator.free(text),
+        .uri => {},
     };
-    errdefer new_handle.deinit();
 
-    if (supports_build_system and lsp_synced and isBuildFile(uri) and !isInStd(uri)) {
-        if (self.getBuildFile(uri)) |build_file| {
-            self.invalidateBuildFile(build_file.uri);
-        } else {
-            _ = try self.getOrLoadBuildFile(uri);
+    if (supports_build_system and options.lsp_synced and isBuildFile(uri) and !isInStd(uri)) {
+        switch (options.load_build_file_behaviour) {
+            .load_but_dont_update => {
+                _ = try store.getOrLoadBuildFile(uri);
+            },
+            .only_update => {
+                store.invalidateBuildFile(uri);
+            },
+            .never => {},
         }
     }
 
-    try self.mutex.lock(self.io);
-    defer self.mutex.unlock(self.io);
+    const handle_future: *Handle.Future = handle_future: {
+        try store.mutex.lock(store.io);
+        defer store.mutex.unlock(store.io);
 
-    const gop = try self.handles.getOrPut(self.allocator, uri);
-    errdefer if (!gop.found_existing) std.debug.assert(self.handles.swapRemove(uri));
+        const gop = try store.handles.getOrPut(store.allocator, uri);
+        errdefer store.handles.swapRemoveAt(gop.index);
 
-    if (gop.found_existing) {
-        std.debug.assert(new_handle.impl.associated_build_file == .init);
-        std.debug.assert(new_handle.impl.associated_compilation_units == .unresolved);
-        if (lsp_synced) {
-            new_handle.impl.associated_build_file = gop.value_ptr.*.impl.associated_build_file;
-            gop.value_ptr.*.impl.associated_build_file = .init;
-
-            new_handle.impl.associated_compilation_units = gop.value_ptr.*.impl.associated_compilation_units;
-            gop.value_ptr.*.impl.associated_compilation_units = .unresolved;
-
-            new_handle.uri = gop.key_ptr.*;
-            gop.value_ptr.*.deinit();
-            gop.value_ptr.*.* = new_handle;
+        if (gop.found_existing) {
+            if (gop.value_ptr.*.await(store.io)) |old_handle| {
+                if (!options.override) return old_handle;
+                gop.value_ptr.*.event.reset();
+                old_handle.lsp_synced = options.lsp_synced;
+                break :handle_future gop.value_ptr.*;
+            } else |_| {
+                //
+            }
         } else {
-            // TODO prevent concurrent `createAndStoreDocument` invocations from racing each other
-            new_handle.deinit();
+            gop.key_ptr.* = try uri.dupe(store.allocator);
+            errdefer gop.key_ptr.*.deinit(store.allocator);
+
+            gop.value_ptr.* = try store.allocator.create(Handle.Future);
+            errdefer store.allocator.destroy(gop.value_ptr.*);
         }
-    } else {
-        gop.key_ptr.* = try uri.dupe(self.allocator);
-        errdefer gop.key_ptr.*.deinit(self.allocator);
-
-        gop.value_ptr.* = try self.allocator.create(Handle);
-        errdefer self.allocator.destroy(gop.value_ptr.*);
-
-        new_handle.uri = gop.key_ptr.*;
-        gop.value_ptr.*.* = new_handle;
+        gop.value_ptr.*.* = .{
+            .event = .unset,
+            .handle = .{
+                .uri = gop.key_ptr.*,
+                .tree = undefined,
+                .cimports = .empty,
+                .lsp_synced = options.lsp_synced,
+                .impl = .{
+                    .store = store,
+                    .has_tree_and_source = false,
+                },
+            },
+            .err = null,
+        };
+        break :handle_future gop.value_ptr.*;
+    };
+    defer handle_future.event.set(store.io);
+    errdefer |err| {
+        if (err != error.Canceled) log.err("failed to read document '{s}': {}", .{ uri.raw, err });
+        handle_future.err = err;
     }
 
-    return gop.value_ptr.*;
+    const text: [:0]const u8 = switch (file_source) {
+        .text => |text| text,
+        .uri => try store.readFile(uri),
+    };
+
+    var old_handle: Handle = .dead;
+    try Handle.refresh(
+        &handle_future.handle,
+        &old_handle,
+        text,
+        store.allocator,
+    );
+    old_handle.deinit(store.allocator);
+
+    return &handle_future.handle;
 }
 
 pub const CImportHandle = struct {

@@ -317,6 +317,13 @@ test "fromPath - windows like path on posix" {
     try std.testing.expectEqualStrings(reparsed_uri.raw, uri.raw);
 }
 
+pub fn isFileScheme(uri: Uri) bool {
+    const scheme = for (uri.raw, 0..) |byte, i| {
+        if (!isSchemeChar(byte)) break uri.raw[0..i];
+    } else unreachable; // The Uri is guranteed to be valid
+    return std.mem.eql(u8, scheme, "file");
+}
+
 /// Converts a Uri to a file system path.
 /// Caller owns the returned memory
 pub fn toFsPath(

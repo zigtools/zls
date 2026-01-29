@@ -1029,7 +1029,8 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         (new_zig_exe_path or new_zig_lib_path) and
         server.client_capabilities.supports_publish_diagnostics)
     {
-        for (server.document_store.handles.values()) |handle| {
+        var it: DocumentStore.HandleIterator = .{ .store = &server.document_store };
+        while (it.next()) |handle| {
             if (!handle.lsp_synced) continue;
             server.generateDiagnostics(handle);
         }
