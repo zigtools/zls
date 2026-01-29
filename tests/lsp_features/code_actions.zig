@@ -951,6 +951,70 @@ test "convert string literal to multiline - invalid" {
     );
 }
 
+test "simplify variable initialization - @as to type annotation" {
+    try testConvertString(
+        \\const <cursor>foo = @as(i32, 42);
+    ,
+        \\const foo: i32 = 42;
+    );
+}
+
+test "simplify variable initialization - @as with complex type" {
+    try testConvertString(
+        \\const <cursor>bar = @as([]const u8, "hello");
+    ,
+        \\const bar: []const u8 = "hello";
+    );
+}
+
+test "simplify variable initialization - @as with pointer type" {
+    try testConvertString(
+        \\const <cursor>ptr = @as(*i32, undefined);
+    ,
+        \\const ptr: *i32 = undefined;
+    );
+}
+
+test "simplify variable initialization - var @as" {
+    try testConvertString(
+        \\var <cursor>x = @as(u64, 0);
+    ,
+        \\var x: u64 = 0;
+    );
+}
+
+test "simplify variable initialization - empty struct init" {
+    try testConvertString(
+        \\const <cursor>point = Point{};
+    ,
+        \\const point: Point = .{};
+    );
+}
+
+test "simplify variable initialization - empty struct init complex type" {
+    try testConvertString(
+        \\const <cursor>config = MyModule.Config{};
+    ,
+        \\const config: MyModule.Config = .{};
+    );
+}
+
+test "simplify variable initialization - skip when type annotation exists" {
+    try testConvertString(
+        \\const <cursor>foo: i32 = @as(i32, 42);
+    ,
+        \\const foo: i32 = @as(i32, 42);
+    );
+}
+
+test "simplify variable initialization - skip struct with fields" {
+    try testConvertString(
+        \\const <cursor>point = Point{ .x = 10, .y = 20 };
+    ,
+        \\const point = Point{ .x = 10, .y = 20 };
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check

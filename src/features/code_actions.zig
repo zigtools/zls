@@ -98,20 +98,33 @@ pub const Builder = struct {
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
         const ctx = try Analyser.getPositionContext(builder.arena, tree, source_index, true);
-        if (ctx != .string_literal) return;
 
-        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, tree) orelse return;
+        // Handle string literal refactors
+        if (ctx == .string_literal) {
+            var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, tree) orelse return;
 
-        // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
-        switch (tree.tokenTag(token_idx)) {
-            .string_literal, .multiline_string_literal_line => {},
-            else => token_idx -|= 1,
+            // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
+            switch (tree.tokenTag(token_idx)) {
+                .string_literal, .multiline_string_literal_line => {},
+                else => token_idx -|= 1,
+            }
+
+            switch (tree.tokenTag(token_idx)) {
+                .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
+                .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
+                else => {},
+            }
+            return;
         }
 
-        switch (tree.tokenTag(token_idx)) {
-            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
-            .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
-            else => {},
+        // Handle variable initialization simplification
+        const overlapping_nodes = try ast.nodesOverlappingIndex(builder.arena, tree, source_index);
+        for (overlapping_nodes) |node| {
+            const node_tag = tree.nodeTag(node);
+            if (node_tag == .simple_var_decl or node_tag == .local_var_decl or node_tag == .global_var_decl or node_tag == .aligned_var_decl) {
+                try generateSimplifyVariableInitCodeActions(builder, node);
+                return;
+            }
         }
     }
 
@@ -232,6 +245,135 @@ pub fn generateMultilineStringCodeActions(
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
     });
+}
+
+pub fn generateSimplifyVariableInitCodeActions(
+    builder: *Builder,
+    var_decl_node: Ast.Node.Index,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
+
+    const tree = &builder.handle.tree;
+    const var_decl = tree.fullVarDecl(var_decl_node) orelse return;
+
+    const init_node = var_decl.ast.init_node.unwrap() orelse return;
+    const init_tag = tree.nodeTag(init_node);
+
+    // Check for @as(T, value) pattern
+    if (init_tag == .builtin_call_two or init_tag == .builtin_call_two_comma) {
+        const builtin_token = tree.nodeMainToken(init_node);
+        const builtin_name = offsets.tokenToSlice(tree, builtin_token);
+
+        if (std.mem.eql(u8, builtin_name, "@as")) {
+            const first_param, const second_param = tree.nodeData(init_node).opt_node_and_opt_node;
+            const type_node = first_param.unwrap() orelse return;
+            if (second_param == .none) return;
+
+            // Skip if declaration already has type annotation
+            if (var_decl.ast.type_node != .none) return;
+
+            // Get the variable name
+            const name_token = var_decl.ast.mut_token + 1;
+            const var_name = offsets.tokenToSlice(tree, name_token);
+
+            // Get type and value text
+            const type_loc = offsets.nodeToLoc(tree, type_node);
+            const type_text = tree.source[type_loc.start..type_loc.end];
+
+            const value_loc = offsets.nodeToLoc(tree, second_param.unwrap().?);
+            const value_text = tree.source[value_loc.start..value_loc.end];
+
+            // Build new text: "name: T = value"
+            const new_text = try std.fmt.allocPrint(
+                builder.arena,
+                "{s}: {s} = {s}",
+                .{ var_name, type_text, value_text },
+            );
+
+            // Replace from variable name to end of init expression
+            const name_start = tree.tokenStart(name_token);
+            const init_end = ast.lastToken(tree, init_node);
+            const init_end_pos = tree.tokenStart(init_end + 1);
+            const edit_loc: offsets.Loc = .{
+                .start = name_start,
+                .end = init_end_pos,
+            };
+
+            try builder.actions.append(builder.arena, .{
+                .title = "simplify variable initialization",
+                .kind = .refactor,
+                .isPreferred = false,
+                .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(edit_loc, new_text)}),
+            });
+            return;
+        }
+    }
+
+    // Check for T{} pattern (struct init without type annotation)
+    if (isStructInitVariant(init_tag)) {
+        var buffer: [2]Ast.Node.Index = undefined;
+        const struct_init = tree.fullStructInit(&buffer, init_node) orelse return;
+        const type_expr = struct_init.ast.type_expr.unwrap() orelse return;
+
+        // Skip if declaration already has type annotation
+        if (var_decl.ast.type_node != .none) return;
+
+        // Only simplify if there are no explicit field assignments
+        if (struct_init.ast.fields.len > 0) {
+            // Check if all fields have values (explicit initialization)
+            // For now, skip if there are any fields
+            return;
+        }
+
+        // Get the variable name
+        const name_token = var_decl.ast.mut_token + 1;
+        const var_name = offsets.tokenToSlice(tree, name_token);
+
+        // Get type text
+        const type_loc = offsets.nodeToLoc(tree, type_expr);
+        const type_text = tree.source[type_loc.start..type_loc.end];
+
+        // Build new text: "name: T = .{}"
+        const new_text = try std.fmt.allocPrint(
+            builder.arena,
+            "{s}: {s} = .{{}}",
+            .{ var_name, type_text },
+        );
+
+        // Replace from variable name to end of init expression
+        const name_start = tree.tokenStart(name_token);
+        const init_end = ast.lastToken(tree, init_node);
+        const init_end_pos = tree.tokenStart(init_end + 1);
+        const edit_loc: offsets.Loc = .{
+            .start = name_start,
+            .end = init_end_pos,
+        };
+
+        try builder.actions.append(builder.arena, .{
+            .title = "simplify variable initialization",
+            .kind = .refactor,
+            .isPreferred = false,
+            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(edit_loc, new_text)}),
+        });
+    }
+}
+
+fn isStructInitVariant(tag: Ast.Node.Tag) bool {
+    return switch (tag) {
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        => true,
+        else => false,
+    };
 }
 
 /// To report server capabilities
