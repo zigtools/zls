@@ -310,10 +310,8 @@ pub fn generateSimplifyVariableInitCodeActions(
             });
             return;
         }
-    }
-
-    // Check for T{} pattern (struct init without type annotation)
-    if (isStructInitVariant(init_tag)) {
+    } else if (isStructInitVariant(init_tag)) {
+        // Check for T{} pattern (struct init without type annotation)
         var buffer: [2]Ast.Node.Index = undefined;
         const struct_init = tree.fullStructInit(&buffer, init_node) orelse return;
         const type_expr = struct_init.ast.type_expr.unwrap() orelse return;
