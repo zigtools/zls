@@ -154,7 +154,7 @@ pub const BuildFile = struct {
 
                 const handle = try store.getOrLoadHandle(source_uri) orelse return .unknown;
 
-                const import_uris = try handle.getImportUris();
+                const import_uris = (try handle.import_uris.get(handle)).*;
                 try found_uris.ensureUnusedCapacity(arena, import_uris.len);
                 for (import_uris) |import_uri| found_uris.putAssumeCapacity(try import_uri.dupe(arena), {});
             }
@@ -181,32 +181,16 @@ pub const Handle = struct {
     /// `false` indicates the document only exists because it is a dependency of another document
     /// or has been closed with `textDocument/didClose`.
     lsp_synced: bool,
+    document_scope: Lazy(DocumentScope, DocumentStoreContext) = .unset,
+    import_uris: Lazy([]const Uri, ImportUrisContext) = .unset,
 
     /// private field
     impl: struct {
-        /// @bitCast from/to `Status`
-        status: std.atomic.Value(u32),
         store: *DocumentStore,
-
         lock: std.Io.Mutex = .init,
-        /// See `getLazy`
-        lazy_condition: std.Io.Condition = .init,
-
-        import_uris: ?[]Uri = null,
-        document_scope: DocumentScope = undefined,
-
         associated_build_file: AssociatedBuildFile.State = .init,
         associated_compilation_units: GetAssociatedCompilationUnitsResult = .unresolved,
     },
-
-    const Status = packed struct(u32) {
-        /// true if a thread has acquired the permission to compute the `DocumentScope`
-        /// all other threads will wait until the given thread has computed the `DocumentScope` before reading it.
-        has_document_scope_lock: bool = false,
-        /// true if `handle.impl.document_scope` has been set
-        has_document_scope: bool = false,
-        _: u30 = 0,
-    };
 
     /// Takes ownership of `text` on success.
     pub fn init(
@@ -230,7 +214,6 @@ pub const Handle = struct {
             .cimports = cimports,
             .lsp_synced = lsp_synced,
             .impl = .{
-                .status = .init(@bitCast(Status{})),
                 .store = store,
             },
         };
@@ -241,18 +224,13 @@ pub const Handle = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        const status = self.getStatus();
-
         const allocator = self.impl.store.allocator;
 
-        if (status.has_document_scope) self.impl.document_scope.deinit(allocator);
         allocator.free(self.tree.source);
         self.tree.deinit(allocator);
 
-        if (self.impl.import_uris) |import_uris| {
-            for (import_uris) |uri| uri.deinit(allocator);
-            allocator.free(import_uris);
-        }
+        self.document_scope.deinit(allocator);
+        self.import_uris.deinit(allocator);
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
@@ -263,66 +241,8 @@ pub const Handle = struct {
         self.* = undefined;
     }
 
-    pub fn getImportUris(self: *Handle) error{OutOfMemory}![]const Uri {
-        const store = self.impl.store;
-        const allocator = store.allocator;
-        const io = store.io;
-
-        self.impl.lock.lockUncancelable(io);
-        defer self.impl.lock.unlock(io);
-
-        if (self.impl.import_uris) |import_uris| return import_uris;
-
-        var imports = try analysis.collectImports(allocator, &self.tree);
-        defer imports.deinit(allocator);
-
-        const base_path = self.uri.toFsPath(allocator) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.UnsupportedScheme => {
-                self.impl.import_uris = &.{};
-                return self.impl.import_uris.?;
-            },
-        };
-        defer allocator.free(base_path);
-
-        var uris: std.ArrayList(Uri) = try .initCapacity(allocator, imports.items.len);
-        errdefer {
-            for (uris.items) |uri| uri.deinit(allocator);
-            uris.deinit(allocator);
-        }
-
-        for (imports.items) |import_str| {
-            if (!std.mem.endsWith(u8, import_str, ".zig")) continue;
-            uris.appendAssumeCapacity(try resolveFileImportString(allocator, base_path, import_str) orelse continue);
-        }
-
-        self.impl.import_uris = try uris.toOwnedSlice(allocator);
-        return self.impl.import_uris.?;
-    }
-
     pub fn getDocumentScope(self: *Handle) error{OutOfMemory}!*const DocumentScope {
-        if (self.getStatus().has_document_scope) return &self.impl.document_scope;
-        return try self.getLazy(DocumentScope, "document_scope", struct {
-            fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
-                var document_scope: DocumentScope = try .init(allocator, &handle.tree);
-                errdefer document_scope.deinit(allocator);
-
-                // remove unused capacity
-                document_scope.extra.shrinkAndFree(allocator, document_scope.extra.items.len);
-                try document_scope.declarations.setCapacity(allocator, document_scope.declarations.len);
-                try document_scope.scopes.setCapacity(allocator, document_scope.scopes.len);
-
-                return document_scope;
-            }
-        });
-    }
-
-    /// Asserts that `getDocumentScope` has been previously called on `handle`.
-    pub fn getDocumentScopeCached(self: *Handle) DocumentScope {
-        if (builtin.mode == .Debug) {
-            std.debug.assert(self.getStatus().has_document_scope);
-        }
-        return self.impl.document_scope;
+        return try self.document_scope.get(self);
     }
 
     pub const AssociatedBuildFile = union(enum) {
@@ -540,49 +460,6 @@ pub const Handle = struct {
         return self.impl.associated_compilation_units;
     }
 
-    fn getLazy(
-        self: *Handle,
-        comptime T: type,
-        comptime name: []const u8,
-        comptime Context: type,
-    ) error{OutOfMemory}!*const T {
-        @branchHint(.cold);
-        const tracy_zone = tracy.traceNamed(@src(), "getLazy(" ++ name ++ ")");
-        defer tracy_zone.end();
-
-        const has_data_field_name = "has_" ++ name;
-        const has_lock_field_name = "has_" ++ name ++ "_lock";
-
-        const io = self.impl.store.io;
-
-        self.impl.lock.lockUncancelable(io);
-        defer self.impl.lock.unlock(io);
-
-        while (true) {
-            const status = self.getStatus();
-            if (@field(status, has_data_field_name)) break;
-            if (@field(status, has_lock_field_name) or
-                self.impl.status.bitSet(@bitOffsetOf(Status, has_lock_field_name), .release) != 0)
-            {
-                // another thread is currently computing the data
-                self.impl.lazy_condition.waitUncancelable(io, &self.impl.lock);
-                continue;
-            }
-            defer self.impl.lazy_condition.broadcast(io);
-
-            @field(self.impl, name) = try Context.create(self, self.impl.store.allocator);
-            errdefer comptime unreachable;
-
-            const old_has_data = self.impl.status.bitSet(@bitOffsetOf(Status, has_data_field_name), .release);
-            std.debug.assert(old_has_data == 0); // race condition
-        }
-        return &@field(self.impl, name);
-    }
-
-    fn getStatus(self: *const Handle) Status {
-        return @bitCast(self.impl.status.load(.acquire));
-    }
-
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
@@ -601,6 +478,95 @@ pub const Handle = struct {
         tree.tokens = tokens.slice();
         return tree;
     }
+
+    fn Lazy(comptime T: type, comptime Context: type) type {
+        return struct {
+            mutex: std.Io.Mutex,
+            value: ?T,
+
+            const LazyResource = @This();
+
+            pub const unset: LazyResource = .{
+                .mutex = .init,
+                .value = null,
+            };
+
+            pub fn deinit(lazy: *LazyResource, allocator: std.mem.Allocator) void {
+                const value: *T = if (lazy.value) |*value| value else return;
+                Context.deinit(value, allocator);
+                lazy.value = undefined;
+            }
+
+            pub fn get(lazy: *LazyResource, handle: *Handle) error{OutOfMemory}!*const T {
+                const tracy_zone = tracy.traceNamed(@src(), "Lazy(" ++ @typeName(T) ++ ").get");
+                defer tracy_zone.end();
+
+                const store = handle.impl.store;
+                const io = store.io;
+
+                lazy.mutex.lockUncancelable(io);
+                defer lazy.mutex.unlock(io);
+                if (lazy.value == null) {
+                    lazy.value = try Context.create(handle, store.allocator);
+                }
+                return &lazy.value.?;
+            }
+
+            pub fn getCached(lazy: *LazyResource) *const T {
+                if (@import("builtin").mode == .Debug) {
+                    std.debug.assert(lazy.mutex.state.load(.acquire) == .unlocked);
+                }
+                return &lazy.value.?;
+            }
+        };
+    }
+
+    const DocumentStoreContext = struct {
+        fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}!DocumentScope {
+            var document_scope: DocumentScope = try .init(allocator, &handle.tree);
+            errdefer document_scope.deinit(allocator);
+
+            // remove unused capacity
+            document_scope.extra.shrinkAndFree(allocator, document_scope.extra.items.len);
+            try document_scope.declarations.setCapacity(allocator, document_scope.declarations.len);
+            try document_scope.scopes.setCapacity(allocator, document_scope.scopes.len);
+
+            return document_scope;
+        }
+        fn deinit(document_scope: *DocumentScope, allocator: std.mem.Allocator) void {
+            document_scope.deinit(allocator);
+        }
+    };
+
+    const ImportUrisContext = struct {
+        fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}![]const Uri {
+            var imports = try analysis.collectImports(allocator, &handle.tree);
+            defer imports.deinit(allocator);
+
+            const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.UnsupportedScheme => return &.{},
+            };
+            defer allocator.free(base_path);
+
+            var uris: std.ArrayList(Uri) = try .initCapacity(allocator, imports.items.len);
+            errdefer {
+                for (uris.items) |uri| uri.deinit(allocator);
+                uris.deinit(allocator);
+            }
+
+            for (imports.items) |import_str| {
+                if (!std.mem.endsWith(u8, import_str, ".zig")) continue;
+                uris.appendAssumeCapacity(try resolveFileImportString(allocator, base_path, import_str) orelse continue);
+            }
+
+            return try uris.toOwnedSlice(allocator);
+        }
+        fn deinit(import_uris: *[]const Uri, allocator: std.mem.Allocator) void {
+            for (import_uris.*) |uri| uri.deinit(allocator);
+            allocator.free(import_uris.*);
+        }
+    };
 };
 
 pub const ErrorMessage = struct {
@@ -1479,7 +1445,7 @@ pub fn collectDependencies(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const import_uris = try handle.getImportUris();
+    const import_uris = (try handle.import_uris.get(handle)).*;
 
     try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
     for (import_uris) |uri| {

@@ -4515,7 +4515,7 @@ pub const ScopeWithHandle = struct {
 
     pub fn toNode(scope_handle: ScopeWithHandle) Ast.Node.Index {
         if (scope_handle.scope == Scope.Index.root) return .root;
-        var doc_scope = scope_handle.handle.getDocumentScopeCached();
+        var doc_scope = scope_handle.handle.document_scope.getCached();
         return doc_scope.getScopeAstNode(scope_handle.scope).?;
     }
 
