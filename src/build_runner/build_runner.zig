@@ -103,7 +103,7 @@ pub fn main(init: process.Init.Minimal) !void {
             .io = io,
             .gpa = gpa,
             .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
-            .cwd = try process.getCwdAlloc(single_threaded_arena.allocator()),
+            .cwd = try process.currentPathAlloc(io, single_threaded_arena.allocator()),
         },
         .zig_exe = zig_exe,
         .environ_map = try init.environ.createMap(arena),

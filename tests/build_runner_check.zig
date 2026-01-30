@@ -13,7 +13,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     if (args.len != 7) @panic("invalid arguments");
 
-    const cwd = try std.process.getCwdAlloc(gpa);
+    const cwd = try std.process.currentPathAlloc(io, gpa);
     defer gpa.free(cwd);
 
     const expected = std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .limited(16 * 1024 * 1024)) catch |err|
