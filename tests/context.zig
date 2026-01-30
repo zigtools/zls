@@ -32,7 +32,7 @@ pub const Context = struct {
                 if (config.global_cache_path) |global_cache_path| allocator.free(global_cache_path);
             };
             if (builtin.target.os.tag != .wasi) {
-                const cwd = try std.process.getCwdAlloc(allocator);
+                const cwd = try std.process.currentPathAlloc(io, allocator);
                 defer allocator.free(cwd);
                 config.zig_exe_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
                 config.zig_lib_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_lib_path });

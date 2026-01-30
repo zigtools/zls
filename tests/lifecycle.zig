@@ -16,7 +16,7 @@ test "LSP lifecycle" {
     const arena = arena_allocator.allocator();
 
     if (builtin.target.os.tag != .wasi) {
-        const cwd = try std.process.getCwdAlloc(allocator);
+        const cwd = try std.process.currentPathAlloc(io, allocator);
         defer allocator.free(cwd);
 
         try config_manager.setConfiguration(.frontend, &.{
