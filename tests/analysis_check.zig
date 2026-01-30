@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) Error!void {
                 std.log.err("expected argument after '--zig-lib-path'.", .{});
                 std.process.exit(1);
             };
-            const cwd = std.process.getCwdAlloc(arena) catch |err| {
+            const cwd = std.process.currentPathAlloc(io, arena) catch |err| {
                 std.log.err("failed to get current working directory: {}", .{err});
                 std.process.exit(1);
             };

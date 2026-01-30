@@ -197,7 +197,7 @@ pub const Manager = struct {
             if (std.fs.path.isAbsolute(zig_lib_dir)) {
                 config.zig_lib_path = try arena.dupe(u8, zig_lib_dir);
             } else {
-                const cwd = std.process.getCwdAlloc(manager.allocator) catch |err| switch (err) {
+                const cwd = std.process.currentPathAlloc(io, manager.allocator) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => |e| {
                         log.err("failed to resolve current working directory: {}", .{e});
