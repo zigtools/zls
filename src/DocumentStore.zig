@@ -1477,18 +1477,25 @@ fn createAndStoreDocument(
         defer store.mutex.unlock(store.io);
 
         const gop = try store.handles.getOrPut(store.allocator, uri);
-        errdefer store.handles.swapRemoveAt(gop.index);
 
+        var previous_err: ?ReadFileError = null;
         if (gop.found_existing) {
             if (gop.value_ptr.*.await(store.io)) |old_handle| {
                 if (!options.override) return old_handle;
                 gop.value_ptr.*.event.reset();
                 old_handle.lsp_synced = options.lsp_synced;
                 break :handle_future gop.value_ptr.*;
-            } else |_| {
-                //
+            } else |err| {
+                const retry = switch (err) {
+                    error.Canceled => true,
+                    else => false,
+                };
+                if (options.override and !retry) return err;
+                previous_err = err;
             }
         } else {
+            errdefer store.handles.swapRemoveAt(gop.index);
+
             gop.key_ptr.* = try uri.dupe(store.allocator);
             errdefer gop.key_ptr.*.deinit(store.allocator);
 
@@ -1507,13 +1514,15 @@ fn createAndStoreDocument(
                     .has_tree_and_source = false,
                 },
             },
-            .err = null,
+            .err = previous_err,
         };
         break :handle_future gop.value_ptr.*;
     };
     defer handle_future.event.set(store.io);
     errdefer |err| {
-        if (err != error.Canceled) log.err("failed to read document '{s}': {}", .{ uri.raw, err });
+        const should_log = err != error.Canceled and err != error.FileNotFound;
+        if (should_log) log.err("failed to read document '{s}': {}", .{ uri.raw, err });
+        handle_future.handle = undefined;
         handle_future.err = err;
     }
 
@@ -1531,6 +1540,7 @@ fn createAndStoreDocument(
     );
     old_handle.deinit(store.allocator);
 
+    handle_future.err = null;
     return &handle_future.handle;
 }
 
