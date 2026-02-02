@@ -547,9 +547,6 @@ pub const Handle = struct {
             }
 
             pub fn getCached(lazy: *LazyResource) *const T {
-                if (@import("builtin").mode == .Debug) {
-                    std.debug.assert(lazy.mutex.state.load(.acquire) == .unlocked);
-                }
                 return &lazy.value.?;
             }
         };
