@@ -194,6 +194,12 @@ test "field access" {
     , .field_access, .{});
 }
 
+test "field access function call" {
+    try testContext(
+        \\<loc>Foo.bar()<cursor></loc>
+    , .field_access, .{});
+}
+
 test "field access across multiple lines" {
     // ErrorBuilder doesn't support locs across multiple lines so don't let the test fail :)
     try testContext(
