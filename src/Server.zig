@@ -1664,7 +1664,6 @@ pub const CreateOptions = struct {
     /// Must be set when running `loop`. Controls how the server will send and receive messages.
     transport: ?*lsp.Transport,
     config_manager: *configuration.Manager,
-    max_thread_count: usize = 4, // what is a good value here?
 };
 
 pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
