@@ -686,97 +686,6 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-/// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
-/// if the `source_index` points to `@"name"`, the source location of `name` is returned.
-pub fn identifierLocFromIndex(tree: *const Ast, source_index: usize) ?offsets.Loc {
-    _, const loc = identifierTokenAndLocFromIndex(tree, source_index) orelse return null;
-    return loc;
-}
-
-pub fn identifierTokenAndLocFromIndex(tree: *const Ast, source_index: usize) ?struct { Ast.TokenIndex, offsets.Loc } {
-    const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, tree) orelse return null;
-    switch (tree.tokenTag(token)) {
-        .identifier,
-        .builtin,
-        => {
-            const token_loc = offsets.tokenToLoc(tree, token);
-            if (!(token_loc.start <= source_index and source_index <= token_loc.end)) return null;
-            return .{ token, offsets.identifierIndexToLoc(tree.source, tree.tokenStart(token), .name) };
-        },
-        else => {},
-    }
-
-    var start = source_index;
-    while (start > 0 and isSymbolChar(tree.source[start - 1])) {
-        start -= 1;
-    }
-
-    var end = source_index;
-    while (end < tree.source.len and isSymbolChar(tree.source[end])) {
-        end += 1;
-    }
-
-    if (start == end) return null;
-    return .{ token, .{ .start = start, .end = end } };
-}
-
-test identifierLocFromIndex {
-    var tree = try Ast.parse(std.testing.allocator,
-        \\ name  @builtin  @"escaped"  @"s p a c e"  end
-    , .zig);
-    defer tree.deinit(std.testing.allocator);
-
-    try std.testing.expectEqualSlices(
-        std.zig.Token.Tag,
-        &.{ .identifier, .builtin, .identifier, .identifier, .identifier, .eof },
-        tree.tokens.items(.tag),
-    );
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 1, .end = 5 };
-        std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 1));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 2));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 5));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 8, .end = 15 };
-        std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 6));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 7));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 8));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 11));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 15));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 19, .end = 26 };
-        std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 17));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 18));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 19));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 23));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 27));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 28));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 43, .end = 46 };
-        std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 42));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 43));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 45));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 46));
-    }
-}
-
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
 /// Examples:
 ///```zig
@@ -5017,10 +4926,6 @@ fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
     };
 }
 
-pub fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlphanumeric(char) or char == '_';
-}
-
 /// Given a byte index in a document (typically cursor offset), classify what kind of entity is at that index.
 ///
 /// Classification is based on the lexical structure -- we fetch the line containing index, and look at the
@@ -6613,7 +6518,7 @@ pub fn getSymbolFieldAccessesHighlight(
     property_types: *std.ArrayList(Type),
 ) Error!?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
-        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
+        const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
             const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
             switch (handle.tree.tokenTag(token)) {
                 .question_mark => {

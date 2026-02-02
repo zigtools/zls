@@ -482,12 +482,12 @@ fn prepareFunctionCompletion(builder: *Builder) PrepareFunctionCompletionResult 
     const source = builder.orig_handle.tree.source;
 
     var start_index = builder.source_index;
-    while (start_index > 0 and Analyser.isSymbolChar(source[start_index - 1])) {
+    while (start_index > 0 and offsets.isSymbolChar(source[start_index - 1])) {
         start_index -= 1;
     }
 
     var end_index = builder.source_index;
-    while (end_index < source.len and Analyser.isSymbolChar(source[end_index])) {
+    while (end_index < source.len and offsets.isSymbolChar(source[end_index])) {
         end_index += 1;
     }
 
@@ -950,12 +950,12 @@ pub fn completionAtIndex(
     if (completions.len == 0) return null;
 
     var start_index = source_index;
-    while (start_index > 0 and Analyser.isSymbolChar(source[start_index - 1])) {
+    while (start_index > 0 and offsets.isSymbolChar(source[start_index - 1])) {
         start_index -= 1;
     }
 
     var end_index = source_index;
-    while (end_index < source.len and Analyser.isSymbolChar(source[end_index])) {
+    while (end_index < source.len and offsets.isSymbolChar(source[end_index])) {
         end_index += 1;
     }
 
@@ -1741,7 +1741,7 @@ fn collectFieldAccessContainerNodes(
     // inconsistent at returning name_loc for methods, ie
     // `abc.method() == .` => fails, `abc.method(.{}){.}` => ok
     // it also fails for `abc.xyz.*` ... currently we take advantage of this quirk
-    const name_loc = Analyser.identifierLocFromIndex(&handle.tree, loc.end) orelse {
+    const name_loc = offsets.identifierLocFromIndex(&handle.tree, loc.end) orelse {
         const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
         const container = try analyser.resolveDerefType(result) orelse result;
         if (try analyser.resolveUnwrapErrorUnionType(container, .payload)) |unwrapped| {
