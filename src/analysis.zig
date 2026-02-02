@@ -5002,8 +5002,13 @@ pub fn getPositionContext(
 
         // Single '@' do not return a builtin token so we check this on our own.
         if (tok.tag == .invalid and tree.source[tok.loc.start] == '@') {
-            tok.tag = .builtin;
-            tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
+            if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@\"")) {
+                tok.tag = .identifier;
+                tok.loc = .{ .start = tok.loc.start, .end = @min(line_loc.end, tree.tokenStart(current_token + 1)) };
+            } else if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@")) {
+                tok.tag = .builtin;
+                tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
+            }
         }
 
         if (source_index < tok.loc.start) break;
