@@ -152,7 +152,7 @@ pub const BuildFile = struct {
                 }
                 if (isInStd(source_uri)) continue;
 
-                const handle = try store.getOrLoadHandle(source_uri) orelse return .unknown;
+                const handle = try store.getOrLoadHandle(source_uri) orelse continue;
 
                 const import_uris = (try handle.import_uris.get(handle)).*;
                 try found_uris.ensureUnusedCapacity(arena, import_uris.len);
@@ -298,7 +298,7 @@ pub const Handle = struct {
                     continue;
                 },
                 .yes => |root_source_file| {
-                    // log.debug("Resolved build file of '{s}' as '{s}' root={s}", .{ self.uri.raw, build_file.uri, root_source_file.raw });
+                    // log.debug("Resolved build file of '{s}' as '{s}' root={s}", .{ self.uri.raw, build_file.uri.raw, root_source_file });
                     errdefer comptime unreachable;
                     self.impl.associated_build_file.deinit(document_store.allocator);
                     self.impl.associated_build_file = .{
