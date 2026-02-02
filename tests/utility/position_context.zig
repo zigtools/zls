@@ -36,6 +36,21 @@ test "var_access" {
     , .empty, .{});
 }
 
+test "var_access escaped identifier" {
+    try testContext(
+        \\const foo = <loc>@"<cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo<cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo  <cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo"<cursor></loc>
+    , .var_access, .{});
+}
+
 test "function.payload" {
     try testContext(
         \\    fn foo() !<cursor><loc>Str</loc> {
