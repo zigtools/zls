@@ -679,7 +679,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             );
         }
 
-        const name_loc = Analyser.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
+        const name_loc = offsets.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
         const decl = switch (pos_context) {

@@ -296,7 +296,7 @@ fn hoverDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
+    const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const hover_text = blk: {
         const is_escaped_identifier = handle.tree.source[handle.tree.tokenStart(name_token)] == '@';
@@ -372,7 +372,7 @@ fn hoverDefinitionEnumLiteral(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
+    const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
         return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);

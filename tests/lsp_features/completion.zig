@@ -4707,7 +4707,7 @@ fn testCompletionTextEdit(
 
         const text_edit_or_insert_replace: TextEditOrInsertReplace = completion_item.textEdit orelse blk: {
             var start_index: usize = cursor_idx;
-            while (start_index > 0 and zls.Analyser.isSymbolChar(handle.tree.source[start_index - 1])) {
+            while (start_index > 0 and offsets.isSymbolChar(handle.tree.source[start_index - 1])) {
                 start_index -= 1;
             }
 
