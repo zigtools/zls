@@ -600,6 +600,19 @@ test "label decl" {
     , .label_decl, .{});
 }
 
+test "doctest name" {
+    try testContext(
+        \\test<loc></loc> <cursor>
+    , .test_doctest_name, .{});
+    try testContext(
+        \\test <loc>foo<cursor></loc> {}
+    , .test_doctest_name, .{});
+
+    try testContext(
+        \\test <loc>foo.bar<cursor></loc>,
+    , .field_access, .{});
+}
+
 test "empty" {
     try testContext(
         \\<cursor>

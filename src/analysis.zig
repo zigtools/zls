@@ -4903,6 +4903,7 @@ pub const PositionContext = union(enum) {
     /// - `blk: while`
     /// - `blk: switch`
     label_decl: offsets.Loc,
+    test_doctest_name: offsets.Loc,
     enum_literal: offsets.Loc,
     number_literal: offsets.Loc,
     char_literal: offsets.Loc,
@@ -4910,7 +4911,6 @@ pub const PositionContext = union(enum) {
     parens_expr: offsets.Loc,
     keyword: Ast.TokenIndex,
     error_access,
-    test_doctest_name,
     comment,
     other,
     empty,
@@ -4926,6 +4926,7 @@ pub const PositionContext = union(enum) {
             .var_access,
             .label_access,
             .label_decl,
+            .test_doctest_name,
             .enum_literal,
             .number_literal,
             .char_literal,
@@ -4933,7 +4934,6 @@ pub const PositionContext = union(enum) {
             => |l| return l,
             .keyword => |token_index| return offsets.tokenToLoc(tree, token_index),
             .error_access,
-            .test_doctest_name,
             .comment,
             .other,
             .empty,
@@ -5194,7 +5194,7 @@ pub fn getPositionContext(
                     .{ .label_access = tok.loc }
                 else
                     .{ .var_access = tok.loc },
-                .test_doctest_name => .test_doctest_name,
+                .test_doctest_name => .{ .test_doctest_name = tok.loc },
                 else => .{ .var_access = tok.loc },
             },
             .builtin => .{ .builtin = tok.loc },
@@ -5206,7 +5206,7 @@ pub fn getPositionContext(
                     else => .other,
                 },
                 .comment, .other, .error_access => curr_ctx.ctx,
-                .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
+                .test_doctest_name, .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
                 else => .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
             },
             .question_mark, .period_asterisk => switch (curr_ctx.ctx) {
@@ -5279,7 +5279,7 @@ pub fn getPositionContext(
                 std.debug.assert(tree.tokenTag(current_token) == tag);
                 break :new_state .{ .keyword = current_token };
             },
-            .keyword_test => .test_doctest_name,
+            .keyword_test => .{ .test_doctest_name = .{ .start = tok.loc.end, .end = tok.loc.end } },
             .container_doc_comment => .comment,
             .doc_comment => new_state: {
                 if (!curr_ctx.isErrSetDef()) break :new_state .comment; // Intent is to skip everything between the `error{...}` braces
