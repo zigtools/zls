@@ -183,11 +183,12 @@ pub const Manager = struct {
             };
 
             manager.zig_exe = .{
-                .path = exe_path,
+                .path = zig_env.zig_exe,
                 .version = zig_version,
                 .env = zig_env,
             };
         }
+        config.zig_exe_path = if (manager.zig_exe) |exe| exe.path else null;
 
         if (config.zig_lib_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
