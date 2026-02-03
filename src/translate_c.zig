@@ -179,7 +179,7 @@ pub fn translate(
         .argv = argv.items,
         .stdin = .pipe,
         .stdout = .pipe,
-        .stderr = .ignore,
+        .stderr = .pipe,
     }) catch |err| switch (err) {
         error.Canceled => return error.Canceled,
         else => {
@@ -187,12 +187,7 @@ pub fn translate(
             return null;
         },
     };
-
-    errdefer |err| if (!zig_builtin.is_test) reportTranslateError(io, allocator, process.stderr, argv.items, @errorName(err));
-
-    defer _ = process.wait(io) catch |wait_err| {
-        log.err("zig translate-c process did not terminate, error: {}", .{wait_err});
-    };
+    defer process.kill(io);
 
     {
         var stdin_writer = process.stdin.?.writer(io, &.{});
@@ -209,20 +204,37 @@ pub fn translate(
         }, .little) catch return @as(std.Io.File.Writer.Error!?Result, stdin_writer.err.?);
     }
 
-    var poller = std.Io.poll(allocator, enum { stdout }, .{ .stdout = process.stdout.? });
-    defer poller.deinit();
-    const stdout = poller.reader(.stdout);
+    var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    defer multi_reader.deinit();
+    multi_reader.init(
+        allocator,
+        io,
+        multi_reader_buffer.toStreams(),
+        &.{ process.stdout.?, process.stderr.? },
+    );
 
-    while (true) {
-        const timeout: u64 = 20 * std.time.ns_per_s;
+    const stdout = multi_reader.reader(0);
+    const stderr = multi_reader.reader(1);
+
+    outer: while (true) {
+        const timeout: std.Io.Timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(90) } };
 
         while (stdout.buffered().len < @sizeOf(InMessage.Header)) {
-            if (!try poller.pollTimeout(timeout)) return error.EndOfStream;
+            multi_reader.fill(64, timeout) catch |err| switch (err) {
+                error.EndOfStream => break :outer,
+                else => |e| return e,
+            };
         }
         const header = stdout.takeStruct(InMessage.Header, .little) catch unreachable;
         while (stdout.buffered().len < header.bytes_len) {
-            if (!try poller.pollTimeout(timeout)) return error.EndOfStream;
+            multi_reader.fill(64, timeout) catch |err| switch (err) {
+                error.EndOfStream => break :outer,
+                else => |e| return e,
+            };
         }
+        try multi_reader.checkAnyError();
+
         const body = stdout.take(header.bytes_len) catch unreachable;
         var reader: std.Io.Reader = .fixed(body);
 
@@ -269,22 +281,15 @@ pub fn translate(
             else => {},
         }
     }
-}
 
-fn reportTranslateError(io: std.Io, allocator: std.mem.Allocator, stderr: ?std.Io.File, argv: []const []const u8, err_name: []const u8) void {
-    const joined = std.mem.join(allocator, " ", argv) catch return;
-    defer allocator.free(joined);
-    if (stderr) |file| {
-        var buffer: [1024]u8 = undefined;
-        var file_reader = file.readerStreaming(io, &buffer);
-        const old_cancel_protect = io.swapCancelProtection(.blocked);
-        defer _ = io.swapCancelProtection(old_cancel_protect);
-        const stderr_output = file_reader.interface.allocRemaining(allocator, .limited(16 * 1024 * 1024)) catch return;
-        defer allocator.free(stderr_output);
-        log.err("failed zig translate-c command:\n{s}\nstderr:{s}\nerror:{s}\n", .{ joined, stderr_output, err_name });
-    } else {
-        log.err("failed zig translate-c command:\n{s}\nerror:{s}\n", .{ joined, err_name });
+    const term = try process.wait(io);
+    switch (term) {
+        .exited => |code| std.log.err("zig translate-c failed with code {d} and stderr:\n{s}", .{ code, stderr.buffered() }),
+        .signal => |sig| std.log.err("zig translate-c failed with signal {t} and stderr:\n{s}", .{ sig, stderr.buffered() }),
+        .stopped => |sig| std.log.err("zig translate-c stopped with signal {d} and stderr:\n{s}", .{ sig, stderr.buffered() }),
+        .unknown => |code| std.log.err("zig translate-c failed for unknown reason with code {d} and stderr:\n{s}", .{ code, stderr.buffered() }),
     }
+    return null;
 }
 
 fn extractString(str: []const u8) []const u8 {

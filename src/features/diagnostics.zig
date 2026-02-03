@@ -330,41 +330,39 @@ fn getErrorBundleFromAstCheck(
 
     comptime std.debug.assert(std.process.can_spawn);
 
-    var stderr_bytes: []u8 = "";
-    defer allocator.free(stderr_bytes);
+    var process = std.process.spawn(io, .{
+        .argv = &.{ zig_exe_path, "ast-check", "--color", "off" },
+        .stdin = .pipe,
+        .stdout = .ignore,
+        .stderr = .pipe,
+    }) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        else => {
+            log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+            return .empty;
+        },
+    };
+    try process.stdin.?.writeStreamingAll(io, source);
+    process.stdin.?.close(io);
 
-    {
-        var process = std.process.spawn(io, .{
-            .argv = &.{ zig_exe_path, "ast-check", "--color", "off" },
-            .stdin = .pipe,
-            .stdout = .ignore,
-            .stderr = .pipe,
-        }) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => {
-                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-                return .empty;
-            },
-        };
-        try process.stdin.?.writeStreamingAll(io, source);
-        process.stdin.?.close(io);
+    process.stdin = null;
 
-        process.stdin = null;
+    var buffer: [4096]u8 = undefined;
+    var file_reader = process.stderr.?.readerStreaming(io, &buffer);
+    const stderr = file_reader.interface.allocRemaining(allocator, .limited(16 * 1024 * 1024)) catch |err| switch (err) {
+        error.ReadFailed => return file_reader.err.?,
+        error.OutOfMemory, error.StreamTooLong => |e| return e,
+    };
+    defer allocator.free(stderr);
 
-        stderr_bytes = try readToEndAlloc(io, allocator, process.stderr.?, .limited(16 * 1024 * 1024));
-
-        const term = process.wait(io) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => {
-                log.warn("Failed to await zig ast-check process, error: {}", .{err});
-                return .empty;
-            },
-        };
-
-        if (term != .exited) return .empty;
+    const term = try process.wait(io);
+    switch (term) {
+        .exited => return try getErrorBundleFromStderr(allocator, stderr, true, .{ .single_source_file = source }),
+        .signal => |sig| std.log.err("zig ast-check failed with signal {t} and stderr:\n{s}", .{ sig, stderr }),
+        .stopped => |sig| std.log.err("zig ast-check stopped with signal {d} and stderr:\n{s}", .{ sig, stderr }),
+        .unknown => |code| std.log.err("zig ast-check failed for unknown reason with code {d} and stderr:\n{s}", .{ code, stderr }),
     }
-
-    return try getErrorBundleFromStderr(allocator, stderr_bytes, true, .{ .single_source_file = source });
+    return .empty;
 }
 
 pub fn getErrorBundleFromStderr(
@@ -538,27 +536,15 @@ pub const BuildOnSave = struct {
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .pipe,
-            .cwd = options.workspace_path,
+            .cwd = .{ .path = options.workspace_path },
         }) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             else => {
-                log.err("failed to spawn zig build process: {}", .{err});
+                log.err("failed to spawn zig build-on-save process: {}", .{err});
                 return null;
             },
         };
-
-        errdefer {
-            child_process.stdin.?.close(options.io);
-            child_process.stdin = null;
-
-            _ = terminateChildProcessReportError(
-                options.io,
-                options.allocator,
-                &child_process,
-                "zig build runner",
-                .kill,
-            );
-        }
+        errdefer child_process.kill(options.io);
 
         const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
         errdefer options.allocator.free(duped_workspace_path);
@@ -613,23 +599,20 @@ pub const BuildOnSave = struct {
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
     ) void {
-        defer {
-            allocator.free(workspace_path);
+        defer allocator.free(workspace_path);
 
-            state.mutex.lockUncancelable(io);
-            defer state.mutex.unlock(io);
+        var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+        var multi_reader: std.Io.File.MultiReader = undefined;
+        defer multi_reader.deinit();
+        multi_reader.init(
+            allocator,
+            io,
+            multi_reader_buffer.toStreams(),
+            &.{ state.child_process.stdout.?, state.child_process.stderr.? },
+        );
 
-            state.child_process.stdin.?.close(io);
-            state.child_process.stdin = null;
-
-            _ = terminateChildProcessReportError(
-                io,
-                allocator,
-                &state.child_process,
-                "zig build runner",
-                .wait,
-            );
-        }
+        const stdout = multi_reader.reader(0);
+        const stderr = multi_reader.reader(1);
 
         var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
         defer diagnostic_tags.deinit(allocator);
@@ -641,29 +624,25 @@ pub const BuildOnSave = struct {
             };
         }
 
-        var read_buffer: [@sizeOf(ServerToClient.Header)]u8 = undefined;
-        var file_reader = state.child_process.stdout.?.reader(io, &read_buffer);
-        const reader = &file_reader.interface;
-
-        while (true) {
-            const header = reader.takeStruct(ServerToClient.Header, .little) catch |err| switch (err) {
-                error.ReadFailed => switch (file_reader.err.?) {
-                    error.Canceled => return,
-                    else => return log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?}),
-                },
-                error.EndOfStream => break,
+        outer: while (true) {
+            while (stdout.bufferedLen() < @sizeOf(ServerToClient.Header)) {
+                multi_reader.fill(64, .none) catch |err| switch (err) {
+                    error.Canceled => break :outer,
+                    else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
+                };
+            }
+            const header = stdout.takeStruct(ServerToClient.Header, .little) catch unreachable;
+            while (stdout.bufferedLen() < header.bytes_len) {
+                multi_reader.fill(64, .none) catch |err| switch (err) {
+                    error.Canceled => break :outer,
+                    else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
+                };
+            }
+            multi_reader.checkAnyError() catch |err| switch (err) {
+                error.Canceled => break :outer,
+                else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
             };
-            const body = reader.readAlloc(allocator, header.bytes_len) catch |err| switch (err) {
-                error.ReadFailed => switch (file_reader.err.?) {
-                    error.Canceled => return,
-                    else => return log.err("failed to receive message from zig build runner: {}", .{file_reader.err.?}),
-                },
-                error.EndOfStream, error.OutOfMemory => {
-                    log.err("failed to receive message from zig build runner: {}", .{err});
-                    return;
-                },
-            };
-            defer allocator.free(body);
+            const body = stdout.take(header.bytes_len) catch unreachable;
 
             switch (header.tag) {
                 .watch_error_bundle => {
@@ -674,17 +653,39 @@ pub const BuildOnSave = struct {
                         workspace_path,
                         &diagnostic_tags,
                     ) catch |err| switch (err) {
-                        error.Canceled => return,
-                        else => |e| log.err("failed to handle error bundle message from zig build runner: {}", .{e}),
+                        error.Canceled => break :outer,
+                        else => |e| log.err("failed to handle error bundle message from zig build-on-save runner: {}", .{e}),
                     };
                 },
                 else => |tag| {
-                    log.warn("received unexpected message from zig build runner: {}", .{tag});
+                    log.warn("received unexpected message from zig build-on-save runner: {}", .{tag});
+                    break :outer;
                 },
             }
         }
 
-        log.debug("zig build runner process has exited", .{});
+        const old_cancel_protect = io.swapCancelProtection(.blocked);
+        defer _ = io.swapCancelProtection(old_cancel_protect);
+
+        state.mutex.lockUncancelable(io);
+        defer state.mutex.unlock(io);
+
+        state.child_process.stdin.?.close(io);
+        state.child_process.stdin = null;
+
+        const term = state.child_process.wait(io) catch |err| {
+            log.warn("Failed to await zig build-on-save runner: {}", .{err});
+            return;
+        };
+
+        const stderr_msg_prefix = if (stderr.bufferedLen() > 0) "and stderr:\n" else "";
+
+        switch (term) {
+            .exited => |code| if (code != 0) log.warn("zig build-on-save runner exited with with code: {d}{s}{s}", .{ code, stderr_msg_prefix, stderr.buffered() }),
+            .signal => |sig| std.log.err("zig build-on-save runner failed with signal {t}{s}{s}", .{ sig, stderr_msg_prefix, stderr.buffered() }),
+            .stopped => |sig| std.log.err("zig build-on-save runner stopped with signal {d}{s}{s}", .{ sig, stderr_msg_prefix, stderr.buffered() }),
+            .unknown => |code| std.log.err("zig build-on-save runner failed for unknown reason with code {d}{s}{s}", .{ code, stderr_msg_prefix, stderr.buffered() }),
+        }
     }
 
     fn handleWatchErrorBundle(
@@ -728,64 +729,3 @@ pub const BuildOnSave = struct {
         try collection.publishDiagnostics();
     }
 };
-
-fn terminateChildProcessReportError(
-    io: std.Io,
-    allocator: std.mem.Allocator,
-    child_process: *std.process.Child,
-    name: []const u8,
-    kind: enum { wait, kill },
-) bool {
-    const old_cancel_protect = io.swapCancelProtection(.blocked);
-    defer _ = io.swapCancelProtection(old_cancel_protect);
-
-    const stderr = if (child_process.stderr) |stderr|
-        readToEndAlloc(io, allocator, stderr, .limited(16 * 1024 * 1024)) catch ""
-    else
-        "";
-    defer allocator.free(stderr);
-
-    const term = switch (kind) {
-        .wait => child_process.wait(io) catch |err| {
-            log.warn("Failed to await {s}: {}", .{ name, err });
-            return false;
-        },
-        .kill => blk: {
-            child_process.kill(io);
-            break :blk std.process.Child.Term{ .exited = 0 };
-        },
-    };
-
-    switch (term) {
-        .exited => |code| if (code != 0) {
-            if (stderr.len != 0) {
-                log.warn("{s} exited with non-zero status: {}\nstderr:\n{s}", .{ name, code, stderr });
-            } else {
-                log.warn("{s} exited with non-zero status: {}", .{ name, code });
-            }
-        },
-        else => {
-            if (stderr.len != 0) {
-                log.warn("{s} exitied abnormally: {t}\nstderr:\n{s}", .{ name, term, stderr });
-            } else {
-                log.warn("{s} exitied abnormally: {t}", .{ name, term });
-            }
-        },
-    }
-
-    return true;
-}
-
-fn readToEndAlloc(
-    io: std.Io,
-    allocator: std.mem.Allocator,
-    file: std.Io.File,
-    limit: std.Io.Limit,
-) (std.Io.File.Reader.Error || error{ OutOfMemory, StreamTooLong })![]u8 {
-    var buffer: [1024]u8 = undefined;
-    var file_reader = file.readerStreaming(io, &buffer);
-    return file_reader.interface.allocRemaining(allocator, limit) catch |err| switch (err) {
-        error.ReadFailed => return file_reader.err.?,
-        error.OutOfMemory, error.StreamTooLong => |e| return e,
-    };
-}

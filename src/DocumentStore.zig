@@ -1198,8 +1198,9 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
             self.io,
             .{
                 .argv = args,
-                .cwd = cwd,
-                .max_output_bytes = 16 * 1024 * 1024,
+                .cwd = .{ .path = cwd },
+                .stderr_limit = .limited(16 * 1024 * 1024),
+                .stdout_limit = .limited(16 * 1024 * 1024),
             },
         );
     };
