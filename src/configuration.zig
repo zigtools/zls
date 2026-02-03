@@ -334,7 +334,8 @@ pub const Manager = struct {
                 io,
                 .{
                     .argv = &argv,
-                    .max_output_bytes = 16 * 1024 * 1024,
+                    .stderr_limit = .limited(16 * 1024 * 1024),
+                    .stdout_limit = .limited(16 * 1024 * 1024),
                 },
             ) catch |err| switch (err) {
                 error.Canceled => return error.Canceled,
