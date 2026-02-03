@@ -38,6 +38,10 @@ body:
     attributes:
       label: Steps to Reproduce and Observed Behavior
       description: What exactly can someone else do, in order to observe the problem that you observed?
+      placeholder: |
+        1. Setup X editor with Y config
+        2. Create X.zig file with content Y
+        3. Do X and observe Y
     validations:
       required: true
   - type: textarea
@@ -50,12 +54,18 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Log Output
-      description: Include ZLS's log output [Guide](https://zigtools.org/zls/guides/view-logs/), if applicable. This will be automatically formatted into monospace, so no need for backticks.
-      placeholder: "Should look similar to this:
+      label: Attach ZLS log output
+      description: Refer to the [documentation](https://zigtools.org/zls/guides/view-logs/) on how to aquire the ZLS log output.
+      value: |
+        <details><summary>zls.log</summary>
+
+        <!-- Paste the logs inside the code block below. -->
+        <!-- The placeholder below shows how they typically look like. -->
+        ```log
         info  ( main ): Starting ZLS      VERSION @ '/path/to/zls'
-        info  ( main ): Log File:         /path/to/zls.log (debug)
-        ..."
-      render: shell
+        ...
+        ```
+
+        </details>
     validations:
       required: false
