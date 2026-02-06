@@ -425,7 +425,14 @@ test "imports" {
         \\const std = @import("std");
         \\const builtin = @import("builtin");
     , &.{
-        .{ .startLine = 0, .startCharacter = 0, .endLine = 1, .endCharacter = 34 },
+        .{
+            .startLine = 0,
+            .startCharacter = 0,
+            .endLine = 1,
+            .endCharacter = 34,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
     });
     try testFoldingRange(
         \\const std = @import("std");
@@ -435,7 +442,14 @@ test "imports" {
         \\
         \\pub fn main() void {}
     , &.{
-        .{ .startLine = 0, .startCharacter = 0, .endLine = 3, .endCharacter = 23 },
+        .{
+            .startLine = 0,
+            .startCharacter = 0,
+            .endLine = 3,
+            .endCharacter = 23,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
     });
     // Single import should not create folding range
     try testFoldingRange(
@@ -453,8 +467,22 @@ test "imports" {
         \\const lsp = @import("lsp");
         \\const types = @import("types");
     , &.{
-        .{ .startLine = 0, .startCharacter = 0, .endLine = 1, .endCharacter = 34 },
-        .{ .startLine = 5, .startCharacter = 0, .endLine = 6, .endCharacter = 30 },
+        .{
+            .startLine = 0,
+            .startCharacter = 0,
+            .endLine = 1,
+            .endCharacter = 34,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
+        .{
+            .startLine = 5,
+            .startCharacter = 0,
+            .endLine = 6,
+            .endCharacter = 30,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
     });
 }
 
