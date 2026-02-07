@@ -138,6 +138,8 @@ const Builder = struct {
                 .endLine = range.end.line,
                 .endCharacter = range.end.character,
                 .kind = folding_range.kind,
+                // TODO this should be simplified https://codeberg.org/ziglang/zig/issues/30627
+                .collapsedText = if (folding_range.kind != null and folding_range.kind.? == .imports) "@import(...)" else null,
             });
         }
 
@@ -203,7 +205,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
                 end_import = node;
             } else if (start_import != null and end_import != null) {
                 // We found a non-import after a sequence of imports, create folding range
-                try builder.add(null, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
+                try builder.add(.imports, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
                 start_import = null;
                 end_import = null;
             }
@@ -211,7 +213,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
 
         // Handle the case where imports continue to the end of the file
         if (start_import != null and end_import != null and start_import.? != end_import.?) {
-            try builder.add(null, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
+            try builder.add(.imports, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
         }
     }
 
