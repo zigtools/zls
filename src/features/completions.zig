@@ -121,7 +121,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
             builder.arena,
             &builder.completions,
             builder.analyser.ip,
-            payload.index orelse try builder.analyser.ip.getUnknown(builder.analyser.gpa, payload.type),
+            payload.index orelse try builder.analyser.ip.getUnknown(payload.type),
         ),
         .either => |either_entries| {
             for (either_entries) |entry| {

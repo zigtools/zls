@@ -1,6 +1,9 @@
 //! Based on src/InternPool.zig from the zig codebase
 //! https://github.com/ziglang/zig/blob/master/src/InternPool.zig
 
+io: std.Io,
+gpa: Allocator,
+
 map: std.AutoArrayHashMapUnmanaged(void, void),
 items: std.MultiArrayList(Item),
 extra: std.ArrayList(u32),
@@ -669,11 +672,11 @@ pub const Index = enum(u32) {
             return @enumFromInt(ip.extra.items[slice.start + index]);
         }
 
-        pub fn dupe(slice: Slice, gpa: Allocator, ip: *InternPool) error{OutOfMemory}![]Index {
+        pub fn dupe(slice: Slice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]Index {
             if (slice.len == 0) return &.{};
             ip.lock.lockShared();
             defer ip.lock.unlockShared();
-            return try gpa.dupe(Index, slice.getUnprotectedSlice(ip));
+            return try allocator.dupe(Index, slice.getUnprotectedSlice(ip));
         }
 
         pub fn hashWithHasher(slice: Slice, hasher: anytype, ip: *InternPool) void {
@@ -727,11 +730,11 @@ pub const StringSlice = struct {
         return @enumFromInt(ip.extra.items[slice.start + index]);
     }
 
-    pub fn dupe(slice: StringSlice, gpa: Allocator, ip: *InternPool) error{OutOfMemory}![]String {
+    pub fn dupe(slice: StringSlice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]String {
         if (slice.len == 0) return &.{};
         ip.lock.lockShared();
         defer ip.lock.unlockShared();
-        return try gpa.dupe(String, slice.getUnprotectedSlice(ip));
+        return try allocator.dupe(String, slice.getUnprotectedSlice(ip));
     }
 
     pub fn hashWithHasher(slice: StringSlice, hasher: anytype, ip: *InternPool) void {
@@ -1034,8 +1037,10 @@ pub const Union = struct {
     pub const Index = enum(u32) { _ };
 };
 
-pub fn init(gpa: Allocator) Allocator.Error!InternPool {
+pub fn init(io: std.Io, gpa: Allocator) Allocator.Error!InternPool {
     var ip: InternPool = .{
+        .io = io,
+        .gpa = gpa,
         .map = .empty,
         .items = .empty,
         .extra = .empty,
@@ -1153,15 +1158,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
 
     for (items, 0..) |item, i| {
         assert(@intFromEnum(item.index) == i);
-        if (builtin.is_test or builtin.mode == .Debug) {
-            var failing_allocator: std.testing.FailingAllocator = .init(undefined, .{
-                .fail_index = 0,
-                .resize_fail_index = 0,
-            });
-            assert(item.index == ip.get(failing_allocator.allocator(), item.key) catch unreachable);
-        } else {
-            assert(item.index == ip.get(undefined, item.key) catch unreachable);
-        }
+        assert(item.index == ip.get(item.key) catch unreachable);
     }
 
     return ip;
@@ -1259,7 +1256,7 @@ fn indexToKeyNoLock(ip: *const InternPool, index: Index) Key {
     };
 }
 
-pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
+pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{
         .ip = ip,
         .precomputed_hash = key.hash32(ip),
@@ -1276,7 +1273,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     ip.lock.lock();
     defer ip.lock.unlock();
 
-    const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
+    const gop = try ip.map.getOrPutAdapted(ip.gpa, key, adapter);
     if (gop.found_existing) return @enumFromInt(gop.index);
 
     const item: Item = switch (key) {
@@ -1294,11 +1291,11 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .pointer_type => |pointer_ty| .{
             .tag = .type_pointer,
-            .data = try ip.addExtra(gpa, Key.Pointer, pointer_ty),
+            .data = try ip.addExtra(Key.Pointer, pointer_ty),
         },
         .array_type => |array_ty| .{
             .tag = .type_array,
-            .data = try ip.addExtra(gpa, Key.Array, array_ty),
+            .data = try ip.addExtra(Key.Array, array_ty),
         },
         .struct_type => |struct_index| .{
             .tag = .type_struct,
@@ -1310,11 +1307,11 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .error_union_type => |error_union_ty| .{
             .tag = .type_error_union,
-            .data = try ip.addExtra(gpa, Key.ErrorUnion, error_union_ty),
+            .data = try ip.addExtra(Key.ErrorUnion, error_union_ty),
         },
         .error_set_type => |error_set_ty| .{
             .tag = .type_error_set,
-            .data = try ip.addExtra(gpa, Key.ErrorSet, error_set_ty),
+            .data = try ip.addExtra(Key.ErrorSet, error_set_ty),
         },
         .enum_type => |enum_index| .{
             .tag = .type_enum,
@@ -1322,7 +1319,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .function_type => |function_ty| .{
             .tag = .type_function,
-            .data = try ip.addExtra(gpa, Key.Function, function_ty),
+            .data = try ip.addExtra(Key.Function, function_ty),
         },
         .union_type => |union_index| .{
             .tag = .type_union,
@@ -1330,11 +1327,11 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .tuple_type => |tuple_ty| .{
             .tag = .type_tuple,
-            .data = try ip.addExtra(gpa, Key.Tuple, tuple_ty),
+            .data = try ip.addExtra(Key.Tuple, tuple_ty),
         },
         .vector_type => |vector_ty| .{
             .tag = .type_vector,
-            .data = try ip.addExtra(gpa, Key.Vector, vector_ty),
+            .data = try ip.addExtra(Key.Vector, vector_ty),
         },
         .anyframe_type => |anyframe_ty| .{
             .tag = .type_anyframe,
@@ -1343,18 +1340,18 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
 
         .int_u64_value => |int_val| .{
             .tag = .int_u64,
-            .data = try ip.addExtra(gpa, Key.U64Value, int_val),
+            .data = try ip.addExtra(Key.U64Value, int_val),
         },
         .int_i64_value => |int_val| .{
             .tag = .int_i64,
-            .data = try ip.addExtra(gpa, Key.I64Value, int_val),
+            .data = try ip.addExtra(Key.I64Value, int_val),
         },
         .int_big_value => |big_int_val| .{
             .tag = if (big_int_val.isPositive()) .int_big_positive else .int_big_negative,
-            .data = try ip.addExtra(gpa, Key.BigIntInternal, .{
+            .data = try ip.addExtra(Key.BigIntInternal, .{
                 .ty = big_int_val.ty,
                 .limbs = switch (big_int_val.storage) {
-                    .external => |int| try ip.getLimbSlice(gpa, int.limbs),
+                    .external => |int| try ip.getLimbSlice(int.limbs),
                     .internal => |int| int.limbs,
                 },
             }),
@@ -1369,40 +1366,40 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .float_64_value => |float_val| .{
             .tag = .float_f64,
-            .data = try ip.addExtra(gpa, Key.F64Value, Key.F64Value.pack(float_val)),
+            .data = try ip.addExtra(Key.F64Value, Key.F64Value.pack(float_val)),
         },
         .float_80_value => |float_val| .{
             .tag = .float_f80,
-            .data = try ip.addExtra(gpa, Key.F80Value, Key.F80Value.pack(float_val)),
+            .data = try ip.addExtra(Key.F80Value, Key.F80Value.pack(float_val)),
         },
         .float_128_value => |float_val| .{
             .tag = .float_f128,
-            .data = try ip.addExtra(gpa, Key.F128Value, Key.F128Value.pack(float_val)),
+            .data = try ip.addExtra(Key.F128Value, Key.F128Value.pack(float_val)),
         },
         .float_comptime_value => |float_val| .{
             .tag = .float_comptime,
-            .data = try ip.addExtra(gpa, Key.F128Value, Key.F128Value.pack(float_val)),
+            .data = try ip.addExtra(Key.F128Value, Key.F128Value.pack(float_val)),
         },
 
         .optional_value => |optional_val| .{
             .tag = .optional_value,
-            .data = try ip.addExtra(gpa, Key.OptionalValue, optional_val),
+            .data = try ip.addExtra(Key.OptionalValue, optional_val),
         },
         .slice => |slice_val| .{
             .tag = .slice_value,
-            .data = try ip.addExtra(gpa, Key.Slice, slice_val),
+            .data = try ip.addExtra(Key.Slice, slice_val),
         },
         .aggregate => |aggregate_val| .{
             .tag = .aggregate_value,
-            .data = try ip.addExtra(gpa, Key.Aggregate, aggregate_val),
+            .data = try ip.addExtra(Key.Aggregate, aggregate_val),
         },
         .union_value => |union_val| .{
             .tag = .union_value,
-            .data = try ip.addExtra(gpa, Key.UnionValue, union_val),
+            .data = try ip.addExtra(Key.UnionValue, union_val),
         },
         .error_value => |error_val| .{
             .tag = .error_value,
-            .data = try ip.addExtra(gpa, Key.ErrorValue, error_val),
+            .data = try ip.addExtra(Key.ErrorValue, error_val),
         },
         .null_value => |null_val| .{
             .tag = .null_value,
@@ -1421,7 +1418,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
     };
 
-    try ip.items.append(gpa, item);
+    try ip.items.append(ip.gpa, item);
     return @enumFromInt(ip.items.len - 1);
 }
 
@@ -1436,14 +1433,14 @@ pub fn contains(ip: *InternPool, key: Key) ?Index {
     return @enumFromInt(index);
 }
 
-pub fn getIndexSlice(ip: *InternPool, gpa: Allocator, data: []const Index) error{OutOfMemory}!Index.Slice {
+pub fn getIndexSlice(ip: *InternPool, data: []const Index) error{OutOfMemory}!Index.Slice {
     if (data.len == 0) return Index.Slice.empty;
 
     ip.lock.lock();
     defer ip.lock.unlock();
 
     const start: u32 = @intCast(ip.extra.items.len);
-    try ip.extra.appendSlice(gpa, @ptrCast(data));
+    try ip.extra.appendSlice(ip.gpa, @ptrCast(data));
 
     return .{
         .start = start,
@@ -1451,14 +1448,14 @@ pub fn getIndexSlice(ip: *InternPool, gpa: Allocator, data: []const Index) error
     };
 }
 
-pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) error{OutOfMemory}!StringSlice {
+pub fn getStringSlice(ip: *InternPool, data: []const String) error{OutOfMemory}!StringSlice {
     if (data.len == 0) return StringSlice.empty;
 
     ip.lock.lock();
     defer ip.lock.unlock();
 
     const start: u32 = @intCast(ip.extra.items.len);
-    try ip.extra.appendSlice(gpa, @ptrCast(data));
+    try ip.extra.appendSlice(ip.gpa, @ptrCast(data));
 
     return .{
         .start = start,
@@ -1466,11 +1463,11 @@ pub fn getStringSlice(ip: *InternPool, gpa: Allocator, data: []const String) err
     };
 }
 
-fn getLimbSlice(ip: *InternPool, gpa: Allocator, data: []const std.math.big.Limb) error{OutOfMemory}!LimbSlice {
+fn getLimbSlice(ip: *InternPool, data: []const std.math.big.Limb) error{OutOfMemory}!LimbSlice {
     if (data.len == 0) return LimbSlice.empty;
 
     const start: u32 = @intCast(ip.limbs.items.len);
-    try ip.limbs.appendSlice(gpa, data);
+    try ip.limbs.appendSlice(ip.gpa, data);
 
     return .{
         .start = start,
@@ -1519,32 +1516,32 @@ pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
     return ip.unions.at(@intFromEnum(index));
 }
 
-pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: Decl) Allocator.Error!Decl.Index {
+pub fn createDecl(ip: *InternPool, decl: Decl) Allocator.Error!Decl.Index {
     ip.lock.lock();
     defer ip.lock.unlock();
-    try ip.decls.append(gpa, decl);
+    try ip.decls.append(ip.gpa, decl);
     return @enumFromInt(ip.decls.count() - 1);
 }
-pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: Struct) Allocator.Error!Struct.Index {
+pub fn createStruct(ip: *InternPool, struct_info: Struct) Allocator.Error!Struct.Index {
     ip.lock.lock();
     defer ip.lock.unlock();
-    try ip.structs.append(gpa, struct_info);
+    try ip.structs.append(ip.gpa, struct_info);
     return @enumFromInt(ip.structs.count() - 1);
 }
-pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: Enum) Allocator.Error!Enum.Index {
+pub fn createEnum(ip: *InternPool, enum_info: Enum) Allocator.Error!Enum.Index {
     ip.lock.lock();
     defer ip.lock.unlock();
-    try ip.enums.append(gpa, enum_info);
+    try ip.enums.append(ip.gpa, enum_info);
     return @enumFromInt(ip.enums.count() - 1);
 }
-pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: Union) Allocator.Error!Union.Index {
+pub fn createUnion(ip: *InternPool, union_info: Union) Allocator.Error!Union.Index {
     ip.lock.lock();
     defer ip.lock.unlock();
-    try ip.unions.append(gpa, union_info);
+    try ip.unions.append(ip.gpa, union_info);
     return @enumFromInt(ip.unions.count() - 1);
 }
 
-fn addExtra(ip: *InternPool, gpa: Allocator, comptime T: type, extra: T) Allocator.Error!u32 {
+fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
     comptime if (@sizeOf(T) <= 4) {
         @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
@@ -1553,7 +1550,7 @@ fn addExtra(ip: *InternPool, gpa: Allocator, comptime T: type, extra: T) Allocat
 
     const size = @divExact(@sizeOf(T), 4);
 
-    try ip.extra.ensureUnusedCapacity(gpa, size);
+    try ip.extra.ensureUnusedCapacity(ip.gpa, size);
     inline for (std.meta.fields(T)) |field| {
         const item = @field(extra, field.name);
         switch (field.type) {
@@ -1662,7 +1659,6 @@ const KeyAdapter = struct {
 /// @as(dest_ty, inst);
 pub fn coerce(
     ip: *InternPool,
-    gpa: Allocator,
     arena: Allocator,
     dest_ty: Index,
     inst: Index,
@@ -1681,34 +1677,34 @@ pub fn coerce(
 
     const inst_ty = ip.typeOf(inst);
     if (inst_ty == dest_ty) return inst;
-    if (inst_ty == .undefined_type) return try ip.getUndefined(gpa, dest_ty);
-    if (inst_ty == .unknown_type) return try ip.getUnknown(gpa, dest_ty);
+    if (inst_ty == .undefined_type) return try ip.getUndefined(dest_ty);
+    if (inst_ty == .unknown_type) return try ip.getUnknown(dest_ty);
 
-    const dest_tag = ip.zigTypeTag(dest_ty) orelse return try ip.getUnknown(gpa, dest_ty);
-    const inst_tag = ip.zigTypeTag(inst_ty) orelse return try ip.getUnknown(gpa, dest_ty);
+    const dest_tag = ip.zigTypeTag(dest_ty) orelse return try ip.getUnknown(dest_ty);
+    const inst_tag = ip.zigTypeTag(inst_ty) orelse return try ip.getUnknown(dest_ty);
 
-    var in_memory_result = try ip.coerceInMemoryAllowed(gpa, arena, dest_ty, inst_ty, false, builtin.target);
-    if (in_memory_result == .ok) return try ip.getUnknown(gpa, dest_ty);
+    var in_memory_result = try ip.coerceInMemoryAllowed(arena, dest_ty, inst_ty, false, builtin.target);
+    if (in_memory_result == .ok) return try ip.getUnknown(dest_ty);
 
     switch (dest_tag) {
         .optional => optional: {
             // null to ?T
             if (inst_ty == .null_type) {
-                return try ip.getNull(gpa, dest_ty);
+                return try ip.getNull(dest_ty);
             }
             const child_type = ip.indexToKey(dest_ty).optional_type.payload_type;
 
             // TODO cast from ?*T and ?[*]T to ?*anyopaque
             // but don't do it if the source type is a double pointer
             if (child_type == .anyopaque_type) {
-                return try ip.getUnknown(gpa, dest_ty); // TODO
+                return try ip.getUnknown(dest_ty); // TODO
             }
 
             // T to ?T
-            const intermediate = try ip.coerce(gpa, arena, child_type, inst, target, err_msg);
+            const intermediate = try ip.coerce(arena, child_type, inst, target, err_msg);
             if (intermediate == .none) break :optional;
 
-            return try ip.get(gpa, .{ .optional_value = .{
+            return try ip.get(.{ .optional_value = .{
                 .ty = dest_ty,
                 .val = intermediate,
             } });
@@ -1718,7 +1714,7 @@ pub fn coerce(
 
             // Function body to function pointer.
             if (inst_tag == .@"fn") {
-                return try ip.getUnknown(gpa, dest_ty);
+                return try ip.getUnknown(dest_ty);
             }
 
             const inst_ty_key = ip.indexToKey(inst_ty);
@@ -1730,11 +1726,11 @@ pub fn coerce(
                 const array_ty = ip.indexToKey(dest_info.elem_type);
                 if (array_ty != .array_type) break :single_item;
                 const array_elem_ty = array_ty.array_type.child;
-                if (try ip.coerceInMemoryAllowed(gpa, arena, array_elem_ty, ptr_elem_ty, dest_info.flags.is_const, target) != .ok) {
+                if (try ip.coerceInMemoryAllowed(arena, array_elem_ty, ptr_elem_ty, dest_info.flags.is_const, target) != .ok) {
                     break :single_item;
                 }
-                return try ip.getUnknown(gpa, dest_ty);
-                // return ip.coerceCompatiblePtrs(gpa, arena, dest_ty, inst);
+                return try ip.getUnknown(dest_ty);
+                // return ip.coerceCompatiblePtrs(arena, dest_ty, inst);
             }
 
             // Coercions where the source is a single pointer to an array.
@@ -1746,7 +1742,7 @@ pub fn coerce(
                 if (array_ty != .array_type) break :src_array_ptr;
                 const array_elem_type = array_ty.array_type.child;
 
-                const elem_res = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, array_elem_type, dest_info.flags.is_const, target);
+                const elem_res = try ip.coerceInMemoryAllowed(arena, dest_info.elem_type, array_elem_type, dest_info.flags.is_const, target);
                 if (elem_res != .ok) {
                     in_memory_result = .{ .ptr_child = .{
                         .child = try elem_res.dupe(arena),
@@ -1767,14 +1763,14 @@ pub fn coerce(
                     break :src_array_ptr;
                 }
 
-                return try ip.getUnknown(gpa, dest_ty);
+                return try ip.getUnknown(dest_ty);
                 // switch (dest_info.flags.size) {
                 //     // *[N]T to []T
-                //     .Slice => return ip.coerceArrayPtrToSlice(gpa, arena, dest_ty, inst),
+                //     .Slice => return ip.coerceArrayPtrToSlice(arena, dest_ty, inst),
                 //     // *[N]T to [*c]T
-                //     .C => return ip.coerceCompatiblePtrs(gpa, arena, dest_ty, inst),
+                //     .C => return ip.coerceCompatiblePtrs(arena, dest_ty, inst),
                 //     // *[N]T to [*]T
-                //     .Many => return ip.coerceCompatiblePtrs(gpa, arena, dest_ty, inst),
+                //     .Many => return ip.coerceCompatiblePtrs(arena, dest_ty, inst),
                 //     .One => {},
                 // }
             }
@@ -1784,11 +1780,11 @@ pub fn coerce(
 
                 // TODO if (!sema.checkPtrAttributes(dest_ty, inst_ty, &in_memory_result)) break :src_c_ptr;
                 const src_elem_ty = ip.indexToKey(inst_ty).pointer_type.elem_type;
-                if (try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_elem_ty, dest_info.flags.is_const, target) != .ok) {
+                if (try ip.coerceInMemoryAllowed(arena, dest_info.elem_type, src_elem_ty, dest_info.flags.is_const, target) != .ok) {
                     break :src_c_ptr;
                 }
-                return try ip.getUnknown(gpa, dest_ty);
-                // return ip.coerceCompatiblePtrs(gpa, arena, dest_ty, inst);
+                return try ip.getUnknown(dest_ty);
+                // return ip.coerceCompatiblePtrs(arena, dest_ty, inst);
             }
 
             // cast from *T and [*]T to *anyopaque
@@ -1804,17 +1800,17 @@ pub fn coerce(
                     } };
                     break :pointer;
                 }
-                return try ip.getUnknown(gpa, dest_ty);
-                // return ip.coerceCompatiblePtrs(gpa, arena, dest_ty, inst);
+                return try ip.getUnknown(dest_ty);
+                // return ip.coerceCompatiblePtrs(arena, dest_ty, inst);
             }
 
-            return try ip.getUnknown(gpa, dest_ty);
+            return try ip.getUnknown(dest_ty);
         },
         .int, .comptime_int => switch (inst_tag) {
-            .float, .comptime_float => return try ip.getUnknown(gpa, dest_ty),
+            .float, .comptime_float => return try ip.getUnknown(dest_ty),
             .int, .comptime_int => {
                 if (try ip.intFitsInType(inst, dest_ty, target)) {
-                    return try ip.coerceInt(gpa, dest_ty, inst);
+                    return try ip.coerceInt(dest_ty, inst);
                 } else {
                     err_msg.* = .{ .integer_out_of_range = .{
                         .dest_ty = dest_ty,
@@ -1825,12 +1821,12 @@ pub fn coerce(
             },
             else => {},
         },
-        .float, .comptime_float => return try ip.getUnknown(gpa, dest_ty),
-        .@"enum" => return try ip.getUnknown(gpa, dest_ty),
-        .error_union => return try ip.getUnknown(gpa, dest_ty),
-        .@"union" => return try ip.getUnknown(gpa, dest_ty),
+        .float, .comptime_float => return try ip.getUnknown(dest_ty),
+        .@"enum" => return try ip.getUnknown(dest_ty),
+        .error_union => return try ip.getUnknown(dest_ty),
+        .@"union" => return try ip.getUnknown(dest_ty),
         .array => switch (inst_tag) {
-            .vector => return try ip.getUnknown(gpa, dest_ty),
+            .vector => return try ip.getUnknown(dest_ty),
             .@"struct" => {
                 if (inst_ty == Index.empty_struct_type) {
                     const len = ip.indexToKey(dest_ty).array_type.len;
@@ -1842,14 +1838,14 @@ pub fn coerce(
                         return .none;
                     }
                     // TODO
-                    return try ip.getUnknown(gpa, dest_ty);
+                    return try ip.getUnknown(dest_ty);
                 }
-                return try ip.getUnknown(gpa, dest_ty);
+                return try ip.getUnknown(dest_ty);
             },
             else => {},
         },
-        .vector => return try ip.getUnknown(gpa, dest_ty),
-        .@"struct" => return try ip.getUnknown(gpa, dest_ty),
+        .vector => return try ip.getUnknown(dest_ty),
+        .@"struct" => return try ip.getUnknown(dest_ty),
         else => {},
     }
 
@@ -1879,14 +1875,13 @@ fn intFitsInType(
 
 fn coerceInt(
     ip: *InternPool,
-    gpa: Allocator,
     dest_ty: Index,
     val: Index,
 ) Allocator.Error!Index {
     switch (ip.indexToKey(val)) {
-        .int_i64_value => |int| return try ip.get(gpa, .{ .int_i64_value = .{ .int = int.int, .ty = dest_ty } }),
-        .int_u64_value => |int| return try ip.get(gpa, .{ .int_u64_value = .{ .int = int.int, .ty = dest_ty } }),
-        .int_big_value => |int| return try ip.get(gpa, .{
+        .int_i64_value => |int| return try ip.get(.{ .int_i64_value = .{ .int = int.int, .ty = dest_ty } }),
+        .int_u64_value => |int| return try ip.get(.{ .int_u64_value = .{ .int = int.int, .ty = dest_ty } }),
+        .int_big_value => |int| return try ip.get(.{
             .int_big_value = .{
                 .ty = dest_ty,
                 .storage = .{
@@ -1897,13 +1892,13 @@ fn coerceInt(
                 },
             },
         }),
-        .undefined_value => |info| return try ip.getUndefined(gpa, info.ty),
-        .unknown_value => |info| return try ip.getUnknown(gpa, info.ty),
+        .undefined_value => |info| return try ip.getUndefined(info.ty),
+        .unknown_value => |info| return try ip.getUnknown(info.ty),
         else => unreachable,
     }
 }
 
-pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, target: std.Target) Allocator.Error!Index {
+pub fn resolvePeerTypes(ip: *InternPool, types: []const Index, target: std.Target) Allocator.Error!Index {
     if (builtin.mode == .Debug) {
         for (types) |ty| {
             assert(ip.isType(ty));
@@ -1916,7 +1911,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         else => {},
     }
 
-    var arena_allocator: std.heap.ArenaAllocator = .init(gpa);
+    var arena_allocator: std.heap.ArenaAllocator = .init(ip.gpa);
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
@@ -1937,10 +1932,10 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
         // If the candidate can coerce into our chosen type, we're done.
         // If the chosen type can coerce into the candidate, use that.
-        if ((try ip.coerceInMemoryAllowed(gpa, arena, chosen, candidate, true, target)) == .ok) {
+        if ((try ip.coerceInMemoryAllowed(arena, chosen, candidate, true, target)) == .ok) {
             continue;
         }
-        if ((try ip.coerceInMemoryAllowed(gpa, arena, candidate, chosen, true, target)) == .ok) {
+        if ((try ip.coerceInMemoryAllowed(arena, candidate, chosen, true, target)) == .ok) {
             chosen = candidate;
             continue;
         }
@@ -2148,13 +2143,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         const chosen_elem_ty = chosen_elem_info.array_type.child;
                         const cand_elem_ty = candidate_elem_info.array_type.child;
 
-                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_elem_ty, cand_elem_ty, chosen_info.flags.is_const, target);
+                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(arena, chosen_elem_ty, cand_elem_ty, chosen_info.flags.is_const, target);
                         if (chosen_ok) {
                             convert_to_slice = true;
                             continue;
                         }
 
-                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, cand_elem_ty, chosen_elem_ty, candidate_info.flags.is_const, target);
+                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(arena, cand_elem_ty, chosen_elem_ty, candidate_info.flags.is_const, target);
                         if (cand_ok) {
                             convert_to_slice = true;
                             chosen = candidate;
@@ -2173,8 +2168,8 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     // the one we will keep. If they're both OK then we keep the
                     // C pointer since it matches both single and many pointers.
                     if (candidate_info.flags.size == .c or chosen_info.flags.size == .c) {
-                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, candidate_info.elem_type, chosen_info.elem_type, candidate_info.flags.is_const, target);
-                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(gpa, arena, chosen_info.elem_type, candidate_info.elem_type, chosen_info.flags.is_const, target);
+                        const cand_ok = .ok == try ip.coerceInMemoryAllowed(arena, candidate_info.elem_type, chosen_info.elem_type, candidate_info.flags.is_const, target);
+                        const chosen_ok = .ok == try ip.coerceInMemoryAllowed(arena, chosen_info.elem_type, candidate_info.elem_type, chosen_info.flags.is_const, target);
 
                         if (cand_ok) {
                             if (!chosen_ok or chosen_info.flags.size != .c) {
@@ -2232,7 +2227,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .function_type => {
                     if (candidate_info.flags.is_const and
                         ip.zigTypeTag(candidate_info.elem_type) == .@"fn" and
-                        .ok == try ip.coerceInMemoryAllowedFns(gpa, arena, chosen, candidate_info.elem_type, target))
+                        .ok == try ip.coerceInMemoryAllowedFns(arena, chosen, candidate_info.elem_type, target))
                     {
                         chosen = candidate;
                         continue;
@@ -2245,7 +2240,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 else => {},
             },
             .optional_type => |candidate_info| {
-                if ((try ip.coerceInMemoryAllowed(gpa, arena, chosen, candidate_info.payload_type, true, target)) == .ok) {
+                if ((try ip.coerceInMemoryAllowed(arena, chosen, candidate_info.payload_type, true, target)) == .ok) {
                     seen_const = seen_const or ip.isConstPointer(candidate_info.payload_type);
                     any_are_null = true;
                     continue;
@@ -2265,7 +2260,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
             },
             .error_set_type => switch (chosen_key) {
                 .error_set_type => {
-                    chosen = try ip.errorSetMerge(gpa, chosen, candidate);
+                    chosen = try ip.errorSetMerge(chosen, candidate);
                     continue;
                 },
                 else => {},
@@ -2289,17 +2284,17 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 else => {},
             },
             .optional_type => |chosen_info| {
-                if ((try ip.coerceInMemoryAllowed(gpa, arena, chosen_info.payload_type, candidate, true, target)) == .ok) {
+                if ((try ip.coerceInMemoryAllowed(arena, chosen_info.payload_type, candidate, true, target)) == .ok) {
                     continue;
                 }
-                if ((try ip.coerceInMemoryAllowed(gpa, arena, candidate, chosen_info.payload_type, true, target)) == .ok) {
+                if ((try ip.coerceInMemoryAllowed(arena, candidate, chosen_info.payload_type, true, target)) == .ok) {
                     any_are_null = true;
                     chosen = candidate;
                     continue;
                 }
             },
             .error_union_type => |chosen_info| {
-                if ((try ip.coerceInMemoryAllowed(gpa, arena, chosen_info.payload_type, candidate, true, target)) == .ok) {
+                if ((try ip.coerceInMemoryAllowed(arena, chosen_info.payload_type, candidate, true, target)) == .ok) {
                     continue;
                 }
             },
@@ -2319,10 +2314,10 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         info.flags.is_const = seen_const or ip.isConstPointer(info.elem_type);
         info.elem_type = ip.elemType(info.elem_type);
 
-        const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
-        const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
+        const new_ptr_ty = try ip.get(.{ .pointer_type = info });
+        const opt_ptr_ty = if (any_are_null) try ip.get(.{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
         const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ptr_ty;
-        return try ip.get(gpa, .{ .error_union_type = .{
+        return try ip.get(.{ .error_union_type = .{
             .error_set_type = set_ty,
             .payload_type = opt_ptr_ty,
         } });
@@ -2335,10 +2330,10 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 var info = ip.indexToKey(error_union_info.payload_type).pointer_type;
                 info.flags.is_const = true;
 
-                const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
-                const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
+                const new_ptr_ty = try ip.get(.{ .pointer_type = info });
+                const opt_ptr_ty = if (any_are_null) try ip.get(.{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
                 const set_ty = if (err_set_ty != .none) err_set_ty else error_union_info.error_set_type;
-                return try ip.get(gpa, .{ .error_union_type = .{
+                return try ip.get(.{ .error_union_type = .{
                     .error_set_type = set_ty,
                     .payload_type = opt_ptr_ty,
                 } });
@@ -2347,10 +2342,10 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 var info = pointer_info;
                 info.flags.is_const = true;
 
-                const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
-                const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
+                const new_ptr_ty = try ip.get(.{ .pointer_type = info });
+                const opt_ptr_ty = if (any_are_null) try ip.get(.{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
                 const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ptr_ty;
-                return try ip.get(gpa, .{ .error_union_type = .{
+                return try ip.get(.{ .error_union_type = .{
                     .error_set_type = set_ty,
                     .payload_type = opt_ptr_ty,
                 } });
@@ -2363,13 +2358,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         const opt_ty = switch (ip.indexToKey(chosen)) {
             .simple_type => |simple| switch (simple) {
                 .null_type => chosen,
-                else => try ip.get(gpa, .{ .optional_type = .{ .payload_type = chosen } }),
+                else => try ip.get(.{ .optional_type = .{ .payload_type = chosen } }),
             },
             .optional_type => chosen,
-            else => try ip.get(gpa, .{ .optional_type = .{ .payload_type = chosen } }),
+            else => try ip.get(.{ .optional_type = .{ .payload_type = chosen } }),
         };
         const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ty;
-        return try ip.get(gpa, .{ .error_union_type = .{
+        return try ip.get(.{ .error_union_type = .{
             .error_set_type = set_ty,
             .payload_type = opt_ty,
         } });
@@ -2498,7 +2493,6 @@ const InMemoryCoercionResult = union(enum) {
 /// * array: same shape and coerceable child
 fn coerceInMemoryAllowed(
     ip: *InternPool,
-    gpa: Allocator,
     arena: Allocator,
     dest_ty: Index,
     src_ty: Index,
@@ -2566,14 +2560,14 @@ fn coerceInMemoryAllowed(
             } };
         },
         .pointer => {
-            return try ip.coerceInMemoryAllowedPtrs(gpa, arena, dest_ty, src_ty, dest_is_const, target);
+            return try ip.coerceInMemoryAllowedPtrs(arena, dest_ty, src_ty, dest_is_const, target);
         },
         .optional => {
             // Pointer-like Optionals
             const maybe_dest_ptr_ty = ip.optionalPtrTy(dest_ty);
             const maybe_src_ptr_ty = ip.optionalPtrTy(src_ty);
             if (maybe_dest_ptr_ty != .none and maybe_src_ptr_ty != .none) {
-                return try ip.coerceInMemoryAllowedPtrs(gpa, arena, dest_ty, src_ty, dest_is_const, target);
+                return try ip.coerceInMemoryAllowedPtrs(arena, dest_ty, src_ty, dest_is_const, target);
             }
 
             if (maybe_dest_ptr_ty != maybe_src_ptr_ty) {
@@ -2586,7 +2580,7 @@ fn coerceInMemoryAllowed(
             const dest_child_type = dest_key.optional_type.payload_type;
             const src_child_type = src_key.optional_type.payload_type;
 
-            const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_child_type, src_child_type, dest_is_const, target);
+            const child = try ip.coerceInMemoryAllowed(arena, dest_child_type, src_child_type, dest_is_const, target);
             if (child != .ok) {
                 return .{ .optional_child = .{
                     .child = try child.dupe(arena),
@@ -2598,12 +2592,12 @@ fn coerceInMemoryAllowed(
             return .ok;
         },
         .@"fn" => {
-            return try ip.coerceInMemoryAllowedFns(gpa, arena, dest_ty, src_ty, target);
+            return try ip.coerceInMemoryAllowedFns(arena, dest_ty, src_ty, target);
         },
         .error_union => {
             const dest_payload = dest_key.error_union_type.payload_type;
             const src_payload = src_key.error_union_type.payload_type;
-            const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_payload, src_payload, dest_is_const, target);
+            const child = try ip.coerceInMemoryAllowed(arena, dest_payload, src_payload, dest_is_const, target);
             if (child != .ok) {
                 return .{ .error_union_payload = .{
                     .child = try child.dupe(arena),
@@ -2614,10 +2608,10 @@ fn coerceInMemoryAllowed(
             const dest_set = dest_key.error_union_type.error_set_type;
             const src_set = src_key.error_union_type.error_set_type;
             if (dest_set == .none or src_set == .none) return .ok;
-            return try ip.coerceInMemoryAllowedErrorSets(gpa, arena, dest_set, src_set);
+            return try ip.coerceInMemoryAllowedErrorSets(arena, dest_set, src_set);
         },
         .error_set => {
-            return try ip.coerceInMemoryAllowedErrorSets(gpa, arena, dest_ty, src_ty);
+            return try ip.coerceInMemoryAllowedErrorSets(arena, dest_ty, src_ty);
         },
         .array => {
             const dest_info = dest_key.array_type;
@@ -2629,7 +2623,7 @@ fn coerceInMemoryAllowed(
                 } };
             }
 
-            const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.child, src_info.child, dest_is_const, target);
+            const child = try ip.coerceInMemoryAllowed(arena, dest_info.child, src_info.child, dest_is_const, target);
             if (child != .ok) {
                 return .{ .array_elem = .{
                     .child = try child.dupe(arena),
@@ -2663,7 +2657,7 @@ fn coerceInMemoryAllowed(
 
             const dest_elem_ty = dest_key.vector_type.child;
             const src_elem_ty = src_key.vector_type.child;
-            const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_elem_ty, src_elem_ty, dest_is_const, target);
+            const child = try ip.coerceInMemoryAllowed(arena, dest_elem_ty, src_elem_ty, dest_is_const, target);
             if (child != .ok) {
                 return .{ .vector_elem = .{
                     .child = try child.dupe(arena),
@@ -2685,7 +2679,6 @@ fn coerceInMemoryAllowed(
 
 fn coerceInMemoryAllowedErrorSets(
     ip: *InternPool,
-    gpa: Allocator,
     arena: Allocator,
     dest_ty: Index,
     src_ty: Index,
@@ -2694,18 +2687,18 @@ fn coerceInMemoryAllowedErrorSets(
     if (dest_ty == .anyerror_type) return .ok;
     if (src_ty == .anyerror_type) return .from_anyerror;
 
-    const dest_set_names = try ip.indexToKey(dest_ty).error_set_type.names.dupe(gpa, ip);
-    defer gpa.free(dest_set_names);
+    const dest_set_names = try ip.indexToKey(dest_ty).error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(dest_set_names);
 
-    const src_set_names = try ip.indexToKey(src_ty).error_set_type.names.dupe(gpa, ip);
-    defer gpa.free(src_set_names);
+    const src_set_names = try ip.indexToKey(src_ty).error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(src_set_names);
 
     var missing_error_buf: std.ArrayList(String) = .empty;
-    defer missing_error_buf.deinit(gpa);
+    defer missing_error_buf.deinit(ip.gpa);
 
     for (src_set_names) |name| {
         if (std.mem.findScalar(String, dest_set_names, name) == null) {
-            try missing_error_buf.append(gpa, name);
+            try missing_error_buf.append(ip.gpa, name);
         }
     }
 
@@ -2718,7 +2711,6 @@ fn coerceInMemoryAllowedErrorSets(
 
 fn coerceInMemoryAllowedFns(
     ip: *InternPool,
-    gpa: Allocator,
     arena: Allocator,
     dest_ty: Index,
     src_ty: Index,
@@ -2743,7 +2735,7 @@ fn coerceInMemoryAllowedFns(
     }
 
     if (src_info.return_type != Index.noreturn_type) {
-        const rt = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.return_type, src_info.return_type, true, target);
+        const rt = try ip.coerceInMemoryAllowed(arena, dest_info.return_type, src_info.return_type, true, target);
         if (rt != .ok) {
             return .{ .fn_return_type = .{
                 .child = try rt.dupe(arena),
@@ -2775,15 +2767,15 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    const dest_arg_types = try dest_info.args.dupe(gpa, ip);
-    defer gpa.free(dest_arg_types);
+    const dest_arg_types = try dest_info.args.dupe(ip.gpa, ip);
+    defer ip.gpa.free(dest_arg_types);
 
-    const src_arg_types = try src_info.args.dupe(gpa, ip);
-    defer gpa.free(src_arg_types);
+    const src_arg_types = try src_info.args.dupe(ip.gpa, ip);
+    defer ip.gpa.free(src_arg_types);
 
     for (dest_arg_types, src_arg_types, 0..) |dest_arg_ty, src_arg_ty, i| {
         // Note: Cast direction is reversed here.
-        const param = try ip.coerceInMemoryAllowed(gpa, arena, src_arg_ty, dest_arg_ty, true, target);
+        const param = try ip.coerceInMemoryAllowed(arena, src_arg_ty, dest_arg_ty, true, target);
         if (param != .ok) {
             return .{ .fn_param = .{
                 .child = try param.dupe(arena),
@@ -2807,7 +2799,6 @@ fn coerceInMemoryAllowedFns(
 /// * sentinel-terminated pointers can coerce into `[*]`
 fn coerceInMemoryAllowedPtrs(
     ip: *InternPool,
-    gpa: Allocator,
     arena: Allocator,
     dest_ty: Index,
     src_ty: Index,
@@ -2846,7 +2837,7 @@ fn coerceInMemoryAllowedPtrs(
         } };
     }
 
-    const child = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.elem_type, src_info.elem_type, dest_info.flags.is_const, target);
+    const child = try ip.coerceInMemoryAllowed(arena, dest_info.elem_type, src_info.elem_type, dest_info.flags.is_const, target);
     if (child != .ok) {
         return .{ .ptr_child = .{
             .child = try child.dupe(arena),
@@ -3159,19 +3150,18 @@ pub fn isUnknown(ip: *InternPool, index: Index) bool {
     }
 }
 
-pub fn isUnknownDeep(ip: *InternPool, gpa: Allocator, index: Index) Allocator.Error!bool {
+pub fn isUnknownDeep(ip: *InternPool, index: Index) Allocator.Error!bool {
     var set: std.AutoHashMapUnmanaged(Index, void) = .empty;
-    defer set.deinit(gpa);
-    return try ip.isUnknownDeepInternal(index, gpa, &set);
+    defer set.deinit(ip.gpa);
+    return try ip.isUnknownDeepInternal(index, &set);
 }
 
 fn isUnknownDeepInternal(
     ip: *InternPool,
     index: Index,
-    gpa: Allocator,
     set: *std.AutoHashMapUnmanaged(Index, void),
 ) Allocator.Error!bool {
-    const gop = try set.getOrPut(gpa, index);
+    const gop = try set.getOrPut(ip.gpa, index);
     if (gop.found_existing) return false;
     return switch (ip.indexToKey(index)) {
         .simple_type => |simple| switch (simple) {
@@ -3182,31 +3172,31 @@ fn isUnknownDeepInternal(
 
         .int_type => false,
         .pointer_type => |pointer_info| {
-            if (try ip.isUnknownDeepInternal(pointer_info.elem_type, gpa, set)) return true;
-            if (pointer_info.sentinel != .none and try ip.isUnknownDeepInternal(pointer_info.sentinel, gpa, set)) return true;
+            if (try ip.isUnknownDeepInternal(pointer_info.elem_type, set)) return true;
+            if (pointer_info.sentinel != .none and try ip.isUnknownDeepInternal(pointer_info.sentinel, set)) return true;
             return false;
         },
         .array_type => |array_info| {
-            if (try ip.isUnknownDeepInternal(array_info.child, gpa, set)) return true;
-            if (array_info.sentinel != .none and try ip.isUnknownDeepInternal(array_info.sentinel, gpa, set)) return true;
+            if (try ip.isUnknownDeepInternal(array_info.child, set)) return true;
+            if (array_info.sentinel != .none and try ip.isUnknownDeepInternal(array_info.sentinel, set)) return true;
             return false;
         },
         .struct_type => |struct_index| {
             const struct_info = ip.getStruct(struct_index);
             for (struct_info.fields.values()) |field| {
-                if (try ip.isUnknownDeepInternal(field.ty, gpa, set)) return true;
-                if (field.default_value != .none and try ip.isUnknownDeepInternal(field.default_value, gpa, set)) return true;
+                if (try ip.isUnknownDeepInternal(field.ty, set)) return true;
+                if (field.default_value != .none and try ip.isUnknownDeepInternal(field.default_value, set)) return true;
             }
             // TODO namespace
             return false;
         },
-        .optional_type => |optional_info| try ip.isUnknownDeepInternal(optional_info.payload_type, gpa, set),
-        .error_union_type => |error_union_info| try ip.isUnknownDeepInternal(error_union_info.payload_type, gpa, set),
+        .optional_type => |optional_info| try ip.isUnknownDeepInternal(optional_info.payload_type, set),
+        .error_union_type => |error_union_info| try ip.isUnknownDeepInternal(error_union_info.payload_type, set),
         .error_set_type => false,
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
             for (enum_info.values.keys()) |val| {
-                if (try ip.isUnknownDeepInternal(val, gpa, set)) return true;
+                if (try ip.isUnknownDeepInternal(val, set)) return true;
             }
             // TODO namespace
             return false;
@@ -3214,15 +3204,15 @@ fn isUnknownDeepInternal(
         .function_type => |function_info| {
             for (0..function_info.args.len) |i| {
                 const arg_ty = function_info.args.at(@intCast(i), ip);
-                if (try ip.isUnknownDeepInternal(arg_ty, gpa, set)) return true;
+                if (try ip.isUnknownDeepInternal(arg_ty, set)) return true;
             }
-            if (try ip.isUnknownDeepInternal(function_info.return_type, gpa, set)) return true;
+            if (try ip.isUnknownDeepInternal(function_info.return_type, set)) return true;
             return false;
         },
         .union_type => |union_index| {
             const union_info = ip.getUnion(union_index);
             for (union_info.fields.values()) |field| {
-                if (try ip.isUnknownDeepInternal(field.ty, gpa, set)) return true;
+                if (try ip.isUnknownDeepInternal(field.ty, set)) return true;
             }
             // TODO namespace
             return false;
@@ -3233,13 +3223,13 @@ fn isUnknownDeepInternal(
             for (0..tuple_info.types.len) |i| {
                 const ty = tuple_info.types.at(@intCast(i), ip);
                 const val = tuple_info.values.at(@intCast(i), ip);
-                if (try ip.isUnknownDeepInternal(ty, gpa, set)) return true;
-                if (try ip.isUnknownDeepInternal(val, gpa, set)) return true;
+                if (try ip.isUnknownDeepInternal(ty, set)) return true;
+                if (try ip.isUnknownDeepInternal(val, set)) return true;
             }
             return false;
         },
-        .vector_type => |vector_info| try ip.isUnknownDeepInternal(vector_info.child, gpa, set),
-        .anyframe_type => |anyframe_info| try ip.isUnknownDeepInternal(anyframe_info.child, gpa, set),
+        .vector_type => |vector_info| try ip.isUnknownDeepInternal(vector_info.child, set),
+        .anyframe_type => |anyframe_info| try ip.isUnknownDeepInternal(anyframe_info.child, set),
 
         .int_u64_value,
         .int_i64_value,
@@ -3259,7 +3249,7 @@ fn isUnknownDeepInternal(
         .error_value,
         .null_value,
         .undefined_value,
-        => try ip.isUnknownDeepInternal(ip.typeOf(index), gpa, set),
+        => try ip.isUnknownDeepInternal(ip.typeOf(index), set),
         .unknown_value => true,
     };
 }
@@ -3345,7 +3335,7 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.builtin.Type.
 }
 
 /// Asserts the type is an integer or vector of integers.
-pub fn toUnsigned(ip: *InternPool, gpa: Allocator, ty: Index, target: std.Target) Allocator.Error!Index {
+pub fn toUnsigned(ip: *InternPool, ty: Index, target: std.Target) Allocator.Error!Index {
     const tag = ip.zigTypeTag(ty) orelse unreachable;
     return switch (ty) {
         .usize_type, .isize_type => .usize_type,
@@ -3354,13 +3344,13 @@ pub fn toUnsigned(ip: *InternPool, gpa: Allocator, ty: Index, target: std.Target
         .c_ulong_type, .c_long_type => .c_ulong_type,
         .c_ulonglong_type, .c_longlong_type => .c_ulonglong_type,
         else => switch (tag) {
-            .int => try ip.get(gpa, .{ .int_type = .{
+            .int => try ip.get(.{ .int_type = .{
                 .signedness = .unsigned,
                 .bits = ip.intInfo(ty, target).bits,
             } }),
-            .vector => try ip.get(gpa, .{ .vector_type = .{
+            .vector => try ip.get(.{ .vector_type = .{
                 .len = ip.vectorLen(ty),
-                .child = try ip.toUnsigned(gpa, ip.childType(ty), target),
+                .child = try ip.toUnsigned(ip.childType(ty), target),
             } }),
             else => unreachable,
         },
@@ -3524,7 +3514,7 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
     };
 }
 
-pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) Allocator.Error!Index {
+pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
     assert(ip.zigTypeTag(a_ty) == .error_set);
     assert(ip.zigTypeTag(b_ty) == .error_set);
 
@@ -3535,24 +3525,24 @@ pub fn errorSetMerge(ip: *InternPool, gpa: Allocator, a_ty: Index, b_ty: Index) 
 
     if (a_ty == b_ty) return a_ty;
 
-    const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(gpa, ip);
-    defer gpa.free(a_names);
+    const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(a_names);
 
-    const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(gpa, ip);
-    defer gpa.free(b_names);
+    const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(b_names);
 
     var set: std.AutoArrayHashMapUnmanaged(String, void) = .empty;
-    defer set.deinit(gpa);
+    defer set.deinit(ip.gpa);
 
-    try set.ensureTotalCapacity(gpa, a_names.len + b_names.len);
+    try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
 
     for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
     for (b_names) |name| set.putAssumeCapacity(name, {});
 
-    return try ip.get(gpa, .{
+    return try ip.get(.{
         .error_set_type = .{
             .owner_decl = .none,
-            .names = try ip.getStringSlice(gpa, set.keys()),
+            .names = try ip.getStringSlice(set.keys()),
         },
     });
 }
@@ -3827,29 +3817,29 @@ pub fn toInt(ip: *InternPool, val: Index, comptime T: type) ?T {
     };
 }
 
-pub fn getBigInt(ip: *InternPool, gpa: Allocator, ty: Index, int: std.math.big.int.Const) Allocator.Error!Index {
+pub fn getBigInt(ip: *InternPool, ty: Index, int: std.math.big.int.Const) Allocator.Error!Index {
     assert(ip.isType(ty));
-    return try ip.get(gpa, .{
+    return try ip.get(.{
         .int_big_value = .{ .ty = ty, .storage = .{ .external = int } },
     });
 }
 
-pub fn getNull(ip: *InternPool, gpa: Allocator, ty: Index) Allocator.Error!Index {
+pub fn getNull(ip: *InternPool, ty: Index) Allocator.Error!Index {
     if (ty == .none) return Index.null_value;
     assert(ip.isType(ty));
-    return try ip.get(gpa, .{ .null_value = .{ .ty = ty } });
+    return try ip.get(.{ .null_value = .{ .ty = ty } });
 }
 
-pub fn getUndefined(ip: *InternPool, gpa: Allocator, ty: Index) Allocator.Error!Index {
+pub fn getUndefined(ip: *InternPool, ty: Index) Allocator.Error!Index {
     assert(ip.isType(ty));
-    return try ip.get(gpa, .{ .undefined_value = .{ .ty = ty } });
+    return try ip.get(.{ .undefined_value = .{ .ty = ty } });
 }
 
-pub fn getUnknown(ip: *InternPool, gpa: Allocator, ty: Index) Allocator.Error!Index {
+pub fn getUnknown(ip: *InternPool, ty: Index) Allocator.Error!Index {
     assert(ip.isType(ty));
     if (ty == .type_type) return Index.unknown_type;
     if (ty == .unknown_type) return Index.unknown_unknown;
-    return try ip.get(gpa, .{ .unknown_value = .{ .ty = ty } });
+    return try ip.get(.{ .unknown_value = .{ .ty = ty } });
 }
 
 // ---------------------------------------------
@@ -4170,8 +4160,8 @@ const FormatId = struct {
     string: String,
 
     fn render(ctx: FormatId, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.string);
-        defer locked_string.release(&ctx.ip.string_pool);
+        const locked_string = ctx.ip.string_pool.stringToSliceLock(ctx.ip.io, ctx.string);
+        defer locked_string.release(ctx.ip.io, &ctx.ip.string_pool);
         try writer.print("{f}", .{std.zig.fmtId(locked_string.slice)});
     }
 };
@@ -4186,20 +4176,21 @@ pub fn fmtId(ip: *InternPool, string: String) std.fmt.Alt(FormatId, FormatId.ren
 
 test "simple types" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const null_type = try ip.get(gpa, .{ .simple_type = .null_type });
-    const undefined_type = try ip.get(gpa, .{ .simple_type = .undefined_type });
-    const enum_literal_type = try ip.get(gpa, .{ .simple_type = .enum_literal_type });
+    const null_type = try ip.get(.{ .simple_type = .null_type });
+    const undefined_type = try ip.get(.{ .simple_type = .undefined_type });
+    const enum_literal_type = try ip.get(.{ .simple_type = .enum_literal_type });
 
-    const undefined_value = try ip.get(gpa, .{ .simple_value = .undefined_value });
-    const void_value = try ip.get(gpa, .{ .simple_value = .void_value });
-    const unreachable_value = try ip.get(gpa, .{ .simple_value = .unreachable_value });
-    const null_value = try ip.get(gpa, .{ .simple_value = .null_value });
-    const bool_true = try ip.get(gpa, .{ .simple_value = .bool_true });
-    const bool_false = try ip.get(gpa, .{ .simple_value = .bool_false });
+    const undefined_value = try ip.get(.{ .simple_value = .undefined_value });
+    const void_value = try ip.get(.{ .simple_value = .void_value });
+    const unreachable_value = try ip.get(.{ .simple_value = .unreachable_value });
+    const null_value = try ip.get(.{ .simple_value = .null_value });
+    const bool_true = try ip.get(.{ .simple_value = .bool_true });
+    const bool_false = try ip.get(.{ .simple_value = .bool_false });
 
     try expectFmt("@TypeOf(null)", "{f}", .{null_type.fmt(&ip)});
     try expectFmt("@TypeOf(undefined)", "{f}", .{undefined_type.fmt(&ip)});
@@ -4223,14 +4214,15 @@ test "simple types" {
 
 test "int type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
-    const u7_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 7 } });
-    const another_i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const i32_type = try ip.get(.{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const i16_type = try ip.get(.{ .int_type = .{ .signedness = .signed, .bits = 16 } });
+    const u7_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 7 } });
+    const another_i32_type = try ip.get(.{ .int_type = .{ .signedness = .signed, .bits = 32 } });
 
     try expect(i32_type == another_i32_type);
     try expect(i32_type != u7_type);
@@ -4261,10 +4253,10 @@ test "int type" {
     try expect(ip.isUnsignedInt(u7_type, builtin.target));
     try expect(!ip.isSignedInt(u7_type, builtin.target));
 
-    try expect(.u32_type == try ip.toUnsigned(gpa, i32_type, builtin.target));
-    try expect(.u16_type == try ip.toUnsigned(gpa, i16_type, builtin.target));
-    try expect(.u16_type == try ip.toUnsigned(gpa, .u16_type, builtin.target));
-    try expect(u7_type == try ip.toUnsigned(gpa, u7_type, builtin.target));
+    try expect(.u32_type == try ip.toUnsigned(i32_type, builtin.target));
+    try expect(.u16_type == try ip.toUnsigned(i16_type, builtin.target));
+    try expect(.u16_type == try ip.toUnsigned(.u16_type, builtin.target));
+    try expect(u7_type == try ip.toUnsigned(u7_type, builtin.target));
 
     try expect(i32_type == ip.scalarType(i32_type));
     try expect(i16_type == ip.scalarType(i16_type));
@@ -4273,18 +4265,19 @@ test "int type" {
 
 test "int value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const unsigned_zero_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 0 } });
-    const unsigned_one_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 1 } });
-    const signed_zero_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .i64_type, .int = 0 } });
-    const signed_one_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .i64_type, .int = 1 } });
+    const unsigned_zero_value = try ip.get(.{ .int_u64_value = .{ .ty = .u64_type, .int = 0 } });
+    const unsigned_one_value = try ip.get(.{ .int_u64_value = .{ .ty = .u64_type, .int = 1 } });
+    const signed_zero_value = try ip.get(.{ .int_u64_value = .{ .ty = .i64_type, .int = 0 } });
+    const signed_one_value = try ip.get(.{ .int_u64_value = .{ .ty = .i64_type, .int = 1 } });
 
-    const u64_max_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = std.math.maxInt(u64) } });
-    const i64_max_value = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.maxInt(i64) } });
-    const i64_min_value = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.minInt(i64) } });
+    const u64_max_value = try ip.get(.{ .int_u64_value = .{ .ty = .u64_type, .int = std.math.maxInt(u64) } });
+    const i64_max_value = try ip.get(.{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.maxInt(i64) } });
+    const i64_min_value = try ip.get(.{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.minInt(i64) } });
 
     try expect(unsigned_zero_value != unsigned_one_value);
     try expect(unsigned_one_value != signed_zero_value);
@@ -4306,8 +4299,9 @@ test "int value" {
 
 test "big int value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     var result: std.math.big.int.Managed = try .init(gpa);
@@ -4317,10 +4311,10 @@ test "big int value" {
 
     try result.pow(&a, 128);
 
-    const positive_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst());
-    const negative_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst().negate());
+    const positive_big_int_value = try ip.getBigInt(.comptime_int_type, result.toConst());
+    const negative_big_int_value = try ip.getBigInt(.comptime_int_type, result.toConst().negate());
 
-    const another_positive_big_int_value = try ip.getBigInt(gpa, .comptime_int_type, result.toConst());
+    const another_positive_big_int_value = try ip.getBigInt(.comptime_int_type, result.toConst());
 
     try std.testing.expect(positive_big_int_value != negative_big_int_value);
     try std.testing.expectEqual(positive_big_int_value, another_positive_big_int_value);
@@ -4335,18 +4329,19 @@ test "big int value" {
 
 test "float type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
-    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
-    const f80_type = try ip.get(gpa, .{ .simple_type = .f80 });
-    const f128_type = try ip.get(gpa, .{ .simple_type = .f128 });
+    const f16_type = try ip.get(.{ .simple_type = .f16 });
+    const f32_type = try ip.get(.{ .simple_type = .f32 });
+    const f64_type = try ip.get(.{ .simple_type = .f64 });
+    const f80_type = try ip.get(.{ .simple_type = .f80 });
+    const f128_type = try ip.get(.{ .simple_type = .f128 });
 
-    const another_f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
-    const another_f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
+    const another_f32_type = try ip.get(.{ .simple_type = .f32 });
+    const another_f64_type = try ip.get(.{ .simple_type = .f64 });
 
     try expect(f16_type != f32_type);
     try expect(f32_type != f64_type);
@@ -4365,24 +4360,25 @@ test "float type" {
 
 test "float value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
-    const f32_value = try ip.get(gpa, .{ .float_32_value = 0.5 });
-    const f64_value = try ip.get(gpa, .{ .float_64_value = 1.0 });
-    const f80_value = try ip.get(gpa, .{ .float_80_value = 2.0 });
-    const f128_value = try ip.get(gpa, .{ .float_128_value = 2.75 });
+    const f16_value = try ip.get(.{ .float_16_value = 0.25 });
+    const f32_value = try ip.get(.{ .float_32_value = 0.5 });
+    const f64_value = try ip.get(.{ .float_64_value = 1.0 });
+    const f80_value = try ip.get(.{ .float_80_value = 2.0 });
+    const f128_value = try ip.get(.{ .float_128_value = 2.75 });
 
-    const f32_snan_value = try ip.get(gpa, .{ .float_32_value = std.math.snan(f32) });
-    const f32_qnan_value = try ip.get(gpa, .{ .float_32_value = std.math.nan(f32) });
+    const f32_snan_value = try ip.get(.{ .float_32_value = std.math.snan(f32) });
+    const f32_qnan_value = try ip.get(.{ .float_32_value = std.math.nan(f32) });
 
-    const f32_inf_value = try ip.get(gpa, .{ .float_32_value = std.math.inf(f32) });
-    const f32_ninf_value = try ip.get(gpa, .{ .float_32_value = -std.math.inf(f32) });
+    const f32_inf_value = try ip.get(.{ .float_32_value = std.math.inf(f32) });
+    const f32_ninf_value = try ip.get(.{ .float_32_value = -std.math.inf(f32) });
 
-    const f32_zero_value = try ip.get(gpa, .{ .float_32_value = 0.0 });
-    const f32_nzero_value = try ip.get(gpa, .{ .float_32_value = -0.0 });
+    const f32_zero_value = try ip.get(.{ .float_32_value = 0.0 });
+    const f32_nzero_value = try ip.get(.{ .float_32_value = -0.0 });
 
     try expect(f16_value != f32_value);
     try expect(f32_value != f64_value);
@@ -4423,19 +4419,20 @@ test "float value" {
 
 test "pointer type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip = try InternPool.init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"*i32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*i32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .i32_type,
         .flags = .{ .size = .one },
     } });
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{ .size = .one },
     } });
-    const @"*const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*const volatile u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
@@ -4443,7 +4440,7 @@ test "pointer type" {
             .is_volatile = true,
         },
     } });
-    const @"*align(4:2:3) u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*align(4:2:3) u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
@@ -4454,7 +4451,7 @@ test "pointer type" {
             .host_size = 3,
         },
     } });
-    const @"*allowzero addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*allowzero addrspace(.shared) const u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
@@ -4464,25 +4461,25 @@ test "pointer type" {
         },
     } });
 
-    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{ .size = .many },
     } });
-    const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*:0]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .sentinel = .zero_comptime_int,
         .flags = .{ .size = .many },
     } });
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{ .size = .slice },
     } });
-    const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[:0]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .sentinel = .zero_comptime_int,
         .flags = .{ .size = .slice },
     } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*c]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{ .size = .c },
     } });
@@ -4512,12 +4509,13 @@ test "pointer type" {
 
 test "optional type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const i32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .i32_type } });
-    const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+    const i32_optional_type = try ip.get(.{ .optional_type = .{ .payload_type = .i32_type } });
+    const u32_optional_type = try ip.get(.{ .optional_type = .{ .payload_type = .u32_type } });
 
     try expect(i32_optional_type != u32_optional_type);
 
@@ -4527,41 +4525,43 @@ test "optional type" {
 
 test "optional value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+    const u32_optional_type = try ip.get(.{ .optional_type = .{ .payload_type = .u32_type } });
 
-    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
-    const optional_42_value = try ip.get(gpa, .{ .optional_value = .{ .ty = u32_optional_type, .val = u64_42_value } });
+    const u64_42_value = try ip.get(.{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
+    const optional_42_value = try ip.get(.{ .optional_value = .{ .ty = u32_optional_type, .val = u64_42_value } });
 
     try expectFmt("42", "{f}", .{optional_42_value.fmt(&ip)});
 }
 
 test "error set type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const foo_name = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_name = try ip.string_pool.getOrPutString(gpa, "bar");
-    const baz_name = try ip.string_pool.getOrPutString(gpa, "baz");
+    const foo_name = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_name = try ip.string_pool.getOrPutString(io, gpa, "bar");
+    const baz_name = try ip.string_pool.getOrPutString(io, gpa, "baz");
 
-    const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{
+    const empty_error_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
     } });
 
-    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_baz_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name, baz_name }),
+        .names = try ip.getStringSlice(&.{ foo_name, bar_name, baz_name }),
     } });
 
-    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
     } });
 
     try expect(empty_error_set != foo_bar_baz_set);
@@ -4574,17 +4574,18 @@ test "error set type" {
 
 test "error union type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{
+    const empty_error_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
     } });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
+    const bool_type = try ip.get(.{ .simple_type = .bool });
 
-    const @"error{}!bool" = try ip.get(gpa, .{ .error_union_type = .{
+    const @"error{}!bool" = try ip.get(.{ .error_union_type = .{
         .error_set_type = empty_error_set,
         .payload_type = bool_type,
     } });
@@ -4594,15 +4595,16 @@ test "error union type" {
 
 test "array type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const i32_3_array_type = try ip.get(gpa, .{ .array_type = .{
+    const i32_3_array_type = try ip.get(.{ .array_type = .{
         .len = 3,
         .child = .i32_type,
     } });
-    const u32_0_0_array_type = try ip.get(gpa, .{ .array_type = .{
+    const u32_0_0_array_type = try ip.get(.{ .array_type = .{
         .len = 3,
         .child = .u32_type,
         .sentinel = .zero_comptime_int,
@@ -4616,14 +4618,15 @@ test "array type" {
 
 test "struct value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const foo_name_index = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_name_index = try ip.string_pool.getOrPutString(gpa, "bar");
+    const foo_name_index = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_name_index = try ip.string_pool.getOrPutString(io, gpa, "bar");
 
-    const struct_index = try ip.createStruct(gpa, .{
+    const struct_index = try ip.createStruct(.{
         .fields = .empty,
         .owner_decl = .none,
         .namespace = .none,
@@ -4631,14 +4634,14 @@ test "struct value" {
         .backing_int_ty = .none,
         .status = .none,
     });
-    const struct_type = try ip.get(gpa, .{ .struct_type = struct_index });
+    const struct_type = try ip.get(.{ .struct_type = struct_index });
     const struct_info = ip.getStructMut(struct_index);
     try struct_info.fields.put(gpa, foo_name_index, .{ .ty = .usize_type });
     try struct_info.fields.put(gpa, bar_name_index, .{ .ty = .bool_type });
 
-    const aggregate_value = try ip.get(gpa, .{ .aggregate = .{
+    const aggregate_value = try ip.get(.{ .aggregate = .{
         .ty = struct_type,
-        .values = try ip.getIndexSlice(gpa, &.{ .one_usize, .bool_true }),
+        .values = try ip.getIndexSlice(&.{ .one_usize, .bool_true }),
     } });
 
     try expectFmt(".{.foo = 1, .bar = true}", "{f}", .{aggregate_value.fmt(&ip)});
@@ -4646,12 +4649,13 @@ test "struct value" {
 
 test "function type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{.i32_type}),
+    const @"fn(i32) bool" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{.i32_type}),
         .return_type = .bool_type,
     } });
 
@@ -4660,22 +4664,22 @@ test "function type" {
     var args_is_noalias: std.StaticBitSet(32) = .initEmpty();
     args_is_noalias.set(1);
 
-    const @"fn(comptime type, noalias i32) type" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{ .type_type, .i32_type }),
+    const @"fn(comptime type, noalias i32) type" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{ .type_type, .i32_type }),
         .args_is_comptime = args_is_comptime,
         .args_is_noalias = args_is_noalias,
         .return_type = .type_type,
     } });
 
-    const @"fn(i32, ...) type" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{.i32_type}),
+    const @"fn(i32, ...) type" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{.i32_type}),
         .return_type = .type_type,
         .flags = .{
             .is_var_args = true,
         },
     } });
 
-    const @"fn() align(4) callconv(.c) type" = try ip.get(gpa, .{ .function_type = .{
+    const @"fn() align(4) callconv(.c) type" = try ip.get(.{ .function_type = .{
         .args = .empty,
         .return_type = .type_type,
         .flags = .{
@@ -4692,33 +4696,34 @@ test "function type" {
 
 test "union value" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const int_name_index = try ip.string_pool.getOrPutString(gpa, "int");
-    const float_name_index = try ip.string_pool.getOrPutString(gpa, "float");
+    const int_name_index = try ip.string_pool.getOrPutString(io, gpa, "int");
+    const float_name_index = try ip.string_pool.getOrPutString(io, gpa, "float");
 
-    const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
+    const f16_value = try ip.get(.{ .float_16_value = 0.25 });
 
-    const union_index = try ip.createUnion(gpa, .{
+    const union_index = try ip.createUnion(.{
         .tag_type = .none,
         .fields = .empty,
         .namespace = .none,
         .layout = .auto,
         .status = .none,
     });
-    const union_type = try ip.get(gpa, .{ .union_type = union_index });
+    const union_type = try ip.get(.{ .union_type = union_index });
     const union_info = ip.getUnionMut(union_index);
     try union_info.fields.put(gpa, int_name_index, .{ .ty = .usize_type, .alignment = 0 });
     try union_info.fields.put(gpa, float_name_index, .{ .ty = .f16_type, .alignment = 0 });
 
-    const union_value1 = try ip.get(gpa, .{ .union_value = .{
+    const union_value1 = try ip.get(.{ .union_value = .{
         .ty = union_type,
         .field_index = 0,
         .val = .one_usize,
     } });
-    const union_value2 = try ip.get(gpa, .{ .union_value = .{
+    const union_value2 = try ip.get(.{ .union_value = .{
         .ty = union_type,
         .field_index = 1,
         .val = f16_value,
@@ -4730,12 +4735,13 @@ test "union value" {
 
 test "anyframe type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .i32_type } });
-    const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .bool_type } });
+    const @"anyframe->i32" = try ip.get(.{ .anyframe_type = .{ .child = .i32_type } });
+    const @"anyframe->bool" = try ip.get(.{ .anyframe_type = .{ .child = .bool_type } });
 
     try expect(@"anyframe->i32" != @"anyframe->bool");
 
@@ -4745,19 +4751,20 @@ test "anyframe type" {
 
 test "vector type" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"@Vector(2,i32)" = try ip.get(gpa, .{ .vector_type = .{
+    const @"@Vector(2,i32)" = try ip.get(.{ .vector_type = .{
         .len = 2,
         .child = .i32_type,
     } });
-    const @"@Vector(2,u32)" = try ip.get(gpa, .{ .vector_type = .{
+    const @"@Vector(2,u32)" = try ip.get(.{ .vector_type = .{
         .len = 2,
         .child = .u32_type,
     } });
-    const @"@Vector(2,bool)" = try ip.get(gpa, .{ .vector_type = .{
+    const @"@Vector(2,bool)" = try ip.get(.{ .vector_type = .{
         .len = 2,
         .child = .bool_type,
     } });
@@ -4768,8 +4775,8 @@ test "vector type" {
     try expectFmt("@Vector(2,u32)", "{f}", .{@"@Vector(2,u32)".fmt(&ip)});
     try expectFmt("@Vector(2,bool)", "{f}", .{@"@Vector(2,bool)".fmt(&ip)});
 
-    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,i32)", builtin.target));
-    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(gpa, @"@Vector(2,u32)", builtin.target));
+    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(@"@Vector(2,i32)", builtin.target));
+    try expect(@"@Vector(2,u32)" == try ip.toUnsigned(@"@Vector(2,u32)", builtin.target));
 
     try expect(.i32_type == ip.scalarType(@"@Vector(2,i32)"));
     try expect(.u32_type == ip.scalarType(@"@Vector(2,u32)"));
@@ -4782,13 +4789,14 @@ test "vector type" {
 
 test "Index.Slice" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    _ = try ip.getIndexSlice(gpa, &.{ .none, .c_ulonglong_type, .call_modifier_type });
-    const index_slice = try ip.getIndexSlice(gpa, &.{ .bool_type, .f32_type, .one_u8 });
-    _ = try ip.getIndexSlice(gpa, &.{ .bool_false, .none, .anyerror_type });
+    _ = try ip.getIndexSlice(&.{ .none, .c_ulonglong_type, .call_modifier_type });
+    const index_slice = try ip.getIndexSlice(&.{ .bool_type, .f32_type, .one_u8 });
+    _ = try ip.getIndexSlice(&.{ .bool_false, .none, .anyerror_type });
 
     try std.testing.expectEqual(@as(u32, 3), index_slice.len);
     try std.testing.expectEqual(Index.bool_type, index_slice.at(0, &ip));
@@ -4808,17 +4816,18 @@ test "Index.Slice" {
 
 test StringSlice {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const str1 = try ip.string_pool.getOrPutString(gpa, "aaa");
-    const str2 = try ip.string_pool.getOrPutString(gpa, "bbb");
-    const str3 = try ip.string_pool.getOrPutString(gpa, "ccc");
+    const str1 = try ip.string_pool.getOrPutString(io, gpa, "aaa");
+    const str2 = try ip.string_pool.getOrPutString(io, gpa, "bbb");
+    const str3 = try ip.string_pool.getOrPutString(io, gpa, "ccc");
 
-    _ = try ip.getStringSlice(gpa, &.{ str2, str1, str3 });
-    const string_slice = try ip.getStringSlice(gpa, &.{ str1, str2, str3 });
-    _ = try ip.getStringSlice(gpa, &.{ str3, str2, str1 });
+    _ = try ip.getStringSlice(&.{ str2, str1, str3 });
+    const string_slice = try ip.getStringSlice(&.{ str1, str2, str3 });
+    _ = try ip.getStringSlice(&.{ str3, str2, str1 });
 
     try std.testing.expectEqual(@as(u32, 3), string_slice.len);
     try std.testing.expectEqual(str1, string_slice.at(0, &ip));
@@ -4842,7 +4851,7 @@ test "test thread safety of InternPool" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     const index_start = ip.map.count();
@@ -4852,12 +4861,11 @@ test "test thread safety of InternPool" {
     const funcs = struct {
         fn do(
             intern_pool: *InternPool,
-            allocator: std.mem.Allocator,
             count: usize,
         ) void {
             // insert float_32_value from 0 to count + random work
             for (0..count) |i| {
-                _ = intern_pool.get(allocator, .{ .float_32_value = @floatFromInt(i) }) catch @panic("OOM");
+                _ = intern_pool.get(.{ .float_32_value = @floatFromInt(i) }) catch @panic("OOM");
                 _ = intern_pool.indexToKey(@enumFromInt(i));
             }
             for (0..count) |i| {
@@ -4870,7 +4878,7 @@ test "test thread safety of InternPool" {
 
     var wait_group: std.Io.Group = .init;
     for (0..cpu_count) |_| {
-        wait_group.async(io, funcs.do, .{ &ip, gpa, size });
+        wait_group.async(io, funcs.do, .{ &ip, size });
     }
     try wait_group.await(io);
 
@@ -4899,94 +4907,97 @@ test "test thread safety of InternPool" {
 
 test "coerceInMemoryAllowed integers and floats" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
 
     var arena_allocator: std.heap.ArenaAllocator = .init(gpa);
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    var ip: InternPool = try .init(gpa);
-    defer ip.deinit(gpa);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u32_type, .u32_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u32_type, .u16_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u16_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(arena, .i32_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u32_type, .i32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u32_type, .i16_type, true, builtin.target) == .int_not_coercible);
 
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u32_type, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u16_type, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u16_type, .u32_type, true, builtin.target) == .int_not_coercible);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .i32_type, .u32_type, true, builtin.target) == .int_not_coercible);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i32_type, true, builtin.target) == .int_not_coercible);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i16_type, true, builtin.target) == .int_not_coercible);
-
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f32_type, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f64_type, .f32_type, true, builtin.target) == .no_match);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(arena, .f32_type, .f32_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .f64_type, .f32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
 }
 
 test "coerceInMemoryAllowed error set" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
 
     var arena_allocator: std.heap.ArenaAllocator = .init(gpa);
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    var ip: InternPool = try .init(gpa);
-    defer ip.deinit(gpa);
+    const foo_name = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_name = try ip.string_pool.getOrPutString(io, gpa, "bar");
+    const baz_name = try ip.string_pool.getOrPutString(io, gpa, "baz");
 
-    const foo_name = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_name = try ip.string_pool.getOrPutString(gpa, "bar");
-    const baz_name = try ip.string_pool.getOrPutString(gpa, "baz");
-
-    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_baz_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ baz_name, bar_name, foo_name }),
+        .names = try ip.getStringSlice(&.{ baz_name, bar_name, foo_name }),
     } });
-    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
     } });
-    const foo_set = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{foo_name}),
+        .names = try ip.getStringSlice(&.{foo_name}),
     } });
-    const empty_set = try ip.get(gpa, .{ .error_set_type = .{
+    const empty_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
     } });
 
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, empty_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, .anyerror_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, .anyerror_type, true, builtin.target) == .ok);
 
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, .anyerror_type, true, builtin.target) == .from_anyerror);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_baz_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+    try expect(try ip.coerceInMemoryAllowed(arena, empty_set, .anyerror_type, true, builtin.target) == .from_anyerror);
 
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_baz_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, empty_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, empty_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, empty_set, true, builtin.target) == .ok);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_baz_set, foo_bar_baz_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_baz_set, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_baz_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_baz_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_set, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(arena, empty_set, empty_set, true, builtin.target) == .ok);
 
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_set, true, builtin.target) == .missing_error);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_set, true, builtin.target) == .missing_error);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
-    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(arena, empty_set, foo_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(arena, empty_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_set, foo_bar_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(arena, foo_bar_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
 }
 
 test "resolvePeerTypes" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    try expect(.noreturn_type == try ip.resolvePeerTypes(gpa, &.{}, builtin.target));
-    try expect(.type_type == try ip.resolvePeerTypes(gpa, &.{.type_type}, builtin.target));
+    try expect(.noreturn_type == try ip.resolvePeerTypes(&.{}, builtin.target));
+    try expect(.type_type == try ip.resolvePeerTypes(&.{.type_type}, builtin.target));
 
     try ip.testResolvePeerTypes(.bool_type, .bool_type, .bool_type);
     try ip.testResolvePeerTypes(.bool_type, .noreturn_type, .bool_type);
@@ -4997,8 +5008,9 @@ test "resolvePeerTypes" {
 
 test "resolvePeerTypes integers and floats" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     try ip.testResolvePeerTypes(.i16_type, .i16_type, .i16_type);
@@ -5082,12 +5094,13 @@ test "resolvePeerTypes integers and floats" {
 
 test "resolvePeerTypes optionals" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
-    const @"?bool" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .bool_type } });
+    const @"?u32" = try ip.get(.{ .optional_type = .{ .payload_type = .u32_type } });
+    const @"?bool" = try ip.get(.{ .optional_type = .{ .payload_type = .bool_type } });
 
     try ip.testResolvePeerTypes(.u32_type, .null_type, @"?u32");
     try ip.testResolvePeerTypes(.bool_type, .null_type, @"?bool");
@@ -5095,44 +5108,45 @@ test "resolvePeerTypes optionals" {
 
 test "resolvePeerTypes pointers" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .one } } });
-    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .many } } });
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .slice } } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .c } } });
+    const @"*u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .one } } });
+    const @"[*]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .many } } });
+    const @"[]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .slice } } });
+    const @"[*c]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .c } } });
 
-    const @"?*u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*u32" } });
-    const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
-    const @"?[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]u32" } });
+    const @"?*u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*u32" } });
+    const @"?[*]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"[*]u32" } });
+    const @"?[]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"[]u32" } });
 
-    const @"**u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"*u32", .flags = .{ .size = .one } } });
-    const @"*[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*]u32", .flags = .{ .size = .one } } });
-    const @"*[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[]u32", .flags = .{ .size = .one } } });
-    const @"*[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*c]u32", .flags = .{ .size = .one } } });
+    const @"**u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"*u32", .flags = .{ .size = .one } } });
+    const @"*[*]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"[*]u32", .flags = .{ .size = .one } } });
+    const @"*[]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"[]u32", .flags = .{ .size = .one } } });
+    const @"*[*c]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"[*c]u32", .flags = .{ .size = .one } } });
 
-    const @"?*[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[*]u32" } });
-    const @"?*[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[]u32" } });
+    const @"?*[*]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*[*]u32" } });
+    const @"?*[]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*[]u32" } });
 
-    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 1, .child = .u32_type, .sentinel = .none } });
-    const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 2, .child = .u32_type, .sentinel = .none } });
+    const @"[1]u32" = try ip.get(.{ .array_type = .{ .len = 1, .child = .u32_type, .sentinel = .none } });
+    const @"[2]u32" = try ip.get(.{ .array_type = .{ .len = 2, .child = .u32_type, .sentinel = .none } });
 
-    const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .flags = .{ .size = .one } } });
-    const @"*[2]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[2]u32", .flags = .{ .size = .one } } });
+    const @"*[1]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"[1]u32", .flags = .{ .size = .one } } });
+    const @"*[2]u32" = try ip.get(.{ .pointer_type = .{ .elem_type = @"[2]u32", .flags = .{ .size = .one } } });
 
-    const @"?*[1]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[1]u32" } });
-    const @"?*[2]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[2]u32" } });
+    const @"?*[1]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*[1]u32" } });
+    const @"?*[2]u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*[2]u32" } });
 
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .one, .is_const = true } } });
-    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .many, .is_const = true } } });
-    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .slice, .is_const = true } } });
-    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .c, .is_const = true } } });
+    const @"*const u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .one, .is_const = true } } });
+    const @"[*]const u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .many, .is_const = true } } });
+    const @"[]const u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .slice, .is_const = true } } });
+    const @"[*c]const u32" = try ip.get(.{ .pointer_type = .{ .elem_type = .u32_type, .flags = .{ .size = .c, .is_const = true } } });
 
-    const @"?*const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*const u32" } });
-    const @"?[*]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]const u32" } });
-    const @"?[]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]const u32" } });
+    const @"?*const u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"*const u32" } });
+    const @"?[*]const u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"[*]const u32" } });
+    const @"?[]const u32" = try ip.get(.{ .optional_type = .{ .payload_type = @"[]const u32" } });
 
     _ = @"**u32";
     _ = @"*[*c]u32";
@@ -5188,15 +5202,16 @@ test "resolvePeerTypes pointers" {
 
 test "resolvePeerTypes function pointers" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{ .size = .one },
     } });
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*const u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
@@ -5204,13 +5219,13 @@ test "resolvePeerTypes function pointers" {
         },
     } });
 
-    const @"fn(*u32) void" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{@"*u32"}),
+    const @"fn(*u32) void" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{@"*u32"}),
         .return_type = .void_type,
     } });
 
-    const @"fn(*const u32) void" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{@"*const u32"}),
+    const @"fn(*const u32) void" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{@"*const u32"}),
         .return_type = .void_type,
     } });
 
@@ -5220,31 +5235,32 @@ test "resolvePeerTypes function pointers" {
 
 test "resolvePeerTypes error sets" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const foo_name = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_name = try ip.string_pool.getOrPutString(gpa, "bar");
+    const foo_name = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_name = try ip.string_pool.getOrPutString(io, gpa, "bar");
 
-    const @"error{foo}" = try ip.get(gpa, .{ .error_set_type = .{
+    const @"error{foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{foo_name}),
+        .names = try ip.getStringSlice(&.{foo_name}),
     } });
 
-    const @"error{bar}" = try ip.get(gpa, .{ .error_set_type = .{
+    const @"error{bar}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{bar_name}),
+        .names = try ip.getStringSlice(&.{bar_name}),
     } });
 
-    const @"error{foo,bar}" = try ip.get(gpa, .{ .error_set_type = .{
+    const @"error{foo,bar}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ foo_name, bar_name }),
+        .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
     } });
 
-    const @"error{bar,foo}" = try ip.get(gpa, .{ .error_set_type = .{
+    const @"error{bar,foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
-        .names = try ip.getStringSlice(gpa, &.{ bar_name, foo_name }),
+        .names = try ip.getStringSlice(&.{ bar_name, foo_name }),
     } });
 
     try ip.testResolvePeerTypesInOrder(@"error{foo}", @"error{bar}", @"error{foo,bar}");
@@ -5257,7 +5273,7 @@ fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !v
 }
 
 fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
-    const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{ lhs, rhs }, builtin.target);
+    const actual = try resolvePeerTypes(ip, &.{ lhs, rhs }, builtin.target);
     if (expected == actual) return;
     std.debug.print("expected `{f}`, found `{f}`\n", .{ expected.fmtDebug(ip), actual.fmtDebug(ip) });
     return error.TestExpectedEqual;
@@ -5265,14 +5281,15 @@ fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected
 
 test "coerce int" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
 
-    var ip: InternPool = try .init(gpa);
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"as(comptime_int, 1)" = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } });
-    const @"as(u1, 1)" = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u1_type, .int = 1 } });
-    const @"as(comptime_int, -1)" = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .comptime_int_type, .int = -1 } });
-    const @"as(i64, 32000)" = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .i64_type, .int = 32000 } });
+    const @"as(comptime_int, 1)" = try ip.get(.{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } });
+    const @"as(u1, 1)" = try ip.get(.{ .int_u64_value = .{ .ty = .u1_type, .int = 1 } });
+    const @"as(comptime_int, -1)" = try ip.get(.{ .int_i64_value = .{ .ty = .comptime_int_type, .int = -1 } });
+    const @"as(i64, 32000)" = try ip.get(.{ .int_i64_value = .{ .ty = .i64_type, .int = 32000 } });
 
     try ip.testCoerce(.u1_type, @"as(comptime_int, 1)", @"as(u1, 1)");
     try ip.testCoerce(.u1_type, @"as(comptime_int, -1)", .none);
@@ -5288,7 +5305,7 @@ fn testCoerce(ip: *InternPool, dest_ty: Index, inst: Index, expected: Index) !vo
     const arena = arena_allocator.allocator();
 
     var err_msg: ErrorMsg = undefined;
-    const actual = try ip.coerce(gpa, arena, dest_ty, inst, builtin.target, &err_msg);
+    const actual = try ip.coerce(arena, dest_ty, inst, builtin.target, &err_msg);
     if (expected == actual) return;
 
     std.debug.print(

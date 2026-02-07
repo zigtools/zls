@@ -1386,7 +1386,6 @@ pub fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) erro
             if (std.mem.eql(u8, "len", name)) {
                 if (info.elem_count) |elem_count| {
                     const index = try analyser.ip.get(
-                        analyser.gpa,
                         .{ .int_u64_value = .{ .ty = .usize_type, .int = elem_count } },
                     );
                     return Type.fromIP(analyser, .usize_type, index);
@@ -1398,7 +1397,6 @@ pub fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) erro
         .tuple => |info| {
             if (std.mem.eql(u8, "len", name)) {
                 const index = try analyser.ip.get(
-                    analyser.gpa,
                     .{ .int_u64_value = .{ .ty = .usize_type, .int = info.len } },
                 );
                 return Type.fromIP(analyser, .usize_type, index);
@@ -1527,7 +1525,7 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
 
     const bits = std.fmt.parseUnsigned(u16, identifier_name[1..], 10) catch return null;
 
-    return try analyser.ip.get(analyser.gpa, .{ .int_type = .{
+    return try analyser.ip.get(.{ .int_type = .{
         .bits = bits,
         .signedness = signedness,
     } });
@@ -1592,7 +1590,7 @@ fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?T
 }
 
 fn resolvePeerTypesIP(analyser: *Analyser, a: InternPool.Index, b: InternPool.Index) error{OutOfMemory}!?InternPool.Index {
-    const resolved = try analyser.ip.resolvePeerTypes(analyser.gpa, &.{ a, b }, builtin.target);
+    const resolved = try analyser.ip.resolvePeerTypes(&.{ a, b }, builtin.target);
     if (resolved == .none) return null;
     return resolved;
 }
@@ -1606,7 +1604,7 @@ fn resolvePeerErrorSets(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory
     const b_index = b.data.ip_index.index orelse return null;
     if (analyser.ip.zigTypeTag(a_index) != .error_set) return null;
     if (analyser.ip.zigTypeTag(b_index) != .error_set) return null;
-    const resolved_index = try analyser.ip.errorSetMerge(analyser.gpa, a_index, b_index);
+    const resolved_index = try analyser.ip.errorSetMerge(a_index, b_index);
     return Type.fromIP(analyser, .type_type, resolved_index);
 }
 
@@ -2198,7 +2196,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const lhs, const rhs = tree.nodeData(node).node_and_node;
             const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse return null;
             const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse return null;
-            const ip_index = try analyser.ip.errorSetMerge(analyser.gpa, lhs_index, rhs_index);
+            const ip_index = try analyser.ip.errorSetMerge(lhs_index, rhs_index);
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2212,11 +2210,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 const identifier_token: Ast.TokenIndex = @intCast(tok_i);
                 defer i += 1;
                 const name = offsets.tokenToSlice(tree, identifier_token);
-                const index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
+                const index = try analyser.ip.string_pool.getOrPutString(analyser.store.io, analyser.gpa, name);
                 try strings.put(analyser.gpa, index, {});
             }
-            const names = try analyser.ip.getStringSlice(analyser.gpa, strings.keys());
-            const ip_index = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{ .owner_decl = .none, .names = names } });
+            const names = try analyser.ip.getStringSlice(strings.keys());
+            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2343,7 +2341,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     const result_ty = switch (scalar_tag) {
                         .comptime_float, .float, .comptime_int => operand_ty,
                         .int => if (analyser.ip.isSignedInt(scalar_ty, builtin.target))
-                            try analyser.ip.toUnsigned(analyser.gpa, operand_ty, builtin.target)
+                            try analyser.ip.toUnsigned(operand_ty, builtin.target)
                         else
                             operand_ty,
                         else => return null,
@@ -2419,14 +2417,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     if (!child_ty.is_type_val) return null;
 
                     const child_ty_ip_index = switch (child_ty.data) {
-                        .ip_index => |payload| payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type),
+                        .ip_index => |payload| payload.index orelse try analyser.ip.getUnknown(payload.type),
                         else => return null,
                     };
 
                     const len = try analyser.resolveIntegerLiteral(u32, .of(params[0], handle)) orelse
                         return null; // `InternPool.Key.Vector.len` can't represent unknown length yet
 
-                    const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
+                    const vector_ty_ip_index = try analyser.ip.get(.{
                         .vector_type = .{
                             .len = len,
                             .child = child_ty_ip_index,
@@ -2701,7 +2699,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             if (typeof.data == .ip_index and typeof.data.ip_index.index != null) {
                 const key = analyser.ip.indexToKey(typeof.data.ip_index.index.?);
                 if (key == .vector_type) {
-                    const vector_ty_ip_index = try analyser.ip.get(analyser.gpa, .{
+                    const vector_ty_ip_index = try analyser.ip.get(.{
                         .vector_type = .{
                             .len = key.vector_type.len,
                             .child = .bool_type,
@@ -2734,8 +2732,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 length += slice.len - 2 + @intFromBool(i != 0);
             }
 
-            const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{
-                .elem_type = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
+            const string_literal_type = try analyser.ip.get(.{ .pointer_type = .{
+                .elem_type = try analyser.ip.get(.{ .array_type = .{
                     .child = .u8_type,
                     .len = length,
                     .sentinel = .zero_u8,
@@ -2759,8 +2757,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 .failure => return null,
             }
 
-            const string_literal_type = try analyser.ip.get(analyser.gpa, .{ .pointer_type = .{
-                .elem_type = try analyser.ip.get(analyser.gpa, .{ .array_type = .{
+            const string_literal_type = try analyser.ip.get(.{ .pointer_type = .{
+                .elem_type = try analyser.ip.get(.{ .array_type = .{
                     .child = .u8_type,
                     .len = discarding_writer.count,
                     .sentinel = .zero_u8,
@@ -2776,13 +2774,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const name_token = tree.nodeMainToken(node) + 2;
             if (tree.tokenTag(name_token) != .identifier) return null;
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
-            const name_index = try analyser.ip.string_pool.getOrPutString(analyser.gpa, name);
+            const name_index = try analyser.ip.string_pool.getOrPutString(analyser.store.io, analyser.gpa, name);
 
-            const error_set_type = try analyser.ip.get(analyser.gpa, .{ .error_set_type = .{
+            const error_set_type = try analyser.ip.get(.{ .error_set_type = .{
                 .owner_decl = .none,
-                .names = try analyser.ip.getStringSlice(analyser.gpa, &.{name_index}),
+                .names = try analyser.ip.getStringSlice(&.{name_index}),
             } });
-            const error_value = try analyser.ip.get(analyser.gpa, .{ .error_value = .{
+            const error_value = try analyser.ip.get(.{ .error_value = .{
                 .ty = error_set_type,
                 .error_tag_name = name_index,
             } });
@@ -2807,19 +2805,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const value: ?InternPool.Index = switch (result) {
                 .float => blk: {
                     break :blk try analyser.ip.get(
-                        analyser.gpa,
                         .{ .float_comptime_value = std.fmt.parseFloat(f128, bytes) catch break :blk null },
                     );
                 },
                 .int => blk: {
                     break :blk if (bytes[0] == '-')
                         try analyser.ip.get(
-                            analyser.gpa,
                             .{ .int_i64_value = .{ .ty = ty, .int = std.fmt.parseInt(i64, bytes, 0) catch break :blk null } },
                         )
                     else
                         try analyser.ip.get(
-                            analyser.gpa,
                             .{ .int_u64_value = .{ .ty = ty, .int = std.fmt.parseInt(u64, bytes, 0) catch break :blk null } },
                         );
                 },
@@ -2832,7 +2827,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                         else => break :blk null,
                     };
                     std.debug.assert(ty == .comptime_int_type);
-                    break :blk try analyser.ip.getBigInt(analyser.gpa, ty, big_int.toConst());
+                    break :blk try analyser.ip.getBigInt(ty, big_int.toConst());
                 },
                 .failure => unreachable, // checked above
             };
@@ -3969,7 +3964,7 @@ pub const Type = struct {
     pub fn instanceTypeVal(self: Type, analyser: *Analyser) error{OutOfMemory}!?Type {
         if (!self.is_type_val) return null;
         return switch (self.data) {
-            .ip_index => |payload| fromIP(analyser, payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type), null),
+            .ip_index => |payload| fromIP(analyser, payload.index orelse try analyser.ip.getUnknown(payload.type), null),
             .either => |old_entries| {
                 const new_entries = try analyser.arena.alloc(Type.Data.EitherEntry, old_entries.len);
                 for (old_entries, new_entries) |old, *new| {
@@ -4478,7 +4473,7 @@ pub const Type = struct {
                 });
             },
             .ip_index => |payload| {
-                const ip_index = payload.index orelse try analyser.ip.getUnknown(analyser.gpa, payload.type);
+                const ip_index = payload.index orelse try analyser.ip.getUnknown(payload.type);
                 try analyser.ip.print(ip_index, writer, .{
                     .truncate_container = options.truncate_container_decls,
                 });
