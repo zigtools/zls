@@ -61,7 +61,7 @@ pub fn dotCompletions(
                         try completions.ensureUnusedCapacity(arena, enum_info.fields.count());
                         for (enum_info.fields.keys()) |name| {
                             completions.appendAssumeCapacity(.{
-                                .label = try std.fmt.allocPrint(arena, "{f}", .{name.fmt(&ip.string_pool)}),
+                                .label = try std.fmt.allocPrint(arena, "{f}", .{name.fmt(ip.io, &ip.string_pool)}),
                                 .kind = .EnumMember,
                                 // include field.val?
                             });
@@ -123,7 +123,7 @@ pub fn dotCompletions(
                     .label = try std.fmt.allocPrint(arena, "{f}", .{ip.fmtId(name)}),
                     .kind = .Field,
                     .detail = try std.fmt.allocPrint(arena, "{f}: {f}", .{
-                        name.fmt(&ip.string_pool),
+                        name.fmt(ip.io, &ip.string_pool),
                         fmtFieldDetail(ip, field),
                     }),
                 });
@@ -231,7 +231,8 @@ pub fn fmtFieldDetail(ip: *InternPool, field: InternPool.Struct.Field) std.fmt.A
 
 test "dotCompletions - primitives" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     try testCompletion(&ip, .bool_type, &.{});
@@ -243,11 +244,12 @@ test "dotCompletions - primitives" {
 
 test "dotCompletions - optional types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"?u32"), &.{
+    const @"?u32" = try ip.get(.{ .optional_type = .{ .payload_type = .u32_type } });
+    try testCompletion(&ip, try ip.getUnknown(@"?u32"), &.{
         .{
             .label = "?",
             .kind = .Operator,
@@ -258,20 +260,21 @@ test "dotCompletions - optional types" {
 
 test "dotCompletions - array types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"[3]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 3 } });
-    const @"[1]u8" = try ip.get(gpa, .{ .array_type = .{ .child = .u8_type, .len = 1 } });
+    const @"[3]u32" = try ip.get(.{ .array_type = .{ .child = .u32_type, .len = 3 } });
+    const @"[1]u8" = try ip.get(.{ .array_type = .{ .child = .u8_type, .len = 1 } });
 
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[3]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"[3]u32"), &.{
         .{
             .label = "len",
             .kind = .Field,
             .detail = "usize = 3",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[1]u8"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"[1]u8"), &.{
         .{
             .label = "len",
             .kind = .Field,
@@ -282,43 +285,44 @@ test "dotCompletions - array types" {
 
 test "dotCompletions - pointer types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .one,
         },
     } });
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .slice,
         },
     } });
-    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[]const u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .slice,
             .is_const = true,
         },
     } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*c]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .c,
         },
     } });
 
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"*u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"*u32"), &.{
         .{
             .label = "*",
             .kind = .Operator,
             .detail = "u32",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"[]u32"), &.{
         .{
             .label = "ptr",
             .kind = .Field,
@@ -330,7 +334,7 @@ test "dotCompletions - pointer types" {
             .detail = "len: usize",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[]const u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"[]const u32"), &.{
         .{
             .label = "ptr",
             .kind = .Field,
@@ -342,7 +346,7 @@ test "dotCompletions - pointer types" {
             .detail = "len: usize",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[*c]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"[*c]u32"), &.{
         .{
             .label = "*",
             .kind = .Operator,
@@ -358,42 +362,43 @@ test "dotCompletions - pointer types" {
 
 test "dotCompletions - single pointer indirection" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .child = .u32_type, .len = 1 } });
-    const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[1]u32" = try ip.get(.{ .array_type = .{ .child = .u32_type, .len = 1 } });
+    const @"*[1]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = @"[1]u32",
         .flags = .{
             .size = .one,
         },
     } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*c]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = .u32_type,
         .flags = .{
             .size = .c,
         },
     } });
-    const @"**[1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"**[1]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = @"*[1]u32",
         .flags = .{
             .size = .one,
         },
     } });
-    const @"[*][1]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"[*][1]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = @"[1]u32",
         .flags = .{
             .size = .many,
         },
     } });
-    const @"*[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*[*c]u32" = try ip.get(.{ .pointer_type = .{
         .elem_type = @"[*c]u32",
         .flags = .{
             .size = .one,
         },
     } });
 
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"*[1]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"*[1]u32"), &.{
         .{
             .label = "*",
             .kind = .Operator,
@@ -405,16 +410,16 @@ test "dotCompletions - single pointer indirection" {
             .detail = "usize = 1",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"**[1]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"**[1]u32"), &.{
         .{
             .label = "*",
             .kind = .Operator,
             .detail = "*[1]u32",
         },
     });
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"[*][1]u32"), &.{});
+    try testCompletion(&ip, try ip.getUnknown(@"[*][1]u32"), &.{});
 
-    try testCompletion(&ip, try ip.getUnknown(gpa, @"*[*c]u32"), &.{
+    try testCompletion(&ip, try ip.getUnknown(@"*[*c]u32"), &.{
         .{
             .label = "*",
             .kind = .Operator,

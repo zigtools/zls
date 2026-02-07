@@ -124,7 +124,7 @@ pub const ErrorMsg = union(enum) {
             ),
             .duplicate_struct_field => |info| try writer.print(
                 "duplicate struct field: '{f}'",
-                .{info.name.fmt(&ip.string_pool)},
+                .{info.name.fmt(ip.io, &ip.string_pool)},
             ),
             .unknown_field => |info| {
                 const accessed_ty = ip.typeOf(info.accessed);

@@ -150,7 +150,8 @@ fn formatDegibberish(data: FormatDegibberishData, writer: *std.Io.Writer) std.Io
 
 test "degibberish - simple types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     try std.testing.expectFmt("u32", "{f}", .{fmtDegibberish(&ip, .u32_type)});
@@ -159,7 +160,8 @@ test "degibberish - simple types" {
 
 test "degibberish - pointer types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
     try std.testing.expectFmt("many-item pointer to u8", "{f}", .{fmtDegibberish(&ip, .manyptr_u8_type)});
@@ -172,11 +174,12 @@ test "degibberish - pointer types" {
 
 test "degibberish - array types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"[3:0]u8" = try ip.get(gpa, .{ .array_type = .{ .len = 3, .child = .u8_type, .sentinel = .zero_u8 } });
-    const @"[0]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 0, .child = .u32_type } });
+    const @"[3:0]u8" = try ip.get(.{ .array_type = .{ .len = 3, .child = .u8_type, .sentinel = .zero_u8 } });
+    const @"[0]u32" = try ip.get(.{ .array_type = .{ .len = 0, .child = .u32_type } });
 
     try std.testing.expectFmt("0 terminated array 3 of u8", "{f}", .{fmtDegibberish(&ip, @"[3:0]u8")});
     try std.testing.expectFmt("array 0 of u32", "{f}", .{fmtDegibberish(&ip, @"[0]u32")});
@@ -184,29 +187,31 @@ test "degibberish - array types" {
 
 test "degibberish - optional types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+    const @"?u32" = try ip.get(.{ .optional_type = .{ .payload_type = .u32_type } });
 
     try std.testing.expectFmt("optional of u32", "{f}", .{fmtDegibberish(&ip, @"?u32")});
 }
 
 test "degibberish - error union types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const foo_string = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_string = try ip.string_pool.getOrPutString(gpa, "bar");
-    const baz_string = try ip.string_pool.getOrPutString(gpa, "baz");
+    const foo_string = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_string = try ip.string_pool.getOrPutString(io, gpa, "bar");
+    const baz_string = try ip.string_pool.getOrPutString(io, gpa, "baz");
 
-    const @"error{foo,bar,baz}" = try ip.get(gpa, .{ .error_set_type = .{
-        .names = try ip.getStringSlice(gpa, &.{ foo_string, bar_string, baz_string }),
+    const @"error{foo,bar,baz}" = try ip.get(.{ .error_set_type = .{
+        .names = try ip.getStringSlice(&.{ foo_string, bar_string, baz_string }),
         .owner_decl = .none,
     } });
 
-    const @"error{foo,bar,baz}!u32" = try ip.get(gpa, .{ .error_union_type = .{
+    const @"error{foo,bar,baz}!u32" = try ip.get(.{ .error_union_type = .{
         .error_set_type = @"error{foo,bar,baz}",
         .payload_type = .u32_type,
     } });
@@ -216,15 +221,16 @@ test "degibberish - error union types" {
 
 test "degibberish - error set types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const foo_string = try ip.string_pool.getOrPutString(gpa, "foo");
-    const bar_string = try ip.string_pool.getOrPutString(gpa, "bar");
-    const baz_string = try ip.string_pool.getOrPutString(gpa, "baz");
+    const foo_string = try ip.string_pool.getOrPutString(io, gpa, "foo");
+    const bar_string = try ip.string_pool.getOrPutString(io, gpa, "bar");
+    const baz_string = try ip.string_pool.getOrPutString(io, gpa, "baz");
 
-    const @"error{foo,bar,baz}" = try ip.get(gpa, .{ .error_set_type = .{
-        .names = try ip.getStringSlice(gpa, &.{ foo_string, bar_string, baz_string }),
+    const @"error{foo,bar,baz}" = try ip.get(.{ .error_set_type = .{
+        .names = try ip.getStringSlice(&.{ foo_string, bar_string, baz_string }),
         .owner_decl = .none,
     } });
 
@@ -233,11 +239,12 @@ test "degibberish - error set types" {
 
 test "degibberish - function types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"fn(u32, void) type" = try ip.get(gpa, .{ .function_type = .{
-        .args = try ip.getIndexSlice(gpa, &.{ .u32_type, .void_type }),
+    const @"fn(u32, void) type" = try ip.get(.{ .function_type = .{
+        .args = try ip.getIndexSlice(&.{ .u32_type, .void_type }),
         .return_type = .type_type,
     } });
 
@@ -248,12 +255,13 @@ test "degibberish - function types" {
 
 test "degibberish - tuple types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"struct{u32, comptime_float, c_int}" = try ip.get(gpa, .{ .tuple_type = .{
-        .types = try ip.getIndexSlice(gpa, &.{ .u32_type, .comptime_float_type, .c_int_type }),
-        .values = try ip.getIndexSlice(gpa, &.{ .none, .none, .none }),
+    const @"struct{u32, comptime_float, c_int}" = try ip.get(.{ .tuple_type = .{
+        .types = try ip.getIndexSlice(&.{ .u32_type, .comptime_float_type, .c_int_type }),
+        .values = try ip.getIndexSlice(&.{ .none, .none, .none }),
     } });
 
     try std.testing.expectFmt("tuple of (u32, comptime_float, c_int)", "{f}", .{fmtDegibberish(&ip, @"struct{u32, comptime_float, c_int}")});
@@ -261,11 +269,12 @@ test "degibberish - tuple types" {
 
 test "degibberish - vector types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"@Vector(3, u8)" = try ip.get(gpa, .{ .vector_type = .{ .len = 3, .child = .u8_type } });
-    const @"@Vector(0, u32)" = try ip.get(gpa, .{ .vector_type = .{ .len = 0, .child = .u32_type } });
+    const @"@Vector(3, u8)" = try ip.get(.{ .vector_type = .{ .len = 3, .child = .u8_type } });
+    const @"@Vector(0, u32)" = try ip.get(.{ .vector_type = .{ .len = 0, .child = .u32_type } });
 
     try std.testing.expectFmt("vector 3 of u8", "{f}", .{fmtDegibberish(&ip, @"@Vector(3, u8)")});
     try std.testing.expectFmt("vector 0 of u32", "{f}", .{fmtDegibberish(&ip, @"@Vector(0, u32)")});
@@ -273,9 +282,10 @@ test "degibberish - vector types" {
 
 test "degibberish - anyframe types" {
     const gpa = std.testing.allocator;
-    var ip: InternPool = try .init(gpa);
+    const io = std.testing.io;
+    var ip: InternPool = try .init(io, gpa);
     defer ip.deinit(gpa);
 
-    const @"anyframe->u32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .u32_type } });
+    const @"anyframe->u32" = try ip.get(.{ .anyframe_type = .{ .child = .u32_type } });
     try std.testing.expectFmt("function frame returning u32", "{f}", .{fmtDegibberish(&ip, @"anyframe->u32")});
 }
