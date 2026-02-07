@@ -23,12 +23,12 @@
             .hash = "known_folders-0.0.0-Fy-PJqHJAAB43zDJmOdlr3nViu69IFI9pNFt7hkHjKk4",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/669e6ed7470100bfd9d2aa9f6f96b93c45996179.tar.gz",
-            .hash = "diffz-0.0.1-G2tlISLPAQDzXkUIRWWUfdgIsIb1dAyVwRPXMt5kRpui",
+            .url = "https://github.com/ziglibs/diffz/archive/aa11caef328a3f20f2493f8fd676a1dfa7819246.tar.gz",
+            .hash = "diffz-0.0.1-G2tlIYrNAQAQx3cuIp7EVs0xvxbv9DCPf4YuHmvubsrZ",
         },
         .lsp_kit = .{
-            .url = "https://github.com/zigtools/lsp-kit/archive/922e9c2fc00741b167a19277d737b8eb890f0253.tar.gz",
-            .hash = "lsp_kit-0.1.0-bi_PL94yDABlKrIbUTtVALYWLeFt6XAzHS6R12Tp83_Z",
+            .url = "https://github.com/zigtools/lsp-kit/archive/7b03f0b6801babffe76608cf3db59793902a21d6.tar.gz",
+            .hash = "lsp_kit-0.1.0-bi_PLw8zDABvCWe2rD4Aqb9gx0sRXBKO0a7M0vg3AbR3",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",

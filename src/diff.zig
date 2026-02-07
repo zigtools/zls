@@ -6,11 +6,8 @@ const offsets = @import("offsets.zig");
 const tracy = @import("tracy");
 const DiffMatchPatch = @import("diffz");
 
-const dmp: DiffMatchPatch = .{
-    .diff_timeout = .fromMilliseconds(250),
-};
-
 pub fn edits(
+    io: std.Io,
     allocator: std.mem.Allocator,
     before: []const u8,
     after: []const u8,
@@ -19,7 +16,13 @@ pub fn edits(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var diffs = try dmp.diff(allocator, before, after, true);
+    const dmp: DiffMatchPatch = .initDefault(io, allocator);
+    var diffs = try dmp.diff(
+        before,
+        after,
+        true,
+        .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(250) } },
+    );
     defer DiffMatchPatch.deinitDiffList(allocator, &diffs);
 
     var edit_count: usize = 0;
