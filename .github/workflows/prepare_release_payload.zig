@@ -76,7 +76,10 @@ fn createRequestBody(
         var sha256sum: std.crypto.hash.sha2.Sha256 = .init(.{});
         var read_buffer: [16 * 1024]u8 = undefined;
         while (true) {
-            const amt = try file.readStreaming(io, &.{&read_buffer});
+            const amt = file.readStreaming(io, &.{&read_buffer}) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => |e| return e,
+            };
             if (amt == 0) break;
             sha256sum.update(read_buffer[0..amt]);
         }
