@@ -8,7 +8,7 @@ map: std.AutoArrayHashMapUnmanaged(void, void),
 items: std.MultiArrayList(Item),
 extra: std.ArrayList(u32),
 string_pool: StringPool,
-lock: RwLock,
+lock: std.Io.RwLock,
 
 limbs: std.ArrayList(usize),
 
@@ -29,11 +29,6 @@ pub const StringPool = @import("string_pool.zig").StringPool(.{});
 pub const String = StringPool.String;
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
 const SegmentedList = @import("segmented_list.zig").SegmentedList;
-
-pub const RwLock = if (builtin.single_threaded)
-    std.Thread.RwLock.SingleThreadedRwLock
-else
-    std.Thread.RwLock.DefaultRwLock;
 
 pub const Key = union(enum) {
     simple_type: SimpleType,
@@ -442,8 +437,8 @@ pub const Key = union(enum) {
 
                 if (a_info.names.len != b_info.names.len) return false;
 
-                if (should_lock) ip.lock.lockShared();
-                defer if (should_lock) ip.lock.unlockShared();
+                if (should_lock) ip.lock.lockSharedUncancelable(ip.io);
+                defer if (should_lock) ip.lock.unlockShared(ip.io);
 
                 for (
                     a_info.names.getUnprotectedSlice(ip),
@@ -469,8 +464,8 @@ pub const Key = union(enum) {
 
                 if (a_info.args.len != b_info.args.len) return false;
 
-                if (should_lock) ip.lock.lockShared();
-                defer if (should_lock) ip.lock.unlockShared();
+                if (should_lock) ip.lock.lockSharedUncancelable(ip.io);
+                defer if (should_lock) ip.lock.unlockShared(ip.io);
 
                 for (
                     a_info.args.getUnprotectedSlice(ip),
@@ -488,8 +483,8 @@ pub const Key = union(enum) {
                 if (a_info.types.len != b_info.types.len) return false;
                 if (a_info.values.len != b_info.values.len) return false;
 
-                if (should_lock) ip.lock.lockShared();
-                defer if (should_lock) ip.lock.unlockShared();
+                if (should_lock) ip.lock.lockSharedUncancelable(ip.io);
+                defer if (should_lock) ip.lock.unlockShared(ip.io);
 
                 for (
                     a_info.types.getUnprotectedSlice(ip),
@@ -507,8 +502,8 @@ pub const Key = union(enum) {
 
                 if (a_info.ty != b_info.ty) return false;
 
-                if (should_lock) ip.lock.lockShared();
-                defer if (should_lock) ip.lock.unlockShared();
+                if (should_lock) ip.lock.lockSharedUncancelable(ip.io);
+                defer if (should_lock) ip.lock.unlockShared(ip.io);
 
                 if (!a_info.getConst(ip).eql(b_info.getConst(ip))) return false;
 
@@ -521,8 +516,8 @@ pub const Key = union(enum) {
 
                 if (a_info.values.len != b_info.values.len) return false;
 
-                if (should_lock) ip.lock.lockShared();
-                defer if (should_lock) ip.lock.unlockShared();
+                if (should_lock) ip.lock.lockSharedUncancelable(ip.io);
+                defer if (should_lock) ip.lock.unlockShared(ip.io);
 
                 for (
                     a_info.values.getUnprotectedSlice(ip),
@@ -667,23 +662,23 @@ pub const Index = enum(u32) {
         /// prefer using `dupe` when iterating over all elements.
         pub fn at(slice: Slice, index: u32, ip: *InternPool) Index {
             assert(index < slice.len);
-            ip.lock.lockShared();
-            defer ip.lock.unlockShared();
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
             return @enumFromInt(ip.extra.items[slice.start + index]);
         }
 
         pub fn dupe(slice: Slice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]Index {
             if (slice.len == 0) return &.{};
-            ip.lock.lockShared();
-            defer ip.lock.unlockShared();
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
             return try allocator.dupe(Index, slice.getUnprotectedSlice(ip));
         }
 
         pub fn hashWithHasher(slice: Slice, hasher: anytype, ip: *InternPool) void {
             std.hash.autoHash(hasher, slice.len);
             if (slice.len == 0) return;
-            ip.lock.lockShared();
-            defer ip.lock.unlockShared();
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
             hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
         }
 
@@ -725,23 +720,23 @@ pub const StringSlice = struct {
     /// prefer using `dupe` when iterating over all elements.
     pub fn at(slice: StringSlice, index: u32, ip: *InternPool) String {
         assert(index < slice.len);
-        ip.lock.lockShared();
-        defer ip.lock.unlockShared();
+        ip.lock.lockSharedUncancelable(ip.io);
+        defer ip.lock.unlockShared(ip.io);
         return @enumFromInt(ip.extra.items[slice.start + index]);
     }
 
     pub fn dupe(slice: StringSlice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]String {
         if (slice.len == 0) return &.{};
-        ip.lock.lockShared();
-        defer ip.lock.unlockShared();
+        ip.lock.lockSharedUncancelable(ip.io);
+        defer ip.lock.unlockShared(ip.io);
         return try allocator.dupe(String, slice.getUnprotectedSlice(ip));
     }
 
     pub fn hashWithHasher(slice: StringSlice, hasher: anytype, ip: *InternPool) void {
         std.hash.autoHash(hasher, slice.len);
         if (slice.len == 0) return;
-        ip.lock.lockShared();
-        defer ip.lock.unlockShared();
+        ip.lock.lockSharedUncancelable(ip.io);
+        defer ip.lock.unlockShared(ip.io);
         hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
     }
 
@@ -763,8 +758,8 @@ pub const LimbSlice = struct {
     pub fn hashWithHasher(slice: LimbSlice, hasher: anytype, ip: *InternPool) void {
         std.hash.autoHash(hasher, slice.len);
         if (slice.len == 0) return;
-        ip.lock.lockShared();
-        defer ip.lock.unlockShared();
+        ip.lock.lockSharedUncancelable(ip.io);
+        defer ip.lock.unlockShared(ip.io);
         hasher.update(std.mem.sliceAsBytes(slice.getUnprotectedSlice(ip)));
     }
 
@@ -1045,7 +1040,7 @@ pub fn init(io: std.Io, gpa: Allocator) Allocator.Error!InternPool {
         .items = .empty,
         .extra = .empty,
         .string_pool = .empty,
-        .lock = .{},
+        .lock = .init,
         .limbs = .empty,
         .decls = .{},
         .structs = .{},
@@ -1193,8 +1188,8 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 pub fn indexToKey(ip: *InternPool, index: Index) Key {
     assert(index != .none);
 
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.indexToKeyNoLock(index);
 }
 
@@ -1263,15 +1258,15 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
     };
 
     not_found: {
-        ip.lock.lockShared();
-        defer ip.lock.unlockShared();
+        ip.lock.lockSharedUncancelable(ip.io);
+        defer ip.lock.unlockShared(ip.io);
 
         const index = ip.map.getIndexAdapted(key, adapter) orelse break :not_found;
         return @enumFromInt(index);
     }
 
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
 
     const gop = try ip.map.getOrPutAdapted(ip.gpa, key, adapter);
     if (gop.found_existing) return @enumFromInt(gop.index);
@@ -1427,8 +1422,8 @@ pub fn contains(ip: *InternPool, key: Key) ?Index {
         .ip = ip,
         .precomputed_hash = key.hash32(ip),
     };
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
     return @enumFromInt(index);
 }
@@ -1436,8 +1431,8 @@ pub fn contains(ip: *InternPool, key: Key) ?Index {
 pub fn getIndexSlice(ip: *InternPool, data: []const Index) error{OutOfMemory}!Index.Slice {
     if (data.len == 0) return Index.Slice.empty;
 
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
 
     const start: u32 = @intCast(ip.extra.items.len);
     try ip.extra.appendSlice(ip.gpa, @ptrCast(data));
@@ -1451,8 +1446,8 @@ pub fn getIndexSlice(ip: *InternPool, data: []const Index) error{OutOfMemory}!In
 pub fn getStringSlice(ip: *InternPool, data: []const String) error{OutOfMemory}!StringSlice {
     if (data.len == 0) return StringSlice.empty;
 
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
 
     const start: u32 = @intCast(ip.extra.items.len);
     try ip.extra.appendSlice(ip.gpa, @ptrCast(data));
@@ -1476,67 +1471,67 @@ fn getLimbSlice(ip: *InternPool, data: []const std.math.big.Limb) error{OutOfMem
 }
 
 pub fn getDecl(ip: *InternPool, index: InternPool.Decl.Index) *const InternPool.Decl {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.decls.at(@intFromEnum(index));
 }
 pub fn getDeclMut(ip: *InternPool, index: InternPool.Decl.Index) *InternPool.Decl {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.decls.at(@intFromEnum(index));
 }
 pub fn getStruct(ip: *InternPool, index: Struct.Index) *const Struct {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.structs.at(@intFromEnum(index));
 }
 pub fn getStructMut(ip: *InternPool, index: Struct.Index) *Struct {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.structs.at(@intFromEnum(index));
 }
 pub fn getEnum(ip: *InternPool, index: Enum.Index) *const Enum {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.enums.at(@intFromEnum(index));
 }
 pub fn getEnumMut(ip: *InternPool, index: Enum.Index) *Enum {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.enums.at(@intFromEnum(index));
 }
 pub fn getUnion(ip: *InternPool, index: Union.Index) *const Union {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.unions.at(@intFromEnum(index));
 }
 pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return ip.unions.at(@intFromEnum(index));
 }
 
 pub fn createDecl(ip: *InternPool, decl: Decl) Allocator.Error!Decl.Index {
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
     try ip.decls.append(ip.gpa, decl);
     return @enumFromInt(ip.decls.count() - 1);
 }
 pub fn createStruct(ip: *InternPool, struct_info: Struct) Allocator.Error!Struct.Index {
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
     try ip.structs.append(ip.gpa, struct_info);
     return @enumFromInt(ip.structs.count() - 1);
 }
 pub fn createEnum(ip: *InternPool, enum_info: Enum) Allocator.Error!Enum.Index {
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
     try ip.enums.append(ip.gpa, enum_info);
     return @enumFromInt(ip.enums.count() - 1);
 }
 pub fn createUnion(ip: *InternPool, union_info: Union) Allocator.Error!Union.Index {
-    ip.lock.lock();
-    defer ip.lock.unlock();
+    ip.lock.lockUncancelable(ip.io);
+    defer ip.lock.unlock(ip.io);
     try ip.unions.append(ip.gpa, union_info);
     return @enumFromInt(ip.unions.count() - 1);
 }
@@ -2944,8 +2939,8 @@ fn panicOrElse(comptime T: type, message: []const u8, value: T) T {
 // ---------------------------------------------
 
 pub fn zigTypeTag(ip: *InternPool, index: Index) ?std.builtin.TypeId {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
         .simple_type => switch (@as(SimpleType, @enumFromInt(ip.items.items(.data)[@intFromEnum(index)]))) {
             .f16,
@@ -3037,8 +3032,8 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) ?std.builtin.TypeId {
 }
 
 pub fn typeOf(ip: *InternPool, index: Index) Index {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     const data = ip.items.items(.data)[@intFromEnum(index)];
     return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
         .simple_value => switch (@as(SimpleValue, @enumFromInt(data))) {
@@ -3096,8 +3091,8 @@ pub fn typeOf(ip: *InternPool, index: Index) Index {
 }
 
 pub fn isType(ip: *InternPool, ty: Index) bool {
-    ip.lock.lockShared();
-    defer ip.lock.unlockShared();
+    ip.lock.lockSharedUncancelable(ip.io);
+    defer ip.lock.unlockShared(ip.io);
     return switch (ip.items.items(.tag)[@intFromEnum(ty)]) {
         .simple_type,
         .type_int_signed,
@@ -3143,8 +3138,8 @@ pub fn isUnknown(ip: *InternPool, index: Index) bool {
     switch (index) {
         .unknown_type, .unknown_unknown => return true,
         else => {
-            ip.lock.lockShared();
-            defer ip.lock.unlockShared();
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
             return ip.items.items(.tag)[@intFromEnum(index)] == .unknown_value;
         },
     }
