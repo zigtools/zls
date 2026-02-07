@@ -8,12 +8,12 @@ pub const Config = struct {
     thread_safe: bool = !builtin.single_threaded,
 
     /// What type of mutex you'd like to use, for thread safety.
-    /// when specified, the mutex type must have the same shape as `std.Thread.Mutex` and
+    /// when specified, the mutex type must have the same shape as `std.Io.Mutex` and
     /// `DummyMutex`, and have no required fields. Specifying this field causes
     /// the `thread_safe` field to be ignored.
     ///
     /// when null (default):
-    /// * the mutex type defaults to `std.Thread.Mutex` when thread_safe is enabled.
+    /// * the mutex type defaults to `std.Io.Mutex` when thread_safe is enabled.
     /// * the mutex type defaults to `DummyMutex` otherwise.
     MutexType: ?type = null,
 };
@@ -37,8 +37,8 @@ pub fn StringPool(comptime config: Config) type {
                 return @enumFromInt(@intFromEnum(self));
             }
 
-            pub fn fmt(self: String, pool: *Pool) std.fmt.Alt(FormatContext, print) {
-                return .{ .data = .{ .string = self, .pool = pool } };
+            pub fn fmt(self: String, io: std.Io, pool: *Pool) std.fmt.Alt(FormatContext, print) {
+                return .{ .data = .{ .string = self, .io = io, .pool = pool } };
             }
         };
 
@@ -53,14 +53,14 @@ pub fn StringPool(comptime config: Config) type {
         };
 
         /// Asserts that `str` contains no null bytes.
-        pub fn getString(pool: *Pool, str: []const u8) ?String {
+        pub fn getString(pool: *Pool, io: std.Io, str: []const u8) ?String {
             assert(std.mem.findScalar(u8, str, 0) == null);
 
             // precompute the hash before acquiring the lock
             const precomputed_key_hash = std.hash_map.hashString(str);
 
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
+            pool.mutex.lockUncancelable(io);
+            defer pool.mutex.unlock(io);
 
             const adapter: PrecomputedStringIndexAdapter = .{
                 .bytes = &pool.bytes,
@@ -74,7 +74,7 @@ pub fn StringPool(comptime config: Config) type {
 
         /// Asserts that `str` contains no null bytes.
         /// Returns `error.OutOfMemory` if adding this new string would increase the amount of allocated bytes above std.math.maxInt(u32)
-        pub fn getOrPutString(pool: *Pool, allocator: Allocator, str: []const u8) error{OutOfMemory}!String {
+        pub fn getOrPutString(pool: *Pool, io: std.Io, allocator: Allocator, str: []const u8) error{OutOfMemory}!String {
             assert(std.mem.findScalar(u8, str, 0) == null);
 
             const start_index = std.math.cast(u32, pool.bytes.items.len) orelse return error.OutOfMemory;
@@ -82,8 +82,8 @@ pub fn StringPool(comptime config: Config) type {
             // precompute the hash before acquiring the lock
             const precomputed_key_hash = std.hash_map.hashString(str);
 
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
+            pool.mutex.lockUncancelable(io);
+            defer pool.mutex.unlock(io);
 
             const adapter: PrecomputedStringIndexAdapter = .{
                 .bytes = &pool.bytes,
@@ -113,18 +113,18 @@ pub fn StringPool(comptime config: Config) type {
         }
 
         /// Caller owns the memory.
-        pub fn stringToSliceAlloc(pool: *Pool, allocator: Allocator, index: String) Allocator.Error![]const u8 {
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
+        pub fn stringToSliceAlloc(pool: *Pool, io: std.Io, allocator: Allocator, index: String) Allocator.Error![]const u8 {
+            pool.mutex.lockUncancelable(io);
+            defer pool.mutex.unlock(io);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
             const start = @intFromEnum(index);
             return try allocator.dupe(u8, std.mem.sliceTo(string_bytes + start, 0));
         }
 
         /// Caller owns the memory.
-        pub fn stringToSliceAllocZ(pool: *Pool, allocator: Allocator, index: String) Allocator.Error![:0]const u8 {
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
+        pub fn stringToSliceAllocZ(pool: *Pool, io: std.Io, allocator: Allocator, index: String) Allocator.Error![:0]const u8 {
+            pool.mutex.lockUncancelable(io);
+            defer pool.mutex.unlock(io);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
             const start = @intFromEnum(index);
             return try allocator.dupeZ(u8, std.mem.sliceTo(string_bytes + start, 0));
@@ -137,9 +137,9 @@ pub fn StringPool(comptime config: Config) type {
         pub const LockedString = struct {
             slice: [:0]const u8,
 
-            pub fn release(locked_string: LockedString, pool: *Pool) void {
+            pub fn release(locked_string: LockedString, io: std.Io, pool: *Pool) void {
                 _ = locked_string;
-                pool.mutex.unlock();
+                pool.mutex.unlock(io);
             }
         };
 
@@ -147,8 +147,8 @@ pub fn StringPool(comptime config: Config) type {
         /// equal strings are guaranteed to share the same storage
         ///
         /// Will lock the `StringPool` until the `release` method is called on the returned locked string.
-        pub fn stringToSliceLock(pool: *Pool, index: String) LockedString {
-            pool.mutex.lock();
+        pub fn stringToSliceLock(pool: *Pool, io: std.Io, index: String) LockedString {
+            pool.mutex.lockUncancelable(io);
             return .{ .slice = pool.stringToSliceUnsafe(index) };
         }
 
@@ -172,7 +172,7 @@ pub fn StringPool(comptime config: Config) type {
         map: std.HashMapUnmanaged(u32, void, std.hash_map.StringIndexContext, std.hash_map.default_max_load_percentage),
 
         pub const empty: Pool = .{
-            .mutex = .{},
+            .mutex = .init,
             .bytes = .empty,
             .map = .empty,
         };
@@ -183,21 +183,23 @@ pub fn StringPool(comptime config: Config) type {
             pool.* = undefined;
         }
 
-        pub const MutexType = config.MutexType orelse if (config.thread_safe) std.Thread.Mutex else DummyMutex;
+        pub const MutexType = config.MutexType orelse if (config.thread_safe) std.Io.Mutex else DummyMutex;
 
         const DummyMutex = struct {
-            pub fn lock(_: *@This()) void {}
-            pub fn unlock(_: *@This()) void {}
+            pub const init: DummyMutex = .{};
+            pub fn lockUncancelable(_: *DummyMutex, _: std.Io) void {}
+            pub fn unlock(_: *DummyMutex, _: std.Io) void {}
         };
 
         const FormatContext = struct {
             string: String,
+            io: std.Io,
             pool: *Pool,
         };
 
         fn print(ctx: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            const locked_string = ctx.pool.stringToSliceLock(ctx.string);
-            defer locked_string.release(ctx.pool);
+            const locked_string = ctx.pool.stringToSliceLock(ctx.io, ctx.string);
+            defer locked_string.release(ctx.io, ctx.pool);
             try writer.writeAll(locked_string.slice);
         }
     };
@@ -222,30 +224,32 @@ const PrecomputedStringIndexAdapter = struct {
 
 test StringPool {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
     var pool: StringPool(.{}) = .empty;
     defer pool.deinit(gpa);
 
     const str = "All Your Codebase Are Belong To Us";
-    const index = try pool.getOrPutString(gpa, str);
+    const index = try pool.getOrPutString(io, gpa, str);
 
     {
-        const locked_string = pool.stringToSliceLock(index);
-        defer locked_string.release(&pool);
+        const locked_string = pool.stringToSliceLock(io, index);
+        defer locked_string.release(io, &pool);
 
         try std.testing.expectEqualStrings(str, locked_string.slice);
     }
-    try std.testing.expectFmt(str, "{f}", .{index.fmt(&pool)});
+    try std.testing.expectFmt(str, "{f}", .{index.fmt(io, &pool)});
 }
 
 test "StringPool - check interning" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
     var pool: StringPool(.{ .thread_safe = false }) = .empty;
     defer pool.deinit(gpa);
 
     const str = "All Your Codebase Are Belong To Us";
-    const index1 = try pool.getOrPutString(gpa, str);
-    const index2 = try pool.getOrPutString(gpa, str);
-    const index3 = pool.getString(str).?;
+    const index1 = try pool.getOrPutString(io, gpa, str);
+    const index2 = try pool.getOrPutString(io, gpa, str);
+    const index3 = pool.getString(io, str).?;
     const storage1 = pool.stringToSlice(index1);
     const storage2 = pool.stringToSliceUnsafe(index2);
 
@@ -259,14 +263,15 @@ test "StringPool - check interning" {
 
 test "StringPool - getOrPut on existing string without allocation" {
     const gpa = std.testing.allocator;
+    const io = std.testing.io;
     var failing_gpa: std.testing.FailingAllocator = .init(gpa, .{ .fail_index = 0 });
 
     var pool: StringPool(.{}) = .empty;
     defer pool.deinit(gpa);
 
     try pool.bytes.ensureTotalCapacityPrecise(gpa, "hello".len + 1);
-    const hello_string = try pool.getOrPutString(gpa, "hello");
+    const hello_string = try pool.getOrPutString(io, gpa, "hello");
 
-    try std.testing.expectError(error.OutOfMemory, pool.getOrPutString(failing_gpa.allocator(), "world"));
-    try std.testing.expectEqual(hello_string, try pool.getOrPutString(failing_gpa.allocator(), "hello"));
+    try std.testing.expectError(error.OutOfMemory, pool.getOrPutString(io, failing_gpa.allocator(), "world"));
+    try std.testing.expectEqual(hello_string, try pool.getOrPutString(io, failing_gpa.allocator(), "hello"));
 }

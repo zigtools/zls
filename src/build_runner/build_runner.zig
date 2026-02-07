@@ -50,20 +50,23 @@ pub fn main(init: process.Init.Minimal) !void {
     defer _ = debug_gpa_state.deinit();
     const gpa = debug_gpa_state.allocator();
 
-    // ...but we'll back our arena by `std.heap.page_allocator` for efficiency.
-    var single_threaded_arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-    defer single_threaded_arena.deinit();
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{ .child_allocator = single_threaded_arena.allocator() };
-    const arena = thread_safe_arena.allocator();
-
-    const args = try init.args.toSlice(arena);
-
     var threaded: Io.Threaded = .init(gpa, .{
         .environ = init.environ,
         .argv0 = .init(init.args),
     });
     defer threaded.deinit();
     const io = threaded.ioBasic();
+
+    // ...but we'll back our arena by `std.heap.page_allocator` for efficiency.
+    var single_threaded_arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer single_threaded_arena.deinit();
+    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
+        .child_allocator = single_threaded_arena.allocator(),
+        .io = io,
+    };
+    const arena = thread_safe_arena.allocator();
+
+    const args = try init.args.toSlice(arena);
 
     // skip my own exe name
     var arg_idx: usize = 1;
