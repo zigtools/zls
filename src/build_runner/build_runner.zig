@@ -530,7 +530,7 @@ const Watch = struct {
 
     fn wait(w: *Watch, gpa: Allocator, timeout: Io.Timeout) !std.Build.Watch.WaitResult {
         if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
-            return try w.fs_watch.wait(gpa, switch (timeout) {
+            return try w.fs_watch.wait(gpa, w.io, switch (timeout) {
                 .none => .none,
                 .duration => |d| .{ .ms = @intCast(d.raw.toMilliseconds()) },
                 .deadline => unreachable,
