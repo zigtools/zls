@@ -4097,6 +4097,36 @@ test "insert replace behaviour - function alias" {
     });
 }
 
+test "insert replace behaviour - escaped identifier" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const @"foo bar" = 5;
+        \\const foo = @"foo<cursor>
+        ,
+        .label = "@\"foo bar\"",
+        .expected_insert_line = "const foo = @\"foo bar\"",
+        .expected_replace_line = "const foo = @\"foo bar\"",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn @"foo bar"() void {}
+        \\const foo = <cursor>@"foo
+        ,
+        .label = "@\"foo bar\"",
+        .expected_insert_line = "const foo = @\"foo bar\"@\"foo",
+        .expected_replace_line = "const foo = @\"foo bar\"",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\fn @"foo bar"() void {}
+        \\const foo = @"foo <cursor>
+        ,
+        .label = "@\"foo bar\"",
+        .expected_insert_line = "const foo = @\"foo bar\"",
+        .expected_replace_line = "const foo = @\"foo bar\"",
+    });
+}
+
 test "insert replace behaviour - decl literal function" {
     try testCompletionTextEdit(.{
         .source =
@@ -4681,7 +4711,6 @@ fn testCompletionTextEdit(
     ctx.server.config_manager.config.enable_snippets = options.enable_snippets;
 
     const test_uri = try ctx.addDocument(.{ .source = text });
-    const handle = ctx.server.document_store.getHandle(test_uri).?;
 
     const cursor_position = offsets.indexToPosition(options.source, cursor_idx, ctx.server.offset_encoding);
     const params: types.completion.Params = .{
@@ -4705,21 +4734,7 @@ fn testCompletionTextEdit(
 
         const TextEditOrInsertReplace = std.meta.Child(@TypeOf(completion_item.textEdit));
 
-        const text_edit_or_insert_replace: TextEditOrInsertReplace = completion_item.textEdit orelse blk: {
-            var start_index: usize = cursor_idx;
-            while (start_index > 0 and zls.Analyser.isSymbolChar(handle.tree.source[start_index - 1])) {
-                start_index -= 1;
-            }
-
-            const start_position = offsets.indexToPosition(text, start_index, ctx.server.offset_encoding);
-
-            break :blk .{
-                .text_edit = .{
-                    .newText = completion_item.insertText orelse completion_item.label,
-                    .range = .{ .start = start_position, .end = cursor_position },
-                },
-            };
-        };
+        const text_edit_or_insert_replace: TextEditOrInsertReplace = completion_item.textEdit.?;
 
         switch (text_edit_or_insert_replace) {
             .text_edit => |text_edit| {

@@ -36,6 +36,21 @@ test "var_access" {
     , .empty, .{});
 }
 
+test "var_access escaped identifier" {
+    try testContext(
+        \\const foo = <loc>@"<cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo<cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo  <cursor></loc>
+    , .var_access, .{});
+    try testContext(
+        \\const foo = <loc>@"foo"<cursor></loc>
+    , .var_access, .{});
+}
+
 test "function.payload" {
     try testContext(
         \\    fn foo() !<cursor><loc>Str</loc> {
@@ -191,6 +206,12 @@ test "field access" {
     , .field_access, .{ .lookahead = true });
     try testContext(
         \\if (true) <loc>foo.bar<cursor></loc> == 3
+    , .field_access, .{});
+}
+
+test "field access function call" {
+    try testContext(
+        \\<loc>Foo.bar()<cursor></loc>
     , .field_access, .{});
 }
 
@@ -592,6 +613,19 @@ test "label decl" {
     try testContext(
         \\var foo = <loc>blk<cursor></loc>: { break :blk null };
     , .label_decl, .{});
+}
+
+test "doctest name" {
+    try testContext(
+        \\test<loc></loc> <cursor>
+    , .test_doctest_name, .{});
+    try testContext(
+        \\test <loc>foo<cursor></loc> {}
+    , .test_doctest_name, .{});
+
+    try testContext(
+        \\test <loc>foo.bar<cursor></loc>,
+    , .field_access, .{});
 }
 
 test "empty" {

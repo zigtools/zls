@@ -686,97 +686,6 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-/// if the `source_index` points to `@name`, the source location of `name` without the `@` is returned.
-/// if the `source_index` points to `@"name"`, the source location of `name` is returned.
-pub fn identifierLocFromIndex(tree: *const Ast, source_index: usize) ?offsets.Loc {
-    _, const loc = identifierTokenAndLocFromIndex(tree, source_index) orelse return null;
-    return loc;
-}
-
-pub fn identifierTokenAndLocFromIndex(tree: *const Ast, source_index: usize) ?struct { Ast.TokenIndex, offsets.Loc } {
-    const token = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, tree) orelse return null;
-    switch (tree.tokenTag(token)) {
-        .identifier,
-        .builtin,
-        => {
-            const token_loc = offsets.tokenToLoc(tree, token);
-            if (!(token_loc.start <= source_index and source_index <= token_loc.end)) return null;
-            return .{ token, offsets.identifierIndexToLoc(tree.source, tree.tokenStart(token), .name) };
-        },
-        else => {},
-    }
-
-    var start = source_index;
-    while (start > 0 and isSymbolChar(tree.source[start - 1])) {
-        start -= 1;
-    }
-
-    var end = source_index;
-    while (end < tree.source.len and isSymbolChar(tree.source[end])) {
-        end += 1;
-    }
-
-    if (start == end) return null;
-    return .{ token, .{ .start = start, .end = end } };
-}
-
-test identifierLocFromIndex {
-    var tree = try Ast.parse(std.testing.allocator,
-        \\ name  @builtin  @"escaped"  @"s p a c e"  end
-    , .zig);
-    defer tree.deinit(std.testing.allocator);
-
-    try std.testing.expectEqualSlices(
-        std.zig.Token.Tag,
-        &.{ .identifier, .builtin, .identifier, .identifier, .identifier, .eof },
-        tree.tokens.items(.tag),
-    );
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 1, .end = 5 };
-        std.debug.assert(std.mem.eql(u8, "name", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 1));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 2));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 5));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 8, .end = 15 };
-        std.debug.assert(std.mem.eql(u8, "builtin", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 6));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 7));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 8));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 11));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 15));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 19, .end = 26 };
-        std.debug.assert(std.mem.eql(u8, "escaped", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 16));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 17));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 18));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 19));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 23));
-        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 27));
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 28));
-    }
-
-    {
-        const expected_loc: offsets.Loc = .{ .start = 43, .end = 46 };
-        std.debug.assert(std.mem.eql(u8, "end", offsets.locToSlice(tree.source, expected_loc)));
-
-        try std.testing.expectEqual(@as(?offsets.Loc, null), identifierLocFromIndex(&tree, 42));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 43));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 45));
-        try std.testing.expectEqual(@as(?offsets.Loc, expected_loc), identifierLocFromIndex(&tree, 46));
-    }
-}
-
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
 /// Examples:
 ///```zig
@@ -4898,6 +4807,7 @@ pub const PositionContext = union(enum) {
     /// - `blk: while`
     /// - `blk: switch`
     label_decl: offsets.Loc,
+    test_doctest_name: offsets.Loc,
     enum_literal: offsets.Loc,
     number_literal: offsets.Loc,
     char_literal: offsets.Loc,
@@ -4905,7 +4815,6 @@ pub const PositionContext = union(enum) {
     parens_expr: offsets.Loc,
     keyword: Ast.TokenIndex,
     error_access,
-    test_doctest_name,
     comment,
     other,
     empty,
@@ -4921,6 +4830,7 @@ pub const PositionContext = union(enum) {
             .var_access,
             .label_access,
             .label_decl,
+            .test_doctest_name,
             .enum_literal,
             .number_literal,
             .char_literal,
@@ -4928,7 +4838,6 @@ pub const PositionContext = union(enum) {
             => |l| return l,
             .keyword => |token_index| return offsets.tokenToLoc(tree, token_index),
             .error_access,
-            .test_doctest_name,
             .comment,
             .other,
             .empty,
@@ -4980,6 +4889,7 @@ const Stack = struct {
     };
 
     pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) error{OutOfMemory}!Stack {
+        std.debug.assert(capacity > 0); // See `peek`.
         return .{ .states = try .initCapacity(allocator, capacity) };
     }
 
@@ -4991,9 +4901,9 @@ const Stack = struct {
         try self.states.append(allocator, state.*);
     }
 
-    pub fn peek(self: *Stack, allocator: std.mem.Allocator) error{OutOfMemory}!*Stack.State {
+    pub fn peek(self: *Stack) *Stack.State {
         if (self.states.items.len == 0) {
-            try self.states.append(allocator, .{ .ctx = .empty, .scope = .global });
+            self.states.appendAssumeCapacity(.{ .ctx = .empty, .scope = .global });
         }
         return &self.states.items[self.states.items.len - 1];
     }
@@ -5001,12 +4911,11 @@ const Stack = struct {
     /// Pops the last state off the stack. Sets previous state's ctx to .empty if !scopes_match
     pub fn pop(
         self: *Stack,
-        allocator: std.mem.Allocator,
         /// Indicate whether the current state's scope matches the one being closed
         scopes_match: bool,
-    ) error{OutOfMemory}!void {
+    ) void {
         if (self.states.items.len != 0) self.states.items.len -= 1;
-        if (!scopes_match) (try self.peek(allocator)).ctx = .empty;
+        if (!scopes_match) self.peek().ctx = .empty;
     }
 };
 
@@ -5015,10 +4924,6 @@ fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
         .start = prev.start,
         .end = token.loc.end,
     };
-}
-
-pub fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlphanumeric(char) or char == '_';
 }
 
 /// Given a byte index in a document (typically cursor offset), classify what kind of entity is at that index.
@@ -5097,8 +5002,13 @@ pub fn getPositionContext(
 
         // Single '@' do not return a builtin token so we check this on our own.
         if (tok.tag == .invalid and tree.source[tok.loc.start] == '@') {
-            tok.tag = .builtin;
-            tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
+            if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@\"")) {
+                tok.tag = .identifier;
+                tok.loc = .{ .start = tok.loc.start, .end = @min(line_loc.end, tree.tokenStart(current_token + 1)) };
+            } else if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@")) {
+                tok.tag = .builtin;
+                tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
+            }
         }
 
         if (source_index < tok.loc.start) break;
@@ -5107,7 +5017,7 @@ pub fn getPositionContext(
             // `tok` is the latter of the two.
             if (!should_do_lookahead) break;
             should_do_lookahead = false;
-            const curr_ctx = try stack.peek(allocator);
+            const curr_ctx = stack.peek();
             switch (tok.tag) {
                 .identifier,
                 .builtin,
@@ -5137,13 +5047,15 @@ pub fn getPositionContext(
             else => {},
         }
 
-        // State changes
-        var curr_ctx = try stack.peek(allocator);
-        switch (tok.tag) {
-            .string_literal, .multiline_string_literal_line => string_lit_block: {
-                curr_ctx.ctx = .{ .string_literal = tok.loc };
-                if (tok.tag != .string_literal) break :string_lit_block;
-
+        const curr_ctx: *Stack.State = stack.peek();
+        defer switch (stack.peek().ctx) {
+            .field_access => |*loc| loc.* = tokenLocAppend(loc.*, tok),
+            else => {},
+        };
+        const new_state: PositionContext = switch (tok.tag) {
+            .multiline_string_literal_line => .{ .string_literal = tok.loc },
+            .string_literal,
+            => new_state: {
                 const string_literal_slice = offsets.locToSlice(tree.source, tok.loc);
                 var content_loc = tok.loc;
 
@@ -5154,7 +5066,8 @@ pub fn getPositionContext(
                     }
                 }
 
-                if (source_index < content_loc.start or content_loc.end < source_index) break :string_lit_block;
+                var new_state: PositionContext = .{ .string_literal = tok.loc };
+                if (source_index < content_loc.start or content_loc.end < source_index) break :new_state new_state;
 
                 if (curr_ctx.scope == .parens and
                     stack.states.items.len >= 2)
@@ -5165,53 +5078,54 @@ pub fn getPositionContext(
                         .builtin => |loc| {
                             const builtin_name = tree.source[loc.start..loc.end];
                             if (std.mem.eql(u8, builtin_name, "@import")) {
-                                curr_ctx.ctx = .{ .import_string_literal = tok.loc };
+                                new_state = .{ .import_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
-                                curr_ctx.ctx = .{ .cinclude_string_literal = tok.loc };
+                                new_state = .{ .cinclude_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
-                                curr_ctx.ctx = .{ .embedfile_string_literal = tok.loc };
+                                new_state = .{ .embedfile_string_literal = tok.loc };
                             }
                         },
                         else => {},
                     }
                 }
+                break :new_state new_state;
             },
-            .identifier => if (curr_ctx.isErrSetDef()) {
-                // Intent is to skip everything between the `error{...}` braces
-            } else switch (curr_ctx.ctx) {
-                .enum_literal => curr_ctx.ctx = .{ .enum_literal = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
-                .field_access => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree).?, tok) },
-                .label_access => |loc| curr_ctx.ctx = if (loc.start == loc.end)
+            .identifier => if (curr_ctx.isErrSetDef())
+                continue // Intent is to skip everything between the `error{...}` braces
+            else switch (curr_ctx.ctx) {
+                .enum_literal => |loc| .{ .enum_literal = tokenLocAppend(loc, tok) },
+                .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
+                .label_access => |loc| if (loc.start == loc.end)
                     .{ .label_access = tok.loc }
                 else
                     .{ .var_access = tok.loc },
-                .test_doctest_name => curr_ctx.ctx = .test_doctest_name,
-                else => curr_ctx.ctx = .{ .var_access = tok.loc },
+                .test_doctest_name => .{ .test_doctest_name = tok.loc },
+                else => .{ .var_access = tok.loc },
             },
-            .builtin => curr_ctx.ctx = .{ .builtin = tok.loc },
-            .period, .period_asterisk => switch (curr_ctx.ctx) {
-                // TODO: only set context to enum literal if token tag is "." (not ".*")
-                .empty, .label_access => curr_ctx.ctx = .{ .enum_literal = tok.loc },
-                .enum_literal => curr_ctx.ctx = .empty,
+            .builtin => .{ .builtin = tok.loc },
+            .period => switch (curr_ctx.ctx) {
+                .empty, .label_access => .{ .enum_literal = tok.loc },
+                .enum_literal => .empty,
                 .keyword => |token_index| switch (tree.tokenTag(token_index)) {
-                    .keyword_break => curr_ctx.ctx = .{ .enum_literal = tok.loc },
-                    else => curr_ctx.ctx = .other,
+                    .keyword_break => .{ .enum_literal = tok.loc },
+                    else => .other,
                 },
-                .comment, .other, .field_access, .error_access => {},
-                else => curr_ctx.ctx = .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
+                .comment, .other, .error_access => curr_ctx.ctx,
+                .test_doctest_name, .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
+                else => .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
             },
-            .question_mark => switch (curr_ctx.ctx) {
-                .field_access => {},
-                else => curr_ctx.ctx = .empty,
+            .question_mark, .period_asterisk => switch (curr_ctx.ctx) {
+                .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
+                else => .empty,
             },
             .colon => switch (curr_ctx.ctx) {
                 .keyword => |token_index| switch (tree.tokenTag(token_index)) {
                     .keyword_break,
                     .keyword_continue,
-                    => curr_ctx.ctx = .{ .label_access = .{ .start = tok.loc.end, .end = tok.loc.end } },
-                    else => curr_ctx.ctx = .empty,
+                    => .{ .label_access = .{ .start = tok.loc.end, .end = tok.loc.end } },
+                    else => .empty,
                 },
-                else => curr_ctx.ctx = .empty,
+                else => .empty,
             },
             .l_paren => {
                 if (curr_ctx.ctx == .empty) curr_ctx.ctx = .{ .parens_expr = tok.loc };
@@ -5223,22 +5137,40 @@ pub fn getPositionContext(
                     else => .parens,
                 } else .parens;
                 try stack.push(allocator, &.{ .ctx = .empty, .scope = scope });
+                continue;
             },
-            .r_paren => try stack.pop(allocator, curr_ctx.scope == .parens),
-            .l_bracket => try stack.push(allocator, &.{ .ctx = .empty, .scope = .brackets }),
-            .r_bracket => try stack.pop(allocator, curr_ctx.scope == .brackets),
-            .l_brace => try stack.push(allocator, &.{ .ctx = if (curr_ctx.ctx == .error_access) curr_ctx.ctx else .empty, .scope = .braces }),
-            .r_brace => try stack.pop(allocator, curr_ctx.scope == .braces),
-            .keyword_error => curr_ctx.ctx = .error_access,
+            .r_paren => {
+                stack.pop(curr_ctx.scope == .parens);
+                continue;
+            },
+            .l_bracket => {
+                try stack.push(allocator, &.{ .ctx = .empty, .scope = .brackets });
+                continue;
+            },
+            .r_bracket => {
+                stack.pop(curr_ctx.scope == .brackets);
+                continue;
+            },
+            .l_brace => {
+                try stack.push(allocator, &.{ .ctx = if (curr_ctx.ctx == .error_access) curr_ctx.ctx else .empty, .scope = .braces });
+                continue;
+            },
+            .r_brace => {
+                stack.pop(curr_ctx.scope == .braces);
+                continue;
+            },
+            .keyword_error => .error_access,
             .number_literal => {
                 if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
                     return .{ .number_literal = tok.loc };
                 }
+                continue;
             },
             .char_literal => {
                 if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
                     return .{ .char_literal = tok.loc };
                 }
+                continue;
             },
             .keyword_addrspace,
             .keyword_break,
@@ -5248,26 +5180,23 @@ pub fn getPositionContext(
             .keyword_if,
             .keyword_switch,
             .keyword_while,
-            => |tag| {
+            => |tag| new_state: {
                 std.debug.assert(tree.tokenTag(current_token) == tag);
-                curr_ctx.ctx = .{ .keyword = current_token };
+                break :new_state .{ .keyword = current_token };
             },
-            .keyword_test => curr_ctx.ctx = .test_doctest_name,
-            .container_doc_comment => curr_ctx.ctx = .comment,
-            .doc_comment => {
-                if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .comment; // Intent is to skip everything between the `error{...}` braces
+            .keyword_test => .{ .test_doctest_name = .{ .start = tok.loc.end, .end = tok.loc.end } },
+            .container_doc_comment => .comment,
+            .doc_comment => new_state: {
+                if (!curr_ctx.isErrSetDef()) break :new_state .comment; // Intent is to skip everything between the `error{...}` braces
+                continue;
             },
-            .comma => {
-                if (!curr_ctx.isErrSetDef()) curr_ctx.ctx = .empty; // Intent is to skip everything between the `error{...}` braces
+            .comma => new_state: {
+                if (!curr_ctx.isErrSetDef()) break :new_state .empty; // Intent is to skip everything between the `error{...}` braces
+                continue;
             },
-            else => curr_ctx.ctx = .empty,
-        }
-
-        curr_ctx = try stack.peek(allocator);
-        switch (curr_ctx.ctx) {
-            .field_access => |r| curr_ctx.ctx = .{ .field_access = tokenLocAppend(r, tok) },
-            else => {},
-        }
+            else => .empty,
+        };
+        curr_ctx.ctx = new_state;
     }
 
     if (stack.states.pop()) |state| {
@@ -6594,7 +6523,7 @@ pub fn getSymbolFieldAccessesHighlight(
     property_types: *std.ArrayList(Type),
 ) Error!?offsets.Loc {
     const name_loc, const highlight_loc = blk: {
-        const name_token, const name_loc = Analyser.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
+        const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, source_index) orelse {
             const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{ .question_mark, .period_asterisk }, &handle.tree) orelse return null;
             switch (handle.tree.tokenTag(token)) {
                 .question_mark => {

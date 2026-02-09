@@ -227,7 +227,9 @@ pub const IdentifierIndexRange = enum {
     full,
 };
 
-/// Support formats:
+/// The source index must be at the start of the valid identifier.
+///
+/// Supported formats:
 /// - `foo`
 /// - `@"foo"`
 /// - `@foo`
@@ -251,12 +253,7 @@ pub fn identifierIndexToLoc(text: [:0]const u8, source_index: usize, range: Iden
     } else {
         const start: usize = source_index + @intFromBool(text[source_index] == '@');
         var index = start;
-        while (true) : (index += 1) {
-            switch (text[index]) {
-                'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
-                else => break,
-            }
-        }
+        while (isSymbolChar(text[index])) : (index += 1) {}
         return .{ .start = if (range == .full) source_index else start, .end = index };
     }
 }
@@ -302,6 +299,93 @@ pub fn identifierTokenToNameLoc(tree: *const Ast, identifier_token: Ast.TokenInd
 
 pub fn identifierTokenToNameSlice(tree: *const Ast, identifier_token: Ast.TokenIndex) []const u8 {
     return locToSlice(tree.source, identifierTokenToNameLoc(tree, identifier_token));
+}
+
+/// See `identifierTokenAndLocFromIndex`.
+pub fn identifierLocFromIndex(tree: *const Ast, source_index: usize) ?Loc {
+    _, const loc = identifierTokenAndLocFromIndex(tree, source_index) orelse return null;
+    return loc;
+}
+
+/// Returns the source location of `foo` if the source index is on a valid identifier.
+///
+/// Supported formats:
+/// - `foo`    (identifier)
+/// - `@"foo"` (escaped identifier)
+/// - `@foo`   (builtin)
+pub fn identifierTokenAndLocFromIndex(tree: *const Ast, source_index: usize) ?struct { Ast.TokenIndex, Loc } {
+    const token = sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .identifier, .builtin }, tree) orelse return null;
+    switch (tree.tokenTag(token)) {
+        .identifier, .builtin => {},
+        else => return null,
+    }
+    const token_loc = tokenToLoc(tree, token);
+    std.debug.assert(token_loc.start <= source_index and source_index <= token_loc.end);
+    return .{ token, identifierIndexToLoc(tree.source, token_loc.start, .name) };
+}
+
+test identifierLocFromIndex {
+    var tree = try Ast.parse(std.testing.allocator,
+        \\ name  @builtin  @"escaped"  @"s p a c e"  end
+    , .zig);
+    defer tree.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualSlices(
+        std.zig.Token.Tag,
+        &.{ .identifier, .builtin, .identifier, .identifier, .identifier, .eof },
+        tree.tokens.items(.tag),
+    );
+
+    {
+        const expected_loc: Loc = .{ .start = 1, .end = 5 };
+        std.debug.assert(std.mem.eql(u8, "name", locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 1));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 2));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 5));
+    }
+
+    {
+        const expected_loc: Loc = .{ .start = 8, .end = 15 };
+        std.debug.assert(std.mem.eql(u8, "builtin", locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(@as(?Loc, null), identifierLocFromIndex(&tree, 6));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 7));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 8));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 11));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 15));
+        try std.testing.expectEqual(@as(?Loc, null), identifierLocFromIndex(&tree, 16));
+    }
+
+    {
+        const expected_loc: Loc = .{ .start = 19, .end = 26 };
+        std.debug.assert(std.mem.eql(u8, "escaped", locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(@as(?Loc, null), identifierLocFromIndex(&tree, 16));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 17));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 18));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 19));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 23));
+        try std.testing.expectEqual(expected_loc, identifierLocFromIndex(&tree, 27));
+        try std.testing.expectEqual(@as(?Loc, null), identifierLocFromIndex(&tree, 28));
+    }
+
+    {
+        const expected_loc: Loc = .{ .start = 43, .end = 46 };
+        std.debug.assert(std.mem.eql(u8, "end", locToSlice(tree.source, expected_loc)));
+
+        try std.testing.expectEqual(@as(?Loc, null), identifierLocFromIndex(&tree, 42));
+        try std.testing.expectEqual(@as(?Loc, expected_loc), identifierLocFromIndex(&tree, 43));
+        try std.testing.expectEqual(@as(?Loc, expected_loc), identifierLocFromIndex(&tree, 45));
+        try std.testing.expectEqual(@as(?Loc, expected_loc), identifierLocFromIndex(&tree, 46));
+    }
+}
+
+pub fn isSymbolChar(char: u8) bool {
+    return switch (char) {
+        'a'...'z', 'A'...'Z', '_', '0'...'9' => true,
+        else => false,
+    };
 }
 
 pub fn tokensToLoc(tree: *const Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
