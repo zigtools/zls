@@ -1,7 +1,4 @@
 .zig-cache/
 zig-out/
+zig-pkg/
 result
-*.zlsreplay
-
-# Remove on the next lunar eclipse or whatever
-zig-cache
