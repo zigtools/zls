@@ -530,34 +530,19 @@ const Watch = struct {
 
     fn wait(w: *Watch, gpa: Allocator, timeout: Io.Timeout) !std.Build.Watch.WaitResult {
         if (@TypeOf(std.Build.Watch) != void and w.supports_fs_watch) {
-            return try w.fs_watch.wait(gpa, switch (timeout) {
+            return try w.fs_watch.wait(gpa, w.io, switch (timeout) {
                 .none => .none,
                 .duration => |d| .{ .ms = @intCast(d.raw.toMilliseconds()) },
                 .deadline => unreachable,
             });
         }
-        waitTimeout(&w.manual_event, w.io, timeout) catch |err| switch (err) {
+        w.manual_event.waitTimeout(w.io, timeout) catch |err| switch (err) {
             error.Canceled => unreachable,
             error.Timeout => return .timeout,
         };
         w.manual_event.reset();
         markStepsDirty(gpa, w.steps);
         return .dirty;
-    }
-
-    /// Copy of `Io.Event.waitTimeout` but a compile error has been fixed.
-    pub fn waitTimeout(event: *Io.Event, io: std.Io, timeout: Io.Timeout) (error{Timeout} || Io.Cancelable)!void {
-        if (@cmpxchgStrong(Io.Event, event, .unset, .waiting, .acquire, .acquire)) |prev| switch (prev) {
-            .unset => unreachable,
-            .waiting => assert(!builtin.single_threaded), // invalid state
-            .is_set => return,
-        };
-        try io.futexWaitTimeout(Io.Event, event, .waiting, timeout);
-        switch (@atomicLoad(Io.Event, event, .acquire)) {
-            .unset => unreachable, // `reset` called before pending `wait` returned
-            .waiting => return error.Timeout,
-            .is_set => return,
-        }
     }
 
     fn markStepsDirty(gpa: Allocator, all_steps: []const *Step) void {
