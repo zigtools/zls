@@ -574,11 +574,7 @@ pub const Handle = struct {
             var imports = try analysis.collectImports(allocator, &handle.tree);
             defer imports.deinit(allocator);
 
-            const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.UnsupportedScheme => return &.{},
-            };
-            defer allocator.free(base_path);
+            const parsed_uri = std.Uri.parse(handle.uri.raw) catch unreachable; // The Uri is guranteed to be valid
 
             var uris: std.ArrayList(Uri) = try .initCapacity(allocator, imports.items.len);
             errdefer {
@@ -588,7 +584,7 @@ pub const Handle = struct {
 
             for (imports.items) |import_str| {
                 if (!std.mem.endsWith(u8, import_str, ".zig")) continue;
-                uris.appendAssumeCapacity(try resolveFileImportString(allocator, base_path, import_str) orelse continue);
+                uris.appendAssumeCapacity(try Uri.resolveImport(allocator, handle.uri, parsed_uri, import_str));
             }
 
             return try uris.toOwnedSlice(allocator);
@@ -1873,13 +1869,8 @@ pub fn uriFromImportStr(
     defer tracy_zone.end();
 
     if (std.mem.endsWith(u8, import_str, ".zig") or std.mem.endsWith(u8, import_str, ".zon")) {
-        const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.UnsupportedScheme => return .none,
-        };
-        defer allocator.free(base_path);
-        const uri = try resolveFileImportString(allocator, base_path, import_str) orelse return .none;
-        return .{ .one = uri };
+        const parsed_uri = std.Uri.parse(handle.uri.raw) catch unreachable; // The Uri is guranteed to be valid
+        return .{ .one = try Uri.resolveImport(allocator, handle.uri, parsed_uri, import_str) };
     }
 
     if (std.mem.eql(u8, import_str, "std")) {
@@ -1948,11 +1939,4 @@ pub fn uriFromImportStr(
             return .{ .one = try .fromPath(allocator, imported_root_source_file) };
         },
     }
-}
-
-fn resolveFileImportString(allocator: std.mem.Allocator, base_path: []const u8, import_str: []const u8) error{OutOfMemory}!?Uri {
-    const joined_path = try std.fs.path.resolve(allocator, &.{ base_path, "..", import_str });
-    defer allocator.free(joined_path);
-
-    return try .fromPath(allocator, joined_path);
 }

@@ -345,10 +345,7 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
         var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
         defer phr.deinit(allocator);
 
-        const uri = try ctx.addDocument(.{
-            .use_file_scheme = sources.len > 1, // use 'file:/' scheme when testing with multiple files so that they can import each other
-            .source = phr.new_source,
-        });
+        const uri = try ctx.addDocument(.{ .source = phr.new_source });
         files.putAssumeCapacityNoClobber(uri.raw, .{ .source = source, .new_source = phr.new_source });
         phr.new_source = ""; // `files` takes ownership of `new_source` from `phr`
 
