@@ -397,7 +397,7 @@ pub fn tokenToLoc(tree: *const Ast, token_index: Ast.TokenIndex) Loc {
     const tag = tree.tokenTag(token_index);
 
     // Many tokens can be determined entirely by their tag.
-    if (tag == .identifier) {
+    if (tag == .identifier or tag == .builtin) {
         // fast path for identifiers
         return identifierIndexToLoc(tree.source, start, .full);
     } else if (tag.lexeme()) |lexeme| {
