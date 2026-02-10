@@ -115,9 +115,9 @@ test "parse - always add authority component (posix)" {
 }
 
 test "parse - normalize percent encoding (posix)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo%5cmain%2ezig", false);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///f%Aao%5cmain%2ezig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:///foo%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///f%AAo%5Cmain.zig", uri.raw);
 }
 
 test "parse - convert percent encoded '\\' to '/' (windows)" {
@@ -435,21 +435,21 @@ fn normalizePercentEncoded(
         const lower_value = std.fmt.charToDigit(lower_hex, 16) catch continue;
         const percent_encoded_char = upper_value * 16 + lower_value;
 
-        if (!isValidChar(percent_encoded_char)) {
-            if (std.ascii.isUpper(upper_hex) or std.ascii.isUpper(lower_hex)) continue;
-
+        if (isValidChar(percent_encoded_char)) {
+            // a character has been unnecessarily escaped
+            result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
+            result.appendAssumeCapacity(percent_encoded_char);
+            start = percent + 3;
+        } else if (std.ascii.isLower(upper_hex) or std.ascii.isLower(lower_hex)) {
             // convert percent encoded character to upper case
             result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
             result.appendAssumeCapacity('%');
             result.appendAssumeCapacity(std.ascii.toUpper(upper_hex));
             result.appendAssumeCapacity(std.ascii.toUpper(lower_hex));
+            start = percent + 3;
         } else {
-            // a character has been unnecessarily escaped
-            result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
-            result.appendAssumeCapacity(percent_encoded_char);
+            // skip properly percent encoded character
         }
-
-        start = percent + 3;
         index = percent + 3;
     }
     result.appendSliceAssumeCapacity(percent_encoded[start..]);
