@@ -1666,21 +1666,17 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     }
 
     const refs = try references.callsiteReferences(
-        analyser.arena,
         analyser,
         .{ .decl = func_decl, .handle = decl_handle.handle, .container_type = decl_handle.container_type },
         false,
         false,
     );
 
-    // TODO: Set `workspace` to true; current problems
-    // - we gather dependencies, not dependents
-
     var possible: std.ArrayList(Type.TypeWithDescriptor) = .empty;
 
     for (refs.items) |ref| {
         var call_buf: [1]Ast.Node.Index = undefined;
-        const call = tree.fullCall(&call_buf, ref.call_node).?;
+        const call = tree.fullCall(&call_buf, ref.node).?;
 
         const real_param_idx = if (func_params_len != 0 and pay.param_index != 0 and call.ast.params.len == func_params_len - 1)
             pay.param_index - 1
@@ -1695,15 +1691,13 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
             defer analyser.collect_callsite_references = old_collect_callsite_references;
             analyser.collect_callsite_references = false;
 
-            const handle = try analyser.store.getOrLoadHandle(ref.uri) orelse continue;
-
             break :resolve_ty try analyser.resolveTypeOfNode(.of(
                 // TODO?: this is a """heuristic based approach"""
                 // perhaps it would be better to use proper self detection
                 // maybe it'd be a perf issue and this is fine?
                 // you figure it out future contributor <3
                 call.ast.params[real_param_idx],
-                handle,
+                ref.handle,
             )) orelse continue;
         };
 
@@ -1713,7 +1707,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
         const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
         try possible.append(analyser.arena, .{
             .type = ty,
-            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ ref.uri.raw, loc.line + 1, loc.character + 1 }),
+            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ ref.handle.uri.raw, loc.line + 1, loc.character + 1 }),
         });
     }
 
