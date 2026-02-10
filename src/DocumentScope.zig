@@ -13,36 +13,6 @@ declarations: std.MultiArrayList(Declaration),
 /// used for looking up a child declaration in a given scope
 declaration_lookup_map: DeclarationLookupMap,
 extra: std.ArrayList(u32),
-/// All identifier token that are in error sets.
-/// When there are multiple error sets that contain the same error, only one of them is stored.
-/// A token that has a doc comment takes priority.
-/// This means that if there a multiple error sets with the same name, only one of them is included.
-global_error_set: IdentifierSet,
-/// All identifier token that are in enums.
-/// When there are multiple enums that contain the field name, only one of them is stored.
-/// A token that has a doc comment takes priority.
-/// This means that if there a multiple enums with the same name, only one of them is included.
-global_enum_set: IdentifierSet,
-
-/// Stores a set of identifier tokens with unique names
-pub const IdentifierSet = std.ArrayHashMapUnmanaged(Ast.TokenIndex, void, IdentifierTokenContext, true);
-
-pub const IdentifierTokenContext = struct {
-    tree: *const Ast,
-
-    pub fn eql(self: @This(), a: Ast.TokenIndex, b: Ast.TokenIndex, b_index: usize) bool {
-        _ = b_index;
-        if (a == b) return true;
-        const a_name = offsets.identifierTokenToNameSlice(self.tree, a);
-        const b_name = offsets.identifierTokenToNameSlice(self.tree, b);
-        return std.mem.eql(u8, a_name, b_name);
-    }
-
-    pub fn hash(self: @This(), token: Ast.TokenIndex) u32 {
-        const name = offsets.identifierTokenToNameSlice(self.tree, token);
-        return std.array_hash_map.hashString(name);
-    }
-};
 
 /// Every `index` inside this `ArrayhashMap` is equivalent to a `Declaration.Index`
 /// This means that every declaration is only the child of a single scope
@@ -524,8 +494,6 @@ pub fn init(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!D
         .declarations = .empty,
         .declaration_lookup_map = .empty,
         .extra = .empty,
-        .global_error_set = .empty,
-        .global_enum_set = .empty,
     };
     errdefer document_scope.deinit(allocator);
 
@@ -557,9 +525,6 @@ pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
     scope.declarations.deinit(allocator);
     scope.declaration_lookup_map.deinit(allocator);
     scope.extra.deinit(allocator);
-
-    scope.global_enum_set.deinit(allocator);
-    scope.global_error_set.deinit(allocator);
 }
 
 fn locToSmallLoc(loc: offsets.Loc) Scope.SmallLoc {
@@ -807,17 +772,6 @@ noinline fn walkContainerDecl(
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
 
-    const is_enum_or_tagged_union, const is_struct = blk: {
-        if (node_idx == .root) break :blk .{ false, true };
-        break :blk switch (tree.tokenTag(container_decl.ast.main_token)) {
-            .keyword_enum => .{ true, false },
-            .keyword_union => .{ container_decl.ast.enum_token != null or container_decl.ast.arg != .none, false },
-            .keyword_struct => .{ false, true },
-            .keyword_opaque => .{ false, false },
-            else => unreachable,
-        };
-    };
-
     const scope = try context.startScope(
         .container,
         .{ .ast_node = node_idx },
@@ -837,6 +791,8 @@ noinline fn walkContainerDecl(
             .container_field_align,
             => {
                 var container_field = tree.fullContainerField(decl).?;
+
+                const is_struct = node_idx == .root or tree.tokenTag(container_decl.ast.main_token) == .keyword_struct;
                 if (is_struct and container_field.ast.tuple_like) continue;
 
                 container_field.convertToNonTupleLike(tree);
@@ -844,23 +800,6 @@ noinline fn walkContainerDecl(
                 const main_token = container_field.ast.main_token;
                 if (tree.tokenTag(main_token) != .identifier) continue;
                 try scope.pushDeclaration(main_token, .{ .ast_node = decl }, .field);
-
-                if (is_enum_or_tagged_union) {
-                    const name = offsets.identifierTokenToNameSlice(tree, main_token);
-                    if (std.mem.eql(u8, name, "_")) continue;
-
-                    const gop = try context.doc_scope.global_enum_set.getOrPutContext(
-                        context.allocator,
-                        main_token,
-                        .{ .tree = tree },
-                    );
-                    if (!gop.found_existing) {
-                        gop.key_ptr.* = main_token;
-                    } else if (gop.found_existing and tree.tokenTag(main_token - 1) == .doc_comment) {
-                        // a token with a doc comment takes priority.
-                        gop.key_ptr.* = main_token;
-                    }
-                }
             },
             .fn_proto,
             .fn_proto_multi,
@@ -905,15 +844,6 @@ noinline fn walkErrorSetNode(
         const identifier_token: Ast.TokenIndex = @intCast(tok_i);
 
         try scope.pushDeclaration(identifier_token, .{ .error_token = identifier_token }, .other);
-        const gop = try context.doc_scope.global_error_set.getOrPutContext(
-            context.allocator,
-            identifier_token,
-            .{ .tree = tree },
-        );
-        if (!gop.found_existing or tree.tokenTag(identifier_token - 1) == .doc_comment) {
-            // a token with a doc comment takes priority.
-            gop.key_ptr.* = identifier_token;
-        }
     }
 
     try scope.finalize();
