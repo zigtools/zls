@@ -4482,58 +4482,6 @@ pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) Error!
     return try result_ty.instanceTypeVal(analyser);
 }
 
-/// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-pub fn collectImports(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!std.ArrayList([]const u8) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var imports: std.ArrayList([]const u8) = .empty;
-    errdefer imports.deinit(allocator);
-
-    for (0..tree.tokens.len) |i| {
-        if (tree.tokenTag(@intCast(i)) != .builtin)
-            continue;
-        const name = offsets.identifierTokenToNameSlice(tree, @intCast(i));
-        if (!std.mem.eql(u8, name, "import")) continue;
-        if (!std.mem.startsWith(std.zig.Token.Tag, tree.tokens.items(.tag)[i + 1 ..], &.{ .l_paren, .string_literal, .r_paren })) continue;
-
-        const str = tree.tokenSlice(@intCast(i + 2));
-        try imports.append(allocator, str[1 .. str.len - 1]);
-    }
-
-    return imports;
-}
-
-/// Collects all `@cImport` nodes
-/// Caller owns returned memory.
-pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}![]Ast.Node.Index {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var import_nodes: std.ArrayList(Ast.Node.Index) = .empty;
-    errdefer import_nodes.deinit(allocator);
-
-    const node_tags = tree.nodes.items(.tag);
-    for (node_tags, 0..) |tag, i| {
-        const node: Ast.Node.Index = @enumFromInt(i);
-
-        switch (tag) {
-            .builtin_call,
-            .builtin_call_comma,
-            .builtin_call_two,
-            .builtin_call_two_comma,
-            => {},
-            else => continue,
-        }
-
-        if (!std.mem.eql(u8, Ast.tokenSlice(tree.*, tree.nodeMainToken(node)), "@cImport")) continue;
-
-        try import_nodes.append(allocator, node);
-    }
-
-    return import_nodes.toOwnedSlice(allocator);
-}
-
 pub const NodeWithUri = struct {
     node: Ast.Node.Index,
     uri: Uri,
