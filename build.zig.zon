@@ -11,12 +11,8 @@
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
     .minimum_zig_version = "0.16.0-dev.2535+b5bd49460",
+    // Must be kept in sync with the `deps.nix` for the Nix flake.
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    // Whenever the dependencies are updated, run the following command:
-    // ```bash
-    // nix run github:nix-community/zon2nix#default_0_14 > deps.nix
-    // ```
-    // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/d002ad87b1f8c238eb080c185bb0b93cfd946b9d.tar.gz",

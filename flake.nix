@@ -2,14 +2,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    zig-flake.url = "github:silversquirl/zig-flake";
+    zig-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
     self,
     nixpkgs,
-    zig-overlay,
+    zig-flake,
   }: let
     lib = nixpkgs.lib;
     parseVersionFieldFromZon = name:
@@ -33,7 +33,7 @@
         system: let
           pkgs = nixpkgs.legacyPackages.${system};
           fs = lib.fileset;
-          zig = zig-overlay.packages.${system}.master;
+          zig = zig-flake.packages.${system}.nightly;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
         in {
           formatter.${system} = pkgs.alejandra;
