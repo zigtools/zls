@@ -487,6 +487,7 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
             std.debug.assert(token_loc.start <= source_index and source_index <= token_loc.end);
             return offsets.identifierIndexToLoc(tree.source, token_loc.start, if (tag == .builtin) .name else .full);
         },
+        .colon => return fallback_loc,
         else => {
             const token_start = tree.tokenStart(token);
 
