@@ -1669,7 +1669,6 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
         analyser,
         .{ .decl = func_decl, .handle = decl_handle.handle, .container_type = decl_handle.container_type },
         false,
-        false,
     );
 
     var possible: std.ArrayList(Type.TypeWithDescriptor) = .empty;

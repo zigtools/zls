@@ -87,10 +87,9 @@ pub const BuildFile = struct {
     }
 
     /// Returns whether the `Uri` is a dependency of the given `BuildFile`.
-    /// May return `null` to indicate an inconclusive result because
+    /// May return `.unknown` to indicate an inconclusive result because
     /// the required build config has not been resolved yet.
     ///
-    /// invalidates any pointers into `build_files`
     /// **Thread safe** takes an exclusive lock
     fn isAssociatedWith(
         build_file: *BuildFile,
@@ -1535,53 +1534,6 @@ pub const CImportHandle = struct {
     /// c source file
     source: []const u8,
 };
-
-/// collects every file uri the given handle depends on
-/// includes imports, cimports & packages
-/// **Thread safe** takes a shared lock
-pub fn collectDependencies(
-    store: *DocumentStore,
-    allocator: std.mem.Allocator,
-    handle: *Handle,
-    dependencies: *std.ArrayList(Uri),
-) error{ Canceled, OutOfMemory }!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try dependencies.ensureUnusedCapacity(allocator, handle.file_imports.len + handle.cimports.len);
-    for (handle.file_imports) |uri| {
-        dependencies.appendAssumeCapacity(try uri.dupe(allocator));
-    }
-
-    if (supports_build_system) {
-        try store.mutex.lock(store.io);
-        defer store.mutex.unlock(store.io);
-        for (handle.cimports.items(.hash)) |hash| {
-            const result = store.cimports.get(hash) orelse continue;
-            switch (result) {
-                .success => |uri| dependencies.appendAssumeCapacity(try uri.dupe(allocator)),
-                .failure => continue,
-            }
-        }
-    }
-
-    if (supports_build_system) no_build_file: {
-        const build_file = switch (try handle.getAssociatedBuildFile(store)) {
-            .none, .unresolved => break :no_build_file,
-            .resolved => |resolved| resolved.build_file,
-        };
-
-        const build_config = build_file.tryLockConfig(store.io) orelse break :no_build_file;
-        defer build_file.unlockConfig(store.io);
-
-        const module_paths = build_config.modules.map.keys();
-
-        try dependencies.ensureUnusedCapacity(allocator, module_paths.len);
-        for (module_paths) |module_path| {
-            dependencies.appendAssumeCapacity(try .fromPath(allocator, module_path));
-        }
-    }
-}
 
 /// returns `true` if all include paths could be collected
 /// may return `false` because include paths from a build.zig may not have been resolved already

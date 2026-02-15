@@ -303,15 +303,30 @@ test "switch case capture - union tag" {
 
 test "cross-file reference" {
     try testMultiFileSymbolReferences(&.{
-        // TODO not putting a reference here is a hack to workaround cross-file references being broken https://github.com/zigtools/zls/issues/1071
-        // for now this only tests the ability to find references within a file to a decl from another file
-        \\pub const placeholder = struct {};
+        // Untitled-0.zig
+        \\pub const <0> = struct {};
         ,
+        // Untitled-1.zig
         \\const file = @import("Untitled-0.zig");
         \\const first = file.<0>;
         \\const second = file.<0>;
         ,
-    }, false);
+    }, true);
+}
+
+test "cross-file - transitive import" {
+    try testMultiFileSymbolReferences(&.{
+        // Untitled-0.zig
+        \\pub const <0> = struct {};
+        ,
+        // Untitled-1.zig
+        \\pub const file = @import("Untitled-0.zig");
+        ,
+        // Untitled-2.zig
+        \\const file = @import("Untitled-1.zig").file;
+        \\const foo: file.<0> = undefined;
+        ,
+    }, true);
 }
 
 fn testSymbolReferences(source: []const u8) !void {
@@ -392,11 +407,12 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
             defer visited.deinit(allocator);
 
             for (actual_locations) |response_location| {
-                const actual_loc = offsets.rangeToLoc(file.new_source, response_location.range, ctx.server.offset_encoding);
                 const actual_file_index = files.getIndex(response_location.uri) orelse {
                     std.debug.print("received location to unknown file `{s}` as the result\n", .{response_location.uri});
                     return error.InvalidReference;
                 };
+                const actual_file_source = files.values()[actual_file_index].new_source;
+                const actual_loc = offsets.rangeToLoc(actual_file_source, response_location.range, ctx.server.offset_encoding);
 
                 const index = found_index: {
                     for (locs.items(.new), locs.items(.file_index), 0..) |expected_loc, expected_file_index, idx| {
@@ -405,12 +421,12 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
                         if (expected_loc.end != actual_loc.end) continue;
                         break :found_index idx;
                     }
-                    try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
+                    try error_builder.msgAtLoc("server returned unexpected reference!", response_location.uri, actual_loc, .err, .{});
                     return error.UnexpectedReference;
                 };
 
                 if (visited.isSet(index)) {
-                    try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
+                    try error_builder.msgAtLoc("server returned duplicate reference!", response_location.uri, actual_loc, .err, .{});
                     return error.DuplicateReference;
                 } else {
                     visited.set(index);

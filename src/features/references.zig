@@ -216,50 +216,6 @@ const Builder = struct {
     }
 };
 
-fn gatherWorkspaceReferences(
-    store: *DocumentStore,
-    builder: anytype,
-    root_handle: *DocumentStore.Handle,
-    skip_std_references: bool,
-    include_decl: bool,
-) Analyser.Error!void {
-    const allocator = store.allocator;
-    var dependencies: Uri.ArrayHashMap(void) = .empty;
-    defer {
-        for (dependencies.keys()) |uri| {
-            uri.deinit(allocator);
-        }
-        dependencies.deinit(allocator);
-    }
-
-    var it: DocumentStore.HandleIterator = .{ .store = store };
-    while (it.next()) |handle| {
-        if (skip_std_references and DocumentStore.isInStd(handle.uri)) {
-            if (!include_decl or !handle.uri.eql(root_handle.uri))
-                continue;
-        }
-
-        var handle_dependencies: std.ArrayList(Uri) = .empty;
-        defer handle_dependencies.deinit(allocator);
-        try store.collectDependencies(allocator, handle, &handle_dependencies);
-
-        try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-        for (handle_dependencies.items) |uri| {
-            const gop = dependencies.getOrPutAssumeCapacity(uri);
-            if (gop.found_existing) {
-                uri.deinit(allocator);
-            }
-        }
-    }
-
-    for (dependencies.keys()) |uri| {
-        if (uri.eql(root_handle.uri)) continue;
-        const handle = try store.getOrLoadHandle(uri) orelse continue;
-
-        try builder.collectReferences(handle, .root);
-    }
-}
-
 fn symbolReferences(
     analyser: *Analyser,
     request: GeneralReferencesRequest,
@@ -267,8 +223,6 @@ fn symbolReferences(
     encoding: offsets.Encoding,
     /// add `target_symbol` as a references
     include_decl: bool,
-    /// exclude references from the std library
-    skip_std_references: bool,
     /// The file on which the request was initiated.
     current_handle: *DocumentStore.Handle,
 ) Analyser.Error!std.ArrayList(types.Location) {
@@ -326,16 +280,86 @@ fn symbolReferences(
 
     const workspace = local_node == null and request != .highlight and target_symbol.isPublic();
     if (workspace) {
-        try gatherWorkspaceReferences(
+        var uris = try gatherWorkspaceReferenceCandidates(
             analyser.store,
-            &builder,
+            analyser.arena,
             current_handle,
-            skip_std_references,
-            include_decl,
+            target_symbol.handle,
         );
+        for (uris.keys()) |uri| {
+            if (uri.eql(current_handle.uri)) continue;
+            const dependency_handle = try analyser.store.getOrLoadHandle(uri) orelse continue;
+            try builder.collectReferences(dependency_handle, .root);
+        }
     }
 
     return builder.locations;
+}
+
+fn gatherWorkspaceReferenceCandidates(
+    store: *DocumentStore,
+    arena: std.mem.Allocator,
+    /// The file on which the request was initiated.
+    root_handle: *DocumentStore.Handle,
+    /// The file which contains the symbol that is being searched for.
+    target_handle: *DocumentStore.Handle,
+) Analyser.Error!Uri.ArrayHashMap(void) {
+    if (DocumentStore.supports_build_system) no_build_file: {
+        const resolved = switch (try root_handle.getAssociatedBuildFile(store)) {
+            .unresolved => return .empty, // this should await instead
+            .none => break :no_build_file,
+            .resolved => |resolved| resolved,
+        };
+
+        const root_module_root_uri: Uri = try .fromPath(arena, resolved.root_source_file);
+
+        var found_uris: Uri.ArrayHashMap(void) = .empty;
+        try found_uris.put(arena, root_module_root_uri, {});
+
+        if (!root_handle.uri.eql(target_handle.uri)) {
+            switch (try target_handle.getAssociatedBuildFile(store)) {
+                .unresolved, .none => {},
+                .resolved => |resolved2| {
+                    const target_module_root_uri: Uri = try .fromPath(arena, resolved2.root_source_file);
+                    // also search through the module in which the symbol has been defined
+                    try found_uris.put(arena, target_module_root_uri, {});
+                },
+            }
+        }
+
+        var i: usize = 0;
+        while (i < found_uris.count()) : (i += 1) {
+            const uri = found_uris.keys()[i];
+            const handle = try store.getOrLoadHandle(uri) orelse continue;
+
+            try found_uris.ensureUnusedCapacity(arena, handle.file_imports.len);
+            for (handle.file_imports) |import_uri| found_uris.putAssumeCapacity(import_uri, {});
+        }
+        return found_uris;
+    }
+
+    var per_file_dependants: Uri.ArrayHashMap(std.ArrayList(Uri)) = .empty;
+
+    var it: DocumentStore.HandleIterator = .{ .store = store };
+    while (it.next()) |handle| {
+        for (handle.file_imports) |import_uri| {
+            const gop = try per_file_dependants.getOrPutValue(arena, import_uri, .empty);
+            try gop.value_ptr.append(arena, handle.uri);
+        }
+    }
+
+    var found_uris: Uri.ArrayHashMap(void) = .empty;
+    try found_uris.put(arena, target_handle.uri, {});
+
+    var i: usize = 0;
+    while (i < found_uris.count()) : (i += 1) {
+        const uri = found_uris.keys()[i];
+        const dependants: std.ArrayList(Uri) = per_file_dependants.get(uri) orelse .empty;
+        try found_uris.ensureUnusedCapacity(arena, dependants.items.len);
+        for (dependants.items) |dependant_uri| found_uris.putAssumeCapacity(dependant_uri, {});
+    }
+
+    return found_uris;
 }
 
 fn controlFlowReferences(
@@ -568,8 +592,6 @@ const CallBuilder = struct {
 pub fn callsiteReferences(
     analyser: *Analyser,
     decl_handle: Analyser.DeclWithHandle,
-    /// exclude references from the std library
-    skip_std_references: bool,
     /// search other files for references
     workspace: bool,
 ) Analyser.Error!std.ArrayList(Analyser.NodeWithHandle) {
@@ -586,13 +608,17 @@ pub fn callsiteReferences(
     try builder.collectReferences(decl_handle.handle, .root);
 
     if (workspace) {
-        try gatherWorkspaceReferences(
+        var uris = try gatherWorkspaceReferenceCandidates(
             analyser.store,
-            &builder,
+            analyser.arena,
             decl_handle.handle,
-            skip_std_references,
-            false,
+            decl_handle.handle,
         );
+        for (uris.keys()) |uri| {
+            if (uri.eql(decl_handle.handle.uri)) continue;
+            const dependency_handle = try analyser.store.getOrLoadHandle(uri) orelse continue;
+            try builder.collectReferences(dependency_handle, .root);
+        }
     }
 
     return builder.callsites;
@@ -693,7 +719,6 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 target_decl,
                 server.offset_encoding,
                 include_decl,
-                server.config_manager.config.skip_std_references,
                 handle,
             ),
         };
