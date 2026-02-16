@@ -692,91 +692,86 @@ pub fn isSnakeCase(name: []const u8) bool {
 /// const decl = @import("decl-file.zig").decl;
 /// const other = decl.middle.other;
 ///```
-pub fn resolveVarDeclAlias(analyser: *Analyser, options: ResolveOptions) Error!?DeclWithHandle {
+pub fn resolveVarDeclAlias(analyser: *Analyser, decl: DeclWithHandle) Error!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const initial_node = switch (decl.decl) {
+        .ast_node => |node| node,
+        else => return null,
+    };
+
     var node_trail: NodeSet = .empty;
     defer node_trail.deinit(analyser.gpa);
-    return try analyser.resolveVarDeclAliasInternal(options, &node_trail);
-}
 
-fn resolveVarDeclAliasInternal(analyser: *Analyser, options: ResolveOptions, node_trail: *NodeSet) Error!?DeclWithHandle {
-    const node_handle = options.node_handle;
-    const node_with_uri: NodeWithUri = .{
-        .node = node_handle.node,
-        .uri = node_handle.handle.uri,
+    var current: ResolveOptions = .{
+        .node_handle = .of(initial_node, decl.handle),
+        .container_type = decl.container_type,
     };
+    var result: ?DeclWithHandle = null;
+    while (true) {
+        const node = current.node_handle.node;
+        const handle = current.node_handle.handle;
+        const tree = &handle.tree;
 
-    const gop = try node_trail.getOrPut(analyser.gpa, node_with_uri);
-    if (gop.found_existing) return null;
+        const resolved: DeclWithHandle = switch (tree.nodeTag(node)) {
+            .identifier => blk: {
+                const name_token = ast.identifierTokenFromIdentifierNode(tree, node) orelse break :blk null;
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                if (current.container_type) |ty| {
+                    break :blk try ty.lookupSymbol(analyser, name);
+                }
+                break :blk try analyser.lookupSymbolGlobal(
+                    handle,
+                    name,
+                    tree.tokenStart(name_token),
+                );
+            },
+            .field_access => blk: {
+                const lhs, const field_name = tree.nodeData(node).node_and_token;
+                const resolved = (try analyser.resolveTypeOfNode(.{
+                    .node_handle = .of(lhs, handle),
+                    .container_type = current.container_type,
+                })) orelse break :blk null;
+                if (!resolved.is_type_val)
+                    break :blk null;
 
-    const handle = node_handle.handle;
-    const tree = &handle.tree;
+                const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name);
 
-    const resolved = switch (tree.nodeTag(node_handle.node)) {
-        .identifier => blk: {
-            const name_token = ast.identifierTokenFromIdentifierNode(tree, node_handle.node) orelse break :blk null;
-            const name = offsets.identifierTokenToNameSlice(tree, name_token);
-            if (options.container_type) |ty| {
-                break :blk try ty.lookupSymbol(analyser, name);
-            }
-            break :blk try analyser.lookupSymbolGlobal(
-                handle,
-                name,
-                tree.tokenStart(name_token),
-            );
-        },
-        .field_access => blk: {
-            const lhs, const field_name = tree.nodeData(node_handle.node).node_and_token;
-            const resolved = (try analyser.resolveTypeOfNode(.{
-                .node_handle = .of(lhs, handle),
-                .container_type = options.container_type,
-            })) orelse return null;
-            if (!resolved.is_type_val)
-                return null;
+                break :blk try resolved.lookupSymbol(analyser, symbol_name);
+            },
+            .global_var_decl,
+            .local_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => {
+                const var_decl = tree.fullVarDecl(node).?;
 
-            const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name);
+                const base_exp = var_decl.ast.init_node.unwrap() orelse return result;
+                if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return result;
 
-            break :blk try resolved.lookupSymbol(analyser, symbol_name);
-        },
-        .global_var_decl,
-        .local_var_decl,
-        .aligned_var_decl,
-        .simple_var_decl,
-        => {
-            const var_decl = tree.fullVarDecl(node_handle.node).?;
+                const gop = try node_trail.getOrPut(analyser.gpa, .{ .node = base_exp, .uri = handle.uri });
+                if (gop.found_existing) return null;
 
-            const base_exp = var_decl.ast.init_node.unwrap() orelse return null;
-            if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return null;
+                current.node_handle.node = base_exp;
+                continue;
+            },
+            else => null,
+        } orelse return result;
 
-            return try analyser.resolveVarDeclAliasInternal(.{
-                .node_handle = .of(base_exp, handle),
-                .container_type = options.container_type,
-            }, node_trail);
-        },
-        else => return null,
-    } orelse return null;
+        const resolved_node = switch (resolved.decl) {
+            .ast_node => |resolved_node| resolved_node,
+            else => return resolved,
+        };
 
-    const resolved_node = switch (resolved.decl) {
-        .ast_node => |node| node,
-        else => return resolved,
-    };
+        const gop = try node_trail.getOrPut(analyser.gpa, .{ .node = resolved_node, .uri = resolved.handle.uri });
+        if (gop.found_existing) return null;
 
-    if (node_trail.contains(.{
-        .node = resolved_node,
-        .uri = resolved.handle.uri,
-    })) {
-        return null;
-    }
-
-    if (try analyser.resolveVarDeclAliasInternal(.{
-        .node_handle = .of(resolved_node, resolved.handle),
-        .container_type = options.container_type,
-    }, node_trail)) |result| {
-        return result;
-    } else {
-        return resolved;
+        current = .{
+            .node_handle = .of(resolved_node, resolved.handle),
+            .container_type = resolved.container_type,
+        };
+        result = resolved;
     }
 }
 
@@ -1442,7 +1437,11 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
 
 fn resolveStringLiteral(analyser: *Analyser, options: ResolveOptions) Error!?[]const u8 {
     var node_with_handle = options.node_handle;
-    if (try analyser.resolveVarDeclAlias(options)) |decl_with_handle| {
+    if (try analyser.resolveVarDeclAlias(.{
+        .decl = .{ .ast_node = options.node_handle.node },
+        .handle = options.node_handle.handle,
+        .container_type = options.container_type,
+    })) |decl_with_handle| {
         if (decl_with_handle.decl == .ast_node) {
             node_with_handle = .{
                 .node = decl_with_handle.decl.ast_node,
@@ -5212,16 +5211,8 @@ pub const DeclWithHandle = struct {
 
     pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) Error!TokenWithHandle {
         if (resolve_alias) {
-            switch (self.decl) {
-                .ast_node => |node| {
-                    if (try analyser.resolveVarDeclAlias(.{
-                        .node_handle = .of(node, self.handle),
-                        .container_type = self.container_type,
-                    })) |result| {
-                        return result.definitionToken(analyser, resolve_alias);
-                    }
-                },
-                else => {},
+            if (try analyser.resolveVarDeclAlias(self)) |result| {
+                return result.definitionToken(analyser, resolve_alias);
             }
             if (try self.resolveType(analyser)) |resolved_type| {
                 if (resolved_type.is_type_val) {
