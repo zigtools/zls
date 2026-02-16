@@ -308,8 +308,12 @@ test "cross-file reference" {
         ,
         // Untitled-1.zig
         \\const file = @import("Untitled-0.zig");
-        \\const first = file.<0>;
-        \\const second = file.<0>;
+        \\const <0> = file.<0>;
+        \\const renamed = file.<0>;
+        \\comptime {
+        \\    _ = <0>;
+        \\    _ = renamed;
+        \\}
         ,
     }, true);
 }
@@ -325,6 +329,23 @@ test "cross-file - transitive import" {
         // Untitled-2.zig
         \\const file = @import("Untitled-1.zig").file;
         \\const foo: file.<0> = undefined;
+        ,
+    }, true);
+}
+
+test "cross-file - alias" {
+    try testMultiFileSymbolReferences(&.{
+        // Untitled-0.zig
+        \\pub const <0> = struct {
+        \\    fn foo(_: <0>) void {}
+        \\    var bar: <0> = undefined;
+        \\};
+        ,
+        // Untitled-1.zig
+        \\const <0> = @import("Untitled-0.zig").<0>;
+        \\comptime {
+        \\    _ = <0>;
+        \\}
         ,
     }, true);
 }

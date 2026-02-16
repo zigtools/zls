@@ -108,7 +108,7 @@ const Builder = struct {
             builder.target_symbol.nameToken(),
         );
 
-        switch (tree.nodeTag(node)) {
+        var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
             => |tag| {
@@ -124,15 +124,12 @@ const Builder = struct {
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
 
-                const child = try builder.analyser.lookupSymbolGlobal(
+                const candidate = try builder.analyser.lookupSymbolGlobal(
                     handle,
                     name,
                     tree.tokenStart(name_token),
                 ) orelse return;
-
-                if (builder.target_symbol.eql(child)) {
-                    try builder.add(handle, name_token);
-                }
+                break :candidate .{ candidate, name_token };
             },
             .field_access => {
                 if (builder.local_only_decl) return;
@@ -143,11 +140,8 @@ const Builder = struct {
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                const child = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
-
-                if (builder.target_symbol.eql(child)) {
-                    try builder.add(handle, field_token);
-                }
+                const candidate = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
+                break :candidate .{ candidate, field_token };
             },
             .struct_init_one,
             .struct_init_one_comma,
@@ -185,33 +179,60 @@ const Builder = struct {
                         else => unreachable,
                     };
 
-                    const lookup = try builder.analyser.lookupSymbolFieldInit(
+                    const candidate = try builder.analyser.lookupSymbolFieldInit(
                         handle,
                         name,
                         nodes[0],
                         nodes[1..],
                     ) orelse return;
 
-                    if (builder.target_symbol.eql(lookup)) {
-                        try builder.add(handle, name_token);
-                    }
                     // if we get here then we know that the name of the field matched
                     // and duplicate fields are invalid so just return early
-                    return;
+                    break :candidate .{ candidate, name_token };
                 }
+                return;
             },
             .enum_literal => {
                 if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
-                const lookup = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
-
-                if (builder.target_symbol.eql(lookup)) {
-                    try builder.add(handle, name_token);
-                }
+                const candidate = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
+                break :candidate .{ candidate, name_token };
             },
-            else => {},
+            .global_var_decl,
+            .local_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => {
+                if (builder.local_only_decl) return;
+                const var_decl = tree.fullVarDecl(node).?;
+
+                const alias_name_token = var_decl.ast.mut_token + 1;
+                const alias_name = offsets.identifierTokenToNameSlice(&handle.tree, alias_name_token);
+                if (!std.mem.eql(u8, alias_name, target_symbol_name)) return;
+
+                const init_node = var_decl.ast.init_node.unwrap() orelse return;
+                if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return;
+
+                if (tree.nodeTag(init_node) != .field_access) return;
+                const lhs_node, const field_token = tree.nodeData(init_node).node_and_token;
+                const field_name = offsets.identifierTokenToNameSlice(tree, field_token);
+                if (!std.mem.eql(u8, field_name, target_symbol_name)) return;
+
+                const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
+                const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
+
+                const candidate = try deref_lhs.lookupSymbol(builder.analyser, field_name) orelse return;
+                break :candidate .{ candidate, alias_name_token };
+            },
+            else => return,
+        };
+
+        candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+
+        if (builder.target_symbol.eql(candidate)) {
+            try builder.add(handle, name_token);
         }
     }
 };
@@ -688,7 +709,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         const name_loc = offsets.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-        const target_decl = switch (pos_context) {
+        var target_decl = switch (pos_context) {
             .var_access, .test_doctest_name => try analyser.lookupSymbolGlobal(handle, name, source_index),
             .field_access => |loc| z: {
                 const held_loc = offsets.locMerge(loc, name_loc);
@@ -704,6 +725,8 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             .keyword => null,
             else => null,
         } orelse return null;
+
+        target_decl = try analyser.resolveVarDeclAlias(target_decl) orelse target_decl;
 
         break :locs switch (target_decl.decl) {
             .label => |payload| try labelReferences(
