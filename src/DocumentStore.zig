@@ -1377,6 +1377,7 @@ fn createAndStoreDocument(
     store: *DocumentStore,
     uri: Uri,
     /// Takes ownership.
+    /// `file_source == .text` implies `options.lsp_synced == true`.
     file_source: FileSource,
     options: CreateAndStoreOptions,
 ) ReadFileError!*Handle {
@@ -1384,6 +1385,7 @@ fn createAndStoreDocument(
     defer tracy_zone.end();
 
     std.debug.assert(!(options.lsp_synced and !options.override));
+    std.debug.assert(!(options.lsp_synced and file_source == .uri));
 
     switch (file_source) {
         .text => {},
@@ -1422,7 +1424,7 @@ fn createAndStoreDocument(
             } else |err| {
                 const retry = switch (err) {
                     error.Canceled => true,
-                    else => false,
+                    else => file_source == .text,
                 };
                 if (options.override and !retry) return err;
                 previous_err = err;
