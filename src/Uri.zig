@@ -8,6 +8,7 @@ const Uri = @This();
 ///   - consistent casing of the Windows drive letter
 ///   - consistent path seperator on Windows (convert '\\' to '/')
 ///   - always add an authority component even if unnecessary
+///   - remove query and fragment component
 raw: []const u8,
 
 pub fn parse(allocator: std.mem.Allocator, text: []const u8) (std.Uri.ParseError || error{OutOfMemory})!Uri {
@@ -35,7 +36,7 @@ fn parseWithOs(
             }
             capacity += host.percent_encoded.len;
         }
-        if (uri.port != null) capacity += comptime ":".len + std.math.log10_int(@as(usize, std.math.maxInt(u16))); // TODO check this
+        if (uri.port != null) capacity += comptime ":".len + std.math.log10_int(@as(usize, std.math.maxInt(u16)));
         if (!std.mem.startsWith(u8, uri.path.percent_encoded, "/")) {
             capacity += "/".len;
         }
@@ -115,9 +116,9 @@ test "parse - always add authority component (posix)" {
 }
 
 test "parse - normalize percent encoding (posix)" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo%5cmain%2ezig", false);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///f%Aao%5cmain%2ezig", false);
     defer uri.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("file:///foo%5Cmain.zig", uri.raw);
+    try std.testing.expectEqualStrings("file:///f%AAo%5Cmain.zig", uri.raw);
 }
 
 test "parse - convert percent encoded '\\' to '/' (windows)" {
@@ -419,6 +420,60 @@ test "toFsPath - UNC (windows)" {
     try std.testing.expectEqualStrings(uri.raw, round_trip_uri.raw);
 }
 
+pub fn resolveImport(
+    allocator: std.mem.Allocator,
+    uri: Uri,
+    parsed_uri: std.Uri,
+    sub_path: []const u8,
+) error{OutOfMemory}!Uri {
+    var result: std.ArrayList(u8) = try .initCapacity(allocator, uri.raw.len + sub_path.len);
+    {
+        errdefer comptime unreachable;
+        result.printAssumeCapacity("{s}:", .{parsed_uri.scheme});
+        result.appendSliceAssumeCapacity("//");
+        if (parsed_uri.host) |host| {
+            if (parsed_uri.user) |user| {
+                result.appendSliceAssumeCapacity(user.percent_encoded);
+                if (parsed_uri.password) |password| {
+                    result.appendAssumeCapacity(':');
+                    result.appendSliceAssumeCapacity(password.percent_encoded);
+                }
+                result.appendAssumeCapacity('@');
+            }
+            result.appendSliceAssumeCapacity(host.percent_encoded);
+            if (parsed_uri.port) |port| result.printAssumeCapacity(":{d}", .{port});
+        }
+    }
+    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &result);
+    defer aw.deinit();
+
+    const percent_encoded_path = parsed_uri.path.percent_encoded;
+
+    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", sub_path });
+    defer allocator.free(joined_path);
+
+    std.Uri.Component.percentEncode(&aw.writer, joined_path, isPathChar) catch unreachable;
+
+    return .{ .raw = try aw.toOwnedSlice() };
+}
+
+test "resolve" {
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///dir/main.zig", false);
+    defer uri.deinit(std.testing.allocator);
+
+    const parsed_uri = std.Uri.parse(uri.raw) catch unreachable;
+
+    const resolved_uri = try resolveImport(std.testing.allocator, uri, parsed_uri, "foo bar.zig");
+    defer resolved_uri.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("file:///dir/foo%20bar.zig", resolved_uri.raw);
+
+    var round_trip_uri: Uri = try .parseWithOs(std.testing.allocator, resolved_uri.raw, false);
+    defer round_trip_uri.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(round_trip_uri.raw, resolved_uri.raw);
+}
+
 fn normalizePercentEncoded(
     result: *std.ArrayList(u8),
     percent_encoded: []const u8,
@@ -435,21 +490,21 @@ fn normalizePercentEncoded(
         const lower_value = std.fmt.charToDigit(lower_hex, 16) catch continue;
         const percent_encoded_char = upper_value * 16 + lower_value;
 
-        if (!isValidChar(percent_encoded_char)) {
-            if (std.ascii.isUpper(upper_hex) or std.ascii.isUpper(lower_hex)) continue;
-
+        if (isValidChar(percent_encoded_char)) {
+            // a character has been unnecessarily escaped
+            result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
+            result.appendAssumeCapacity(percent_encoded_char);
+            start = percent + 3;
+        } else if (std.ascii.isLower(upper_hex) or std.ascii.isLower(lower_hex)) {
             // convert percent encoded character to upper case
             result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
             result.appendAssumeCapacity('%');
             result.appendAssumeCapacity(std.ascii.toUpper(upper_hex));
             result.appendAssumeCapacity(std.ascii.toUpper(lower_hex));
+            start = percent + 3;
         } else {
-            // a character has been unnecessarily escaped
-            result.appendSliceAssumeCapacity(percent_encoded[start..percent]);
-            result.appendAssumeCapacity(percent_encoded_char);
+            // skip properly percent encoded character
         }
-
-        start = percent + 3;
         index = percent + 3;
     }
     result.appendSliceAssumeCapacity(percent_encoded[start..]);

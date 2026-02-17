@@ -25,7 +25,7 @@ mutex: std.Io.Mutex = .init,
 wait_group: if (supports_build_system) std.Io.Group else void = if (supports_build_system) .init else {},
 handles: Uri.ArrayHashMap(*Handle.Future) = .empty,
 build_files: if (supports_build_system) Uri.ArrayHashMap(*BuildFile) else void = if (supports_build_system) .empty else {},
-cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) else void = if (supports_build_system) .empty else {},
+cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(CImportHash, translate_c.Result) else void = if (supports_build_system) .empty else {},
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?*lsp.Transport = null,
@@ -35,18 +35,7 @@ lsp_capabilities: struct {
     supports_inlay_hints_refresh: bool = false,
 } = .{},
 
-pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
-pub const Hash = [Hasher.mac_length]u8;
-
 pub const supports_build_system = std.process.can_spawn;
-
-pub fn computeHash(bytes: []const u8) Hash {
-    var hasher: Hasher = .init(&@splat(0));
-    hasher.update(bytes);
-    var hash: Hash = undefined;
-    hasher.final(&hash);
-    return hash;
-}
 
 pub const Config = struct {
     environ_map: *const std.process.Environ.Map,
@@ -98,10 +87,9 @@ pub const BuildFile = struct {
     }
 
     /// Returns whether the `Uri` is a dependency of the given `BuildFile`.
-    /// May return `null` to indicate an inconclusive result because
+    /// May return `.unknown` to indicate an inconclusive result because
     /// the required build config has not been resolved yet.
     ///
-    /// invalidates any pointers into `build_files`
     /// **Thread safe** takes an exclusive lock
     fn isAssociatedWith(
         build_file: *BuildFile,
@@ -154,9 +142,8 @@ pub const BuildFile = struct {
 
                 const handle = try store.getOrLoadHandle(source_uri) orelse continue;
 
-                const import_uris = (try handle.import_uris.get(handle)).*;
-                try found_uris.ensureUnusedCapacity(arena, import_uris.len);
-                for (import_uris) |import_uri| found_uris.putAssumeCapacity(try import_uri.dupe(arena), {});
+                try found_uris.ensureUnusedCapacity(arena, handle.file_imports.len);
+                for (handle.file_imports) |import_uri| found_uris.putAssumeCapacity(try import_uri.dupe(arena), {});
             }
         }
 
@@ -175,14 +162,15 @@ pub const BuildFile = struct {
 pub const Handle = struct {
     uri: Uri,
     tree: Ast,
-    /// Contains one entry for every cimport in the document
+    /// List of every file that has been `@Import`ed. Does not include imported modules.
+    file_imports: []const Uri,
+    /// Contains one entry for every `@cImport` in the document
     cimports: std.MultiArrayList(CImportHandle),
     /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
     /// `false` indicates the document only exists because it is a dependency of another document
     /// or has been closed with `textDocument/didClose`.
     lsp_synced: bool,
     document_scope: Lazy(DocumentScope, DocumentStoreContext) = .unset,
-    import_uris: Lazy([]const Uri, ImportUrisContext) = .unset,
 
     /// private field
     impl: struct {
@@ -428,8 +416,27 @@ pub const Handle = struct {
         var new_tree = try parseTree(allocator, text, mode);
         errdefer new_tree.deinit(allocator);
 
-        var new_cimports = try collectCIncludes(allocator, &new_tree);
-        errdefer new_cimports.deinit(allocator);
+        var new_file_imports: std.ArrayList(Uri) = .empty;
+        errdefer new_file_imports.deinit(allocator);
+
+        var new_cimports: std.MultiArrayList(CImportHandle) = .empty;
+        errdefer {
+            for (new_cimports.items(.source)) |source| {
+                allocator.free(source);
+            }
+            new_cimports.deinit(allocator);
+        }
+
+        try collectImports(
+            allocator,
+            handle.uri,
+            &new_tree,
+            &new_file_imports,
+            &new_cimports,
+        );
+
+        const file_imports = try new_file_imports.toOwnedSlice(allocator);
+        errdefer file_imports.deinit(allocator);
 
         errdefer comptime unreachable;
 
@@ -440,13 +447,13 @@ pub const Handle = struct {
         old_handle.cimports = handle.cimports;
 
         handle.tree = new_tree;
+        old_handle.file_imports = handle.file_imports;
+        handle.file_imports = file_imports;
         handle.cimports = new_cimports;
         handle.impl.has_tree_and_source = true;
 
         old_handle.document_scope = handle.document_scope;
         handle.document_scope = .unset;
-        old_handle.import_uris = handle.import_uris;
-        handle.import_uris = .unset;
     }
 
     fn parseTree(allocator: std.mem.Allocator, new_text: [:0]const u8, mode: Ast.Mode) error{OutOfMemory}!Ast {
@@ -468,10 +475,76 @@ pub const Handle = struct {
         return tree;
     }
 
+    fn collectImports(
+        allocator: std.mem.Allocator,
+        uri: Uri,
+        tree: *const Ast,
+        file_imports: *std.ArrayList(Uri),
+        cimports: *std.MultiArrayList(CImportHandle),
+    ) error{OutOfMemory}!void {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
+        const parsed_uri = std.Uri.parse(uri.raw) catch unreachable; // The Uri is guranteed to be valid
+
+        const node_tags = tree.nodes.items(.tag);
+        for (node_tags, 0..) |tag, i| {
+            const node: Ast.Node.Index = @enumFromInt(i);
+
+            switch (tag) {
+                .builtin_call,
+                .builtin_call_comma,
+                .builtin_call_two,
+                .builtin_call_two_comma,
+                => {},
+                else => continue,
+            }
+            const name = offsets.tokenToSlice(tree, tree.nodeMainToken(node));
+
+            if (std.mem.eql(u8, name, "@import")) {
+                try file_imports.ensureUnusedCapacity(allocator, 1);
+
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = tree.builtinCallParams(&buffer, node).?;
+                if (params.len < 1) continue;
+                if (tree.nodeTag(params[0]) != .string_literal) continue;
+
+                var import_string = offsets.tokenToSlice(tree, tree.nodeMainToken(params[0]));
+                import_string = import_string[1 .. import_string.len - 1];
+
+                if (!std.mem.endsWith(u8, import_string, ".zig")) continue;
+
+                const import_uri = try Uri.resolveImport(allocator, uri, parsed_uri, import_string);
+                file_imports.appendAssumeCapacity(import_uri);
+                continue;
+            }
+
+            if (std.mem.eql(u8, name, "@cImport")) {
+                try cimports.ensureUnusedCapacity(allocator, 1);
+
+                const c_source = translate_c.convertCInclude(allocator, tree, node) catch |err| switch (err) {
+                    error.Unsupported => continue,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
+
+                var hasher: CImportHasher = .init(&@splat(0));
+                hasher.update(c_source);
+
+                cimports.appendAssumeCapacity(.{
+                    .node = node,
+                    .hash = hasher.finalResult(),
+                    .source = c_source,
+                });
+                continue;
+            }
+        }
+    }
+
     /// A handle that can only be deallocated. Keep in sync with `deinit`.
     const dead: Handle = .{
         .uri = undefined,
         .tree = undefined,
+        .file_imports = &.{},
         .cimports = .empty,
         .lsp_synced = undefined,
         .impl = .{
@@ -491,7 +564,8 @@ pub const Handle = struct {
             self.tree.deinit(allocator);
         }
         self.document_scope.deinit(allocator);
-        self.import_uris.deinit(allocator);
+        for (self.file_imports) |uri| uri.deinit(allocator);
+        allocator.free(self.file_imports);
 
         for (self.cimports.items(.source)) |source| allocator.free(source);
         self.cimports.deinit(allocator);
@@ -566,36 +640,6 @@ pub const Handle = struct {
         }
         fn deinit(document_scope: *DocumentScope, allocator: std.mem.Allocator) void {
             document_scope.deinit(allocator);
-        }
-    };
-
-    const ImportUrisContext = struct {
-        fn create(handle: *Handle, allocator: std.mem.Allocator) error{OutOfMemory}![]const Uri {
-            var imports = try analysis.collectImports(allocator, &handle.tree);
-            defer imports.deinit(allocator);
-
-            const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.UnsupportedScheme => return &.{},
-            };
-            defer allocator.free(base_path);
-
-            var uris: std.ArrayList(Uri) = try .initCapacity(allocator, imports.items.len);
-            errdefer {
-                for (uris.items) |uri| uri.deinit(allocator);
-                uris.deinit(allocator);
-            }
-
-            for (imports.items) |import_str| {
-                if (!std.mem.endsWith(u8, import_str, ".zig")) continue;
-                uris.appendAssumeCapacity(try resolveFileImportString(allocator, base_path, import_str) orelse continue);
-            }
-
-            return try uris.toOwnedSlice(allocator);
-        }
-        fn deinit(import_uris: *[]const Uri, allocator: std.mem.Allocator) void {
-            for (import_uris.*) |uri| uri.deinit(allocator);
-            allocator.free(import_uris.*);
         }
     };
 };
@@ -1443,6 +1487,7 @@ fn createAndStoreDocument(
             .handle = .{
                 .uri = gop.key_ptr.*,
                 .tree = undefined,
+                .file_imports = &.{},
                 .cimports = .empty,
                 .lsp_synced = options.lsp_synced,
                 .impl = .{
@@ -1480,97 +1525,17 @@ fn createAndStoreDocument(
     return &handle_future.handle;
 }
 
+pub const CImportHasher = std.crypto.auth.siphash.SipHash128(1, 3);
+pub const CImportHash = [CImportHasher.mac_length]u8;
+
 pub const CImportHandle = struct {
     /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of c source file
-    hash: Hash,
+    hash: CImportHash,
     /// c source file
     source: []const u8,
 };
-
-/// Collects all `@cImport` nodes and converts them into c source code if possible
-/// Caller owns returned memory.
-fn collectCIncludes(allocator: std.mem.Allocator, tree: *const Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const cimport_nodes = try analysis.collectCImportNodes(allocator, tree);
-    defer allocator.free(cimport_nodes);
-
-    var sources: std.MultiArrayList(CImportHandle) = .empty;
-    try sources.ensureTotalCapacity(allocator, cimport_nodes.len);
-    errdefer {
-        for (sources.items(.source)) |source| {
-            allocator.free(source);
-        }
-        sources.deinit(allocator);
-    }
-
-    for (cimport_nodes) |node| {
-        const c_source = translate_c.convertCInclude(allocator, tree, node) catch |err| switch (err) {
-            error.Unsupported => continue,
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-
-        sources.appendAssumeCapacity(.{
-            .node = node,
-            .hash = computeHash(c_source),
-            .source = c_source,
-        });
-    }
-
-    return sources;
-}
-
-/// collects every file uri the given handle depends on
-/// includes imports, cimports & packages
-/// **Thread safe** takes a shared lock
-pub fn collectDependencies(
-    store: *DocumentStore,
-    allocator: std.mem.Allocator,
-    handle: *Handle,
-    dependencies: *std.ArrayList(Uri),
-) error{ Canceled, OutOfMemory }!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const import_uris = (try handle.import_uris.get(handle)).*;
-
-    try dependencies.ensureUnusedCapacity(allocator, import_uris.len + handle.cimports.len);
-    for (import_uris) |uri| {
-        dependencies.appendAssumeCapacity(try uri.dupe(allocator));
-    }
-
-    if (supports_build_system) {
-        try store.mutex.lock(store.io);
-        defer store.mutex.unlock(store.io);
-        for (handle.cimports.items(.hash)) |hash| {
-            const result = store.cimports.get(hash) orelse continue;
-            switch (result) {
-                .success => |uri| dependencies.appendAssumeCapacity(try uri.dupe(allocator)),
-                .failure => continue,
-            }
-        }
-    }
-
-    if (supports_build_system) no_build_file: {
-        const build_file = switch (try handle.getAssociatedBuildFile(store)) {
-            .none, .unresolved => break :no_build_file,
-            .resolved => |resolved| resolved.build_file,
-        };
-
-        const build_config = build_file.tryLockConfig(store.io) orelse break :no_build_file;
-        defer build_file.unlockConfig(store.io);
-
-        const module_paths = build_config.modules.map.keys();
-
-        try dependencies.ensureUnusedCapacity(allocator, module_paths.len);
-        for (module_paths) |module_path| {
-            dependencies.appendAssumeCapacity(try .fromPath(allocator, module_path));
-        }
-    }
-}
 
 /// returns `true` if all include paths could be collected
 /// may return `false` because include paths from a build.zig may not have been resolved already
@@ -1688,7 +1653,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     // TODO regenerate cimports if the header files gets modified
 
     const index = std.mem.findScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
-    const hash: Hash = handle.cimports.items(.hash)[index];
+    const hash: CImportHash = handle.cimports.items(.hash)[index];
     const source = handle.cimports.items(.source)[index];
 
     {
@@ -1875,13 +1840,8 @@ pub fn uriFromImportStr(
     defer tracy_zone.end();
 
     if (std.mem.endsWith(u8, import_str, ".zig") or std.mem.endsWith(u8, import_str, ".zon")) {
-        const base_path = handle.uri.toFsPath(allocator) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.UnsupportedScheme => return .none,
-        };
-        defer allocator.free(base_path);
-        const uri = try resolveFileImportString(allocator, base_path, import_str) orelse return .none;
-        return .{ .one = uri };
+        const parsed_uri = std.Uri.parse(handle.uri.raw) catch unreachable; // The Uri is guranteed to be valid
+        return .{ .one = try Uri.resolveImport(allocator, handle.uri, parsed_uri, import_str) };
     }
 
     if (std.mem.eql(u8, import_str, "std")) {
@@ -1950,11 +1910,4 @@ pub fn uriFromImportStr(
             return .{ .one = try .fromPath(allocator, imported_root_source_file) };
         },
     }
-}
-
-fn resolveFileImportString(allocator: std.mem.Allocator, base_path: []const u8, import_str: []const u8) error{OutOfMemory}!?Uri {
-    const joined_path = try std.fs.path.resolve(allocator, &.{ base_path, "..", import_str });
-    defer allocator.free(joined_path);
-
-    return try .fromPath(allocator, joined_path);
 }

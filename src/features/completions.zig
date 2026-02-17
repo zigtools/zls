@@ -722,25 +722,13 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, tree) orelse return;
     if (dot_token_index < 2) return;
 
-    blk: {
-        const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
-        const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse break :blk;
-        const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
-        const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
-        for (containers) |container| {
-            try collectContainerFields(builder, dot_context.likely, container, used_members_set);
-        }
+    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
+    const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse return;
+    const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
+    const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
+    for (containers) |container| {
+        try collectContainerFields(builder, dot_context.likely, container, used_members_set);
     }
-
-    if (builder.completions.items.len != 0) return;
-
-    // Prevent compl for float numbers, eg `1.`
-    //  Ideally this would also `or token_tags[dot_token_index - 1] != .equal`,
-    //  which would mean the only possibility left would be `var enum_val = .`.
-    if (tree.tokenTag(dot_token_index - 1) == .number_literal or tree.tokenTag(dot_token_index - 1) != .equal) return;
-
-    // `var enum_val = .` or the get*Context logic failed because of syntax errors (parser didn't create the necessary node(s))
-    try globalSetCompletions(builder, .enum_set);
 }
 
 /// Asserts that `pos_context` is one of the following:
@@ -964,7 +952,6 @@ pub fn completionAtIndex(
         .builtin => try completeBuiltin(&builder),
         .var_access, .empty => try completeGlobal(&builder),
         .field_access => |loc| try completeFieldAccess(&builder, loc),
-        .error_access => try globalSetCompletions(&builder, .error_set),
         .enum_literal => |loc| try completeDot(&builder, loc),
         .label_access, .label_decl => try completeLabel(&builder),
         .import_string_literal,
@@ -1010,102 +997,6 @@ pub fn completionAtIndex(
     }
 
     return .{ .isIncomplete = false, .items = completions };
-}
-
-// <--------------------------------------------------------------------------->
-//                    global error set / enum field set
-// <--------------------------------------------------------------------------->
-
-const CompletionSet = std.ArrayHashMapUnmanaged(types.completion.Item, void, CompletionContext, false);
-
-const CompletionContext = struct {
-    pub fn hash(self: @This(), item: types.completion.Item) u32 {
-        _ = self;
-        return std.array_hash_map.hashString(item.label);
-    }
-
-    pub fn eql(self: @This(), a: types.completion.Item, b: types.completion.Item, b_index: usize) bool {
-        _ = self;
-        _ = b_index;
-        return std.mem.eql(u8, a.label, b.label);
-    }
-};
-
-const CompletionNameAdapter = struct {
-    pub fn hash(ctx: @This(), name: []const u8) u32 {
-        _ = ctx;
-        return std.array_hash_map.hashString(name);
-    }
-
-    pub fn eql(ctx: @This(), a: []const u8, b: types.completion.Item, b_map_index: usize) bool {
-        _ = ctx;
-        _ = b_map_index;
-        return std.mem.eql(u8, a, b.label);
-    }
-};
-
-/// Every `DocumentScope` store a set of all error names and a set of all enum field names.
-/// This function collects all of these sets from all dependencies and returns them as completions.
-fn globalSetCompletions(builder: *Builder, kind: enum { error_set, enum_set }) Analyser.Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const store = &builder.server.document_store;
-
-    var dependencies: std.ArrayList(Uri) = .empty;
-    try dependencies.append(builder.arena, builder.orig_handle.uri);
-    try store.collectDependencies(builder.arena, builder.orig_handle, &dependencies);
-
-    // TODO Better solution for deciding what tags to include
-    var result_set: CompletionSet = .empty;
-
-    for (dependencies.items) |uri| {
-        // not every dependency is loaded which results in incomplete completion
-        const dependency_handle = store.getHandle(uri) orelse continue;
-        const document_scope = try dependency_handle.getDocumentScope();
-        const curr_set: DocumentScope.IdentifierSet = switch (kind) {
-            .error_set => @field(document_scope, "global_error_set"),
-            .enum_set => @field(document_scope, "global_enum_set"),
-        };
-        try result_set.ensureUnusedCapacity(builder.arena, curr_set.count());
-        for (curr_set.keys()) |identifier_token| {
-            const name = offsets.identifierTokenToNameSlice(&dependency_handle.tree, identifier_token);
-
-            const gop = result_set.getOrPutAssumeCapacityAdapted(
-                name,
-                CompletionNameAdapter{},
-            );
-
-            if (!gop.found_existing) {
-                gop.key_ptr.* = .{
-                    .label = name,
-                    .detail = switch (kind) {
-                        .error_set => try std.fmt.allocPrint(builder.arena, "error.{f}", .{std.zig.fmtId(name)}),
-                        .enum_set => null,
-                    },
-                    .kind = switch (kind) {
-                        .error_set => .Constant,
-                        .enum_set => .EnumMember,
-                    },
-                    .documentation = null, // will be set below
-                };
-            }
-
-            if (gop.key_ptr.documentation == null) {
-                if (try Analyser.getDocCommentsBeforeToken(builder.arena, &dependency_handle.tree, identifier_token)) |documentation| {
-                    gop.key_ptr.documentation = .{
-                        .markup_content = .{
-                            // TODO check if client supports markdown
-                            .kind = .markdown,
-                            .value = documentation,
-                        },
-                    };
-                }
-            }
-        }
-    }
-
-    try builder.completions.appendSlice(builder.arena, result_set.keys());
 }
 
 // <--------------------------------------------------------------------------->

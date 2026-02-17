@@ -31,11 +31,7 @@ fn hoverSymbol(
         if (try decl_handle.docComments(arena)) |doc_string| {
             try doc_strings.append(arena, doc_string);
         }
-        if (decl_handle.decl != .ast_node) break;
-        decl_handle = try analyser.resolveVarDeclAlias(.{
-            .node_handle = .of(decl_handle.decl.ast_node, decl_handle.handle),
-            .container_type = decl_handle.container_type,
-        }) orelse break;
+        decl_handle = try analyser.resolveVarDeclAlias(decl_handle) orelse break;
         maybe_resolved_type = maybe_resolved_type orelse try decl_handle.resolveType(analyser);
     }
 

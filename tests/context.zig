@@ -82,20 +82,11 @@ pub const Context = struct {
 
     // helper
     pub fn addDocument(self: *Context, options: struct {
-        use_file_scheme: bool = false,
         source: []const u8,
         mode: std.zig.Ast.Mode = .zig,
     }) !zls.Uri {
-        const fmt = switch (builtin.os.tag) {
-            .windows => "file:///c:/Untitled-{d}.{t}",
-            else => "file:///Untitled-{d}.{t}",
-        };
-
         const arena = self.arena.allocator();
-        const path = if (options.use_file_scheme)
-            try std.fmt.allocPrint(arena, fmt, .{ self.file_id, options.mode })
-        else
-            try std.fmt.allocPrint(arena, "untitled:///Untitled-{d}.{t}", .{ self.file_id, options.mode });
+        const path = try std.fmt.allocPrint(arena, "untitled:///Untitled-{d}.{t}", .{ self.file_id, options.mode });
         const uri: zls.Uri = try .parse(arena, path);
 
         const params: types.TextDocument.DidOpenParams = .{
