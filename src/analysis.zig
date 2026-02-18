@@ -5054,8 +5054,9 @@ pub fn getPositionContext(
                 .test_doctest_name, .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
                 else => .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
             },
-            .question_mark, .period_asterisk => switch (curr_ctx.ctx) {
-                .var_access, .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
+            .period_asterisk => .{ .field_access = tokenLocAppend(curr_ctx.ctx.loc(tree) orelse tok.loc, tok) },
+            .question_mark => switch (curr_ctx.ctx) {
+                .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
                 else => .empty,
             },
             .colon => switch (curr_ctx.ctx) {
