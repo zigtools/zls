@@ -105,6 +105,31 @@ test "var_access.nested" {
     , .var_access, .{ .lookahead = true });
 }
 
+test "var_access.optional" {
+    try testContext(
+        \\const foo = ?<cursor>
+    , .empty, .{});
+    try testContext(
+        \\const foo = ?<loc>T<cursor></loc>
+    , .var_access, .{});
+}
+
+test "var_access.pointer" {
+    try testContext(
+        \\const foo = *<cursor>
+    , .empty, .{});
+    try testContext(
+        \\const foo = *<loc>T<cursor></loc>
+    , .var_access, .{});
+
+    try testContext(
+        \\const foo = []<cursor>
+    , .empty, .{});
+    try testContext(
+        \\const foo = []<loc>T<cursor></loc>
+    , .var_access, .{});
+}
+
 test "var_access no lookahead" {
     try testContext(
         \\const a_var =<cursor> identifier;
