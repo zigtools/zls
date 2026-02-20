@@ -4348,6 +4348,36 @@ test "doctest name" {
     });
 }
 
+test "completions don't replace punctuation" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 0;
+        \\const bar = foo[<cursor>];
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo[foo];",
+        .expected_replace_line = "const bar = foo[foo];",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 0;
+        \\const bar = foo(<cursor>);
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo(foo);",
+        .expected_replace_line = "const bar = foo(foo);",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 0;
+        \\const bar = foo{<cursor>};
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo{foo};",
+        .expected_replace_line = "const bar = foo{foo};",
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
