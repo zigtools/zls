@@ -731,6 +731,50 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     }
 }
 
+fn completeError(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = &builder.orig_handle.tree;
+
+    const err_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, tree) orelse return;
+    if (err_token_index < 2) return;
+    const dot_token_index = err_token_index + 1;
+
+    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
+    const dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return;
+    const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
+    const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
+    for (containers) |container| {
+        try collectErrorSetNames(builder, container, used_members_set);
+    }
+}
+
+fn collectErrorSetNames(
+    builder: *Builder,
+    container: Analyser.Type,
+    omit_members: std.BufSet,
+) Analyser.Error!void {
+    const ip = builder.analyser.ip;
+    const key = switch (container.data) {
+        .ip_index => |info| ip.indexToKey(info.type),
+        else => return,
+    };
+    if (key != .error_set_type) return;
+    const names = key.error_set_type.names;
+    for (0..names.len) |idx| {
+        const str = names.at(@intCast(idx), ip);
+        const name = try std.fmt.allocPrint(builder.arena, "{f}", .{str.fmt(ip.io, &ip.string_pool)});
+        if (omit_members.contains(name)) continue;
+        try builder.completions.append(builder.arena, .{
+            .label = try std.fmt.allocPrint(builder.arena, "error.{s}", .{name}),
+            .filterText = name,
+            .insertText = name,
+            .kind = .Constant,
+        });
+    }
+}
+
 /// Asserts that `pos_context` is one of the following:
 ///  - `.import_string_literal`
 ///  - `.cinclude_string_literal`
@@ -953,6 +997,7 @@ pub fn completionAtIndex(
         .var_access, .empty => try completeGlobal(&builder),
         .field_access => |loc| try completeFieldAccess(&builder, loc),
         .enum_literal => |loc| try completeDot(&builder, loc),
+        .error_access => |loc| try completeError(&builder, loc),
         .label_access, .label_decl => try completeLabel(&builder),
         .import_string_literal,
         .cinclude_string_literal,
