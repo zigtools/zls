@@ -4295,6 +4295,54 @@ test "insert replace behaviour - file system completions" {
     // zig fmt: on
 }
 
+test "insert replace behaviour - expression inside parens/braces/brackets" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 5;
+        \\const bar = foo(<cursor>);
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo(foo);",
+        .expected_replace_line = "const bar = foo(foo);",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 5;
+        \\const bar = foo(f<cursor>oo);
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo(foooo);",
+        .expected_replace_line = "const bar = foo(foo);",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 5;
+        \\const bar = foo(<cursor>foo);
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo(foofoo);",
+        .expected_replace_line = "const bar = foo(foo);",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 5;
+        \\const bar = foo{<cursor>};
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo{foo};",
+        .expected_replace_line = "const bar = foo{foo};",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const foo = 5;
+        \\const bar = foo[<cursor>];
+        ,
+        .label = "foo",
+        .expected_insert_line = "const bar = foo[foo];",
+        .expected_replace_line = "const bar = foo[foo];",
+    });
+}
+
 test "generic function with @This() as self param" {
     try testCompletion(
         \\const Foo = struct {
