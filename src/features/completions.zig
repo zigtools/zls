@@ -412,10 +412,7 @@ fn functionTypeCompletion(
         .kind = kind,
         .detail = details,
         .insertTextFormat = insert_text_format,
-        .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-            .{ .insert_replace_edit = .{ .newText = new_text, .insert = insert_range, .replace = replace_range } }
-        else
-            .{ .text_edit = .{ .newText = new_text, .range = insert_range } },
+        .textEdit = createTextEdit(builder, .{ .newText = new_text, .insert = insert_range, .replace = replace_range }),
     };
 }
 
@@ -470,6 +467,18 @@ fn populateSnippedCompletions(builder: *Builder, kind: enum { generic, top_level
             .label = name,
             .kind = .Keyword,
         });
+    }
+}
+
+fn createTextEdit(builder: *Builder, edit: types.completion.Item.InsertReplaceEdit) types.completion.Item.TextEdit {
+    std.debug.assert(edit.insert.start.line == edit.insert.end.line); // text edit range must be a single line
+    std.debug.assert(edit.replace.start.line == edit.replace.end.line); // text edit range must be a single line
+    std.debug.assert(offsets.orderPosition(edit.insert.start, edit.replace.start) == .eq); // insert and replace text edits must start at the same position
+    std.debug.assert(edit.insert.end.character <= edit.replace.end.character); // insert text edit must be a prefix of the replace text edit
+    if (builder.server.client_capabilities.supports_completion_insert_replace_support) {
+        return .{ .insert_replace_edit = edit };
+    } else {
+        return .{ .text_edit = .{ .newText = edit.newText, .range = edit.insert } };
     }
 }
 
@@ -597,10 +606,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             .filterText = name[1..],
             .detail = detail,
             .insertTextFormat = insert_text_format,
-            .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                .{ .insert_replace_edit = .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range } }
-            else
-                .{ .text_edit = .{ .newText = new_text[1..], .range = insert_range } },
+            .textEdit = createTextEdit(builder, .{ .newText = new_text[1..], .insert = insert_range, .replace = replace_range }),
             .documentation = .{
                 .markup_content = .{
                     .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
@@ -839,10 +845,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         // completions on module replace the entire string literal
         for (builder.completions.items) |*item| {
             if (item.kind == .Module and item.textEdit == null) {
-                item.textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                    .{ .insert_replace_edit = .{ .newText = item.label, .insert = insert_range, .replace = string_content_range } }
-                else
-                    .{ .text_edit = .{ .newText = item.label, .range = insert_range } };
+                item.textEdit = createTextEdit(builder, .{ .newText = item.label, .insert = insert_range, .replace = string_content_range });
             }
         }
     }
@@ -906,10 +909,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
-                .textEdit = if (builder.server.client_capabilities.supports_completion_insert_replace_support)
-                    .{ .insert_replace_edit = .{ .newText = insert_text, .insert = insert_range, .replace = replace_range } }
-                else
-                    .{ .text_edit = .{ .newText = insert_text, .range = insert_range } },
+                .textEdit = createTextEdit(builder, .{ .newText = insert_text, .insert = insert_range, .replace = replace_range }),
                 .sortText = if (entry.kind == .file) "6" else "5",
             });
         } else |err| switch (err) {
@@ -975,10 +975,7 @@ pub fn completionAtIndex(
 
     for (completions) |*item| {
         if (item.textEdit == null) {
-            item.textEdit = if (server.client_capabilities.supports_completion_insert_replace_support)
-                .{ .insert_replace_edit = .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range } }
-            else
-                .{ .text_edit = .{ .newText = item.insertText orelse item.label, .range = insert_range } };
+            item.textEdit = createTextEdit(&builder, .{ .newText = item.insertText orelse item.label, .insert = insert_range, .replace = replace_range });
         }
         item.insertText = null;
         // https://github.com/microsoft/language-server-protocol/issues/898#issuecomment-593968008
