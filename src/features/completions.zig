@@ -901,7 +901,10 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
             const label = try builder.arena.dupe(u8, entry.name);
             const insert_text = if (entry.kind == .directory)
-                try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
+                if (next_separator_index == null)
+                    try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
+                else
+                    label
             else
                 label;
 
