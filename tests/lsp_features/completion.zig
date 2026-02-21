@@ -4615,6 +4615,7 @@ fn testCompletionTextEdit(
     defer ctx.deinit();
 
     ctx.server.client_capabilities.supports_snippets = true;
+    ctx.server.client_capabilities.supports_completion_insert_replace_support = true;
 
     ctx.server.config_manager.config.enable_argument_placeholders = options.enable_argument_placeholders;
     ctx.server.config_manager.config.enable_snippets = options.enable_snippets;
@@ -4627,60 +4628,38 @@ fn testCompletionTextEdit(
         .position = cursor_position,
     };
 
-    for ([_]bool{ false, true }) |supports_insert_replace| {
-        ctx.server.client_capabilities.supports_completion_insert_replace_support = supports_insert_replace;
+    @setEvalBranchQuota(5000);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
+    const completion_item = try searchCompletionItemWithLabel(response.completion_list, options.label);
 
-        @setEvalBranchQuota(5000);
-        const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params) orelse {
-            std.debug.print("Server returned `null` as the result\n", .{});
-            return error.InvalidResponse;
-        };
-        const completion_item = try searchCompletionItemWithLabel(response.completion_list, options.label);
+    std.debug.assert(completion_item.additionalTextEdits == null); // unsupported
+    std.debug.assert(!(!options.enable_snippets and completion_item.insertTextFormat == .Snippet));
+    std.debug.assert(!(completion_item.kind == .Snippet and completion_item.insertTextFormat != .Snippet));
 
-        std.debug.assert(completion_item.additionalTextEdits == null); // unsupported
-        std.debug.assert(!(!options.enable_snippets and completion_item.insertTextFormat == .Snippet));
-        std.debug.assert(!(completion_item.kind == .Snippet and completion_item.insertTextFormat != .Snippet));
+    // Assumes that a `insert_replace_edit` response is sent. This doesn't have to be the case if the text edits for insert and replace are the same.
+    const edit: types.completion.Item.InsertReplaceEdit = completion_item.textEdit.?.insert_replace_edit;
 
-        const TextEditOrInsertReplace = std.meta.Child(@TypeOf(completion_item.textEdit));
+    try std.testing.expect(edit.insert.start.line == edit.insert.end.line); // text edit range must be a single line
+    try std.testing.expect(edit.replace.start.line == edit.replace.end.line); // text edit range must be a single line
+    try std.testing.expect(offsets.positionInsideRange(cursor_position, edit.insert)); // text edit range must contain the cursor position
+    try std.testing.expect(offsets.positionInsideRange(cursor_position, edit.replace)); // text edit range must contain the cursor position
+    try std.testing.expect(offsets.orderPosition(edit.insert.start, edit.replace.start) == .eq); // insert and replace text edits must start at the same position
+    try std.testing.expect(edit.insert.end.character <= edit.replace.end.character); // insert text edit must be a prefix of the replace text edit
 
-        const text_edit_or_insert_replace: TextEditOrInsertReplace = completion_item.textEdit.?;
+    const insert_text_edit: types.TextEdit = .{ .newText = edit.newText, .range = edit.insert };
+    const replace_text_edit: types.TextEdit = .{ .newText = edit.newText, .range = edit.replace };
 
-        switch (text_edit_or_insert_replace) {
-            .text_edit => |text_edit| {
-                try std.testing.expect(text_edit.range.start.line == text_edit.range.end.line); // text edit range must be a single line
-                try std.testing.expect(offsets.positionInsideRange(cursor_position, text_edit.range)); // text edit range must contain the cursor position
+    const actual_insert_text = try zls.diff.applyTextEdits(allocator, text, &.{insert_text_edit}, ctx.server.offset_encoding);
+    defer allocator.free(actual_insert_text);
 
-                const actual_text = try zls.diff.applyTextEdits(allocator, text, &.{text_edit}, ctx.server.offset_encoding);
-                defer allocator.free(actual_text);
+    const actual_replace_text = try zls.diff.applyTextEdits(allocator, text, &.{replace_text_edit}, ctx.server.offset_encoding);
+    defer allocator.free(actual_replace_text);
 
-                try std.testing.expectEqualStrings(expected_insert_text, actual_text);
-
-                if (supports_insert_replace) {
-                    try std.testing.expectEqualStrings(expected_replace_text, actual_text);
-                }
-            },
-            .insert_replace_edit => |insert_replace_edit| {
-                std.debug.assert(supports_insert_replace);
-
-                try std.testing.expect(insert_replace_edit.insert.start.line == insert_replace_edit.insert.end.line); // text edit range must be a single line
-                try std.testing.expect(insert_replace_edit.replace.start.line == insert_replace_edit.replace.end.line); // text edit range must be a single line
-                try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.insert)); // text edit range must contain the cursor position
-                try std.testing.expect(offsets.positionInsideRange(cursor_position, insert_replace_edit.replace)); // text edit range must contain the cursor position
-
-                const insert_text_edit: types.TextEdit = .{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.insert };
-                const replace_text_edit: types.TextEdit = .{ .newText = insert_replace_edit.newText, .range = insert_replace_edit.replace };
-
-                const actual_insert_text = try zls.diff.applyTextEdits(allocator, text, &.{insert_text_edit}, ctx.server.offset_encoding);
-                defer allocator.free(actual_insert_text);
-
-                const actual_replace_text = try zls.diff.applyTextEdits(allocator, text, &.{replace_text_edit}, ctx.server.offset_encoding);
-                defer allocator.free(actual_replace_text);
-
-                try std.testing.expectEqualStrings(expected_insert_text, actual_insert_text);
-                try std.testing.expectEqualStrings(expected_replace_text, actual_replace_text);
-            },
-        }
-    }
+    try std.testing.expectEqualStrings(expected_insert_text, actual_insert_text);
+    try std.testing.expectEqualStrings(expected_replace_text, actual_replace_text);
 }
 
 fn searchCompletionItemWithLabel(completion_list: types.completion.List, label: []const u8) !types.completion.Item {
