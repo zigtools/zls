@@ -840,7 +840,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             },
         }
 
-        const string_content_range = offsets.locToRange(source, string_content_loc, builder.server.offset_encoding);
+        const string_content_range = offsets.locToRange(source, .{ .start = insert_loc.start, .end = string_content_loc.end }, builder.server.offset_encoding);
 
         // completions on module replace the entire string literal
         for (builder.completions.items) |*item| {
