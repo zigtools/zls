@@ -13,7 +13,7 @@ The complete installation guide is available on the [Zigtools website](https://z
 
 ### Build From Source
 
-Building ZLS requires [a build of Zig master](https://ziglang.org/download/).
+The default branch of ZLS targets [Zig master](https://ziglang.org/download/).
 
 ```bash
 git clone https://github.com/zigtools/zls
