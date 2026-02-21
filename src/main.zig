@@ -513,15 +513,18 @@ fn parseArgs(
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main(init: std.process.Init.Minimal) !u8 {
-    const base_allocator, const is_debug = gpa: {
-        if (exe_options.debug_gpa) break :gpa .{ debug_allocator.allocator(), true };
-        if (zig_builtin.link_libc) break :gpa .{ std.heap.c_allocator, false };
-        if (zig_builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (zig_builtin.mode) {
-            .Debug => .{ debug_allocator.allocator(), true },
-            .ReleaseSafe, .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
+    const is_debug = exe_options.debug_gpa or switch (zig_builtin.mode) {
+        .Debug => true,
+        .ReleaseSafe, .ReleaseFast, .ReleaseSmall => zig_builtin.single_threaded,
     };
+    const base_allocator = if (is_debug)
+        debug_allocator.allocator()
+    else if (zig_builtin.link_libc)
+        std.heap.c_allocator
+    else if (zig_builtin.target.os.tag == .wasi)
+        std.heap.wasm_allocator
+    else
+        std.heap.smp_allocator;
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
