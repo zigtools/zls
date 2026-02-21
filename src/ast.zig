@@ -400,6 +400,24 @@ fn findMatchingRBrace(tree: *const Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
     return if (std.mem.findScalarPos(std.zig.Token.Tag, tree.tokens.items(.tag), start, .r_brace)) |index| @intCast(index) else null;
 }
 
+pub fn isKeyword(tag: std.zig.Token.Tag) bool {
+    const tags = std.zig.Token.keywords.values();
+    var first_keyword: std.meta.Tag(std.zig.Token.Tag) = @intFromEnum(tags[0]);
+    var last_keyword: std.meta.Tag(std.zig.Token.Tag) = @intFromEnum(tags[tags.len - 1]);
+    for (std.zig.Token.keywords.values()) |token_tag| {
+        first_keyword = @min(@intFromEnum(token_tag), first_keyword);
+        last_keyword = @max(@intFromEnum(token_tag), last_keyword);
+    }
+    return first_keyword <= @intFromEnum(tag) and @intFromEnum(tag) <= last_keyword;
+}
+
+test isKeyword {
+    try std.testing.expect(!isKeyword(.invalid));
+    try std.testing.expect(!isKeyword(.container_doc_comment));
+    try std.testing.expect(isKeyword(.keyword_addrspace));
+    try std.testing.expect(isKeyword(.keyword_while));
+}
+
 /// Similar to `std.zig.Ast.lastToken` but also handles ASTs with syntax errors.
 pub fn lastToken(tree: *const Ast, node: Node.Index) Ast.TokenIndex {
     var n = node;

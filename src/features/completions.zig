@@ -487,7 +487,10 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
     const token = switch (offsets.sourceIndexToTokenIndex(tree, source_index)) {
         .none => return fallback_loc,
         .one => |token| token,
-        .between => |data| data.left,
+        .between => |data| switch (tree.tokenTag(data.left)) {
+            .identifier, .builtin, .invalid => data.left,
+            else => |tag| if (ast.isKeyword(tag)) data.left else data.right,
+        },
     };
     switch (tree.tokenTag(token)) {
         .identifier, .builtin => |tag| {
@@ -496,21 +499,20 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
             std.debug.assert(token_loc.start <= source_index and source_index <= token_loc.end);
             return offsets.identifierIndexToLoc(tree.source, token_loc.start, if (tag == .builtin) .name else .full);
         },
-        .colon => return fallback_loc,
-        else => {
-            const token_start = tree.tokenStart(token);
+        else => |token_tag| {
+            if (token_tag != .invalid and !ast.isKeyword(token_tag))
+                return fallback_loc;
 
-            var start: usize, var end: usize = start: {
+            const start: usize, var end: usize = start: {
+                const token_start = tree.tokenStart(token);
                 if (std.mem.startsWith(u8, tree.source[token_start..], "@\"")) {
                     break :start .{ token_start, token_start + 2 };
                 } else if (std.mem.startsWith(u8, tree.source[token_start..], "@") or std.mem.startsWith(u8, tree.source[token_start..], ".")) {
-                    if (token_start + 1 < source_index) return fallback_loc;
                     break :start .{ token_start + 1, token_start + 1 };
                 } else {
                     break :start .{ token_start, token_start };
                 }
             };
-            start = @min(start, source_index);
             end = @max(end, source_index);
 
             while (end < tree.source.len and offsets.isSymbolChar(tree.source[end])) {
