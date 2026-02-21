@@ -842,27 +842,11 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
     };
 }
 
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main(init: std.process.Init.Minimal) !u8 {
-    const gpa, const is_debug = gpa: {
-        if (@import("builtin").target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (@import("builtin").mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
-    };
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
-
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    defer arena.deinit();
-
-    var threaded: std.Io.Threaded = .init_single_threaded;
-    const io = threaded.ioBasic();
-
-    var args = try init.args.toSlice(arena.allocator());
+pub fn main(init: std.process.Init) !u8 {
+    const arena = init.arena.allocator();
+    const io = init.io;
+    const gpa = init.gpa;
+    const args = try init.minimal.args.toSlice(arena);
 
     if (args.len != 2) {
         std.process.fatal("expected exactly 1 argument but got {d}", .{args.len - 1});
