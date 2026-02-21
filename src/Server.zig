@@ -851,8 +851,6 @@ const Workspace = struct {
                 return;
             },
         };
-
-        log.info("trying to start Build-On-Save for '{s}'", .{workspace.uri.raw});
     }
 };
 

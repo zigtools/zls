@@ -624,10 +624,11 @@ pub const BuildOnSave = struct {
             };
         }
 
+        var did_print_status = false;
         outer: while (true) {
             while (stdout.bufferedLen() < @sizeOf(ServerToClient.Header)) {
                 multi_reader.fill(64, .none) catch |err| switch (err) {
-                    error.Canceled => break :outer,
+                    error.Canceled, error.EndOfStream => break :outer,
                     else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
                 };
             }
@@ -643,6 +644,11 @@ pub const BuildOnSave = struct {
                 else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
             };
             const body = stdout.take(header.bytes_len) catch unreachable;
+
+            if (!did_print_status) {
+                log.info("Build-On-Save is running for '{s}'", .{workspace_path});
+                did_print_status = true;
+            }
 
             switch (header.tag) {
                 .watch_error_bundle => {
@@ -678,7 +684,7 @@ pub const BuildOnSave = struct {
             return;
         };
 
-        const stderr_msg_prefix = if (stderr.bufferedLen() > 0) "and stderr:\n" else "";
+        const stderr_msg_prefix = if (stderr.bufferedLen() > 0) " and stderr:\n" else "";
 
         switch (term) {
             .exited => |code| if (code != 0) log.warn("zig build-on-save runner exited with with code: {d}{s}{s}", .{ code, stderr_msg_prefix, stderr.buffered() }),
