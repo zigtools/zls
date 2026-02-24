@@ -2684,6 +2684,30 @@ test "deprecated" {
     });
 }
 
+test "deprecated sorting" {
+    try testCompletionWithOptions(
+        \\pub const Test = struct {
+        \\  pub const a = @compileError("Deprecated; some message");
+        \\  pub const b = true;
+        \\};
+        \\const foo = Test.<cursor>
+    , &.{
+        .{
+            .label = "b",
+            .kind = .Constant,
+            .deprecated = false,
+        },
+        .{
+            .label = "a",
+            .kind = .Constant,
+            .documentation = "Deprecated; some message",
+            .deprecated = true,
+        },
+    }, .{
+        .check_order = true,
+    });
+}
+
 test "declarations" {
     try testCompletion(
         \\const S = struct {
@@ -4407,6 +4431,7 @@ fn testCompletionWithOptions(
         enable_argument_placeholders: bool = true,
         enable_snippets: bool = true,
         completion_label_details: bool = true,
+        check_order: bool = false,
     },
 ) !void {
     const cursor_idx = std.mem.find(u8, source, "<cursor>").?;
@@ -4582,6 +4607,32 @@ fn testCompletionWithOptions(
         try printLabels(&buffer, unexpected, "unexpected");
         try error_builder.msgAtIndex("invalid completions\n{s}", test_uri.raw, cursor_idx, .err, .{buffer.items});
         return error.MissingOrUnexpectedCompletions;
+    }
+
+    if (options.check_order) {
+        const Item = types.completion.Item;
+
+        const items: []Item = try allocator.dupe(Item, completion_list.items);
+        defer allocator.free(items);
+
+        std.mem.sort(Item, items, {}, struct {
+            fn sort(_: void, lhs: Item, rhs: Item) bool {
+                const lhs_text = lhs.sortText orelse return false;
+                const rhs_text = rhs.sortText orelse return false;
+
+                switch (std.mem.order(u8, lhs_text, rhs_text)) {
+                    .lt => return true,
+                    .eq, .gt => return false,
+                }
+            }
+        }.sort);
+
+        for (0..expected_completions.len) |i| {
+            const expected_completion = expected_completions[i];
+            const actual_completion = items[i];
+
+            try std.testing.expectEqualStrings(expected_completion.label, actual_completion.label);
+        }
     }
 }
 
