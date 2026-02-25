@@ -4617,13 +4617,7 @@ fn testCompletionWithOptions(
 
         std.mem.sort(Item, items, {}, struct {
             fn sort(_: void, lhs: Item, rhs: Item) bool {
-                const lhs_text = lhs.sortText orelse return false;
-                const rhs_text = rhs.sortText orelse return false;
-
-                switch (std.mem.order(u8, lhs_text, rhs_text)) {
-                    .lt => return true,
-                    .eq, .gt => return false,
-                }
+                return std.mem.lessThan(u8, lhs.sortText.?, rhs.sortText.?);
             }
         }.sort);
 

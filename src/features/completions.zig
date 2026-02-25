@@ -665,7 +665,8 @@ fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
 }
 
 fn itemSortScore(item: types.completion.Item) []const u8 {
-    const deprecated: bool = if (item.tags) |tags|
+    // Completion items have two ways to mark deprecation; we need to check both.
+    const deprecated: bool = item.deprecated orelse if (item.tags) |tags|
         std.mem.findScalar(types.completion.Item.Tag, tags, .Deprecated) != null
     else
         false;
