@@ -1310,6 +1310,7 @@ fn getSwitchOrStructInitContext(
                     // The opening brace is preceded by a r_paren => evaluate
                     .r_paren => {
                         need_ret_type = true;
+                        if (upper_index < 1) return null;
                         var token_index = upper_index - 1; // if `switch` we need the last token of the condition
                         parens_depth = even;
                         // Walk backwards counting parens until one_opening then check the preceding token's tag
