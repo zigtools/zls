@@ -4754,7 +4754,7 @@ pub const PositionContext = union(enum) {
     /// XXX: Internal use only, currently points to the loc of the first l_paren
     parens_expr: offsets.Loc,
     keyword: Ast.TokenIndex,
-    error_access,
+    error_access: offsets.Loc,
     comment,
     other,
     empty,
@@ -5100,7 +5100,7 @@ pub fn getPositionContext(
                 stack.pop(curr_ctx.scope == .braces);
                 continue;
             },
-            .keyword_error => .error_access,
+            .keyword_error => .{ .error_access = tok.loc },
             .number_literal => {
                 if (tok.loc.start <= source_index and tok.loc.end >= source_index) {
                     return .{ .number_literal = tok.loc };
