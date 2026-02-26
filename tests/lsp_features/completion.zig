@@ -3571,6 +3571,13 @@ test "filesystem string literal ends with non ASCII symbol" {
     });
 }
 
+test "filesystem unterminated string literal with newline" {
+    try testCompletion(
+        \\const foo = @import("
+        \\  <cursor>
+    , &.{});
+}
+
 test "label details disabled" {
     try testCompletionWithOptions(
         \\const S = struct {
