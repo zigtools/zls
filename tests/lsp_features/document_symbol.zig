@@ -96,6 +96,14 @@ test "invalid tuple-like container" {
     );
 }
 
+test "extern function" {
+    try testDocumentSymbol(
+        \\fn foo() void;
+    ,
+        \\Function foo (fn foo() void)
+    );
+}
+
 test "test decl" {
     try testDocumentSymbol(
         \\test foo {}

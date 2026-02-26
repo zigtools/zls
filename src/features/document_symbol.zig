@@ -113,7 +113,11 @@ pub fn getDocumentSymbols(
                 };
             },
 
-            .fn_decl => blk: {
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            => blk: {
                 var buffer: [1]Ast.Node.Index = undefined;
                 const fn_info = tree.fullFnProto(&buffer, node).?;
                 const name_token = fn_info.name_token orelse continue;
