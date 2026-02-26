@@ -4806,8 +4806,10 @@ pub const PositionContext = union(enum) {
             if (std.mem.endsWith(u8, string_literal_slice[1..], "\"")) {
                 location.end -= 1;
             }
+            location.end = std.mem.findAnyPos(u8, source, location.start, &.{ '\n', '"' }) orelse source.len;
         } else if (std.mem.startsWith(u8, string_literal_slice, "\\")) {
             location.start += 2;
+            location.end = std.mem.findScalarPos(u8, source, location.start, '\n') orelse source.len;
         }
         return location;
     }
