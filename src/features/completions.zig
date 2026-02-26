@@ -664,6 +664,20 @@ fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
     };
 }
 
+fn itemSortScore(item: types.completion.Item) []const u8 {
+    // Completion items have two ways to mark deprecation; we need to check both.
+    const deprecated: bool = item.deprecated orelse if (item.tags) |tags|
+        std.mem.findScalar(types.completion.Item.Tag, tags, .Deprecated) != null
+    else
+        false;
+
+    if (deprecated) {
+        return "9";
+    } else {
+        return kindToSortScore(item.kind.?);
+    }
+}
+
 fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.TokenIndex) error{OutOfMemory}!std.BufSet {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1038,7 +1052,7 @@ pub fn completionAtIndex(
         }
 
         if (item.sortText == null) {
-            const score = kindToSortScore(item.kind.?);
+            const score = itemSortScore(item.*);
             item.sortText = try std.fmt.allocPrint(arena, "{s}_{s}", .{ score, item.label });
         }
     }
