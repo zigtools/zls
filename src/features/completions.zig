@@ -508,7 +508,8 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
                 if (std.mem.startsWith(u8, tree.source[token_start..], "@\"")) {
                     break :start .{ token_start, token_start + 2 };
                 } else if (std.mem.startsWith(u8, tree.source[token_start..], "@") or std.mem.startsWith(u8, tree.source[token_start..], ".")) {
-                    break :start .{ token_start + 1, token_start + 1 };
+                    const start = @min(token_start + 1, source_index);
+                    break :start .{ start, start };
                 } else {
                     break :start .{ token_start, token_start };
                 }
