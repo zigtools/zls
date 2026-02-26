@@ -3839,6 +3839,24 @@ test "insert replace behaviour - builtin with partial argument placeholders" {
     });
 }
 
+test "insert replace behaviour - prepend on builtin or enum literal" {
+    try testCompletionTextEdit(.{
+        .source = "const foo = <cursor>@",
+        .label = "comptime_int",
+        .expected_insert_line = "const foo = comptime_int@",
+        .expected_replace_line = "const foo = comptime_int@",
+    });
+    try testCompletionTextEdit(.{
+        .source =
+        \\const E = enum{ A, B };
+        \\const foo: E = <cursor>.
+        ,
+        .label = "comptime_int",
+        .expected_insert_line = "const foo: E = comptime_int.",
+        .expected_replace_line = "const foo: E = comptime_int.",
+    });
+}
+
 test "insert replace behaviour - function" {
     try testCompletionTextEdit(.{
         .source =
