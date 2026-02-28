@@ -449,17 +449,19 @@ pub fn resolveImport(
             if (parsed_uri.port) |port| result.printAssumeCapacity(":{d}", .{port});
         }
     }
-    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &result);
+    var aw: std.Io.Writer.Allocating = try .initCapacity(allocator, sub_path.len);
     defer aw.deinit();
+
+    std.Uri.Component.percentEncode(&aw.writer, sub_path, isPathChar) catch unreachable;
 
     const percent_encoded_path = parsed_uri.path.percent_encoded;
 
-    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", sub_path });
+    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
     defer allocator.free(joined_path);
 
-    std.Uri.Component.percentEncode(&aw.writer, joined_path, isPathChar) catch unreachable;
+    try result.appendSlice(allocator, joined_path);
 
-    return .{ .raw = try aw.toOwnedSlice() };
+    return .{ .raw = try result.toOwnedSlice(allocator) };
 }
 
 test "resolve" {
