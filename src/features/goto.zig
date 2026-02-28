@@ -97,6 +97,13 @@ fn gotoDefinitionGlobal(
 
     const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const is_escaped_identifier = handle.tree.source[handle.tree.tokenStart(name_token)] == '@';
+
+    if (!is_escaped_identifier) {
+        if (std.mem.eql(u8, name, "_")) return null;
+        if (try analyser.resolvePrimitive(name)) |_| return null;
+    }
+
     const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
