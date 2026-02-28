@@ -431,39 +431,45 @@ pub fn resolveImport(
     parsed_uri: std.Uri,
     sub_path: []const u8,
 ) error{OutOfMemory}!Uri {
-    var result: std.ArrayList(u8) = try .initCapacity(allocator, uri.raw.len + sub_path.len);
-    {
-        errdefer comptime unreachable;
-        result.printAssumeCapacity("{s}:", .{parsed_uri.scheme});
-        result.appendSliceAssumeCapacity("//");
-        if (parsed_uri.host) |host| {
-            if (parsed_uri.user) |user| {
-                result.appendSliceAssumeCapacity(user.percent_encoded);
-                if (parsed_uri.password) |password| {
-                    result.appendAssumeCapacity(':');
-                    result.appendSliceAssumeCapacity(password.percent_encoded);
-                }
-                result.appendAssumeCapacity('@');
-            }
-            result.appendSliceAssumeCapacity(host.percent_encoded);
-            if (parsed_uri.port) |port| result.printAssumeCapacity(":{d}", .{port});
-        }
-    }
-    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &result);
+    var sub_path_capacity: usize = 0;
+    for (sub_path) |char|
+        sub_path_capacity += if (isPathChar(char)) 1 else 3;
+
+    var aw: std.Io.Writer.Allocating = try .initCapacity(allocator, uri.raw.len + sub_path_capacity);
     defer aw.deinit();
 
-    const percent_encoded_path = parsed_uri.path.percent_encoded;
+    const writer = &aw.writer;
 
-    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", sub_path });
+    std.Uri.Component.percentEncode(writer, sub_path, isPathChar) catch unreachable;
+
+    const percent_encoded_path = parsed_uri.path.percent_encoded;
+    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
     defer allocator.free(joined_path);
 
-    std.Uri.Component.percentEncode(&aw.writer, joined_path, isPathChar) catch unreachable;
+    aw.clearRetainingCapacity();
+
+    {
+        errdefer comptime unreachable;
+        writer.print("{s}://", .{parsed_uri.scheme}) catch unreachable;
+        if (parsed_uri.host) |host| {
+            if (parsed_uri.user) |user| {
+                writer.writeAll(user.percent_encoded) catch unreachable;
+                if (parsed_uri.password) |password|
+                    writer.print(":{s}", .{password.percent_encoded}) catch unreachable;
+                writer.writeByte('@') catch unreachable;
+            }
+            writer.writeAll(host.percent_encoded) catch unreachable;
+            if (parsed_uri.port) |port|
+                writer.print(":{d}", .{port}) catch unreachable;
+        }
+        writer.writeAll(joined_path) catch unreachable;
+    }
 
     return .{ .raw = try aw.toOwnedSlice() };
 }
 
 test "resolve" {
-    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///dir/main.zig", false);
+    const uri: Uri = try .parseWithOs(std.testing.allocator, "file:///foo%20bar/main.zig", false);
     defer uri.deinit(std.testing.allocator);
 
     const parsed_uri = std.Uri.parse(uri.raw) catch unreachable;
@@ -471,7 +477,7 @@ test "resolve" {
     const resolved_uri = try resolveImport(std.testing.allocator, uri, parsed_uri, "foo bar.zig");
     defer resolved_uri.deinit(std.testing.allocator);
 
-    try std.testing.expectEqualStrings("file:///dir/foo%20bar.zig", resolved_uri.raw);
+    try std.testing.expectEqualStrings("file:///foo%20bar/foo%20bar.zig", resolved_uri.raw);
 
     var round_trip_uri: Uri = try .parseWithOs(std.testing.allocator, resolved_uri.raw, false);
     defer round_trip_uri.deinit(std.testing.allocator);
