@@ -122,6 +122,13 @@ const Builder = struct {
                     else => unreachable,
                 };
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+
+                if (!is_escaped_identifier) {
+                    if (std.mem.eql(u8, name, "_")) return;
+                    if (try builder.analyser.resolvePrimitive(name)) |_| return;
+                }
+
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
 
                 const candidate = try builder.analyser.lookupSymbolGlobal(
