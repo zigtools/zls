@@ -32,12 +32,12 @@ test "global variable" {
 
     try testDefinition(
         \\const S = <tdef>struct</tdef> { alpha: u32 };
-        \\const <>s: S  = S{ .alpha = 5 };
+        \\const <def><decl><>s</decl></def>: S  = S{ .alpha = 5 };
     );
 
     try testDefinition(
         \\const S = <tdef>struct</tdef> { alpha: u32 };
-        \\const <>s = S{ .alpha = 5 };
+        \\const <def><decl><>s</decl></def> = S{ .alpha = 5 };
     );
 }
 
@@ -92,11 +92,11 @@ test "function parameter" {
 
 test "inferred struct init" {
     try testDefinition(
-        \\const S = <def>struct</def> { alpha: u32 };
+        \\const S = <tdef><def>struct</def></tdef> { alpha: u32 };
         \\const foo: S = .<>{ .alpha = 5 };
     );
     try testDefinition(
-        \\const S = <def>struct</def> { alpha: u32 };
+        \\const S = <tdef><def>struct</def></tdef> { alpha: u32 };
         \\fn f(_: S) void {}
         \\const foo = f(<>.{ .alpha = 5 });
     );
@@ -137,7 +137,7 @@ test "decl literal on generic type" {
 
 test "decl literal pointer" {
     try testDefinition(
-        \\const S = struct {
+        \\const S = <tdef>struct</tdef> {
         \\    const value: S = .{};
         \\    const <def><decl>ptr</decl></def>: *const S = &value;
         \\};
@@ -148,7 +148,7 @@ test "decl literal pointer" {
     try testDefinition(
         \\const S = struct {
         \\    const value: S = .{};
-        \\    fn <def><decl>pointerFn</decl></def>() *const S {
+        \\    <tdef>fn</tdef> <def><decl>pointerFn</decl></def>() *const S {
         \\        return &value;
         \\    }
         \\};
@@ -163,7 +163,7 @@ test "capture" {
         \\test {
         \\    const S = <tdef>struct</tdef> {};
         \\    var maybe: ?S = 5;
-        \\    if (maybe) |<>some| {}
+        \\    if (maybe) |<def><decl><>some</decl></def>| {}
         \\}
     );
     if (true) return error.SkipZigTest; // TODO
@@ -172,7 +172,7 @@ test "capture" {
     try testDefinition(
         \\test {
         \\    var maybe: <tdef>?u32</tdef> = 5;
-        \\    if (maybe) |<>some| {}
+        \\    if (maybe) |<def><decl><>some</decl></def>| {}
         \\}
     );
 }
@@ -252,7 +252,7 @@ test "escaped identifier - global" {
 
 test "escaped identifier - enum literal" {
     try testDefinition(
-        \\const E = enum { <def><decl>@"foo bar"</decl></def> };
+        \\const E = <tdef>enum</tdef> { <def><decl>@"foo bar"</decl></def> };
         \\const e: E = .<origin><>@"foo bar"</origin>;
     );
 }
@@ -271,7 +271,7 @@ test "multiline builder pattern" {
         \\    fn add(foo: Foo) Foo {}
         \\    fn remove(foo: Foo) Foo {}
         \\    fn process(foo: Foo) Foo {}
-        \\    fn <def>finalize</def>(_: Foo) void {}
+        \\    <tdef>fn</tdef> <def><decl>finalize</decl></def>(_: Foo) void {}
         \\};
         \\test {
         \\    var builder = Foo{};
@@ -296,7 +296,7 @@ test "block and decl with same name" {
     );
     try testDefinition(
         \\const x = x: {
-        \\    const <def><decl>x</decl></def>: u8 = 1;
+        \\    const <def><decl>x</decl></def>: <tdef>u8</tdef> = 1;
         \\    break :x <>x;
         \\};
         \\_ = x;
@@ -322,7 +322,7 @@ test "non labeled break" {
         \\}
     );
     try testDefinition(
-        \\const <def><decl>num</decl></def>: usize = 5;
+        \\const <def><decl>num</decl></def>: <tdef>usize</tdef> = 5;
         \\return while (true) {
         \\    break num<>;
         \\};
@@ -332,36 +332,36 @@ test "non labeled break" {
 test "type definition unwraps error unions, optionals, pointers" {
     try testDefinition(
         \\const S = <tdef>struct</tdef> {};
-        \\const <>foo: error{}!S = .{};
+        \\const <def><decl><>foo</decl></def>: error{}!S = .{};
     );
     try testDefinition(
         \\const S = <tdef>struct</tdef> {};
-        \\const <>foo: ?S = .{};
+        \\const <def><decl><>foo</decl></def>: ?S = .{};
     );
     try testDefinition(
         \\const S = <tdef>struct</tdef> {};
-        \\const <>foo: *const S = &.{};
+        \\const <def><decl><>foo</decl></def>: *const S = &.{};
     );
     try testDefinition(
         \\const S = <tdef>struct</tdef> {};
-        \\const <>foo: error{}!?*const S = &.{};
+        \\const <def><decl><>foo</decl></def>: error{}!?*const S = &.{};
     );
 }
 
 test "builtins" {
     try testDefinition(
         \\const S = struct {
-        \\    const <def><decl>Self</decl></def> = <>@This();
+        \\    const <tdef><def><decl>Self</decl></def></tdef> = <>@This();
         \\};
     );
     try testDefinition(
         \\const <decl>S</decl> = struct {
-        \\    const <def>Self</def> = @This();
+        \\    const <tdef><def>Self</def></tdef> = @This();
         \\};
         \\const foo: <>S = .{};
     );
     try testDefinition(
-        \\const <def><decl>S</decl></def> = @This();
+        \\const <tdef><def><decl>S</decl></def></tdef> = @This();
         \\const foo: <>S = .{};
     );
 }
@@ -371,7 +371,8 @@ test "builtins" {
 /// - use `<def>content</def>` to set the expected range of the definition
 /// - use `<tdef>content</tdef>` to set the expected range of the type definition
 ///
-/// If a declaration, definition or type definition is not set, it default to checking for no response from the Server
+/// If a declaration is not set, it checks for no response from the Server.
+/// Ditto for definition and type definition.
 fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
@@ -433,34 +434,15 @@ fn testDefinition(source: []const u8) !void {
     const type_definition_loc: ?offsets.Loc = try parseTaggedLoc(source, phr, "tdef");
     const origin_loc: ?offsets.Loc = try parseTaggedLoc(source, phr, "origin");
 
-    if (declaration_loc == null and
-        definition_loc == null and
-        type_definition_loc == null)
-    {
-        std.debug.print("must specify at least one sub-test with <decl>, <def> or <tdef>\n", .{});
-        return error.NoChecksSpecified;
-    }
-
     const cursor_position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
 
     const declaration_params: types.declaration.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
     const definition_params: types.Definition.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
     const type_definition_params: types.type_definition.Params = .{ .textDocument = .{ .uri = test_uri.raw }, .position = cursor_position };
 
-    const maybe_declaration_response = if (declaration_loc != null)
-        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params)
-    else
-        null;
-
-    const maybe_definition_response = if (definition_loc != null)
-        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", definition_params)
-    else
-        null;
-
-    const maybe_type_definition_response = if (type_definition_loc != null)
-        try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/typeDefinition", type_definition_params)
-    else
-        null;
+    const maybe_declaration_response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/declaration", declaration_params);
+    const maybe_definition_response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", definition_params);
+    const maybe_type_definition_response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/typeDefinition", type_definition_params);
 
     if (maybe_declaration_response) |response| {
         try std.testing.expect(response == .definition_links);
@@ -472,6 +454,8 @@ fn testDefinition(source: []const u8) !void {
                 try error_builder.msgAtLoc("expected declaration here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual declaration here", test_uri.raw, actual_loc, .err, .{});
             }
+        } else {
+            try error_builder.msgAtLoc("unexpected declaration here", test_uri.raw, actual_loc, .err, .{});
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
@@ -494,6 +478,8 @@ fn testDefinition(source: []const u8) !void {
                 try error_builder.msgAtLoc("expected definition here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual definition here", test_uri.raw, actual_loc, .err, .{});
             }
+        } else {
+            try error_builder.msgAtLoc("unexpected definition here", test_uri.raw, actual_loc, .err, .{});
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
@@ -516,6 +502,8 @@ fn testDefinition(source: []const u8) !void {
                 try error_builder.msgAtLoc("expected type definition here!", test_uri.raw, expected_loc, .err, .{});
                 try error_builder.msgAtLoc("actual type definition here", test_uri.raw, actual_loc, .err, .{});
             }
+        } else {
+            try error_builder.msgAtLoc("unexpected type definition here", test_uri.raw, actual_loc, .err, .{});
         }
         const actual_origin_loc = offsets.rangeToLoc(phr.new_source, response.definition_links[0].originSelectionRange.?, ctx.server.offset_encoding);
         if (origin_loc) |expected_origin_loc| {
