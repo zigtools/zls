@@ -366,6 +366,29 @@ test "builtins" {
     );
 }
 
+test "escaped identifier with same name as primitive" {
+    try testDefinition(
+        \\const @"null" = undefined;
+        \\const foo = <>null;
+        \\const bar = @"null";
+    );
+    try testDefinition(
+        \\const @"i32" = undefined;
+        \\const foo = <>i32;
+        \\const bar = @"i32";
+    );
+    try testDefinition(
+        \\const <def><decl>@"null"</decl></def> = undefined;
+        \\const foo = null;
+        \\const bar = <>@"null";
+    );
+    try testDefinition(
+        \\const <def><decl>@"i32"</decl></def> = undefined;
+        \\const foo = i32;
+        \\const bar = <>@"i32";
+    );
+}
+
 /// - use `<>` to indicate the cursor position
 /// - use `<decl>content</decl>` to set the expected range of the declaration
 /// - use `<def>content</def>` to set the expected range of the definition

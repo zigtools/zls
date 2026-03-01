@@ -637,6 +637,19 @@ test "matching control flow - unlabeled switch" {
     );
 }
 
+test "escaped identifier with same name as primitive" {
+    try testSimpleReferences(
+        \\const @"null"<cursor> = undefined;
+        \\const foo = null;
+        \\const bar = <loc>@"null"</loc>;
+    );
+    try testSimpleReferences(
+        \\const @"i32"<cursor> = undefined;
+        \\const foo = i32;
+        \\const bar = <loc>@"i32"</loc>;
+    );
+}
+
 fn testSimpleReferences(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
