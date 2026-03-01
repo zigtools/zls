@@ -508,7 +508,8 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
                 if (std.mem.startsWith(u8, tree.source[token_start..], "@\"")) {
                     break :start .{ token_start, token_start + 2 };
                 } else if (std.mem.startsWith(u8, tree.source[token_start..], "@") or std.mem.startsWith(u8, tree.source[token_start..], ".")) {
-                    break :start .{ token_start + 1, token_start + 1 };
+                    const start = @min(token_start + 1, source_index);
+                    break :start .{ start, start };
                 } else {
                     break :start .{ token_start, token_start };
                 }
@@ -810,10 +811,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
 
     if (pos_context == .string_literal and !DocumentStore.isBuildFile(builder.orig_handle.uri)) return;
 
-    var string_content_loc = pos_context.stringLiteralContentLoc(source);
-
-    // the position context is without lookahead so we have to do it ourself
-    string_content_loc.end = std.mem.findAnyPos(u8, source, string_content_loc.end, &.{ 0, '\n', '\r', '"' }) orelse source.len;
+    const string_content_loc = pos_context.stringLiteralContentLoc(source);
 
     if (builder.source_index < string_content_loc.start or string_content_loc.end < builder.source_index) return;
 
@@ -1312,6 +1310,7 @@ fn getSwitchOrStructInitContext(
                     // The opening brace is preceded by a r_paren => evaluate
                     .r_paren => {
                         need_ret_type = true;
+                        if (upper_index < 1) return null;
                         var token_index = upper_index - 1; // if `switch` we need the last token of the condition
                         parens_depth = even;
                         // Walk backwards counting parens until one_opening then check the preceding token's tag
