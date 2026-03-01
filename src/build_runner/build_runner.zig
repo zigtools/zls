@@ -58,13 +58,9 @@ pub fn main(init: process.Init.Minimal) !void {
     const io = threaded.ioBasic();
 
     // ...but we'll back our arena by `std.heap.page_allocator` for efficiency.
-    var single_threaded_arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-    defer single_threaded_arena.deinit();
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = single_threaded_arena.allocator(),
-        .io = io,
-    };
-    const arena = thread_safe_arena.allocator();
+    var arena_instance: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer arena_instance.deinit();
+    const arena = arena_instance.allocator();
 
     const args = try init.args.toSlice(arena);
 
@@ -106,7 +102,7 @@ pub fn main(init: process.Init.Minimal) !void {
             .io = io,
             .gpa = gpa,
             .manifest_dir = try local_cache_directory.handle.createDirPathOpen(io, "h", .{}),
-            .cwd = try process.currentPathAlloc(io, single_threaded_arena.allocator()),
+            .cwd = try process.currentPathAlloc(io, arena),
         },
         .zig_exe = zig_exe,
         .environ_map = try init.environ.createMap(arena),
@@ -259,8 +255,10 @@ pub fn main(init: process.Init.Minimal) !void {
                 fatal("argument '{s}' is not available", .{arg});
             } else if (mem.eql(u8, arg, "--debug-pkg-config")) {
                 builder.debug_pkg_config = true;
-            } else if (mem.eql(u8, arg, "--debug-rt")) {
-                graph.debug_compiler_runtime_libs = true;
+            } else if (mem.cutPrefix(u8, arg, "--debug-rt=")) |rest| {
+                graph.debug_compiler_runtime_libs =
+                    std.meta.stringToEnum(std.builtin.OptimizeMode, rest) orelse
+                    fatal("unrecognized optimization mode: '{s}'", .{rest});
             } else if (mem.eql(u8, arg, "--debug-compile-errors")) {
                 builder.debug_compile_errors = true;
             } else if (mem.eql(u8, arg, "--debug-incremental")) {
