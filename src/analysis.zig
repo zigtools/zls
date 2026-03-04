@@ -2336,9 +2336,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 },
                 else => {
                     const data = version_data.builtins.get(call_name) orelse return null;
-                    if (try analyser.resolvePrimitive(data.return_type)) |primitive|
-                        return Type.fromIP(analyser, primitive, null);
-                    return analyser.instanceStdBuiltinType(data.return_type);
+                    return analyser.resolveLangrefType(data.return_type);
                 },
             }
         },
@@ -4455,6 +4453,12 @@ pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, i
     }
 }
 
+fn resolveLangrefType(analyser: *Analyser, type_str: []const u8) Error!?Type {
+    if (try analyser.resolvePrimitive(type_str)) |primitive|
+        return Type.fromIP(analyser, primitive, null);
+    return analyser.instanceStdBuiltinType(type_str);
+}
+
 /// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
 pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) Error!?Type {
@@ -6271,7 +6275,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 const parameter = data.parameters[index];
                 const colon_index = std.mem.findScalar(u8, parameter.signature, ':') orelse return null;
                 const type_str = parameter.signature[colon_index + 2 ..];
-                return analyser.instanceStdBuiltinType(type_str);
+                return analyser.resolveLangrefType(type_str);
             }
         },
 
