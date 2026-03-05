@@ -4456,6 +4456,90 @@ pub fn resolveImportString(analyser: *Analyser, handle: *DocumentStore.Handle, i
 fn resolveLangrefType(analyser: *Analyser, type_str: []const u8) Error!?Type {
     if (try analyser.resolvePrimitive(type_str)) |primitive|
         return Type.fromIP(analyser, primitive, null);
+
+    // e.g. `?type`
+    if (std.mem.startsWith(u8, type_str, "?")) {
+        const elem_str = type_str[1..];
+        const elem_ty = try analyser.resolveLangrefType(elem_str) orelse return null;
+        return .{
+            .data = .{
+                .optional = try analyser.allocType(try elem_ty.typeOf(analyser)),
+            },
+            .is_type_val = false,
+        };
+    }
+
+    // e.g. `*const anyopaque`
+    if (std.mem.startsWith(u8, type_str, "*")) {
+        var elem_str = type_str[1..];
+        const is_const = std.mem.startsWith(u8, elem_str, "const ");
+        if (is_const)
+            elem_str = elem_str[6..];
+        const elem_ty = try analyser.resolveLangrefType(elem_str) orelse return null;
+        return .{
+            .data = .{
+                .pointer = .{
+                    .size = .one,
+                    .sentinel = .none,
+                    .is_const = is_const,
+                    .elem_ty = try analyser.allocType(try elem_ty.typeOf(analyser)),
+                },
+            },
+            .is_type_val = false,
+        };
+    }
+
+    // e.g. `[]const u8`
+    if (std.mem.startsWith(u8, type_str, "[")) {
+        const bracket_idx = std.mem.findScalar(u8, type_str, ']') orelse return null;
+
+        var is_slice = bracket_idx == 1;
+        var sentinel: InternPool.Index = .none;
+
+        // e.g. `[:0]const u8`
+        if (std.mem.findScalarLast(u8, type_str[0..bracket_idx], ':')) |colon_idx| {
+            is_slice = colon_idx == 1;
+            const sentinel_str = type_str[colon_idx + 1 .. bracket_idx];
+            if (std.mem.eql(u8, sentinel_str, "0"))
+                sentinel = .zero_comptime_int
+            else
+                sentinel = .unknown_unknown;
+        }
+
+        // e.g. `[N:0]u8`
+        if (!is_slice) {
+            const elem_str = type_str[bracket_idx + 1 ..];
+            const elem_ty = try analyser.resolveLangrefType(elem_str) orelse return null;
+            return .{
+                .data = .{
+                    .array = .{
+                        .elem_count = null,
+                        .sentinel = sentinel,
+                        .elem_ty = try analyser.allocType(try elem_ty.typeOf(analyser)),
+                    },
+                },
+                .is_type_val = false,
+            };
+        }
+
+        var elem_str = type_str[bracket_idx + 1 ..];
+        const is_const = std.mem.startsWith(u8, elem_str, "const ");
+        if (is_const)
+            elem_str = elem_str[6..];
+        const elem_ty = try analyser.resolveLangrefType(elem_str) orelse return null;
+        return .{
+            .data = .{
+                .pointer = .{
+                    .size = .slice,
+                    .sentinel = sentinel,
+                    .is_const = is_const,
+                    .elem_ty = try analyser.allocType(try elem_ty.typeOf(analyser)),
+                },
+            },
+            .is_type_val = false,
+        };
+    }
+
     return analyser.instanceStdBuiltinType(type_str);
 }
 

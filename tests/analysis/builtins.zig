@@ -177,21 +177,41 @@ const Int = @Int(.signed, 16);
 const Pointer = @Pointer(.one, undefined, undefined, undefined);
 //    ^^^^^^^ (type)()
 //                       ^^^^ (Size)()
-const Struct = @Struct(.auto, undefined, undefined, undefined, undefined);
+const Struct = @Struct(.auto, undefined, &.{"foo"}, &.{i32}, &.{.{}});
 //    ^^^^^^ (type)()
 //                     ^^^^^ (ContainerLayout)()
-const Union = @Union(.auto, undefined, undefined, undefined, undefined);
+//                                        ^ ([1][]const u8)()
+//                                                            ^ ([?]Attributes)()
+//                                                              ^ (Attributes)()
+const Union = @Union(.auto, undefined, &.{"foo"}, &.{i32}, &.{.{}});
 //    ^^^^^ (type)()
 //                   ^^^^^ (ContainerLayout)()
+//                                      ^ ([1][]const u8)()
+//                                                          ^ ([?]Attributes)()
+//                                                            ^ (Attributes)()
 const Enum = @Enum(undefined, .exhaustive, undefined, undefined);
 //    ^^^^ (type)()
 //                            ^^^^^^^^^^^ (Mode)()
+const Fn = @Fn(&.{i32}, &.{.{}}, undefined, .{});
+//    ^^ (type)()
+//                       ^ ([?]Attributes)()
+//                         ^ (Attributes)()
+//                                          ^ (Attributes)()
 
 const type_enum_literal: @EnumLiteral() = .foo;
 //    ^^^^^^^^^^^^^^^^^ (@EnumLiteral())()
 
 const type_info = @typeInfo(u8);
 //    ^^^^^^^^^ (Type)()
+
+const type_name = @typeName(u8);
+//    ^^^^^^^^^ (*const [?:0]u8)()
+
+const tag_name = @tagName(type_enum_literal);
+//    ^^^^^^^^ ([:0]const u8)()
+
+const error_name = @errorName(error.Foo);
+//    ^^^^^^^^^^ ([:0]const u8)()
 
 comptime {
     // Use @compileLog to verify the expected type with the compiler
@@ -201,6 +221,10 @@ comptime {
 fn builtin_calls() void {
     @branchHint(.none);
     //          ^^^^^ (BranchHint)()
+
+    const trace = @errorReturnTrace();
+    //    ^^^^^ (?*StackTrace)()
+    _ = trace;
 
     const src = @src();
     //    ^^^ (SourceLocation)()
