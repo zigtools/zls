@@ -339,6 +339,13 @@ pub fn toFsPath(
     return try toFsPathWithOs(uri, allocator, builtin.os.tag == .windows);
 }
 
+/// Based on `std.ArrayList.printAssumeCapacity`
+fn formatRawAssumeCapacity(component: std.Uri.Component, buffer: *std.ArrayList(u8)) void {
+    var w: std.Io.Writer = .fixed(buffer.unusedCapacitySlice());
+    component.formatRaw(&w) catch unreachable;
+    buffer.items.len += w.end;
+}
+
 fn toFsPathWithOs(
     uri: Uri,
     allocator: std.mem.Allocator,
@@ -347,24 +354,25 @@ fn toFsPathWithOs(
     const parsed_uri = std.Uri.parse(uri.raw) catch unreachable; // The Uri is guranteed to be valid
     if (!std.mem.eql(u8, parsed_uri.scheme, "file")) return error.UnsupportedScheme;
 
-    var aw: std.Io.Writer.Allocating = try .initCapacity(allocator, uri.raw.len);
+    var buf: std.ArrayList(u8) = try .initCapacity(allocator, uri.raw.len);
+    defer buf.deinit(allocator);
+
     if (is_windows and parsed_uri.host != null) {
         const host = parsed_uri.host.?;
-        aw.writer.writeAll("\\\\") catch unreachable;
+        buf.appendSliceAssumeCapacity("\\\\");
         if (parsed_uri.user) |user| {
-            user.formatRaw(&aw.writer) catch unreachable;
+            formatRawAssumeCapacity(user, &buf);
             if (parsed_uri.password) |password| {
-                aw.writer.writeByte(':') catch unreachable;
-                password.formatRaw(&aw.writer) catch unreachable;
+                buf.appendAssumeCapacity(':');
+                formatRawAssumeCapacity(password, &buf);
             }
-            aw.writer.writeByte('@') catch unreachable;
+            buf.appendAssumeCapacity('@');
         }
-        host.formatRaw(&aw.writer) catch unreachable;
-        if (parsed_uri.port) |port| aw.writer.print(":{d}", .{port}) catch unreachable;
+        formatRawAssumeCapacity(host, &buf);
+        if (parsed_uri.port) |port|
+            buf.printAssumeCapacity(":{d}", .{port});
     }
-    parsed_uri.path.formatRaw(&aw.writer) catch unreachable; // capacity has already been reserved
-    var buf = aw.toArrayList();
-    errdefer buf.deinit(allocator);
+    formatRawAssumeCapacity(parsed_uri.path, &buf); // capacity has already been reserved
 
     if (is_windows and
         buf.items.len >= 3 and
@@ -438,34 +446,34 @@ pub fn resolveImport(
     var aw: std.Io.Writer.Allocating = try .initCapacity(allocator, uri.raw.len + sub_path_capacity);
     defer aw.deinit();
 
-    const writer = &aw.writer;
-
-    std.Uri.Component.percentEncode(writer, sub_path, isPathChar) catch unreachable;
+    std.Uri.Component.percentEncode(&aw.writer, sub_path, isPathChar) catch unreachable;
 
     const percent_encoded_path = parsed_uri.path.percent_encoded;
     const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
     defer allocator.free(joined_path);
 
-    aw.clearRetainingCapacity();
+    var buffer = aw.toArrayList();
+    defer buffer.deinit(allocator);
+    buffer.clearRetainingCapacity();
 
     {
         errdefer comptime unreachable;
-        writer.print("{s}://", .{parsed_uri.scheme}) catch unreachable;
+        buffer.printAssumeCapacity("{s}://", .{parsed_uri.scheme});
         if (parsed_uri.host) |host| {
             if (parsed_uri.user) |user| {
-                writer.writeAll(user.percent_encoded) catch unreachable;
+                buffer.appendSliceAssumeCapacity(user.percent_encoded);
                 if (parsed_uri.password) |password|
-                    writer.print(":{s}", .{password.percent_encoded}) catch unreachable;
-                writer.writeByte('@') catch unreachable;
+                    buffer.printAssumeCapacity(":{s}", .{password.percent_encoded});
+                buffer.appendAssumeCapacity('@');
             }
-            writer.writeAll(host.percent_encoded) catch unreachable;
+            buffer.appendSliceAssumeCapacity(host.percent_encoded);
             if (parsed_uri.port) |port|
-                writer.print(":{d}", .{port}) catch unreachable;
+                buffer.printAssumeCapacity(":{d}", .{port});
         }
-        writer.writeAll(joined_path) catch unreachable;
+        buffer.appendSliceAssumeCapacity(joined_path);
     }
 
-    return .{ .raw = try aw.toOwnedSlice() };
+    return .{ .raw = try buffer.toOwnedSlice(allocator) };
 }
 
 test "resolve" {
