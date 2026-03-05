@@ -908,9 +908,12 @@ fn generateVersionDataFile(
     );
 
     for (builtins) |builtin| {
-        const signature = try std.mem.replaceOwned(u8, allocator, builtin.signature[builtin.name.len + 1 ..], "std.builtin.", "");
-        defer allocator.free(signature);
-        const signature_with_sentinel = try allocator.dupeZ(u8, signature);
+        const signature0 = builtin.signature[builtin.name.len + 1 ..];
+        const signature1 = try std.mem.replaceOwned(u8, allocator, signature0, "std.builtin.", "");
+        defer allocator.free(signature1);
+        const signature2 = try std.mem.replaceOwned(u8, allocator, signature1, "builtin.", "");
+        defer allocator.free(signature2);
+        const signature_with_sentinel = try allocator.dupeZ(u8, signature2);
         defer allocator.free(signature_with_sentinel);
 
         const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, signature_with_sentinel);
