@@ -1901,6 +1901,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             func_ty = try analyser.resolveFunctionTypeFromCall(handle, call, func_ty);
             const func_info = func_ty.data.function;
+            const func_uri = func_info.handle.uri.raw;
+
+            if (std.mem.endsWith(u8, func_uri, "/std/meta.zig") and func_info.name != null) {
+                const func_name = func_info.name.?;
+
+                if (std.mem.eql(u8, func_name, "Tag")) {
+                    if (call.ast.params.len < 1) return .unknown_type;
+                    const arg = call.ast.params[0];
+                    const arg_ty = try analyser.resolveTypeOfNodeInternal(.of(arg, handle)) orelse return .unknown_type;
+                    // TODO: handle enum tag, e.g. `enum(u8)`
+                    const tag_type = try analyser.resolveUnionTag(arg_ty) orelse return .unknown_type;
+                    return try tag_type.typeOf(analyser);
+                }
+            }
+
             return func_info.return_value.*;
         },
         .container_field,
@@ -2732,7 +2747,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         .unreachable_literal => return Type.fromIP(analyser, .noreturn_type, null),
         .anyframe_literal => return Type.fromIP(analyser, .anyframe_type, null),
 
-        .anyframe_type => return Type.fromIP(analyser, .type_type, null),
+        .anyframe_type => return .unknown_type,
 
         .mul,
         .div,
@@ -3490,6 +3505,16 @@ pub const Type = struct {
                 },
             }
         }
+    };
+
+    pub const unknown_type: Type = .{
+        .data = .{
+            .ip_index = .{
+                .type = .type_type,
+                .index = null,
+            },
+        },
+        .is_type_val = true,
     };
 
     pub fn hash32(self: Type) u32 {
