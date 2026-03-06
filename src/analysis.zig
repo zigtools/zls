@@ -1906,6 +1906,25 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             if (std.mem.endsWith(u8, func_uri, "/std/meta.zig") and func_info.name != null) {
                 const func_name = func_info.name.?;
 
+                if (std.mem.eql(u8, func_name, "ArgsTuple")) {
+                    if (call.ast.params.len < 1) return .unknown_type;
+                    const arg = call.ast.params[0];
+                    const arg_ty = try analyser.resolveTypeOfNodeInternal(.of(arg, handle)) orelse return .unknown_type;
+                    if (!arg_ty.is_type_val or arg_ty.data != .function) return .unknown_type;
+                    const arg_func_info = arg_ty.data.function;
+                    if (arg_func_info.has_varargs) return .unknown_type;
+                    const arg_func_params = arg_func_info.parameters;
+                    const elem_ty_slice = try analyser.arena.alloc(Type, arg_func_params.len);
+                    for (arg_func_params, elem_ty_slice) |param, *elem_ty| {
+                        if (param.type.data == .anytype_parameter) return .unknown_type;
+                        elem_ty.* = param.type;
+                    }
+                    return .{
+                        .data = .{ .tuple = elem_ty_slice },
+                        .is_type_val = true,
+                    };
+                }
+
                 if (std.mem.eql(u8, func_name, "Tag")) {
                     if (call.ast.params.len < 1) return .unknown_type;
                     const arg = call.ast.params[0];
