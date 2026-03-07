@@ -3475,6 +3475,58 @@ test "either" {
     });
 }
 
+test "either - fields and methods with same name" {
+    try testCompletionWithOptions(
+        \\const Foo = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\    fn gamma(_: @This()) void {}
+        \\    fn delta(_: @This()) f32 {}
+        \\};
+        \\const Bar = struct {
+        \\    alpha: u32,
+        \\    beta: bool,
+        \\    fn gamma(_: @This()) void {}
+        \\    fn delta(_: @This()) f64 {}
+        \\};
+        \\const fizz: if (undefined) Foo else Bar = undefined;
+        \\const buzz = fizz.<cursor>
+    , &.{
+        .{
+            .label = "alpha",
+            .labelDetails = .{
+                .detail = null,
+                .description = "u32",
+            },
+            .kind = .Field,
+            .detail = "u32",
+        },
+        .{
+            .label = "beta",
+            .labelDetails = null,
+            .kind = .Field,
+            .detail = null,
+        },
+        .{
+            .label = "gamma",
+            .labelDetails = .{
+                .detail = "()",
+                .description = "void",
+            },
+            .kind = .Method,
+            .detail = null,
+        },
+        .{
+            .label = "delta",
+            .labelDetails = null,
+            .kind = .Method,
+            .detail = null,
+        },
+    }, .{
+        .check_null_fields = true,
+    });
+}
+
 test "container type inside switch case value" {
     try testCompletion(
         \\test {
@@ -4642,6 +4694,7 @@ fn testCompletionWithOptions(
         enable_snippets: bool = true,
         completion_label_details: bool = true,
         check_order: bool = false,
+        check_null_fields: bool = false,
     },
 ) !void {
     const cursor_idx = std.mem.find(u8, source, "<cursor>").?;
@@ -4742,6 +4795,14 @@ fn testCompletionWithOptions(
                 if (actual_doc) |str| std.zig.fmtString(str) else null,
             });
             return error.InvalidCompletionDoc;
+        } else blk: {
+            if (!options.check_null_fields) break :blk;
+            const actual_doc = actual_completion.documentation orelse break :blk;
+            try error_builder.msgAtIndex("completion item '{s}' has unexpected doc '{f}'", test_uri.raw, cursor_idx, .err, .{
+                label,
+                std.zig.fmtString(actual_doc.markup_content.value),
+            });
+            return error.InvalidCompletionDoc;
         }
 
         try std.testing.expect(actual_completion.insertText == null); // 'insertText' is subject to interpretation on the client so 'textEdit' should be preferred
@@ -4757,6 +4818,14 @@ fn testCompletionWithOptions(
                 label,
                 expected_detail,
                 actual_completion.detail,
+            });
+            return error.InvalidCompletionDetail;
+        } else blk: {
+            if (!options.check_null_fields) break :blk;
+            const actual_detail = actual_completion.detail orelse break :blk;
+            try error_builder.msgAtIndex("completion item '{s}' has unexpected detail '{s}'", test_uri.raw, cursor_idx, .err, .{
+                label,
+                actual_detail,
             });
             return error.InvalidCompletionDetail;
         }
@@ -4789,6 +4858,13 @@ fn testCompletionWithOptions(
                 });
                 return error.InvalidCompletionLabelDetails;
             }
+        } else blk: {
+            if (!options.check_null_fields) break :blk;
+            if (actual_completion.labelDetails == null) break :blk;
+            try error_builder.msgAtIndex("completion item '{s}' has unexpected label details", test_uri.raw, cursor_idx, .err, .{
+                label,
+            });
+            return error.InvalidCompletionLabelDetails;
         }
 
         blk: {
