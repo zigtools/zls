@@ -51,7 +51,7 @@ fn hoverSymbol(
             .container_field,
             .container_field_init,
             .container_field_align,
-            => Analyser.getContainerFieldSignature(tree, tree.fullContainerField(node).?) orelse return null,
+            => offsets.nodeToSlice(tree, node),
             .fn_proto,
             .fn_proto_multi,
             .fn_proto_one,

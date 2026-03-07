@@ -322,7 +322,7 @@ test "struct" {
         \\<cursor>foo: u32,
     ,
         \\```zig
-        \\u32
+        \\foo: u32
         \\```
         \\```zig
         \\(u32)
@@ -333,7 +333,7 @@ test "struct" {
         \\const foo = (S{ .foo = 0 }).<cursor>foo;
     ,
         \\```zig
-        \\u32
+        \\foo: u32
         \\```
         \\```zig
         \\(u32)
