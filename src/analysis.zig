@@ -641,21 +641,6 @@ test trimCommonIndentation {
     }
 }
 
-pub fn getContainerFieldSignature(tree: *const Ast, field: Ast.full.ContainerField) ?[]const u8 {
-    const type_expr = field.ast.type_expr.unwrap() orelse return null;
-
-    const end_node = if (field.ast.value_expr.unwrap()) |value_expr|
-        value_expr
-    else if (field.ast.align_expr.unwrap()) |align_expr|
-        align_expr
-    else
-        type_expr;
-
-    const first_token = tree.firstToken(type_expr);
-    const last_token = ast.lastToken(tree, end_node);
-    return offsets.tokensToSlice(tree, first_token, last_token);
-}
-
 /// Returns whether the given `node` is the identifier `type`.
 pub fn isMetaType(tree: *const Ast, node: Ast.Node.Index) bool {
     if (tree.nodeTag(node) == .identifier) {

@@ -1427,11 +1427,11 @@ fn collectContainerFields(
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        const completion_item: types.completion.Item = switch (tree.nodeTag(decl.ast_node)) {
+        switch (tree.nodeTag(decl.ast_node)) {
             .container_field_init,
             .container_field_align,
             .container_field,
-            => blk: {
+            => {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
@@ -1478,26 +1478,29 @@ fn collectContainerFields(
                     };
                 };
 
-                const detail = if (maybe_resolved_ty) |ty| detail: {
-                    const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
+                const detail = detail: {
+                    const type_str = if (maybe_resolved_ty) |ty|
+                        try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false })
+                    else if (field.ast.type_expr.unwrap()) |type_expr| typ: {
+                        const type_str = offsets.nodeToSlice(tree, type_expr);
+                        if (std.mem.eql(u8, name, type_str) and field.ast.tuple_like) break :detail null;
+                        break :typ type_str;
+                    } else break :detail null;
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         const value_str = offsets.nodeToSlice(tree, value_expr);
                         break :detail try std.fmt.allocPrint(builder.arena, "{s} = {s}", .{ type_str, value_str });
                     } else {
                         break :detail try std.fmt.allocPrint(builder.arena, "{s}", .{type_str});
                     }
-                } else if (Analyser.getContainerFieldSignature(tree, field)) |signature| detail: {
-                    if (std.mem.eql(u8, name, signature) and field.ast.tuple_like) break :detail null;
-                    break :detail signature;
-                } else null;
+                };
 
-                break :blk .{
+                try builder.completions.append(builder.arena, .{
                     .label = name,
                     .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                     .detail = detail,
                     .insertTextFormat = insert_text_format,
                     .insertText = insert_text,
-                };
+                });
             },
             .global_var_decl,
             .local_var_decl,
@@ -1513,14 +1516,13 @@ fn collectContainerFields(
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);
-                continue;
             },
             .fn_proto,
             .fn_proto_multi,
             .fn_proto_one,
             .fn_proto_simple,
             .fn_decl,
-            => blk: {
+            => {
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
@@ -1529,11 +1531,11 @@ fn collectContainerFields(
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
-                break :blk try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
+                const completion_item = try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
+                try builder.completions.append(builder.arena, completion_item);
             },
-            else => continue,
-        };
-        try builder.completions.append(builder.arena, completion_item);
+            else => {},
+        }
     }
 }
 
