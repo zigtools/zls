@@ -1643,6 +1643,25 @@ test "enum" {
     });
 }
 
+test "enum - explicit and implicit ordinal values" {
+    try testCompletionWithOptions(
+        \\const E = enum(u8) {
+        \\    alpha = 0,
+        \\    beta,
+        \\    gamma = 3,
+        \\    delta,
+        \\};
+        \\const foo: E = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+        .{ .label = "delta", .kind = .EnumMember },
+        .{ .label = "gamma", .kind = .EnumMember },
+    }, .{
+        .check_order = true,
+    });
+}
+
 test "decl literal" {
     try testCompletion(
         \\const S = struct {
@@ -2472,6 +2491,25 @@ test "structinit" {
         .{ .label = "s2f2", .kind = .Field, .detail = "u32 = 1" },
         .{ .label = "ref1", .kind = .Field, .detail = "S1" },
         .{ .label = "mye", .kind = .Field, .detail = "MyEnum = .ef1" },
+    });
+}
+
+test "structinit - fields with and without default value" {
+    try testCompletionWithOptions(
+        \\const S = struct {
+        \\    alpha: u32 = 0,
+        \\    beta: []const u8,
+        \\    gamma: bool = false,
+        \\    delta: f64,
+        \\};
+        \\const foo = S{ .<cursor> };
+    , &.{
+        .{ .label = "beta", .kind = .Field },
+        .{ .label = "delta", .kind = .Field },
+        .{ .label = "alpha", .kind = .Field },
+        .{ .label = "gamma", .kind = .Field },
+    }, .{
+        .check_order = true,
     });
 }
 
