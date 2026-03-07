@@ -24,9 +24,79 @@ const Builder = struct {
     arena: std.mem.Allocator,
     orig_handle: *DocumentStore.Handle,
     source_index: usize,
-    completions: std.ArrayList(types.completion.Item),
+    completions: Completions,
     cached_prepare_function_completion_result: ?PrepareFunctionCompletionResult = null,
     use_snippets: bool,
+};
+
+pub const Completions = struct {
+    map: std.StringArrayHashMapUnmanaged(types.completion.Item),
+
+    pub const empty: Completions = .{ .map = .empty };
+
+    pub fn items(completions: Completions) []types.completion.Item {
+        return completions.map.values();
+    }
+
+    pub fn ensureUnusedCapacity(
+        completions: *Completions,
+        allocator: std.mem.Allocator,
+        additional_count: usize,
+    ) !void {
+        try completions.map.ensureUnusedCapacity(allocator, additional_count);
+    }
+
+    pub fn append(
+        completions: *Completions,
+        allocator: std.mem.Allocator,
+        item: types.completion.Item,
+    ) !void {
+        try completions.ensureUnusedCapacity(allocator, 1);
+        completions.appendAssumeCapacity(item);
+    }
+
+    pub fn appendSlice(
+        completions: *Completions,
+        allocator: std.mem.Allocator,
+        slice: []const types.completion.Item,
+    ) !void {
+        try completions.ensureUnusedCapacity(allocator, slice.len);
+        for (slice) |item|
+            completions.appendAssumeCapacity(item);
+    }
+
+    pub fn appendAssumeCapacity(
+        completions: *Completions,
+        item: types.completion.Item,
+    ) void {
+        const gop = completions.map.getOrPutAssumeCapacity(item.label);
+        const ptr = gop.value_ptr;
+
+        if (!gop.found_existing) {
+            ptr.* = item;
+            return;
+        }
+
+        ptr.deprecated = ptr.deprecated orelse item.deprecated;
+        ptr.tags = ptr.tags orelse item.tags;
+        _ = keepIfEql(u8, &ptr.detail, item.detail);
+
+        blk: {
+            if (ptr.labelDetails != null and
+                item.labelDetails != null and
+                keepIfEql(u8, &ptr.labelDetails.?.detail, item.labelDetails.?.detail) and
+                keepIfEql(u8, &ptr.labelDetails.?.description, item.labelDetails.?.description))
+                break :blk;
+            ptr.labelDetails = null;
+        }
+    }
+
+    fn keepIfEql(comptime T: type, a: *?[]const T, b: ?[]const T) bool {
+        if (a.* == null and b == null) return true;
+        if (a.* != null and b != null and std.mem.eql(T, a.*.?, b.?)) return true;
+        a.* = null;
+        return false;
+    }
 };
 
 fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
@@ -175,12 +245,12 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
         }
     }
 
-    const documentation: types.Documentation = .{
+    const documentation: ?types.Documentation = if (doc_comments.items.len > 0) .{
         .markup_content = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
             .value = try std.mem.join(builder.arena, "\n\n", doc_comments.items),
         },
-    };
+    } else null;
 
     try builder.completions.ensureUnusedCapacity(builder.arena, 1);
 
@@ -901,7 +971,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
         const string_content_range = offsets.locToRange(source, .{ .start = insert_loc.start, .end = string_content_loc.end }, builder.server.offset_encoding);
 
         // completions on module replace the entire string literal
-        for (builder.completions.items) |*item| {
+        for (builder.completions.items()) |*item| {
             if (item.kind == .Module and item.textEdit == null) {
                 item.textEdit = createTextEdit(builder, .{ .newText = item.label, .insert = insert_range, .replace = string_content_range });
             }
@@ -1004,7 +1074,7 @@ pub fn completionAtIndex(
 
     if (line_until_index.len == 0 or std.zig.isValidId(line_until_index)) {
         try populateSnippedCompletions(&builder, .top_level);
-        return .{ .isIncomplete = false, .items = builder.completions.items };
+        return .{ .isIncomplete = false, .items = builder.completions.items() };
     }
 
     const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, false);
@@ -1028,7 +1098,7 @@ pub fn completionAtIndex(
         else => return null,
     }
 
-    const completions = builder.completions.items;
+    const completions = builder.completions.items();
     if (completions.len == 0) return null;
 
     const identifier_loc = prepareCompletionLoc(&handle.tree, source_index);
