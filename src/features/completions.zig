@@ -640,21 +640,22 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) Analyser.Error!void 
     try typeToCompletion(builder, ty);
 }
 
-fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
+fn kindToSortScore(kind: types.completion.Item.Kind) u4 {
     return switch (kind) {
-        .Operator => "1",
-        .Field, .EnumMember => "2",
-        .Method => "3",
-        .Function => "4",
+        .Operator => 1,
+        .Field, .EnumMember => 2,
+        // Field with default value => 3
+        .Method => 4,
+        .Function => 5,
         .Text, // used for labels
         .Constant,
         .Variable,
         .Struct,
         .Enum,
         .TypeParameter,
-        => "5",
-        .Snippet => "6",
-        .Keyword => "7",
+        => 6,
+        .Snippet => 7,
+        .Keyword => 8,
 
         // Used for `@import` completions. Must be set in `completeFileSystemStringLiteral`.
         .Module => unreachable,
@@ -665,7 +666,7 @@ fn kindToSortScore(kind: types.completion.Item.Kind) []const u8 {
     };
 }
 
-fn itemSortScore(item: types.completion.Item) []const u8 {
+fn itemSortScore(item: types.completion.Item) u4 {
     // Completion items have two ways to mark deprecation; we need to check both.
     const deprecated: bool = item.deprecated orelse if (item.tags) |tags|
         std.mem.findScalar(types.completion.Item.Tag, tags, .Deprecated) != null
@@ -673,10 +674,14 @@ fn itemSortScore(item: types.completion.Item) []const u8 {
         false;
 
     if (deprecated) {
-        return "9";
+        return 9;
     } else {
         return kindToSortScore(item.kind.?);
     }
+}
+
+fn generateSortText(allocator: std.mem.Allocator, score: u4, label: []const u8) ![]const u8 {
+    return try std.fmt.allocPrint(allocator, "{}_{s}", .{ score, label });
 }
 
 fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.TokenIndex) error{OutOfMemory}!std.BufSet {
@@ -867,7 +872,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                     .label = name,
                     .kind = .Module,
                     .detail = path,
-                    .sortText = "4",
+                    .sortText = try generateSortText(builder.arena, 4, name),
                 });
             }
         } else switch (try builder.orig_handle.getAssociatedBuildFile(store)) {
@@ -892,7 +897,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
                         .label = try builder.arena.dupe(u8, name),
                         .kind = .Module,
                         .detail = try builder.arena.dupe(u8, root_source_file),
-                        .sortText = "4",
+                        .sortText = try generateSortText(builder.arena, 4, name),
                     });
                 }
             },
@@ -966,12 +971,14 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             else
                 label;
 
+            const score: u4 = if (entry.kind == .file) 6 else 5;
+
             try builder.completions.append(builder.arena, .{
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
                 .textEdit = createTextEdit(builder, .{ .newText = insert_text, .insert = insert_range, .replace = replace_range }),
-                .sortText = if (entry.kind == .file) "6" else "5",
+                .sortText = try generateSortText(builder.arena, score, label),
             });
         } else |err| switch (err) {
             error.Canceled => return error.Canceled,
@@ -1051,7 +1058,7 @@ pub fn completionAtIndex(
 
         if (item.sortText == null) {
             const score = itemSortScore(item.*);
-            item.sortText = try std.fmt.allocPrint(arena, "{s}_{s}", .{ score, item.label });
+            item.sortText = try generateSortText(arena, score, item.label);
         }
     }
 
@@ -1434,8 +1441,11 @@ fn collectContainerFields(
             => {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
+                const kind: types.completion.Item.Kind =
+                    if (field.ast.tuple_like) .EnumMember else .Field;
+
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
-                    if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and !field.ast.tuple_like) {
+                    if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and kind == .Field) {
                         if (container.isTaggedUnion() and
                             maybe_resolved_ty != null and
                             maybe_resolved_ty.?.data == .ip_index and
@@ -1461,7 +1471,7 @@ fn collectContainerFields(
                     if (!builder.use_snippets)
                         break :insert_text .{ name, .PlainText };
 
-                    if (field.ast.tuple_like or likely == .enum_comparison or likely == .switch_case)
+                    if (kind == .EnumMember or likely == .enum_comparison or likely == .switch_case)
                         break :insert_text .{ name, .PlainText };
 
                     const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(&builder.orig_handle.tree, builder.source_index)) {
@@ -1478,15 +1488,18 @@ fn collectContainerFields(
                     };
                 };
 
+                var score = kindToSortScore(kind);
+
                 const detail = detail: {
                     const type_str = if (maybe_resolved_ty) |ty|
                         try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false })
                     else if (field.ast.type_expr.unwrap()) |type_expr| typ: {
                         const type_str = offsets.nodeToSlice(tree, type_expr);
-                        if (std.mem.eql(u8, name, type_str) and field.ast.tuple_like) break :detail null;
+                        if (std.mem.eql(u8, name, type_str) and kind == .EnumMember) break :detail null;
                         break :typ type_str;
                     } else break :detail null;
                     if (field.ast.value_expr.unwrap()) |value_expr| {
+                        if (kind == .Field) score += 1;
                         const value_str = offsets.nodeToSlice(tree, value_expr);
                         break :detail try std.fmt.allocPrint(builder.arena, "{s} = {s}", .{ type_str, value_str });
                     } else {
@@ -1496,10 +1509,11 @@ fn collectContainerFields(
 
                 try builder.completions.append(builder.arena, .{
                     .label = name,
-                    .kind = if (field.ast.tuple_like) .EnumMember else .Field,
+                    .kind = kind,
                     .detail = detail,
                     .insertTextFormat = insert_text_format,
                     .insertText = insert_text,
+                    .sortText = try generateSortText(builder.arena, score, name),
                 });
             },
             .global_var_decl,
