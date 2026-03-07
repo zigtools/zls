@@ -4567,6 +4567,31 @@ test "doctest name" {
     });
 }
 
+test "dot after try" {
+    try testCompletion(
+        \\const E = error{Err};
+        \\const Foo = struct {
+        \\  fn init() Foo { return undefined; }
+        \\  fn initErr() E!Foo { return undefined; }
+        \\};
+        \\
+        \\fn foo() !void {
+        \\  const f: Foo = try .<cursor>
+        \\}
+    , &.{
+        .{
+            .label = "initErr",
+            .kind = .Function,
+            .detail = "fn () error{Err}!Foo",
+        },
+        .{
+            .label = "init",
+            .kind = .Function,
+            .detail = "fn () Foo",
+        },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
