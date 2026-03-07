@@ -4,12 +4,13 @@
 const std = @import("std");
 const InternPool = @import("InternPool.zig");
 const types = @import("lsp").types;
+const Completions = @import("../features/completions.zig").Completions;
 
 /// generates a list of dot completions for the given typed-value in `index`
 /// the given `index` must belong to the given InternPool
 pub fn dotCompletions(
     arena: std.mem.Allocator,
-    completions: *std.ArrayList(types.completion.Item),
+    completions: *Completions,
     ip: *InternPool,
     index: InternPool.Index,
 ) error{OutOfMemory}!void {
@@ -438,9 +439,9 @@ fn testCompletion(
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
-    var completions: std.ArrayList(types.completion.Item) = .empty;
+    var completions: Completions = .empty;
 
     try dotCompletions(arena, &completions, ip, index);
 
-    try std.testing.expectEqualDeep(expected, completions.items);
+    try std.testing.expectEqualDeep(expected, completions.items());
 }
