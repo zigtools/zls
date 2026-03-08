@@ -1059,7 +1059,7 @@ test "var decl comments" {
         \\const foo = 0 + 0
         \\```
         \\```zig
-        \\(comptime_int = 0)
+        \\(comptime_int)
         \\```
         \\
         \\this is a comment

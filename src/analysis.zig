@@ -2550,7 +2550,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             // TODO: peer type resolution based on `else` and all `break` statements
             if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_type|
-                return else_type;
+                return else_type.withoutIPIndex(analyser);
 
             var it: BreakIterator = .{
                 .walker = try .init(analyser.gpa, tree, loop.then_expr),
@@ -2595,7 +2595,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             while (try it.next(analyser.gpa, tree)) |operand| {
                 if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type|
-                    return operand_type;
+                    return operand_type.withoutIPIndex(analyser);
             }
         },
 
@@ -2782,19 +2782,23 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         .bit_or,
         => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
+            lhs_ty = lhs_ty.withoutIPIndex(analyser);
+            rhs_ty = rhs_ty.withoutIPIndex(analyser);
             return analyser.resolvePeerTypes(lhs_ty, rhs_ty);
         },
 
         .add => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
+            lhs_ty = lhs_ty.withoutIPIndex(analyser);
+            rhs_ty = rhs_ty.withoutIPIndex(analyser);
             return switch (lhs_ty.data) {
                 .pointer => |lhs_info| switch (lhs_info.size) {
                     .many, .c => lhs_ty,
@@ -2806,10 +2810,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .sub => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
-            const rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
             if (rhs_ty.is_type_val) return null;
+            lhs_ty = lhs_ty.withoutIPIndex(analyser);
+            rhs_ty = rhs_ty.withoutIPIndex(analyser);
             return switch (lhs_ty.data) {
                 .pointer => |lhs_info| switch (rhs_ty.data) {
                     .pointer => |rhs_info| {
@@ -2833,7 +2839,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const lhs, _ = tree.nodeData(node).node_and_node;
             const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
             if (lhs_ty.is_type_val) return null;
-            return lhs_ty;
+            return lhs_ty.withoutIPIndex(analyser);
         },
 
         .array_mult => {
@@ -3580,6 +3586,13 @@ pub const Type = struct {
         return switch (self.data) {
             .ip_index => |payload| payload.index,
             else => null,
+        };
+    }
+
+    fn withoutIPIndex(self: Type, analyser: *Analyser) Type {
+        return switch (self.data) {
+            .ip_index => |payload| fromIP(analyser, payload.type, null),
+            else => self,
         };
     }
 
