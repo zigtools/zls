@@ -157,6 +157,8 @@ pub fn main(init: std.process.Init) Error!void {
     var analyser = zls.Analyser.init(gpa, arena, &document_store, &ip, handle);
     defer analyser.deinit();
 
+    analyser.resolve_number_literal_values = true;
+
     for (annotations) |annotation| {
         var ctx: enum {
             global,
