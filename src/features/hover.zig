@@ -22,6 +22,10 @@ fn hoverSymbol(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+    analyser.resolve_number_literal_values = true;
+    defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+
     var doc_strings: std.ArrayList([]const u8) = .empty;
 
     var decl_handle: Analyser.DeclWithHandle = param_decl_handle;
@@ -101,17 +105,25 @@ fn hoverSymbolResolvedType(
     if (resolved_type_maybe) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
-        const typeof = try resolved_type.typeOf(analyser);
+
         var possible_types: Analyser.Type.ArraySet = .empty;
-        has_more = try typeof.getAllTypesWithHandlesArraySet(analyser, &possible_types);
+        has_more = try resolved_type.getAllTypesWithHandlesArraySet(analyser, &possible_types);
+
+        const options: Analyser.Type.FormatOptions = .{
+            .referenced = &referenced,
+            .truncate_container_decls = possible_types.count() > 1,
+        };
+
         for (possible_types.keys()) |ty| {
-            try resolved_type_strings.append(
-                arena,
-                try ty.stringifyTypeVal(analyser, .{
-                    .referenced = &referenced,
-                    .truncate_container_decls = possible_types.count() > 1,
-                }),
-            );
+            const type_str = try ty.stringifyTypeOf(analyser, options);
+
+            if (ty.ipIndex() != null) {
+                const val_str = try ty.stringifyTypeVal(analyser, options);
+                const combined = try std.fmt.allocPrint(arena, "{s} = {s}", .{ type_str, val_str });
+                try resolved_type_strings.append(arena, combined);
+            } else {
+                try resolved_type_strings.append(arena, type_str);
+            }
         }
     }
     const referenced_types: []const Analyser.ReferencedType = referenced.keys();

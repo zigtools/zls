@@ -256,11 +256,12 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
             }
 
             const detail = if (maybe_resolved_ty) |ty| blk: {
-                if (ty.is_type_val and ty.data == .ip_index and ty.data.ip_index.index != null and !builder.analyser.ip.isUnknown(ty.data.ip_index.index.?)) {
-                    break :blk try ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false });
-                } else {
-                    break :blk try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
+                if (ty.ipIndex()) |index| {
+                    if (ty.is_type_val and !builder.analyser.ip.isUnknown(index)) {
+                        break :blk try ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false });
+                    }
                 }
+                break :blk try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false });
             } else null;
 
             const label_details: ?types.completion.Item.LabelDetails = blk: {
