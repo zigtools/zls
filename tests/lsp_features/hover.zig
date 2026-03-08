@@ -859,7 +859,7 @@ test "either types" {
         \\const T = u32
         \\```
         \\```zig
-        \\(type)
+        \\(type = u32)
         \\```
         \\
         \\small type
@@ -868,7 +868,7 @@ test "either types" {
         \\const T = u64
         \\```
         \\```zig
-        \\(type)
+        \\(type = u64)
         \\```
         \\
         \\large type
@@ -886,12 +886,12 @@ test "either types" {
         \\const bar = either.<cursor>T;
     ,
         \\const T = u32
-        \\(type)
+        \\(type = u32)
         \\
         \\small type
         \\
         \\const T = u64
-        \\(type)
+        \\(type = u64)
         \\
         \\large type
     , .{ .markup_kind = .plaintext });
@@ -902,7 +902,8 @@ test "either type instances" {
         \\const EitherType<cursor> = if (undefined) u32 else f64;
     ,
         \\const EitherType = if (undefined) u32 else f64
-        \\(type)
+        \\(type = u32)
+        \\(type = f64)
     , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
         \\const EitherType = if (undefined) u32 else f64;
@@ -1009,9 +1010,9 @@ test "either type instances" {
         \\    .d => {},
         \\    .e => error.Foo,
         \\}
-        \\(comptime_int)
-        \\(bool)
-        \\(comptime_float)
+        \\(comptime_int = 42)
+        \\(bool = true)
+        \\(comptime_float = 3.14)
         \\(...)
     , .{ .markup_kind = .plaintext });
 }
@@ -1058,7 +1059,7 @@ test "var decl comments" {
         \\const foo = 0 + 0
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 0)
         \\```
         \\
         \\this is a comment
@@ -1085,7 +1086,7 @@ test "var decl alias" {
         \\const foo = 5
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 5)
         \\```
     );
 }
@@ -1108,7 +1109,7 @@ test "escaped identifier" {
         \\const @"foo" = 42
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 42)
         \\```
     , .{
         .highlight = "@\"foo\"",
@@ -1121,7 +1122,7 @@ test "escaped identifier" {
         \\const @"hello  world" = 42
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 42)
         \\```
     , .{
         .highlight = "@\"hello  world\"",
@@ -1134,7 +1135,7 @@ test "escaped identifier" {
         \\const @"hello  world" = 42
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 42)
         \\```
     , .{
         .highlight = "@\"hello  world\"",
@@ -1150,7 +1151,7 @@ test "escaped identifier with same name as primitive" {
         \\const @"true" = 42
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 42)
         \\```
     , .{
         .highlight = "@\"true\"",
@@ -1163,7 +1164,7 @@ test "escaped identifier with same name as primitive" {
         \\const @"f32" = 42
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 42)
         \\```
     , .{
         .highlight = "@\"f32\"",
@@ -1318,7 +1319,7 @@ test "array properties" {
         \\const bar = foo.len<cursor>;
     ,
         \\len
-        \\(usize)
+        \\(usize = 3)
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1328,7 +1329,7 @@ test "tuple properties" {
         \\const bar = foo.len<cursor>;
     ,
         \\len
-        \\(usize)
+        \\(usize = 2)
     , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
         \\const foo: struct { i32, bool } = undefined;

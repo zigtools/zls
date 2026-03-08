@@ -2614,8 +2614,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 return Type.fromIP(analyser, .bool_type, null);
             const typeof = try ty.typeOf(analyser);
 
-            if (typeof.data == .ip_index and typeof.data.ip_index.index != null) {
-                const key = analyser.ip.indexToKey(typeof.data.ip_index.index.?);
+            if (typeof.ipIndex()) |index| {
+                const key = analyser.ip.indexToKey(index);
                 if (key == .vector_type) {
                     const vector_ty_ip_index = try analyser.ip.get(.{
                         .vector_type = .{
@@ -3575,6 +3575,13 @@ pub const Type = struct {
             return a.eql(b);
         }
     };
+
+    pub fn ipIndex(self: Type) ?InternPool.Index {
+        return switch (self.data) {
+            .ip_index => |payload| payload.index,
+            else => null,
+        };
+    }
 
     pub fn fromIP(analyser: *Analyser, ty: InternPool.Index, index: ?InternPool.Index) Type {
         std.debug.assert(analyser.ip.isType(ty));
