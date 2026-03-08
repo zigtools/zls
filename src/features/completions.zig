@@ -1117,6 +1117,8 @@ fn getEnumLiteralContext(
     // Allow using `1.` (parser workaround)
     var token_index = if (tree.tokenTag(dot_token_index - 1) == .number_literal)
         (dot_token_index - 2)
+    else if (tree.tokenTag(dot_token_index - 1) == .keyword_try)
+        (dot_token_index - 2)
     else
         (dot_token_index - 1);
     if (token_index == 0) return null;
