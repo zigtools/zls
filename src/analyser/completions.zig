@@ -91,19 +91,20 @@ pub fn dotCompletions(
                 }
             },
             .slice => {
-                const formatted = try std.fmt.allocPrint(arena, "{f}", .{inner_ty.fmt(ip)});
-                std.debug.assert(std.mem.startsWith(u8, formatted, "[]"));
+                var slice_ptr_info = pointer_info;
+                slice_ptr_info.flags.size = .many;
+                const slice_ptr_ty = try ip.get(.{ .pointer_type = slice_ptr_info });
 
                 try completions.appendSlice(arena, &.{
                     .{
                         .label = "ptr",
                         .kind = .Field,
-                        .detail = try std.fmt.allocPrint(arena, "ptr: [*]{s}", .{formatted["[]".len..]}),
+                        .detail = try std.fmt.allocPrint(arena, "{f}", .{slice_ptr_ty.fmt(ip)}),
                     },
                     .{
                         .label = "len",
                         .kind = .Field,
-                        .detail = "len: usize",
+                        .detail = "usize",
                     },
                 });
             },
@@ -314,6 +315,14 @@ test "dotCompletions - pointer types" {
             .size = .c,
         },
     } });
+    const @"[:0]const u8" = try ip.get(.{ .pointer_type = .{
+        .elem_type = .u8_type,
+        .sentinel = .zero_u8,
+        .flags = .{
+            .size = .slice,
+            .is_const = true,
+        },
+    } });
 
     try testCompletion(&ip, try ip.getUnknown(@"*u32"), &.{
         .{
@@ -326,24 +335,24 @@ test "dotCompletions - pointer types" {
         .{
             .label = "ptr",
             .kind = .Field,
-            .detail = "ptr: [*]u32",
+            .detail = "[*]u32",
         },
         .{
             .label = "len",
             .kind = .Field,
-            .detail = "len: usize",
+            .detail = "usize",
         },
     });
     try testCompletion(&ip, try ip.getUnknown(@"[]const u32"), &.{
         .{
             .label = "ptr",
             .kind = .Field,
-            .detail = "ptr: [*]const u32",
+            .detail = "[*]const u32",
         },
         .{
             .label = "len",
             .kind = .Field,
-            .detail = "len: usize",
+            .detail = "usize",
         },
     });
     try testCompletion(&ip, try ip.getUnknown(@"[*c]u32"), &.{
@@ -356,6 +365,18 @@ test "dotCompletions - pointer types" {
             .label = "?",
             .kind = .Operator,
             .detail = "[*c]u32",
+        },
+    });
+    try testCompletion(&ip, try ip.getUnknown(@"[:0]const u8"), &.{
+        .{
+            .label = "ptr",
+            .kind = .Field,
+            .detail = "[*:0]const u8",
+        },
+        .{
+            .label = "len",
+            .kind = .Field,
+            .detail = "usize",
         },
     });
 }
