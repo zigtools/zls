@@ -34,7 +34,7 @@ store: *DocumentStore,
 ip: *InternPool,
 resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?Type) = .empty,
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?Binding, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .empty,
-collect_callsite_references: bool,
+max_callsite_depth: usize = 4, // TODO: come up with a sensible default
 /// avoid unnecessarily parsing number literals
 resolve_number_literal_values: bool,
 /// handle of the doc where the request originated
@@ -57,7 +57,6 @@ pub fn init(
         .arena = arena,
         .store = store,
         .ip = ip,
-        .collect_callsite_references = true,
         .resolve_number_literal_values = false,
         .root_handle = root_handle,
     };
@@ -1731,7 +1730,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     const tree = &decl_handle.handle.tree;
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
 
-    if (is_cimport or !analyser.collect_callsite_references) return null;
+    if (is_cimport or analyser.max_callsite_depth == 0) return null;
 
     // protection against recursive callsite resolution
     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
@@ -1770,10 +1769,8 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
         if (real_param_idx >= call.ast.params.len) continue;
 
         var ty = resolve_ty: {
-            // don't resolve callsite references while resolving callsite references
-            const old_collect_callsite_references = analyser.collect_callsite_references;
-            defer analyser.collect_callsite_references = old_collect_callsite_references;
-            analyser.collect_callsite_references = false;
+            analyser.max_callsite_depth -= 1;
+            defer analyser.max_callsite_depth += 1;
 
             break :resolve_ty try analyser.resolveTypeOfNode(.of(
                 // TODO?: this is a """heuristic based approach"""
@@ -1796,7 +1793,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     }
 
     const maybe_type = try Type.fromEither(analyser, possible.items);
-    if (maybe_type) |ty| analyser.resolved_callsites.getPtr(pay).?.* = ty;
+    if (maybe_type) |ty| gop_resolved.value_ptr.* = ty;
     return maybe_type;
 }
 
