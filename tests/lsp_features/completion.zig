@@ -4682,6 +4682,16 @@ test "dot after try" {
     });
 }
 
+test "null-terminated slice" {
+    try testCompletion(
+        \\const foo = if (undefined) "a" else "ab";
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "usize" },
+        .{ .label = "ptr", .kind = .Field, .detail = "[*:0]const u8" },
+    });
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     try testCompletionWithOptions(source, expected_completions, .{});
 }
