@@ -2258,6 +2258,27 @@ pub fn resolvePeerTypes(ip: *InternPool, types: []const Index, target: std.Targe
                     chosen = try ip.errorSetMerge(chosen, candidate);
                     continue;
                 },
+                .error_union_type => |chosen_info| {
+                    if (chosen_info.error_set_type != .none) {
+                        chosen = try ip.get(.{ .error_union_type = .{
+                            .error_set_type = try ip.errorSetMerge(chosen_info.error_set_type, candidate),
+                            .payload_type = chosen_info.payload_type,
+                        } });
+                        continue;
+                    }
+                },
+                else => {},
+            },
+            .error_union_type => |candidate_info| switch (chosen_key) {
+                .error_set_type => {
+                    if (candidate_info.error_set_type != .none) {
+                        chosen = try ip.get(.{ .error_union_type = .{
+                            .error_set_type = try ip.errorSetMerge(chosen, candidate_info.error_set_type),
+                            .payload_type = candidate_info.payload_type,
+                        } });
+                        continue;
+                    }
+                },
                 else => {},
             },
             else => {},
@@ -5255,7 +5276,18 @@ test "resolvePeerTypes error sets" {
         .names = try ip.getStringSlice(&.{ bar_name, foo_name }),
     } });
 
+    const @"error{bar}!i32" = try ip.get(.{ .error_union_type = .{
+        .error_set_type = @"error{bar}",
+        .payload_type = .i32_type,
+    } });
+
+    const @"error{bar,foo}!i32" = try ip.get(.{ .error_union_type = .{
+        .error_set_type = @"error{bar,foo}",
+        .payload_type = .i32_type,
+    } });
+
     try ip.testResolvePeerTypes(@"error{foo}", @"error{bar}", @"error{bar,foo}");
+    try ip.testResolvePeerTypes(@"error{foo}", @"error{bar}!i32", @"error{bar,foo}!i32");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
