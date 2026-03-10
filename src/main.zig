@@ -37,6 +37,7 @@ pub const std_options: std.Options = .{
     // value in logFn itself
     .log_level = .debug,
     .logFn = logFn,
+    .networking = false,
 };
 
 /// Log messages with the LSP 'window/logMessage' message.
@@ -540,7 +541,7 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
         .argv0 = .init(init.args),
     });
     defer threaded.deinit();
-    const io = threaded.ioBasic();
+    const io = threaded.io();
 
     var environ_map = try init.environ.createMap(allocator);
     defer environ_map.deinit();
