@@ -795,7 +795,7 @@ fn resolveGenericTypeInternal(
     std.debug.assert(resolved.is_type_val);
     resolved.data = try resolved.data.resolveGeneric(analyser, bound_params, visiting);
     if (!ty.is_type_val) {
-        resolved = (try resolved.instanceTypeVal(analyser)).?;
+        resolved = try resolved.instanceUnchecked(analyser);
     }
     return resolved;
 }
@@ -1181,8 +1181,8 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
         },
         .ip_index => |payload| {
             const ty = try analyser.bracketAccessTypeFromIPIndex(payload.type);
-            const instance = try ty.instanceTypeVal(analyser);
-            const binding: Binding = .{ .type = instance.?, .is_const = is_const };
+            const instance = try ty.instanceUnchecked(analyser);
+            const binding: Binding = .{ .type = instance, .is_const = is_const };
             if (lhs.eql(binding.type)) return null;
             return analyser.resolveBracketAccessTypeFromBinding(binding, rhs);
         },
@@ -3845,8 +3845,8 @@ pub const Type = struct {
                         new_info.return_value = try analyser.allocType(combo.get(info.return_value.*).?);
                     } else {
                         const return_type = try info.return_value.typeOf(analyser);
-                        const return_value = try combo.get(return_type).?.instanceTypeVal(analyser);
-                        new_info.return_value = try analyser.allocType(return_value.?);
+                        const return_value = try combo.get(return_type).?.instanceUnchecked(analyser);
+                        new_info.return_value = try analyser.allocType(return_value);
                     }
                     try all_types.put(arena, .{ .data = .{ .function = new_info }, .is_type_val = ty.is_type_val }, {});
                 }
@@ -3897,13 +3897,18 @@ pub const Type = struct {
 
     pub fn instanceTypeVal(self: Type, analyser: *Analyser) error{OutOfMemory}!?Type {
         if (!self.is_type_val) return null;
+        return try self.instanceUnchecked(analyser);
+    }
+
+    pub fn instanceUnchecked(self: Type, analyser: *Analyser) error{OutOfMemory}!Type {
+        std.debug.assert(self.is_type_val);
         return switch (self.data) {
             .ip_index => |payload| fromIP(analyser, payload.index orelse try analyser.ip.getUnknown(payload.type), null),
             .either => |old_entries| {
                 const new_entries = try analyser.arena.alloc(Type.Data.EitherEntry, old_entries.len);
                 for (old_entries, new_entries) |old, *new| {
                     const old_type: Type = .{ .data = old.type_data, .is_type_val = self.is_type_val };
-                    const new_type = try old_type.instanceTypeVal(analyser) orelse return null;
+                    const new_type = try old_type.instanceUnchecked(analyser);
                     new.* = .{
                         .type_data = new_type.data,
                         .descriptor = old.descriptor,
