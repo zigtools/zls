@@ -18,10 +18,10 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "lsp_kit-0.1.0-bi_PLw8zDABvCWe2rD4Aqb9gx0sRXBKO0a7M0vg3AbR3";
+    name = "lsp_kit-0.1.0-bi_PLwozDAApVpvVJHz80NPklig5biWlZCkyxjFbOtiD";
     path = fetchzip {
-      url = "https://github.com/zigtools/lsp-kit/archive/7b03f0b6801babffe76608cf3db59793902a21d6.tar.gz";
-      hash = "sha256-CjWrp8fERKS5VldRvYtDFk1g4heIkX4YrpLw/eC12Q4=";
+      url = "https://github.com/zigtools/lsp-kit/archive/98d6bed6e42a0866e1e2ba0867673d9f57ca6687.tar.gz";
+      hash = "sha256-/p/AknpFGicfOhpsvyqCNHxeVNVBoiXWh6ctKTwStCM=";
     };
   }
   # workaround: https://codeberg.org/ziglang/zig/issues/31162
