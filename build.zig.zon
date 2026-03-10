@@ -10,7 +10,7 @@
     // nix flake update --commit-lock-file
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    .minimum_zig_version = "0.16.0-dev.2676+4e2cec265",
+    .minimum_zig_version = "0.16.0-dev.2736+3b515fbed",
     // If you do not use Nix, a ZLS maintainer can take care of this.
     // Whenever the dependencies are updated, run the following command:
     // ```bash
@@ -27,8 +27,8 @@
             .hash = "diffz-0.0.1-G2tlIYrNAQAQx3cuIp7EVs0xvxbv9DCPf4YuHmvubsrZ",
         },
         .lsp_kit = .{
-            .url = "https://github.com/zigtools/lsp-kit/archive/7b03f0b6801babffe76608cf3db59793902a21d6.tar.gz",
-            .hash = "lsp_kit-0.1.0-bi_PLw8zDABvCWe2rD4Aqb9gx0sRXBKO0a7M0vg3AbR3",
+            .url = "git+https://github.com/zigtools/lsp-kit.git#98d6bed6e42a0866e1e2ba0867673d9f57ca6687",
+            .hash = "lsp_kit-0.1.0-bi_PLwozDAApVpvVJHz80NPklig5biWlZCkyxjFbOtiD",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",

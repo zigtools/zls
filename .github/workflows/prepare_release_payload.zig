@@ -13,7 +13,7 @@ pub fn main() !void {
     const arena = arena_allocator.allocator();
 
     var threaded: std.Io.Threaded = .init_single_threaded;
-    const io = threaded.ioBasic();
+    const io = threaded.io();
 
     const metadata_source = try std.Io.Dir.cwd().readFileAlloc(io, "zig-out/release.json", arena, .limited(std.math.maxInt(u32)));
     const artifacts_dir = try std.Io.Dir.cwd().openDir(io, "zig-out/artifacts", .{ .iterate = true });
