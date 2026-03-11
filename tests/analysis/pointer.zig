@@ -129,6 +129,12 @@ const many_minus_c = many_u32 - c_u32;
 const slice_u32: []const u32 = &.{ 1, 2 };
 //    ^^^^^^^^^ ([]const u32)()
 
+const slice_u32_sentinel: [:3]const u32 = &.{ 1, 2 };
+//    ^^^^^^^^^^^^^^^^^^ ([:3]const u32)()
+
+const mutable_slice_u32: []u32 = undefined;
+//    ^^^^^^^^^^^^^^^^^ ([]u32)()
+
 const slice_u32_deref = slice_u32.*;
 //    ^^^^^^^^^^^^^^^ (unknown)()
 
@@ -146,6 +152,27 @@ const slice_u32_slice_open = slice_u32[1..];
 
 const slice_u32_slice_sentinel = slice_u32[0..1 :2];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [1:2]u32)()
+
+const slice_u32_slice_open_sentinel = slice_u32[1.. :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([:2]const u32)()
+
+const slice_u32_sentinel_indexing = slice_u32_sentinel[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (u32)()
+
+const slice_u32_sentinel_slice_len_comptime = slice_u32_sentinel[0..2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u32)()
+
+const slice_u32_sentinel_slice_len_runtime = slice_u32_sentinel[0..runtime_index];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u32)()
+
+const slice_u32_sentinel_slice_open = slice_u32_sentinel[1..];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([:3]const u32)()
+
+const slice_u32_sentinel_slice_sentinel = slice_u32_sentinel[0..1 :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [1:2]u32)()
+
+const slice_u32_sentinel_slice_open_sentinel = slice_u32_sentinel[1.. :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([:2]const u32)()
 
 const slice_u32_orelse = slice_u32 orelse unreachable;
 //    ^^^^^^^^^^^^^^^^ (unknown)()
