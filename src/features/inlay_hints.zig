@@ -547,6 +547,10 @@ pub fn writeRangeInlayHint(
     hover_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) Analyser.Error![]types.InlayHint {
+    const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+    analyser.resolve_number_literal_values = true;
+    defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,
