@@ -53,9 +53,41 @@ const TaggedUnionType = union(EnumType) {
     var var_decl: bool = false;
 };
 
+const some_array: [3]i32 = .{ 1, 2, 3 };
+
+var mutable_array: [3]i32 = .{ 1, 2, 3 };
+
+const some_slice: []const i32 = &some_array;
+
+const mutable_slice: []i32 = &mutable_array;
+
 const some_struct: StructType = .{ .foo = 1 };
 
 var mutable_struct: StructType = .{ .foo = 1 };
+
+const some_array_pointer = &some_array;
+//    ^^^^^^^^^^^^^^^^^^ (*const [3]i32)()
+
+const mutable_array_pointer = &mutable_array;
+//    ^^^^^^^^^^^^^^^^^^^^^ (*[3]i32)()
+
+const some_array_element_pointer = &some_array[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const i32)()
+
+const mutable_array_element_pointer = &mutable_array[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*i32)()
+
+const some_slice_pointer = &some_slice;
+//    ^^^^^^^^^^^^^^^^^^ (*const []const i32)()
+
+const mutable_slice_pointer = &mutable_slice;
+//    ^^^^^^^^^^^^^^^^^^^^^ (*const []i32)()
+
+const some_slice_element_pointer = &some_slice[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const i32)()
+
+const mutable_slice_element_pointer = &mutable_slice[1];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*i32)()
 
 const some_struct_pointer = &some_struct;
 //    ^^^^^^^^^^^^^^^^^^^ (*const StructType)()
