@@ -1080,6 +1080,19 @@ pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAcce
 fn bracketAccessTypeFromIPIndex(analyser: *Analyser, ip_index: InternPool.Index) error{OutOfMemory}!Type {
     std.debug.assert(analyser.ip.typeOf(ip_index) == .type_type);
     return switch (analyser.ip.indexToKey(ip_index)) {
+        .tuple_type => |info| {
+            const types = try info.types.dupe(analyser.gpa, analyser.ip);
+            defer analyser.gpa.free(types);
+
+            const elem_ty_slice = try analyser.arena.alloc(Type, types.len);
+            for (elem_ty_slice, types) |*elem_ty, ty|
+                elem_ty.* = try analyser.bracketAccessTypeFromIPIndex(ty);
+
+            return .{
+                .data = .{ .tuple = elem_ty_slice },
+                .is_type_val = true,
+            };
+        },
         .vector_type => |info| .{
             .data = .{
                 .array = .{
@@ -1307,7 +1320,20 @@ pub fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) erro
                 }
             },
 
-            // TODO: tuple_type
+            .tuple_type => |tuple_info| {
+                if (std.mem.eql(u8, "len", name)) {
+                    const index = try analyser.ip.get(.{
+                        .int_u64_value = .{
+                            .ty = .usize_type,
+                            .int = tuple_info.types.len,
+                        },
+                    });
+                    return Type.fromIP(analyser, .usize_type, index);
+                }
+                if (!allDigits(name)) return null;
+                const index = std.fmt.parseInt(u16, name, 10) catch return null;
+                return try analyser.resolveBracketAccessType(ty, .{ .single = index });
+            },
 
             .optional_type => |optional_info| {
                 if (std.mem.eql(u8, "?", name)) {
@@ -1962,10 +1988,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                         if (param.type.data == .anytype_parameter) return .unknown_type;
                         elem_ty.* = param.type;
                     }
-                    return .{
-                        .data = .{ .tuple = elem_ty_slice },
-                        .is_type_val = true,
-                    };
+                    return try Type.createTupleType(analyser, elem_ty_slice);
                 }
 
                 if (std.mem.eql(u8, func_name, "Tag")) {
@@ -2117,10 +2140,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 elem_ty.* = try analyser.resolveTypeOfNodeInternal(.of(element, handle)) orelse return null;
                 elem_ty.* = try elem_ty.typeOf(analyser);
             }
-            return .{
-                .data = .{ .tuple = elem_ty_slice },
-                .is_type_val = false,
-            };
+            const tuple_ty = try Type.createTupleType(analyser, elem_ty_slice);
+            return try tuple_ty.instanceUnchecked(analyser);
         },
         .error_union => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
@@ -2201,10 +2222,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 }
 
                 if (has_unresolved_fields) return null;
-                return .{
-                    .data = .{ .tuple = elem_ty_slice },
-                    .is_type_val = true,
-                };
+                return try Type.createTupleType(analyser, elem_ty_slice);
             }
 
             return try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
@@ -3268,6 +3286,26 @@ pub const Type = struct {
             };
         }
 
+        fn createTuple(analyser: *Analyser, elem_tys: []Type) !Data {
+            const tys = try analyser.gpa.alloc(InternPool.Index, elem_tys.len);
+            defer analyser.gpa.free(tys);
+
+            const vals = try analyser.gpa.alloc(InternPool.Index, elem_tys.len);
+            defer analyser.gpa.free(vals);
+
+            for (tys, vals, elem_tys) |*ty, *val, elem_ty| {
+                ty.* = elem_ty.ipIndex() orelse break;
+                val.* = .none;
+            } else {
+                const types = try analyser.ip.getIndexSlice(tys);
+                const values = try analyser.ip.getIndexSlice(vals);
+                const index = try analyser.ip.get(.{ .tuple_type = .{ .types = types, .values = values } });
+                return .{ .ip_index = .{ .type = .type_type, .index = index } };
+            }
+
+            return .{ .tuple = elem_tys };
+        }
+
         fn createOptional(analyser: *Analyser, child_ty: Type) !Data {
             std.debug.assert(child_ty.is_type_val);
             if (child_ty.ipIndex()) |payload_type| {
@@ -3581,14 +3619,15 @@ pub const Type = struct {
                     const elem_ty = try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting);
                     return try createArray(analyser, elem_count, sentinel, elem_ty);
                 },
-                .tuple => |info| return .{
-                    .tuple = blk: {
+                .tuple => |info| {
+                    const elem_tys = blk: {
                         const types = try analyser.arena.alloc(Type, info.len);
                         for (info, types) |old, *new| {
                             new.* = try analyser.resolveGenericTypeInternal(old, bound_params, visiting);
                         }
                         break :blk types;
-                    },
+                    };
+                    return try createTuple(analyser, elem_tys);
                 },
                 .optional => |info| {
                     const child_ty = try analyser.resolveGenericTypeInternal(info.*, bound_params, visiting);
@@ -3687,6 +3726,13 @@ pub const Type = struct {
     ) !Type {
         return .{
             .data = try Data.createArray(analyser, elem_count, sentinel, elem_ty),
+            .is_type_val = true,
+        };
+    }
+
+    fn createTupleType(analyser: *Analyser, elem_tys: []Type) !Type {
+        return .{
+            .data = try Data.createTuple(analyser, elem_tys),
             .is_type_val = true,
         };
     }
@@ -4164,8 +4210,16 @@ pub const Type = struct {
         return self.getContainerKind() == container_kind_tok;
     }
 
-    pub fn isStructType(self: Type) bool {
-        return self.data == .tuple or self.isContainerKind(.keyword_struct) or self.isRoot();
+    pub fn isStructType(self: Type, analyser: *Analyser) bool {
+        if (!self.is_type_val) return false;
+        return switch (self.data) {
+            .tuple => true,
+            .ip_index => |payload| {
+                const index = payload.index orelse return false;
+                return analyser.ip.zigTypeTag(index) == .@"struct";
+            },
+            else => self.isContainerKind(.keyword_struct) or self.isRoot(),
+        };
     }
 
     pub fn isNamespace(self: Type) bool {
@@ -5052,7 +5106,7 @@ pub fn getFieldAccessType(
                     }
                 } else return null;
                 if (current_type) |ct| {
-                    if (ct.isStructType() or ct.isUnionType()) {
+                    if (ct.isStructType(analyser) or ct.isUnionType()) {
                         // struct initialization
                         current_type = try ct.instanceTypeVal(analyser);
                     }
@@ -5832,9 +5886,16 @@ pub const DeclWithHandle = struct {
 
                 const init_node = tree.nodeData(pay.node).extra_and_node[1];
                 const node = try analyser.resolveTypeOfNode(.of(init_node, self.handle)) orelse return null;
+                if (node.is_type_val) return null;
                 break :blk switch (node.data) {
                     .array => |array_info| try array_info.elem_ty.instanceTypeVal(analyser),
                     .tuple => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
+                    .ip_index => |payload| switch (analyser.ip.indexToKey(payload.type)) {
+                        .vector_type => |vector_info| Type.fromIP(analyser, vector_info.child, null),
+                        .array_type => |array_info| Type.fromIP(analyser, array_info.child, null),
+                        .tuple_type => try analyser.resolveBracketAccessType(node, .{ .single = pay.index }),
+                        else => null,
+                    },
                     else => null,
                 };
             },

@@ -4080,7 +4080,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
         .union_type => return panicOrElse(?Index, "TODO", null),
         .tuple_type => |tuple_info| {
             assert(tuple_info.types.len == tuple_info.values.len);
-            try writer.writeAll("tuple{");
+            try writer.writeAll("struct { ");
 
             for (0..tuple_info.types.len) |i| {
                 const field_ty = tuple_info.types.at(@intCast(i), ip);
@@ -4096,7 +4096,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                     try ip.print(field_val, writer, options);
                 }
             }
-            try writer.writeByte('}');
+            try writer.writeAll(" }");
         },
         .vector_type => |vector_info| {
             try writer.print("@Vector({d},{f})", .{
