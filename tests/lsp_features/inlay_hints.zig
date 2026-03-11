@@ -593,6 +593,16 @@ test "declaration literals" {
     , .{ .kind = .Parameter });
 }
 
+test "indirect usage of integer literal" {
+    try testInlayHints(
+        \\test {
+        \\    const foo<comptime_int> = 3;
+        \\    const bar: [foo]u32 = undefined;
+        \\    const baz<[3]u32> = bar;
+        \\}
+    , .{ .kind = .Type });
+}
+
 const Options = struct {
     kind: types.InlayHint.Kind,
     show_builtin: bool = true,
