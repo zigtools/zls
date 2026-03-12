@@ -858,16 +858,17 @@ fn resolveReturnValueOfFuncNode(
     const fn_proto = tree.fullFnProto(&buf, func_node).?;
     const has_body = tree.nodeTag(func_node) == .fn_decl;
 
-    if (isTypeFunction(tree, fn_proto) and has_body) {
+    if (isTypeFunction(tree, fn_proto)) {
+        if (!has_body) return .unknown_type;
         const body = tree.nodeData(func_node).node_and_node[1];
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const return_node = findReturnStatement(tree, body) orelse return null;
+        const return_node = findReturnStatement(tree, body) orelse return .unknown_type;
         if (tree.nodeData(return_node).opt_node.unwrap()) |return_expr| {
-            return try analyser.resolveTypeOfNodeInternal(.of(return_expr, handle));
+            return try analyser.resolveTypeOfNodeInternal(.of(return_expr, handle)) orelse .unknown_type;
         }
 
-        return null;
+        return .unknown_type;
     }
 
     const return_type = fn_proto.ast.return_type.unwrap() orelse return null;
@@ -2430,7 +2431,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                             else => unreachable,
                         }
                     }
-                    break :param_type Type.fromIP(analyser, .type_type, .unknown_type);
+                    break :param_type .unknown_type;
                 };
 
                 try parameters.append(analyser.arena, .{
