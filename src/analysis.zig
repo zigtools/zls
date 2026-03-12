@@ -1875,7 +1875,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     .container_type = options.container_type,
                 }) orelse break :blk;
                 if (decl_type.isMetaType()) {
-                    fallback_type = decl_type;
+                    fallback_type = .unknown_type;
                     break :blk;
                 }
                 return try decl_type.instanceTypeVal(analyser);
