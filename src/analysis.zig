@@ -1971,6 +1971,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     fallback_type = .unknown_type;
                     break :blk;
                 }
+                if (mut_token_tag == .keyword_const) num: {
+                    const init_node = var_decl.ast.init_node.unwrap() orelse break :num;
+                    const ip_ty = decl_type.ipIndex() orelse break :num;
+                    const ip_index = try analyser.resolveCoercedIPValue(ip_ty, .of(init_node, handle)) orelse break :num;
+                    return Type.fromIP(analyser, analyser.ip.typeOf(ip_index), ip_index);
+                }
                 return try decl_type.instanceTypeVal(analyser);
             }
 
