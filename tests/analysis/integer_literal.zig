@@ -32,7 +32,7 @@ const bit_not_one = ~1;
 //    ^^^^^^^^^^^ (comptime_int)((unknown value))
 
 const const_u8: u8 = 42;
-//    ^^^^^^^^ (u8)((unknown value)) TODO this should be `42`
+//    ^^^^^^^^ (u8)(42)
 
 var var_u8: u8 = 42;
 //  ^^^^^^ (u8)((unknown value))
