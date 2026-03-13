@@ -1425,6 +1425,28 @@ fn resolveOptionalIPValue(
     return try analyser.resolveInternPoolValue(.of(node, handle)) orelse .unknown_unknown;
 }
 
+fn resolveCoercedIPValue(
+    analyser: *Analyser,
+    ip_ty: InternPool.Index,
+    options: ResolveOptions,
+) Error!?InternPool.Index {
+    if (!analyser.ip.isType(ip_ty)) return null;
+    const ty = try analyser.resolveTypeOfNode(options) orelse return null;
+    const ip_index = ty.ipIndex() orelse return null;
+    if (analyser.ip.isUndefined(ip_index)) return null;
+
+    var arena_allocator: std.heap.ArenaAllocator = .init(analyser.gpa);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    var err_msg: ErrorMsg = undefined;
+    const new_index = try analyser.ip.coerce(arena, ip_ty, ip_index, builtin.target, &err_msg);
+
+    if (new_index == .none) return null;
+    if (analyser.ip.isUnknown(new_index)) return null;
+    return new_index;
+}
+
 fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) Error!?InternPool.Index {
     const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
     analyser.resolve_number_literal_values = true;
@@ -2279,7 +2301,17 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     if (params.len != 0) return null;
                     return options.container_type orelse try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
                 },
-                .as,
+                .as => {
+                    if (params.len < 1) return null;
+                    const ty = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                    num: {
+                        if (params.len < 2) break :num;
+                        const ip_ty = ty.ipIndex() orelse break :num;
+                        const ip_index = try analyser.resolveCoercedIPValue(ip_ty, .of(params[1], handle)) orelse break :num;
+                        return Type.fromIP(analyser, analyser.ip.typeOf(ip_index), ip_index);
+                    }
+                    return try ty.instanceTypeVal(analyser);
+                },
                 .atomic_load,
                 .atomic_rmw,
                 .@"extern",
