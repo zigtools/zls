@@ -3155,6 +3155,17 @@ pub fn isType(ip: *InternPool, ty: Index) bool {
     };
 }
 
+pub fn isUndefined(ip: *InternPool, index: Index) bool {
+    switch (index) {
+        .undefined_value => return true,
+        else => {
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
+            return ip.items.items(.tag)[@intFromEnum(index)] == .undefined_value;
+        },
+    }
+}
+
 pub fn isUnknown(ip: *InternPool, index: Index) bool {
     switch (index) {
         .unknown_type, .unknown_unknown => return true,
