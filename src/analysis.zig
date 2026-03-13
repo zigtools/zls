@@ -1968,6 +1968,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
+            const mut_token_tag = tree.tokenTag(var_decl.ast.mut_token);
             var fallback_type: ?Type = null;
 
             if (var_decl.ast.type_node.unwrap()) |type_node| blk: {
@@ -1983,7 +1984,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             }
 
             if (var_decl.ast.init_node.unwrap()) |init_node| blk: {
-                return try analyser.resolveTypeOfNodeInternal(.of(init_node, handle)) orelse break :blk;
+                const ty = try analyser.resolveTypeOfNodeInternal(.of(init_node, handle)) orelse break :blk;
+                if (mut_token_tag == .keyword_var)
+                    return ty.withoutIPIndex(analyser);
+                return ty;
             }
 
             return fallback_type;
