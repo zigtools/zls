@@ -22,6 +22,15 @@ const comptime_shl = 2 << 3;
 const one_plus_one = 1 + 1;
 //    ^^^^^^^^^^^^ (comptime_int)((unknown value)) TODO this should be `2`
 
+const negation_one = -1;
+//    ^^^^^^^^^^^^ (comptime_int)((unknown value)) TODO this should be `-1`
+
+const negation_wrap_one = -%1;
+//    ^^^^^^^^^^^^^^^^^ (comptime_int)((unknown value)) TODO this should be `-1`
+
+const bit_not_one = ~1;
+//    ^^^^^^^^^^^ (comptime_int)((unknown value))
+
 const const_u8: u8 = 42;
 //    ^^^^^^^^ (u8)((unknown value)) TODO this should be `42`
 
