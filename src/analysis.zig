@@ -2677,7 +2677,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         .bit_not,
         .negation,
         .negation_wrap,
-        => return try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)),
+        => {
+            const ty = try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)) orelse return null;
+            if (ty.is_type_val) return null;
+            return ty.withoutIPIndex(analyser);
+        },
 
         .multiline_string_literal => {
             const start, const end = tree.nodeData(node).token_and_token;
