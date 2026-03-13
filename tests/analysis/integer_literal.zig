@@ -38,7 +38,7 @@ var var_u8: u8 = 42;
 //  ^^^^^^ (u8)((unknown value))
 
 const as_u8 = @as(u8, 42);
-//    ^^^^^ (u8)((unknown value)) TODO this should be `42`
+//    ^^^^^ (u8)(42)
 
 const as_u8_too_big = @as(u8, 256);
 //    ^^^^^^^^^^^^^ (u8)((unknown value))
