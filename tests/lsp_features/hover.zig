@@ -1097,7 +1097,7 @@ test "alias with different type" {
         \\const bar<cursor>: ?i32 = foo;
     ,
         \\const foo: i32 = 1
-        \\(?i32)
+        \\(?i32 = 1)
     , .{ .markup_kind = .plaintext });
 }
 
