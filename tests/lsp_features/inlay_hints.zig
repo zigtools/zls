@@ -551,7 +551,7 @@ test "truncate anonymous error sets" {
 
 test "truncate merged error sets" {
     try testInlayHints(
-        \\const A<error{Foo,Bar}> =  @as(error{ Foo } || error{ Bar }, undefined);
+        \\const A<error{Bar,Foo}> =  @as(error{ Foo } || error{ Bar }, undefined);
     , .{ .kind = .Type });
 }
 

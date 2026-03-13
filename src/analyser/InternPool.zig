@@ -3534,6 +3534,8 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
     for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
     for (b_names) |name| set.putAssumeCapacity(name, {});
 
+    ip.string_pool.sortStrings(ip.io, set.keys());
+
     return try ip.get(.{
         .error_set_type = .{
             .owner_decl = .none,
@@ -5248,18 +5250,12 @@ test "resolvePeerTypes error sets" {
         .names = try ip.getStringSlice(&.{bar_name}),
     } });
 
-    const @"error{foo,bar}" = try ip.get(.{ .error_set_type = .{
-        .owner_decl = .none,
-        .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
-    } });
-
     const @"error{bar,foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ bar_name, foo_name }),
     } });
 
-    try ip.testResolvePeerTypesInOrder(@"error{foo}", @"error{bar}", @"error{foo,bar}");
-    try ip.testResolvePeerTypesInOrder(@"error{bar}", @"error{foo}", @"error{bar,foo}");
+    try ip.testResolvePeerTypes(@"error{foo}", @"error{bar}", @"error{bar,foo}");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {

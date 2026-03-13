@@ -12,7 +12,7 @@ const InvalidErrorUnionTypeUnwrap = ErrorUnionType catch |err| err;
 //                                                        ^^^ (unknown)()
 
 const DuplicateErrorName = error{ Foo, Foo } || error{Bar};
-//    ^^^^^^^^^^^^^^^^^^ (type)(error{Foo,Bar})
+//    ^^^^^^^^^^^^^^^^^^ (type)(error{Bar,Foo})
 
 const ErrorUnionUnknownError = Unknown!u32;
 //    ^^^^^^^^^^^^^^^^^^^^^^ (type)((unknown type)!u32)

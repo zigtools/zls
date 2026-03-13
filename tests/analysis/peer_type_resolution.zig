@@ -52,7 +52,7 @@ pub fn main() !void {
 
     const error_set_2 = if (runtime_bool) error.B else error.A;
     _ = error_set_2 catch {};
-    //  ^^^^^^^^^^^ (error{B,A})()
+    //  ^^^^^^^^^^^ (error{A,B})()
 
     const error_set_3 = if (runtime_bool) error.A else error.B;
     _ = error_set_3 catch {};
@@ -60,7 +60,7 @@ pub fn main() !void {
 
     const error_set_4 = if (runtime_bool) @as(error{ B, C }, error.B) else @as(error{ A, B }, error.A);
     _ = error_set_4 catch {};
-    //  ^^^^^^^^^^^ (error{B,C,A})()
+    //  ^^^^^^^^^^^ (error{A,B,C})()
 
     const error_set_5 = if (runtime_bool) @as(error{ A, B }, error.A) else @as(error{ B, C }, error.B);
     _ = error_set_5 catch {};
@@ -92,7 +92,7 @@ pub fn main() !void {
 
     const error_union_6 = if (runtime_bool) @as(error{B}!S, s) else @as(error{A}!S, s);
     _ = error_union_6 catch {};
-    //  ^^^^^^^^^^^^^ (error{B,A}!S)()
+    //  ^^^^^^^^^^^^^ (error{A,B}!S)()
 
     const error_union_7 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!S, s);
     _ = error_union_7 catch {};
@@ -108,7 +108,7 @@ pub fn main() !void {
 
     const error_union_10 = if (runtime_bool) @as(error{B}!?S, s) else @as(error{A}!S, s);
     _ = error_union_10 catch {};
-    //  ^^^^^^^^^^^^^^ (error{B,A}!?S)()
+    //  ^^^^^^^^^^^^^^ (error{A,B}!?S)()
 
     const error_union_11 = if (runtime_bool) @as(error{A}!S, s) else @as(error{B}!?S, s);
     _ = error_union_11 catch {};
@@ -116,7 +116,7 @@ pub fn main() !void {
 
     const error_union_12 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!?S, s);
     _ = try try error_union_12;
-    //          ^^^^^^^^^^^^^^ (error{B,A}!error{A}!?S)()
+    //          ^^^^^^^^^^^^^^ (error{A,B}!error{A}!?S)()
 
     const error_union_13 = if (runtime_bool) @as(error{A}!?S, s) else @as(error{B}!error{A}!S, s);
     _ = try try error_union_13;
@@ -124,11 +124,11 @@ pub fn main() !void {
 
     const error_union_14 = if (runtime_bool) @as(error{B}!error{A}!S, s) else @as(error{A}!error{B}!?S, s);
     _ = try try error_union_14;
-    //          ^^^^^^^^^^^^^^ (error{B,A}!error{A,B}!?S)()
+    //          ^^^^^^^^^^^^^^ (error{A,B}!error{A,B}!?S)()
 
     const error_union_15 = if (runtime_bool) @as(error{A}!error{B}!?S, s) else @as(error{B}!error{A}!S, s);
     _ = try try error_union_15;
-    //          ^^^^^^^^^^^^^^ (error{A,B}!error{B,A}!?S)()
+    //          ^^^^^^^^^^^^^^ (error{A,B}!error{A,B}!?S)()
 
     const error_union_16 = if (runtime_bool) error.A else s;
     _ = error_union_16;
