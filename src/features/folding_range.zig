@@ -199,6 +199,22 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
             };
 
             if (is_import) {
+                // Check if there is a blank line between the previous import and this one.
+                // If so, treat them as separate folding groups.
+                if (end_import) |prev| {
+                    const prev_end = offsets.tokenToLoc(tree, ast.lastToken(tree, prev)).end;
+                    const curr_start = tree.tokenStart(tree.firstToken(node));
+                    if (prev_end < curr_start) {
+                        const between = tree.source[prev_end..curr_start];
+                        if (std.mem.indexOf(u8, between, "\n\n") != null) {
+                            // Blank line found: emit the current group and start a new one
+                            if (start_import) |s| {
+                                try builder.add(.imports, tree.firstToken(s), ast.lastToken(tree, prev), .inclusive, .inclusive);
+                            }
+                            start_import = node;
+                        }
+                    }
+                }
                 if (start_import == null) {
                     start_import = node;
                 }

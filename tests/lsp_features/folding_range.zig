@@ -484,6 +484,45 @@ test "imports" {
             .collapsedText = "@import(...)",
         },
     });
+    // Imports separated by blank line should create separate folding ranges (issue #2622)
+    try testFoldingRange(
+        \\const Threaded = @import("Threaded.zig");
+        \\const posix = @import("posix.zig");
+        \\
+        \\const fiber = @import("fiber");
+        \\const pike = @import("pike");
+    , &.{
+        .{
+            .startLine = 0,
+            .startCharacter = 0,
+            .endLine = 1,
+            .endCharacter = 34,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
+        .{
+            .startLine = 3,
+            .startCharacter = 0,
+            .endLine = 4,
+            .endCharacter = 27,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
+    });
+    // Imports without blank line should still fold together
+    try testFoldingRange(
+        \\const Threaded = @import("Threaded.zig");
+        \\const fiber = @import("fiber");
+    , &.{
+        .{
+            .startLine = 0,
+            .startCharacter = 0,
+            .endLine = 1,
+            .endCharacter = 30,
+            .kind = .imports,
+            .collapsedText = "@import(...)",
+        },
+    });
 }
 
 fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !void {
