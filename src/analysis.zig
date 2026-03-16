@@ -4286,6 +4286,7 @@ pub const Type = struct {
     }
 
     pub fn resolveDeclLiteralResultType(ty: Type) Type {
+        std.debug.assert(ty.is_type_val);
         var result_type = ty;
         while (true) {
             result_type = switch (result_type.data) {
@@ -6317,9 +6318,9 @@ pub fn lookupSymbolFieldInit(
         else => false,
     };
 
-    container_type = try container_type
-        .resolveDeclLiteralResultType()
-        .instanceTypeVal(analyser) orelse container_type;
+    container_type = try container_type.typeOf(analyser);
+    container_type = container_type.resolveDeclLiteralResultType();
+    container_type = try container_type.instanceUnchecked(analyser);
 
     if (is_struct_init) {
         return try container_type.lookupSymbol(analyser, field_name);
@@ -6336,8 +6337,10 @@ pub fn lookupSymbolFieldInit(
     const decl = try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+    resolved_type = try resolved_type.typeOf(analyser);
     resolved_type = resolved_type.resolveDeclLiteralResultType();
-    if (resolved_type.eql(container_type) or resolved_type.eql(try container_type.typeOf(analyser))) return decl;
+    resolved_type = try resolved_type.instanceUnchecked(analyser);
+    if (resolved_type.eql(container_type)) return decl;
     return null;
 }
 
