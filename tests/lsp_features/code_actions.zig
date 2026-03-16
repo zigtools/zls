@@ -762,6 +762,30 @@ test "organize imports - edge cases" {
     );
 }
 
+test "organize imports - already organized" {
+    // Single import (issue #2523)
+    try testOrganizeImportsNoop(
+        \\const a = @import("a");
+        \\
+    );
+    // Multiple imports, already sorted
+    try testOrganizeImportsNoop(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+        \\
+        \\const abc = @import("abc.zig");
+        \\const xyz = @import("xyz.zig");
+        \\
+    );
+    // Single import with code after it
+    try testOrganizeImportsNoop(
+        \\const std = @import("std");
+        \\
+        \\pub fn main() void {}
+        \\
+    );
+}
+
 test "convert multiline string literal" {
     try testConvertString(
         \\const foo = \\Hell<cursor>o
@@ -958,6 +982,35 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
 
 fn testOrganizeImports(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.organizeImports" });
+}
+
+fn testOrganizeImportsNoop(source: []const u8) !void {
+    var ctx: Context = try .init();
+    defer ctx.deinit();
+
+    const uri = try ctx.addDocument(.{ .source = source });
+
+    const params: types.CodeAction.Params = .{
+        .textDocument = .{ .uri = uri.raw },
+        .range = .{
+            .start = .{ .line = 0, .character = 0 },
+            .end = offsets.indexToPosition(source, source.len, ctx.server.offset_encoding),
+        },
+        .context = .{
+            .diagnostics = &.{},
+            .only = &.{.@"source.organizeImports"},
+        },
+    };
+
+    @setEvalBranchQuota(5000);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return;
+
+    for (response) |action| {
+        const code_action: types.CodeAction = action.code_action;
+        if (code_action.kind != null and code_action.kind.? == .@"source.organizeImports") {
+            return error.TestUnexpectedResult;
+        }
+    }
 }
 
 fn testConvertString(before: []const u8, after: []const u8) !void {

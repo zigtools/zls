@@ -623,13 +623,60 @@ fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
 
     if (imports.len == 0) return;
 
-    // The optimization is disabled because it does not detect the case where imports and other decls are mixed
-    // if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
-
     const placement = analyzeImportPlacement(tree, imports);
 
     const sorted_imports = try builder.arena.dupe(ImportDecl, imports);
     std.mem.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+
+    // Check if imports are already organized (correct order, contiguous, correct separators).
+    // A simple isSorted check is insufficient because it misses mixed imports and incorrect separators.
+    {
+        const already_organized = organized: {
+            // Check sort order matches original
+            for (sorted_imports, imports) |sorted, original| {
+                if (sorted.var_decl != original.var_decl) break :organized false;
+            }
+
+            // Check imports are contiguous in root_decls (no non-import decls between them)
+            const root_decls = tree.rootDecls();
+            var import_range_start: ?usize = null;
+            var import_range_end: usize = 0;
+            for (root_decls, 0..) |decl, i| {
+                for (imports) |imp| {
+                    if (decl == imp.var_decl) {
+                        if (import_range_start == null) import_range_start = i;
+                        import_range_end = i;
+                        break;
+                    }
+                }
+            }
+            const start = import_range_start orelse break :organized true;
+            if (import_range_end - start + 1 != imports.len) break :organized false;
+
+            // Check imports are at the expected position
+            if (placement == .top) {
+                if (start != 0) break :organized false;
+            } else {
+                if (import_range_end != root_decls.len - 1) break :organized false;
+            }
+
+            // Check separators between import groups are correct
+            for (1..sorted_imports.len) |i| {
+                const needs_sep = ImportDecl.addSeperator(sorted_imports[i - 1], sorted_imports[i]);
+                const prev_end = imports[i - 1].getSourceEndIndex(tree, false);
+                const curr_start = imports[i].getSourceStartIndex(tree);
+                if (prev_end < curr_start) {
+                    const between = tree.source[prev_end..curr_start];
+                    const has_blank_line = std.mem.indexOf(u8, between, "\n\n") != null;
+                    if (needs_sep != has_blank_line) break :organized false;
+                }
+            }
+
+            break :organized true;
+        };
+
+        if (already_organized) return;
+    }
 
     var edits: std.ArrayList(types.TextEdit) = .empty;
 
