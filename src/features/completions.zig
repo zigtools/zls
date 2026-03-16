@@ -828,6 +828,9 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
     for (containers) |container| {
         try collectContainerFields(builder, dot_context.likely, container, used_members_set);
+        // Also offer error set values when the expected type is an error set.
+        // This handles `switch(err) { .<cursor> }` where err is an error type.
+        try collectErrorSetNames(builder, container, used_members_set);
     }
 }
 

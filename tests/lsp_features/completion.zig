@@ -2063,6 +2063,19 @@ test "switch on error set - Works in a function of a container" {
     });
 }
 
+test "switch on error set - enum literal dot completion" {
+    // Issue #2624: typing `. ` in switch on error should suggest error values
+    try testCompletion(
+        \\const err: error{E1, E2} = undefined;
+        \\switch(err) {
+        \\    .<cursor>
+        \\}
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
 test "error set" {
     try testCompletion(
         \\const E = error {
