@@ -1464,6 +1464,157 @@ fn resolveIntegerLiteral(analyser: *Analyser, comptime T: type, options: Resolve
     return analyser.ip.toInt(ip_index, T);
 }
 
+const IntInfo = union(enum) {
+    comptime_int,
+    fixed_int: std.builtin.Type.Int,
+};
+
+fn intInfo(analyser: *Analyser, ty: InternPool.Index) ?IntInfo {
+    const type_tag = analyser.ip.zigTypeTag(ty) orelse return null;
+    return switch (type_tag) {
+        .comptime_int => .comptime_int,
+        .int => .{ .fixed_int = analyser.ip.intInfo(ty, builtin.target) },
+        else => null,
+    };
+}
+
+fn resolveUnaryIntegerExpression(
+    analyser: *Analyser,
+    tag: std.zig.Ast.Node.Tag,
+    instance: Type,
+) !?Type {
+    const index = instance.ipIndex() orelse return null;
+    const ty = analyser.ip.typeOf(index);
+    const int_info = analyser.intInfo(ty) orelse return null;
+    var result = try analyser.ip.toBigInt(analyser.gpa, index) orelse return null;
+    defer result.deinit();
+    switch (tag) {
+        .bit_not => switch (int_info) {
+            .comptime_int => return null,
+            .fixed_int => |info| _ = try result.bitNotWrap(&result, info.signedness, info.bits),
+        },
+        .negation => result.negate(),
+        .negation_wrap => switch (int_info) {
+            .comptime_int => result.negate(),
+            // std.math.big.int does not have a negateWrap method
+            .fixed_int => |info| switch (info.signedness) {
+                .signed => {
+                    result.negate();
+                    if (!result.fitsInTwosComp(.signed, info.bits))
+                        result.negate();
+                },
+                .unsigned => if (!result.eqlZero()) {
+                    var temp: std.math.big.int.Managed = try .initSet(analyser.gpa, 1);
+                    defer temp.deinit();
+                    try temp.shiftLeft(&temp, info.bits);
+                    try result.sub(&temp, &result);
+                },
+            },
+        },
+        else => unreachable,
+    }
+    return try analyser.resolveIntegerExpressionResult(ty, result.toConst());
+}
+
+fn resolveBinaryIntegerExpression(
+    analyser: *Analyser,
+    tag: std.zig.Ast.Node.Tag,
+    instance: Type,
+    lhs_instance: Type,
+    rhs_instance: Type,
+) !?Type {
+    const lhs_index = lhs_instance.ipIndex() orelse return null;
+    const rhs_index = rhs_instance.ipIndex() orelse return null;
+    const type_of = try instance.typeOf(analyser);
+    const ty = type_of.ipIndex() orelse return null;
+    const int_info = analyser.intInfo(ty) orelse return null;
+    var lhs = try analyser.ip.toBigInt(analyser.gpa, lhs_index) orelse return null;
+    defer lhs.deinit();
+    var rhs = try analyser.ip.toBigInt(analyser.gpa, rhs_index) orelse return null;
+    defer rhs.deinit();
+    var result: std.math.big.int.Managed = try .init(analyser.gpa);
+    defer result.deinit();
+    switch (tag) {
+        .mul => try result.mul(&lhs, &rhs),
+        .div => {
+            var temp: std.math.big.int.Managed = try .init(analyser.gpa);
+            defer temp.deinit();
+            try result.divTrunc(&temp, &lhs, &rhs);
+        },
+        .mod => {
+            var temp: std.math.big.int.Managed = try .init(analyser.gpa);
+            defer temp.deinit();
+            try temp.divTrunc(&result, &lhs, &rhs);
+        },
+        .add => try result.add(&lhs, &rhs),
+        .sub => try result.sub(&lhs, &rhs),
+        .shl => try result.shiftLeft(&lhs, rhs.toInt(usize) catch return null),
+        .shr => try result.shiftRight(&lhs, rhs.toInt(usize) catch return null),
+        .bit_and => try result.bitAnd(&lhs, &rhs),
+        .bit_xor => try result.bitXor(&lhs, &rhs),
+        .bit_or => try result.bitOr(&lhs, &rhs),
+        .add_wrap,
+        .sub_wrap,
+        .mul_wrap,
+        .add_sat,
+        .sub_sat,
+        .mul_sat,
+        .shl_sat,
+        => switch (int_info) {
+            .comptime_int => switch (tag) {
+                .add_wrap, .add_sat => try result.add(&lhs, &rhs),
+                .sub_wrap, .sub_sat => try result.sub(&lhs, &rhs),
+                .mul_wrap, .mul_sat => try result.mul(&lhs, &rhs),
+                .shl_sat => try result.shiftLeft(&lhs, rhs.toInt(usize) catch return null),
+                else => unreachable,
+            },
+            .fixed_int => |info| switch (tag) {
+                .add_wrap => _ = try result.addWrap(&lhs, &rhs, info.signedness, info.bits),
+                .sub_wrap => _ = try result.subWrap(&lhs, &rhs, info.signedness, info.bits),
+                .mul_wrap => _ = try result.mulWrap(&lhs, &rhs, info.signedness, info.bits),
+                .add_sat => try result.addSat(&lhs, &rhs, info.signedness, info.bits),
+                .sub_sat => try result.subSat(&lhs, &rhs, info.signedness, info.bits),
+                // std.math.big.int does not have a mulSat method
+                .mul_sat => {
+                    try result.mul(&lhs, &rhs);
+                    try result.saturate(&result, info.signedness, info.bits);
+                },
+                .shl_sat => try result.shiftLeftSat(&lhs, rhs.toInt(usize) catch return null, info.signedness, info.bits),
+                else => unreachable,
+            },
+        },
+        else => unreachable,
+    }
+    return try analyser.resolveIntegerExpressionResult(ty, result.toConst());
+}
+
+fn resolveIntegerExpressionResult(
+    analyser: *Analyser,
+    ty: InternPool.Index,
+    result: std.math.big.int.Const,
+) !?Type {
+    const int_info = analyser.intInfo(ty) orelse return null;
+    switch (int_info) {
+        .comptime_int => {},
+        .fixed_int => |info| {
+            if (!result.fitsInTwosComp(info.signedness, info.bits)) {
+                return null;
+            }
+        },
+    }
+    const index = index: {
+        if (result.positive) blk: {
+            const int = result.toInt(u64) catch break :blk;
+            break :index try analyser.ip.get(.{ .int_u64_value = .{ .ty = ty, .int = int } });
+        } else blk: {
+            const int = result.toInt(i64) catch break :blk;
+            break :index try analyser.ip.get(.{ .int_i64_value = .{ .ty = ty, .int = int } });
+        }
+        break :index try analyser.ip.getBigInt(ty, result);
+    };
+    return Type.fromIP(analyser, ty, index);
+}
+
 const primitives: std.StaticStringMap(InternPool.Index) = .initComptime(.{
     .{ "anyerror", .anyerror_type },
     .{ "anyframe", .anyframe_type },
@@ -1979,8 +2130,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = &handle.tree;
+    const node_tag = tree.nodeTag(node);
 
-    switch (tree.nodeTag(node)) {
+    switch (node_tag) {
         .global_var_decl,
         .local_var_decl,
         .simple_var_decl,
@@ -2740,7 +2892,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         => {
             const ty = try analyser.resolveTypeOfNodeInternal(.of(tree.nodeData(node).node, handle)) orelse return null;
             if (ty.is_type_val) return null;
-            return ty.withoutIPIndex(analyser);
+            return try analyser.resolveUnaryIntegerExpression(node_tag, ty) orelse ty.withoutIPIndex(analyser);
         },
 
         .multiline_string_literal => {
@@ -2885,63 +3037,69 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         .bit_or,
         => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            if (lhs_ty.is_type_val) return null;
-            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
-            if (rhs_ty.is_type_val) return null;
-            lhs_ty = lhs_ty.withoutIPIndex(analyser);
-            rhs_ty = rhs_ty.withoutIPIndex(analyser);
-            return analyser.resolvePeerTypes(lhs_ty, rhs_ty);
+            const lhs_instance = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_instance.is_type_val) return null;
+            const rhs_instance = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_instance.is_type_val) return null;
+            const lhs_no_value = lhs_instance.withoutIPIndex(analyser);
+            const rhs_no_value = rhs_instance.withoutIPIndex(analyser);
+            const instance = try analyser.resolvePeerTypes(lhs_no_value, rhs_no_value) orelse return null;
+            return try analyser.resolveBinaryIntegerExpression(node_tag, instance, lhs_instance, rhs_instance) orelse return instance;
         },
 
         .add => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            if (lhs_ty.is_type_val) return null;
-            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
-            if (rhs_ty.is_type_val) return null;
-            lhs_ty = lhs_ty.withoutIPIndex(analyser);
-            rhs_ty = rhs_ty.withoutIPIndex(analyser);
-            if (lhs_ty.pointerSize(analyser)) |lhs_size| {
+            const lhs_instance = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_instance.is_type_val) return null;
+            const rhs_instance = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_instance.is_type_val) return null;
+            const lhs_no_value = lhs_instance.withoutIPIndex(analyser);
+            const rhs_no_value = rhs_instance.withoutIPIndex(analyser);
+            if (lhs_no_value.pointerSize(analyser)) |lhs_size| {
                 return switch (lhs_size) {
-                    .many, .c => lhs_ty,
+                    .many, .c => lhs_no_value,
                     else => null,
                 };
             }
-            return try analyser.resolvePeerTypes(lhs_ty, rhs_ty);
+            const instance = try analyser.resolvePeerTypes(lhs_no_value, rhs_no_value) orelse return null;
+            return try analyser.resolveBinaryIntegerExpression(node_tag, instance, lhs_instance, rhs_instance) orelse return instance;
         },
 
         .sub => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            var lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            if (lhs_ty.is_type_val) return null;
-            var rhs_ty = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
-            if (rhs_ty.is_type_val) return null;
-            lhs_ty = lhs_ty.withoutIPIndex(analyser);
-            rhs_ty = rhs_ty.withoutIPIndex(analyser);
-            if (lhs_ty.pointerSize(analyser)) |lhs_size| {
-                if (rhs_ty.pointerSize(analyser)) |rhs_size| {
+            const lhs_instance = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_instance.is_type_val) return null;
+            const rhs_instance = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return null;
+            if (rhs_instance.is_type_val) return null;
+            const lhs_no_value = lhs_instance.withoutIPIndex(analyser);
+            const rhs_no_value = rhs_instance.withoutIPIndex(analyser);
+            if (lhs_no_value.pointerSize(analyser)) |lhs_size| {
+                if (rhs_no_value.pointerSize(analyser)) |rhs_size| {
                     if (lhs_size == .slice) return null;
                     if (rhs_size == .slice) return null;
                     return Type.fromIP(analyser, .usize_type, null);
                 } else {
                     return switch (lhs_size) {
-                        .many, .c => lhs_ty,
+                        .many, .c => lhs_no_value,
                         else => null,
                     };
                 }
             }
-            return try analyser.resolvePeerTypes(lhs_ty, rhs_ty);
+            const instance = try analyser.resolvePeerTypes(lhs_no_value, rhs_no_value) orelse return null;
+            return try analyser.resolveBinaryIntegerExpression(node_tag, instance, lhs_instance, rhs_instance) orelse return instance;
         },
 
         .shl,
         .shl_sat,
         .shr,
         => {
-            const lhs, _ = tree.nodeData(node).node_and_node;
-            const lhs_ty = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
-            if (lhs_ty.is_type_val) return null;
-            return lhs_ty.withoutIPIndex(analyser);
+            const lhs, const rhs = tree.nodeData(node).node_and_node;
+            const lhs_instance = try analyser.resolveTypeOfNodeInternal(.of(lhs, handle)) orelse return null;
+            if (lhs_instance.is_type_val) return null;
+            const lhs_no_value = lhs_instance.withoutIPIndex(analyser);
+            const rhs_instance = try analyser.resolveTypeOfNodeInternal(.of(rhs, handle)) orelse return lhs_no_value;
+            if (rhs_instance.is_type_val) return lhs_no_value;
+            return try analyser.resolveBinaryIntegerExpression(node_tag, lhs_no_value, lhs_instance, rhs_instance) orelse return lhs_no_value;
         },
 
         .array_mult => {
