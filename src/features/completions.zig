@@ -1614,6 +1614,7 @@ fn collectContainerFields(
                 // decl literal
                 const resolved_ty = maybe_resolved_ty orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                expected_ty = try expected_ty.typeOf(builder.analyser);
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
