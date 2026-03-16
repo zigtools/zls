@@ -1797,8 +1797,6 @@ pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Inde
     if (self.config.zig_lib_dir == null) return null;
     if (self.config.global_cache_dir == null) return null;
 
-    // TODO regenerate cimports if the header files gets modified
-
     const index = std.mem.findScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
     const hash: CImportHash = handle.cimports.items(.hash)[index];
     const source = handle.cimports.items(.source)[index];

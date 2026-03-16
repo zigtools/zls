@@ -2186,7 +2186,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 };
             }
 
-            // TODO: use map? idk
             return try analyser.innermostContainer(handle, tree.tokenStart(tree.firstToken(node)));
         },
         .builtin_call,
@@ -3126,7 +3125,7 @@ pub const Type = struct {
         /// `anytype` in `fn foo(bar: anytype) @TypeOf(bar)`
         anytype_parameter: struct {
             token_handle: TokenWithHandle,
-            type_from_callsite_references: ?*Type, // TODO: come up with a shorter name...
+            type_from_callsite_references: ?*Type,
         },
 
         /// Branching types
@@ -6501,7 +6500,7 @@ pub fn resolveExpressionTypeFromAncestors(
             }
         },
 
-        else => {}, // TODO: Implement more expressions; better safe than sorry
+        else => {},
     }
 
     return null;

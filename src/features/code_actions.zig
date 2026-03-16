@@ -62,11 +62,6 @@ pub const Builder = struct {
                 },
                 // the undeclared identifier may be a discard
                 .undeclared_identifier => try handlePointlessDiscard(builder, loc),
-                .unreachable_code => {
-                    // TODO
-                    // autofix: comment out code
-                    // fix: remove code
-                },
                 .var_never_mutated => try handleVariableNeverMutated(builder, loc),
             }
         }
@@ -381,7 +376,6 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
     }
 
     if (builder.wantKind(.quickfix)) {
-        // TODO add no `// autofix` comment
         // TODO fix formatting
         try builder.actions.append(builder.arena, .{
             .title = "remove function parameter",
@@ -868,7 +862,6 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                         // `>@import("string")<` case
                         const builtin_name = offsets.tokenToSlice(tree, token);
                         if (!std.mem.eql(u8, builtin_name, "@import")) continue :next_decl;
-                        // TODO what about @embedFile ?
 
                         const first_param, const second_param = tree.nodeData(current_node).opt_node_and_opt_node;
                         const param_node = first_param.unwrap() orelse continue :next_decl;
@@ -1095,7 +1088,6 @@ const DiagnosticKind = union(enum) {
     omit_discard: DiscardCat,
     non_camelcase_fn,
     undeclared_identifier,
-    unreachable_code,
     var_never_mutated,
 
     const IdCat = enum {

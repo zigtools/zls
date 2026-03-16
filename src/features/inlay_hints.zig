@@ -353,7 +353,6 @@ fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hin
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(&builder.handle.tree, type_token_index).end,
         .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{hint}),
-        // TODO: Implement on-hover stuff.
         .tooltip = null,
         .kind = .Type,
     });

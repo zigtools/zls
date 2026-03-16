@@ -1167,7 +1167,6 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void
 
 /// If `loc` is `null`, semantic tokens will be computed for the entire source range
 /// Otherwise only tokens in the give source range will be returned
-/// TODO edit version.
 pub fn writeSemanticTokens(
     arena: std.mem.Allocator,
     analyser: *Analyser,

@@ -1323,7 +1323,6 @@ fn processPkgConfig(
     }
 }
 
-// TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
     /// Run pkg-config for the given library name and parse the output, returning the arguments
     /// that should be passed to zig to link the given library.

@@ -767,9 +767,8 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 });
             }
 
-            // TODO can we avoid having to move map from `changes` to `new_changes`?
             var new_changes: lsp.parser.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.map.ensureTotalCapacity(arena, @intCast(changes.count()));
+            try new_changes.map.ensureTotalCapacity(arena, changes.count());
 
             var changes_it = changes.iterator();
             while (changes_it.next()) |entry| {

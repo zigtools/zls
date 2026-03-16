@@ -31,7 +31,6 @@ pub const enable = if (builtin.is_test) false else options.enable;
 pub const enable_allocation = enable and options.enable_allocation;
 pub const enable_callstack = enable and options.enable_callstack;
 
-// TODO: make this configurable
 const callstack_depth = 10;
 
 const ___tracy_c_zone_context = extern struct {

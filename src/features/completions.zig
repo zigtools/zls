@@ -220,8 +220,6 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
     if (is_cimport) {
         if (std.mem.startsWith(u8, name, "_")) return;
-        // TODO figuring out which declarations should be excluded could be made more complete and accurate
-        // by translating an empty file to acquire all exclusions
         const exclusions: std.StaticStringMap(void) = .initComptime(.{
             .{ "linux", {} },
             .{ "unix", {} },
@@ -1142,7 +1140,7 @@ pub fn completionAtIndex(
 // <--------------------------------------------------------------------------->
 
 const EnumLiteralContext = struct {
-    const Likely = enum { // TODO: better name, tagged union?
+    const Likely = enum {
         /// `mye: Enum = .`, `abc.field = .`, `f(.{.field = .`
         enum_literal,
         /// Same as above, but`f() = .` or `identifier.f() = .` are ignored, ie lhs of `=` is a fn call
