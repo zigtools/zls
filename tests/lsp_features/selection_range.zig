@@ -13,12 +13,26 @@ test "empty" {
     try testSelectionRange("<>", &.{});
 }
 
-test "smoke" {
+test "between nodes" {
+    try testSelectionRange(
+        \\const foo = 6;
+        \\
+        \\<>
+        \\
+        \\const bar = 7;
+    , &.{});
+}
+
+test "expression inside function" {
     try testSelectionRange(
         \\fn main() void {
         \\    const x = 1 <>+ 1;
         \\}
-    , &.{ "1 + 1", "const x = 1 + 1", "{\n    const x = 1 + 1;\n}" });
+    , &.{
+        "1 + 1",
+        "const x = 1 + 1",
+        "{\n    const x = 1 + 1;\n}",
+    });
 }
 
 test "function parameter" {
@@ -26,10 +40,14 @@ test "function parameter" {
         \\fn f(x: i32, y: <>struct {}, z: f32) void {
         \\
         \\}
-    , &.{ "struct {}", "y: struct {}", "fn f(x: i32, y: struct {}, z: f32) void" });
+    , &.{
+        "struct {}",
+        "y: struct {}",
+        "fn f(x: i32, y: struct {}, z: f32) void",
+    });
 }
 
-fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
+fn testSelectionRange(source: []const u8, expected: []const []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
@@ -51,19 +69,16 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var got: std.ArrayList([]const u8) = .empty;
-    defer got.deinit(allocator);
+    var actual: std.ArrayList([]const u8) = .empty;
+    defer actual.deinit(allocator);
 
     var it: ?*const types.SelectionRange = &selectionRanges[0];
     while (it) |r| {
-        const slice = offsets.rangeToSlice(phr.new_source, r.range, .@"utf-16");
-        try got.append(allocator, slice);
+        const slice = offsets.rangeToSlice(phr.new_source, r.range, ctx.server.offset_encoding);
+        try actual.append(allocator, slice);
         it = r.parent;
     }
-    const last = got.pop().?;
+    const last = actual.pop().?;
+    try zls.testing.expectEqual(expected, actual.items);
     try std.testing.expectEqualStrings(phr.new_source, last);
-    try std.testing.expectEqual(want.len, got.items.len);
-    for (want, got.items) |expected, actual| {
-        try std.testing.expectEqualStrings(expected, actual);
-    }
 }

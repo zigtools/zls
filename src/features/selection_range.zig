@@ -14,67 +14,93 @@ pub fn generateSelectionRanges(
     positions: []const types.Position,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?[]types.SelectionRange {
-    // For each of the input positions, we need to compute the stack of AST
-    // nodes/ranges which contain the position. At the moment, we do this in a
-    // super inefficient way, by iterating _all_ nodes, selecting the ones that
-    // contain position, and then sorting.
-    //
-    // A faster algorithm would be to walk the tree starting from the root,
-    // descending into the child containing the position at every step.
+    const tree = &handle.tree;
+    var mappings: std.ArrayList(offsets.multiple.IndexToPositionMapping) = .empty;
     const result = try arena.alloc(types.SelectionRange, positions.len);
-    var locs: std.ArrayList(offsets.Loc) = try .initCapacity(arena, 32);
-    for (positions, result) |position, *out| {
-        const index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
+    for (positions, result) |position, *root_selection_range| {
+        const source_index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
 
-        locs.clearRetainingCapacity();
-        for (0..handle.tree.nodes.len, handle.tree.nodes.items(.tag)) |i, tag| {
-            const node: Ast.Node.Index = @enumFromInt(i);
-            const loc = offsets.nodeToLoc(&handle.tree, node);
+        var stack: std.ArrayList(struct { Ast.Node.Index, offsets.Loc }) = .empty;
+        var walker: ast.Walker = try .init(arena, tree, .root);
+        defer walker.deinit(arena);
+        while (try walker.next(arena, tree)) |event| {
+            switch (event) {
+                .open => |node| {
+                    const loc = offsets.nodeToLoc(tree, node);
+                    if (loc.start <= source_index and source_index <= loc.end) {
+                        try stack.append(arena, .{ node, loc });
+                    } else {
+                        walker.skip();
+                    }
+                },
+                .close => break,
+            }
+        }
 
-            if (!(loc.start <= index and index <= loc.end)) continue;
+        var builder: Builder = .init(root_selection_range, &mappings);
+        if (stack.items.len == 0) {
+            try builder.add(arena, offsets.nodeToLoc(tree, .root));
+            continue;
+        }
+        while (stack.pop()) |item| {
+            const node = item[0];
+            const loc = item[1];
 
-            try locs.append(arena, loc);
-            switch (tag) {
+            switch (tree.nodeTag(node)) {
                 // Function parameters are not stored in the AST explicitly, iterate over them
                 // manually.
                 .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
                     var buffer: [1]Ast.Node.Index = undefined;
                     const fn_proto = handle.tree.fullFnProto(&buffer, node).?;
-                    var it: ast.FnParamIterator = .init(&fn_proto, &handle.tree);
-                    while (it.next()) |param| {
-                        const param_loc = ast.paramLoc(&handle.tree, param, true);
-                        if (param_loc.start <= index and index <= param_loc.end) {
-                            try locs.append(arena, param_loc);
-                        }
+                    var param_it: ast.FnParamIterator = .init(&fn_proto, &handle.tree);
+                    while (param_it.next()) |param| {
+                        const param_loc = ast.paramLoc(tree, param, true);
+                        if (!(param_loc.start <= source_index and source_index <= param_loc.end)) continue;
+                        try builder.add(arena, param_loc);
+                        break;
                     }
                 },
                 else => {},
             }
-        }
 
-        std.mem.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
-        {
-            var i: usize = 0;
-            while (i + 1 < locs.items.len) {
-                if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
-                    _ = locs.orderedRemove(i);
-                } else {
-                    i += 1;
-                }
-            }
+            try builder.add(arena, loc);
         }
-
-        var selection_ranges = try arena.alloc(types.SelectionRange, locs.items.len);
-        for (selection_ranges, 0..) |*range, i| {
-            range.range = offsets.locToRange(handle.tree.source, locs.items[i], offset_encoding);
-            range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
-        }
-        out.* = selection_ranges[0];
     }
-
+    offsets.multiple.indexToPositionWithMappings(tree.source, mappings.items, offset_encoding);
     return result;
 }
 
-fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
-    return (lhs.end - lhs.start) < (rhs.end - rhs.start);
-}
+const Builder = struct {
+    node: *types.SelectionRange,
+    is_node_uninitalized: bool,
+    mappings: *std.ArrayList(offsets.multiple.IndexToPositionMapping),
+
+    // `add` must be called at least once afterwards to initalize `root_selection_range`.
+    fn init(
+        root_selection_range: *types.SelectionRange,
+        mappings: *std.ArrayList(offsets.multiple.IndexToPositionMapping),
+    ) Builder {
+        root_selection_range.* = undefined;
+        return .{
+            .node = root_selection_range,
+            .is_node_uninitalized = true,
+            .mappings = mappings,
+        };
+    }
+
+    fn add(b: *Builder, arena: std.mem.Allocator, loc: offsets.Loc) error{OutOfMemory}!void {
+        const new = if (b.is_node_uninitalized) b.node else try arena.create(types.SelectionRange);
+        const current = if (b.is_node_uninitalized) null else b.node;
+        new.* = .{
+            .range = undefined, // set below
+            .parent = null,
+        };
+        if (current) |c| c.parent = new;
+        b.node = new;
+        b.is_node_uninitalized = false;
+        try b.mappings.appendSlice(arena, &.{
+            .{ .output = &new.range.start, .source_index = loc.start },
+            .{ .output = &new.range.end, .source_index = loc.end },
+        });
+    }
+};
