@@ -20,7 +20,7 @@ fn parseWithOs(
     text: []const u8,
     comptime is_windows: bool,
 ) (std.Uri.ParseError || error{OutOfMemory})!Uri {
-    var uri: std.Uri = try .parse(text);
+    const uri: std.Uri = try .parse(text);
 
     const capacity = capacity: {
         var capacity: usize = 0;

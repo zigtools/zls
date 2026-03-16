@@ -697,7 +697,7 @@ comptime {
 
 /// The same struct as `Config` but every field is optional.
 pub const UnresolvedConfig = blk: {
-    var struct_info: std.builtin.Type.Struct = @typeInfo(Config).@"struct";
+    const struct_info: std.builtin.Type.Struct = @typeInfo(Config).@"struct";
     var field_types: [struct_info.fields.len]type = undefined;
     var field_attrs: [struct_info.fields.len]std.builtin.Type.StructField.Attributes = undefined;
     for (&field_types, &field_attrs, struct_info.fields) |*ty, *attr, field| {
