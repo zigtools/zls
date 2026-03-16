@@ -206,7 +206,7 @@ fn collectWarnStyleDiagnostics(
                         const is_type_function = Analyser.isTypeFunction(tree, func);
 
                         const func_name = tree.tokenSlice(name_token);
-                        if (!is_type_function and !Analyser.isCamelCase(func_name)) {
+                        if (!is_type_function and !isCamelCase(func_name)) {
                             try diagnostics.append(arena, .{
                                 .range = offsets.tokenToRange(tree, name_token, offset_encoding),
                                 .severity = .Hint,
@@ -214,7 +214,7 @@ fn collectWarnStyleDiagnostics(
                                 .source = "zls",
                                 .message = "Functions should be camelCase",
                             });
-                        } else if (is_type_function and !Analyser.isPascalCase(func_name)) {
+                        } else if (is_type_function and !isPascalCase(func_name)) {
                             try diagnostics.append(arena, .{
                                 .range = offsets.tokenToRange(tree, name_token, offset_encoding),
                                 .severity = .Hint,
@@ -229,6 +229,18 @@ fn collectWarnStyleDiagnostics(
             }
         }
     }
+}
+
+fn isCamelCase(name: []const u8) bool {
+    return !std.ascii.isUpper(name[0]) and !isSnakeCase(name);
+}
+
+fn isPascalCase(name: []const u8) bool {
+    return std.ascii.isUpper(name[0]) and !isSnakeCase(name);
+}
+
+fn isSnakeCase(name: []const u8) bool {
+    return std.mem.find(u8, name, "_") != null;
 }
 
 fn collectGlobalVarDiagnostics(

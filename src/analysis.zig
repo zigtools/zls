@@ -655,20 +655,6 @@ pub fn isTypeFunction(tree: *const Ast, func: Ast.full.FnProto) bool {
     return isMetaType(tree, return_type);
 }
 
-// STYLE
-
-pub fn isCamelCase(name: []const u8) bool {
-    return !std.ascii.isUpper(name[0]) and !isSnakeCase(name);
-}
-
-pub fn isPascalCase(name: []const u8) bool {
-    return std.ascii.isUpper(name[0]) and !isSnakeCase(name);
-}
-
-pub fn isSnakeCase(name: []const u8) bool {
-    return std.mem.find(u8, name, "_") != null;
-}
-
 // ANALYSIS ENGINE
 
 /// Resolves variable declarations consisting of chains of imports and field accesses of containers
