@@ -190,7 +190,11 @@ pub fn main(init: std.process.Init) Error!void {
         const ty = blk: {
             const decl_maybe = switch (ctx) {
                 .global => try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start),
-                .enum_literal => try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier),
+                .enum_literal => decl: {
+                    const decl, const type_maybe = try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier) orelse break :decl null;
+                    if (type_maybe) |ty| break :blk ty;
+                    break :decl decl;
+                },
                 .struct_init => break :blk try analyser.resolveStructInitType(handle, identifier_loc.start),
             };
 

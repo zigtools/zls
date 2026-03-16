@@ -21,6 +21,12 @@ const TagA = std.meta.Tag(TaggedUnionA);
 const TagB = std.meta.Tag(TaggedUnionB);
 //    ^^^^ (type)(@typeInfo(TaggedUnionB).@"union".tag_type.?)
 
+const tag_a: TagA = .foo;
+//                  ^^^^ (EnumA)()
+
+const tag_b: TagB = .fizz;
+//                  ^^^^^ (@typeInfo(TaggedUnionB).@"union".tag_type.?)()
+
 const ArgsTupleA = std.meta.ArgsTuple(fn (u8, i32) void);
 //    ^^^^^^^^^^ (type)(struct { u8, i32 })
 
