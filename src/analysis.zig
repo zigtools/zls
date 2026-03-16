@@ -2876,8 +2876,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             defer analyser.arena.free(lineage);
 
             const tag = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(node));
-            const decl = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
-            return decl.resolveType(analyser);
+            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
+            return type_maybe orelse decl.resolveType(analyser);
         },
 
         .unreachable_literal => return Type.fromIP(analyser, .noreturn_type, null),
@@ -6384,7 +6384,7 @@ pub fn lookupSymbolFieldInit(
     field_name: []const u8,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) Error!?DeclWithHandle {
+) Error!?struct { DeclWithHandle, ?Type } {
     var container_type = (try analyser.resolveExpressionType(
         handle,
         node,
@@ -6411,13 +6411,22 @@ pub fn lookupSymbolFieldInit(
     container_type = try container_type.instanceUnchecked(analyser);
 
     if (is_struct_init) {
-        return try container_type.lookupSymbol(analyser, field_name);
+        const decl = try container_type.lookupSymbol(analyser, field_name) orelse return null;
+        return .{ decl, null };
+    }
+
+    switch (container_type.data) {
+        .union_tag => |t| {
+            const decl = try t.lookupSymbol(analyser, field_name) orelse return null;
+            return .{ decl, container_type };
+        },
+        else => {},
     }
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct, .keyword_opaque => {},
-        .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |ty| return ty,
-        .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |ty| return ty,
+        .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |decl| return .{ decl, null },
+        .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |decl| return .{ decl, null },
         else => return null,
     }
 
@@ -6428,7 +6437,7 @@ pub fn lookupSymbolFieldInit(
     resolved_type = try resolved_type.typeOf(analyser);
     resolved_type = resolved_type.resolveDeclLiteralResultType();
     resolved_type = try resolved_type.instanceUnchecked(analyser);
-    if (resolved_type.eql(container_type)) return decl;
+    if (resolved_type.eql(container_type)) return .{ decl, null };
     return null;
 }
 
@@ -6471,8 +6480,9 @@ pub fn resolveExpressionTypeFromAncestors(
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
-                    return try field_decl.resolveType(analyser);
+                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field| {
+                    const decl, const type_maybe = field;
+                    return type_maybe orelse try decl.resolveType(analyser);
                 }
             }
         },
@@ -6614,8 +6624,8 @@ pub fn resolveExpressionTypeFromAncestors(
 
             var fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
-                const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
-                const ty = try decl.resolveType(analyser) orelse return null;
+                const decl, const type_maybe = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
+                const ty = type_maybe orelse try decl.resolveType(analyser) orelse return null;
                 break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             } else blk: {
                 const ty = try analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return null;
@@ -6875,7 +6885,7 @@ pub fn getSymbolEnumLiteral(
     handle: *DocumentStore.Handle,
     source_index: usize,
     name: []const u8,
-) Error!?DeclWithHandle {
+) Error!?struct { DeclWithHandle, ?Type } {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
