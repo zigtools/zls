@@ -1480,6 +1480,19 @@ fn getReturnTypeNode(tree: *const Ast, nodes: []const Ast.Node.Index) ?Ast.Node.
     return null;
 }
 
+fn isTaggedUnionFieldWithOPV(
+    builder: *Builder,
+    container: Analyser.Type,
+    field_type: Analyser.Type,
+) bool {
+    if (!container.isTaggedUnion()) return false;
+    const ip_index = switch (field_type.data) {
+        .ip_index => |payload| payload.type,
+        else => return false,
+    };
+    return builder.analyser.ip.onePossibleValue(ip_index) != .none;
+}
+
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 fn collectContainerFields(
     builder: *Builder,
@@ -1518,13 +1531,9 @@ fn collectContainerFields(
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and kind == .Field) {
-                        if (container.isTaggedUnion() and
-                            maybe_resolved_ty != null and
-                            maybe_resolved_ty.?.data == .ip_index and
-                            maybe_resolved_ty.?.data.ip_index.type != .unknown_type and
-                            builder.analyser.ip.onePossibleValue(maybe_resolved_ty.?.data.ip_index.type) != .none)
-                        {
-                            break :insert_text .{ name, .PlainText };
+                        if (maybe_resolved_ty) |ty| {
+                            if (isTaggedUnionFieldWithOPV(builder, container, ty))
+                                break :insert_text .{ name, .PlainText };
                         }
 
                         if (!builder.use_snippets) {
