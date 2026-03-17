@@ -1500,8 +1500,13 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) Analyser.Error!void {
-    const info = switch (container.data) {
-        .container => |info| info,
+    const info, const type_maybe = switch (container.data) {
+        .container => |info| .{ info, null },
+        .union_tag => |union_ty| blk: {
+            const info = union_ty.data.container;
+            const ty = try container.instanceTypeVal(builder.analyser) orelse container;
+            break :blk .{ info, ty };
+        },
         else => return,
     };
 
@@ -1513,7 +1518,7 @@ fn collectContainerFields(
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
-        const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
+        const maybe_resolved_ty = type_maybe orelse try decl_handle.resolveType(builder.analyser);
         const tree = &scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
@@ -1526,8 +1531,10 @@ fn collectContainerFields(
             => {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
-                const kind: types.completion.Item.Kind =
-                    if (field.ast.tuple_like) .EnumMember else .Field;
+                const kind: types.completion.Item.Kind = switch (container.data) {
+                    .union_tag => .EnumMember,
+                    else => if (field.ast.tuple_like) .EnumMember else .Field,
+                };
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and kind == .Field) {
