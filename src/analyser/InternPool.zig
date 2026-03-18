@@ -2258,6 +2258,27 @@ pub fn resolvePeerTypes(ip: *InternPool, types: []const Index, target: std.Targe
                     chosen = try ip.errorSetMerge(chosen, candidate);
                     continue;
                 },
+                .error_union_type => |chosen_info| {
+                    if (chosen_info.error_set_type != .none) {
+                        chosen = try ip.get(.{ .error_union_type = .{
+                            .error_set_type = try ip.errorSetMerge(chosen_info.error_set_type, candidate),
+                            .payload_type = chosen_info.payload_type,
+                        } });
+                        continue;
+                    }
+                },
+                else => {},
+            },
+            .error_union_type => |candidate_info| switch (chosen_key) {
+                .error_set_type => {
+                    if (candidate_info.error_set_type != .none) {
+                        chosen = try ip.get(.{ .error_union_type = .{
+                            .error_set_type = try ip.errorSetMerge(chosen, candidate_info.error_set_type),
+                            .payload_type = candidate_info.payload_type,
+                        } });
+                        continue;
+                    }
+                },
                 else => {},
             },
             else => {},
@@ -3534,6 +3555,8 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
     for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
     for (b_names) |name| set.putAssumeCapacity(name, {});
 
+    ip.string_pool.sortStrings(ip.io, set.keys());
+
     return try ip.get(.{
         .error_set_type = .{
             .owner_decl = .none,
@@ -4057,7 +4080,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
         .union_type => return panicOrElse(?Index, "TODO", null),
         .tuple_type => |tuple_info| {
             assert(tuple_info.types.len == tuple_info.values.len);
-            try writer.writeAll("tuple{");
+            try writer.writeAll("struct { ");
 
             for (0..tuple_info.types.len) |i| {
                 const field_ty = tuple_info.types.at(@intCast(i), ip);
@@ -4073,7 +4096,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                     try ip.print(field_val, writer, options);
                 }
             }
-            try writer.writeByte('}');
+            try writer.writeAll(" }");
         },
         .vector_type => |vector_info| {
             try writer.print("@Vector({d},{f})", .{
@@ -5248,18 +5271,23 @@ test "resolvePeerTypes error sets" {
         .names = try ip.getStringSlice(&.{bar_name}),
     } });
 
-    const @"error{foo,bar}" = try ip.get(.{ .error_set_type = .{
-        .owner_decl = .none,
-        .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
-    } });
-
     const @"error{bar,foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ bar_name, foo_name }),
     } });
 
-    try ip.testResolvePeerTypesInOrder(@"error{foo}", @"error{bar}", @"error{foo,bar}");
-    try ip.testResolvePeerTypesInOrder(@"error{bar}", @"error{foo}", @"error{bar,foo}");
+    const @"error{bar}!i32" = try ip.get(.{ .error_union_type = .{
+        .error_set_type = @"error{bar}",
+        .payload_type = .i32_type,
+    } });
+
+    const @"error{bar,foo}!i32" = try ip.get(.{ .error_union_type = .{
+        .error_set_type = @"error{bar,foo}",
+        .payload_type = .i32_type,
+    } });
+
+    try ip.testResolvePeerTypes(@"error{foo}", @"error{bar}", @"error{bar,foo}");
+    try ip.testResolvePeerTypes(@"error{foo}", @"error{bar}!i32", @"error{bar,foo}!i32");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {

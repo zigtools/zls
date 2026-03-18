@@ -247,7 +247,7 @@ fn colorIdentifierBasedOnType(
     if (type_node.is_type_val) {
         const token_type: TokenType = if (type_node.isNamespace())
             .namespace
-        else if (type_node.isStructType())
+        else if (type_node.isStructType(builder.analyser))
             .@"struct"
         else if (type_node.isEnumType())
             .@"enum"

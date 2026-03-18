@@ -170,9 +170,9 @@ pub fn dotCompletions(
             try completions.ensureUnusedCapacity(arena, tuple_info.types.len);
             for (tuple_types, 0..) |tuple_ty, i| {
                 completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
+                    .label = try std.fmt.allocPrint(arena, "@\"{d}\"", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{d}: {f}", .{ i, tuple_ty.fmt(ip) }),
+                    .detail = try std.fmt.allocPrint(arena, "{f}", .{tuple_ty.fmt(ip)}),
                 });
             }
         },

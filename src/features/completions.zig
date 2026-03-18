@@ -313,7 +313,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
                     } else {
                         kind = .EnumMember;
                     }
-                } else if (ty.is_type_val and ty.isStructType() or ty.isUnionType()) {
+                } else if (ty.is_type_val and ty.isStructType(builder.analyser) or ty.isUnionType()) {
                     kind = .Struct;
                 } else if (decl_handle.decl == .function_parameter and ty.isMetaType()) {
                     kind = .TypeParameter;

@@ -167,6 +167,18 @@ pub fn StringPool(comptime config: Config) type {
             return std.mem.sliceTo(string_bytes + start, 0);
         }
 
+        pub fn sortStrings(pool: *Pool, io: std.Io, indexes: []String) void {
+            pool.mutex.lockUncancelable(io);
+            defer pool.mutex.unlock(io);
+            std.mem.sort(String, indexes, pool, stringLessThanUnsafe);
+        }
+
+        fn stringLessThanUnsafe(pool: *Pool, a: String, b: String) bool {
+            const a_slice = pool.stringToSliceUnsafe(a);
+            const b_slice = pool.stringToSliceUnsafe(b);
+            return std.mem.lessThan(u8, a_slice, b_slice);
+        }
+
         mutex: MutexType,
         bytes: std.ArrayList(u8),
         map: std.HashMapUnmanaged(u32, void, std.hash_map.StringIndexContext, std.hash_map.default_max_load_percentage),
