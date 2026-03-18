@@ -19,6 +19,16 @@ fn hoverSymbol(
     param_decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
 ) Analyser.Error!?[]const u8 {
+    return try hoverSymbolWithType(analyser, arena, param_decl_handle, null, markup_kind);
+}
+
+fn hoverSymbolWithType(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    param_decl_handle: Analyser.DeclWithHandle,
+    type_maybe: ?Analyser.Type,
+    markup_kind: types.MarkupKind,
+) Analyser.Error!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -29,7 +39,7 @@ fn hoverSymbol(
     var doc_strings: std.ArrayList([]const u8) = .empty;
 
     var decl_handle: Analyser.DeclWithHandle = param_decl_handle;
-    var maybe_resolved_type = try param_decl_handle.resolveType(analyser);
+    var maybe_resolved_type = type_maybe orelse try param_decl_handle.resolveType(analyser);
 
     while (true) {
         if (try decl_handle.docComments(arena)) |doc_string| {
@@ -384,13 +394,13 @@ fn hoverDefinitionEnumLiteral(
         return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
+    const decl, const type_maybe = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 
     return .{
         .contents = .{
             .markup_content = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
+                .value = (try hoverSymbolWithType(analyser, arena, decl, type_maybe, markup_kind)) orelse return null,
             },
         },
         .range = offsets.tokenToRange(&handle.tree, name_token, offset_encoding),
