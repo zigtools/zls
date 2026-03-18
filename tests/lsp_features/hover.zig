@@ -1053,13 +1053,13 @@ test "either type instances - big" {
 test "var decl comments" {
     try testHover(
         \\///this is a comment
-        \\const f<cursor>oo = 0 + 0;
+        \\const f<cursor>oo = 0;
     ,
         \\```zig
-        \\const foo = 0 + 0
+        \\const foo = 0
         \\```
         \\```zig
-        \\(comptime_int)
+        \\(comptime_int = 0)
         \\```
         \\
         \\this is a comment
@@ -1097,7 +1097,7 @@ test "alias with different type" {
         \\const bar<cursor>: ?i32 = foo;
     ,
         \\const foo: i32 = 1
-        \\(?i32)
+        \\(?i32 = 1)
     , .{ .markup_kind = .plaintext });
 }
 
