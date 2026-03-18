@@ -1073,7 +1073,8 @@ pub const BracketAccess = union(enum) {
 /// - `lhs[start..]` (open)
 /// - `lhs[start..end]` (range)
 pub fn resolveBracketAccessType(analyser: *Analyser, lhs: Type, rhs: BracketAccess) error{OutOfMemory}!?Type {
-    return analyser.resolveBracketAccessTypeFromBinding(.{ .type = lhs, .is_const = false }, rhs);
+    const binding = try analyser.resolveBracketAccess(.{ .type = lhs, .is_const = false }, rhs) orelse return null;
+    return binding.type;
 }
 
 // TODO: copy indexing logic from Zig compiler to InternPool, and then delete bracketAccessTypeFromIPIndex
@@ -1128,24 +1129,32 @@ fn bracketAccessTypeFromIPIndex(analyser: *Analyser, ip_index: InternPool.Index)
     };
 }
 
-pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Binding, rhs: BracketAccess) error{OutOfMemory}!?Type {
+pub fn resolveBracketAccess(analyser: *Analyser, lhs_binding: Binding, rhs: BracketAccess) error{OutOfMemory}!?Binding {
     const lhs = lhs_binding.type;
-    const is_const = lhs_binding.is_const;
     if (lhs.is_type_val) return null;
 
+    const is_const = switch (lhs.data) {
+        .pointer => |info| info.is_const,
+        else => lhs_binding.is_const,
+    };
+
     var result: union(enum) { array: ?u64, slice: void } = .slice;
-    var sentinel: InternPool.Index = .none;
+    var sentinel: ?InternPool.Index = .none;
     const elem_ty = elem: switch (lhs.data) {
         .tuple => |fields| switch (rhs) {
             .single => |index_maybe| {
                 const index = index_maybe orelse return null;
                 if (index >= fields.len) return null;
-                return try fields[@intCast(index)].instanceTypeVal(analyser);
+                const instance = try fields[@intCast(index)].instanceUnchecked(analyser);
+                return .{ .type = instance, .is_const = is_const };
             },
             .open, .range => return null,
         },
         .array => |info| switch (rhs) {
-            .single => return try info.elem_ty.instanceTypeVal(analyser),
+            .single => {
+                const instance = try info.elem_ty.instanceUnchecked(analyser);
+                return .{ .type = instance, .is_const = is_const };
+            },
             .open => |access| {
                 if (access.start) |start| {
                     result = .{ .array = null };
@@ -1155,7 +1164,8 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                         }
                     }
                 }
-                sentinel = info.sentinel;
+                sentinel = access.sentinel;
+                if (sentinel == .none) sentinel = info.sentinel;
                 break :elem info.elem_ty;
             },
             .range => |access| {
@@ -1168,17 +1178,17 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                         }
                     }
                 }
-                sentinel = access.sentinel orelse .none;
+                sentinel = access.sentinel;
                 break :elem info.elem_ty;
             },
         },
-        .pointer => |info| return switch (info.size) {
+        .pointer => |info| switch (info.size) {
             .one => switch (info.elem_ty.data) {
                 .tuple, .array => continue :elem info.elem_ty.data,
                 else => switch (rhs) {
                     .single, .open => return null,
                     .range => |access| {
-                        if (access.sentinel != null) return null;
+                        if (access.sentinel != .none) return null;
                         const start, const end = access.bounds orelse return null;
                         if (start > end or start > 1 or end > 1) return null;
                         result = .{ .array = end - start };
@@ -1187,14 +1197,22 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                 },
             },
             .many, .slice, .c => switch (rhs) {
-                .single => try info.elem_ty.instanceTypeVal(analyser),
-                .open => lhs,
+                .single => {
+                    const instance = try info.elem_ty.instanceUnchecked(analyser);
+                    return .{ .type = instance, .is_const = is_const };
+                },
+                .open => |access| {
+                    sentinel = access.sentinel;
+                    if (sentinel == info.sentinel) return lhs_binding;
+                    if (sentinel == .none) sentinel = info.sentinel;
+                    break :elem info.elem_ty;
+                },
                 .range => |access| {
                     if (access.bounds) |bounds| {
                         const start, const end = bounds;
                         result = .{ .array = if (start <= end) end - start else null };
                     }
-                    sentinel = access.sentinel orelse .none;
+                    sentinel = access.sentinel;
                     break :elem info.elem_ty;
                 },
             },
@@ -1204,7 +1222,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
             const instance = try ty.instanceUnchecked(analyser);
             const binding: Binding = .{ .type = instance, .is_const = is_const };
             if (lhs.eql(binding.type)) return null;
-            return analyser.resolveBracketAccessTypeFromBinding(binding, rhs);
+            return analyser.resolveBracketAccess(binding, rhs);
         },
         else => return null,
     };
@@ -1213,11 +1231,13 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
         .array => |elem_count| {
             const array_ty = try Type.createArrayType(analyser, elem_count, sentinel, elem_ty.*);
             const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, array_ty);
-            return try pointer_ty.instanceUnchecked(analyser);
+            const pointer_instance = try pointer_ty.instanceUnchecked(analyser);
+            return .{ .type = pointer_instance, .is_const = true };
         },
         .slice => {
             const slice_ty = try Type.createPointerType(analyser, .slice, sentinel, is_const, elem_ty.*);
-            return try slice_ty.instanceUnchecked(analyser);
+            const slice_instance = try slice_ty.instanceUnchecked(analyser);
+            return .{ .type = slice_instance, .is_const = true };
         },
     }
 }
@@ -1383,12 +1403,13 @@ fn resolveArrayCat(analyser: *Analyser, l_ty: Type, r_ty: Type) Error!?Type {
         const r = r_count orelse break :blk null;
         break :blk std.math.add(u64, l, r) catch null;
     };
-    const sentinel = switch (l_sentinel) {
-        .none => r_sentinel,
-        else => switch (r_sentinel) {
-            .none => l_sentinel,
-            else => if (l_sentinel == r_sentinel) l_sentinel else .none,
-        },
+    const sentinel = blk: {
+        const l = l_sentinel orelse break :blk null;
+        const r = r_sentinel orelse break :blk null;
+        if (l == .none) break :blk r;
+        if (r == .none) break :blk l;
+        if (l == r) break :blk l;
+        break :blk .none;
     };
     const array_ty = try Type.createArrayType(analyser, elem_count, sentinel, l_elem_ty);
     return try array_ty.instanceUnchecked(analyser);
@@ -1399,7 +1420,7 @@ fn resolveOptionalIPValue(
     optional_node: Ast.Node.OptionalIndex,
     handle: *DocumentStore.Handle,
 ) Error!?InternPool.Index {
-    const node = optional_node.unwrap() orelse return null;
+    const node = optional_node.unwrap() orelse return .none;
     return try analyser.resolveInternPoolValue(.of(node, handle));
 }
 
@@ -2093,7 +2114,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const size = ptr_info.size;
             const is_const = ptr_info.const_token != null;
 
-            const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle) orelse .none;
+            const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle);
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(ptr_info.ast.child_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -2106,7 +2127,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const array_info = tree.fullArrayType(node).?;
 
             const elem_count = try analyser.resolveIntegerLiteral(u64, .of(array_info.ast.elem_count, handle));
-            const sentinel = try analyser.resolveOptionalIPValue(array_info.ast.sentinel, handle) orelse .none;
+            const sentinel = try analyser.resolveOptionalIPValue(array_info.ast.sentinel, handle);
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(array_info.ast.elem_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -3053,10 +3074,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Er
 
             const kind: BracketAccess = try .fromSlice(analyser, handle, slice);
 
-            return .{
-                .type = try analyser.resolveBracketAccessTypeFromBinding(sliced, kind) orelse return null,
-                .is_const = true,
-            };
+            return try analyser.resolveBracketAccess(sliced, kind);
         },
 
         .array_access => {
@@ -3066,10 +3084,7 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Er
 
             const index = try analyser.resolveIntegerLiteral(u64, .of(rhs_node, handle));
 
-            return .{
-                .type = try analyser.resolveBracketAccessTypeFromBinding(lhs, .{ .single = index }) orelse return null,
-                .is_const = true,
-            };
+            return try analyser.resolveBracketAccess(lhs, .{ .single = index });
         },
 
         .deref => {
@@ -3123,8 +3138,8 @@ pub const Type = struct {
         /// - `[*c]T`
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
-            /// `.none` means no sentinel
-            sentinel: InternPool.Index,
+            /// `.none` means no sentinel, `null` means unknown sentinel
+            sentinel: ?InternPool.Index,
             is_const: bool,
             elem_ty: *Type,
         },
@@ -3132,8 +3147,8 @@ pub const Type = struct {
         /// `[elem_count :sentinel]elem_ty`
         array: struct {
             elem_count: ?u64,
-            /// `.none` means no sentinel
-            sentinel: InternPool.Index,
+            /// `.none` means no sentinel, `null` means unknown sentinel
+            sentinel: ?InternPool.Index,
             elem_ty: *Type,
         },
 
@@ -3230,16 +3245,17 @@ pub const Type = struct {
         fn createPointer(
             analyser: *Analyser,
             size: std.builtin.Type.Pointer.Size,
-            sentinel: InternPool.Index,
+            sentinel: ?InternPool.Index,
             is_const: bool,
             elem_ty: Type,
         ) !Data {
             std.debug.assert(elem_ty.is_type_val);
-            if (elem_ty.ipIndex()) |elem_type| {
+            blk: {
+                const elem_type = elem_ty.ipIndex() orelse break :blk;
                 const index = try analyser.ip.get(.{
                     .pointer_type = .{
                         .elem_type = elem_type,
-                        .sentinel = sentinel,
+                        .sentinel = sentinel orelse break :blk,
                         .flags = .{
                             .size = size,
                             .is_const = is_const,
@@ -3261,7 +3277,7 @@ pub const Type = struct {
         fn createArray(
             analyser: *Analyser,
             elem_count: ?u64,
-            sentinel: InternPool.Index,
+            sentinel: ?InternPool.Index,
             elem_ty: Type,
         ) !Data {
             std.debug.assert(elem_ty.is_type_val);
@@ -3272,7 +3288,7 @@ pub const Type = struct {
                     .array_type = .{
                         .len = len,
                         .child = child,
-                        .sentinel = sentinel,
+                        .sentinel = sentinel orelse break :blk,
                     },
                 });
                 return .{ .ip_index = .{ .type = .type_type, .index = index } };
@@ -3708,7 +3724,7 @@ pub const Type = struct {
     fn createPointerType(
         analyser: *Analyser,
         size: std.builtin.Type.Pointer.Size,
-        sentinel: InternPool.Index,
+        sentinel: ?InternPool.Index,
         is_const: bool,
         elem_ty: Type,
     ) !Type {
@@ -3721,7 +3737,7 @@ pub const Type = struct {
     fn createArrayType(
         analyser: *Analyser,
         elem_count: ?u64,
-        sentinel: InternPool.Index,
+        sentinel: ?InternPool.Index,
         elem_ty: Type,
     ) !Type {
         return .{
@@ -4369,7 +4385,7 @@ pub const Type = struct {
         };
     }
 
-    fn arrayInfo(ty: Type, analyser: *Analyser) ?struct { ?u64, InternPool.Index, Type } {
+    fn arrayInfo(ty: Type, analyser: *Analyser) ?struct { ?u64, ?InternPool.Index, Type } {
         if (ty.is_type_val) return null;
         return switch (ty.data) {
             .array => |info| .{
@@ -4522,14 +4538,24 @@ pub const Type = struct {
                     .many => {
                         try writer.writeAll("[*");
                         if (info.sentinel != .none) {
-                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.writeByte(':');
+                            if (info.sentinel) |sentinel| {
+                                try writer.print("{f}", .{sentinel.fmt(analyser.ip)});
+                            } else {
+                                try writer.writeByte('?');
+                            }
                         }
                         try writer.writeByte(']');
                     },
                     .slice => {
                         try writer.writeAll("[");
                         if (info.sentinel != .none) {
-                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.writeByte(':');
+                            if (info.sentinel) |sentinel| {
+                                try writer.print("{f}", .{sentinel.fmt(analyser.ip)});
+                            } else {
+                                try writer.writeByte('?');
+                            }
                         }
                         try writer.writeByte(']');
                     },
@@ -4546,7 +4572,12 @@ pub const Type = struct {
                     try writer.writeAll("?");
                 }
                 if (info.sentinel != .none) {
-                    try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                    try writer.writeByte(':');
+                    if (info.sentinel) |sentinel| {
+                        try writer.print("{f}", .{sentinel.fmt(analyser.ip)});
+                    } else {
+                        try writer.writeByte('?');
+                    }
                 }
                 try writer.writeByte(']');
                 try info.elem_ty.rawStringify(writer, analyser, options);

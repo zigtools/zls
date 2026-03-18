@@ -22,10 +22,6 @@ fn hoverSymbol(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
-    analyser.resolve_number_literal_values = true;
-    defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
-
     var doc_strings: std.ArrayList([]const u8) = .empty;
 
     var decl_handle: Analyser.DeclWithHandle = param_decl_handle;
@@ -520,6 +516,10 @@ pub fn hover(
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) Analyser.Error!?types.Hover {
+    const old_resolve_number_literal_values = analyser.resolve_number_literal_values;
+    analyser.resolve_number_literal_values = true;
+    defer analyser.resolve_number_literal_values = old_resolve_number_literal_values;
+
     const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
     const response = switch (pos_context) {

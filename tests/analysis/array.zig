@@ -3,9 +3,9 @@ const ArrayType = [3]u8;
 const ArrayTypeWithSentinel = [3:0]u8;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)([3:0]u8)
 
-const ArrayTypeWithSentinel2 = [3:.{}]struct {};
-//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3]struct {})
-//                                ^ (struct {})()
+const ArrayTypeWithSentinel2 = [3:.{}]packed struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3:?]packed struct {})
+//                                ^ (packed struct {})()
 
 const InvalidArrayTypeAccess0 = ArrayType[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
@@ -24,6 +24,9 @@ var runtime_index: usize = 5;
 const some_array: [length]u8 = undefined;
 //    ^^^^^^^^^^ ([3]u8)()
 
+const some_array_sentinel: [length:4]u8 = undefined;
+//    ^^^^^^^^^^^^^^^^^^^ ([3:4]u8)()
+
 const some_array_pointer = &[3]u8{ 1, 2, 3 };
 //    ^^^^^^^^^^^^^^^^^^ (*const [3]u8)()
 
@@ -32,6 +35,9 @@ const some_unsized_array: [unknown_length]u8 = undefined;
 
 const some_array_len = some_array.len;
 //    ^^^^^^^^^^^^^^ (usize)(3)
+
+const some_array_sentinel_len = some_array_sentinel.len;
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (usize)(3)
 
 const some_unsized_array_len = some_unsized_array.len;
 //    ^^^^^^^^^^^^^^^^^^^^^^ (usize)()
@@ -50,6 +56,9 @@ const array_slice_open_3 = some_array[3..];
 
 const array_slice_open_4 = some_array[4..];
 //    ^^^^^^^^^^^^^^^^^^ (*const [?]u8)()
+
+const array_slice_open_sentinel = some_array[1.. :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2:2]u8)()
 
 const array_slice_open_runtime = some_array[runtime_index..];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
@@ -71,6 +80,45 @@ const array_slice_0_runtime = some_array[0..runtime_index];
 
 const array_slice_with_sentinel = some_array[0..runtime_index :0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^^^ ([:0]const u8)()
+
+const array_sentinel_indexing = some_array_sentinel[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (u8)()
+
+const array_sentinel_indexing_pointer = &some_array_sentinel[0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const u8)()
+
+const array_sentinel_slice_open_1 = some_array_sentinel[1..];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2:4]u8)()
+
+const array_sentinel_slice_open_3 = some_array_sentinel[3..];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [0:4]u8)()
+
+const array_sentinel_slice_open_4 = some_array_sentinel[4..];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [?:4]u8)()
+
+const array_sentinel_slice_open_sentinel = some_array_sentinel[1.. :2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2:2]u8)()
+
+const array_sentinel_slice_open_runtime = some_array_sentinel[runtime_index..];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([:4]const u8)()
+
+const array_sentinel_slice_0_2 = some_array_sentinel[0..2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2]u8)()
+
+const array_sentinel_slice_0_2_sentinel = some_array_sentinel[0..2 :0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const [2:0]u8)()
+
+const array_sentinel_slice_0_5 = some_array_sentinel[0..5];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [?]u8)()
+
+const array_sentinel_slice_3_2 = some_array_sentinel[3..2];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (*const [?]u8)()
+
+const array_sentinel_slice_0_runtime = some_array_sentinel[0..runtime_index];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([]const u8)()
+
+const array_sentinel_slice_with_sentinel = some_array_sentinel[0..runtime_index :0];
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ([:0]const u8)()
 
 //
 // Array init
