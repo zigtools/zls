@@ -1101,10 +1101,11 @@ fn extractBuildInformation(
             });
 
             for (module.import_table.keys(), module.import_table.values()) |name, import| {
+                const import_root_source_file = import.root_source_file orelse continue;
                 const gop_import = try gop.value_ptr.import_table.map.getOrPut(allocator, name);
                 // This does not account for the possibility of collisions (i.e. modules with same root source file import different modules under the same name).
                 if (!gop_import.found_existing) {
-                    gop_import.value_ptr.* = try std.fs.path.resolve(allocator, &.{ cwd, import.root_source_file.?.getPath2(import.owner, null) });
+                    gop_import.value_ptr.* = try std.fs.path.resolve(allocator, &.{ cwd, import_root_source_file.getPath2(import.owner, null) });
                 }
             }
             gop.value_ptr.c_macros = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.c_macros, c_macros.keys() });
