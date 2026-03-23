@@ -17,6 +17,7 @@ const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const tracy = @import("tracy");
 const InternPool = @import("analyser/InternPool.zig");
+const ErrorMsg = @import("analyser/error_msg.zig").ErrorMsg;
 const references = @import("features/references.zig");
 
 pub const DocumentScope = @import("DocumentScope.zig");
@@ -1027,12 +1028,12 @@ pub const BracketAccess = union(enum) {
     /// `lhs[start.. :sentinel]`
     open: struct {
         start: ?u64,
-        sentinel: ?InternPool.Index,
+        sentinel: InternPool.Index,
     },
     /// `lhs[start..end :sentinel]`
     range: struct {
         bounds: ?struct { u64, u64 },
-        sentinel: ?InternPool.Index,
+        sentinel: InternPool.Index,
     },
 
     pub fn fromSlice(
@@ -1168,7 +1169,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                         }
                     }
                 }
-                sentinel = access.sentinel orelse .none;
+                sentinel = access.sentinel;
                 break :elem info.elem_ty;
             },
         },
@@ -1178,7 +1179,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                 else => switch (rhs) {
                     .single, .open => return null,
                     .range => |access| {
-                        if (access.sentinel != null) return null;
+                        if (access.sentinel != .none) return null;
                         const start, const end = access.bounds orelse return null;
                         if (start > end or start > 1 or end > 1) return null;
                         result = .{ .array = end - start };
@@ -1194,7 +1195,7 @@ pub fn resolveBracketAccessTypeFromBinding(analyser: *Analyser, lhs_binding: Bin
                         const start, const end = bounds;
                         result = .{ .array = if (start <= end) end - start else null };
                     }
-                    sentinel = access.sentinel orelse .none;
+                    sentinel = access.sentinel;
                     break :elem info.elem_ty;
                 },
             },
@@ -1383,12 +1384,13 @@ fn resolveArrayCat(analyser: *Analyser, l_ty: Type, r_ty: Type) Error!?Type {
         const r = r_count orelse break :blk null;
         break :blk std.math.add(u64, l, r) catch null;
     };
-    const sentinel = switch (l_sentinel) {
-        .none => r_sentinel,
-        else => switch (r_sentinel) {
-            .none => l_sentinel,
-            else => if (l_sentinel == r_sentinel) l_sentinel else .none,
-        },
+    const sentinel = blk: {
+        if (l_sentinel == .unknown_unknown) break :blk .unknown_unknown;
+        if (r_sentinel == .unknown_unknown) break :blk .unknown_unknown;
+        if (l_sentinel == .none) break :blk r_sentinel;
+        if (r_sentinel == .none) break :blk l_sentinel;
+        if (l_sentinel == r_sentinel) break :blk l_sentinel;
+        break :blk .none;
     };
     const array_ty = try Type.createArrayType(analyser, elem_count, sentinel, l_elem_ty);
     return try array_ty.instanceUnchecked(analyser);
@@ -1398,9 +1400,9 @@ fn resolveOptionalIPValue(
     analyser: *Analyser,
     optional_node: Ast.Node.OptionalIndex,
     handle: *DocumentStore.Handle,
-) Error!?InternPool.Index {
-    const node = optional_node.unwrap() orelse return null;
-    return try analyser.resolveInternPoolValue(.of(node, handle));
+) Error!InternPool.Index {
+    const node = optional_node.unwrap() orelse return .none;
+    return try analyser.resolveInternPoolValue(.of(node, handle)) orelse .unknown_unknown;
 }
 
 fn resolveInternPoolValue(analyser: *Analyser, options: ResolveOptions) Error!?InternPool.Index {
@@ -1534,6 +1536,16 @@ fn resolveErrorSetIPIndex(analyser: *Analyser, options: ResolveOptions) Error!?I
     };
     if (analyser.ip.zigTypeTag(ip_index) != .error_set) return null;
     return ip_index;
+}
+
+fn coerceIP(analyser: *Analyser, dest_ty: InternPool.Index, inst: InternPool.Index) error{OutOfMemory}!?InternPool.Index {
+    if (inst == .none)
+        return .none;
+    var err_msg: ErrorMsg = undefined;
+    const coerced_sentinel = try analyser.ip.coerce(analyser.arena, dest_ty, inst, builtin.target, &err_msg);
+    if (coerced_sentinel != .none)
+        return coerced_sentinel;
+    return null;
 }
 
 fn resolvePeerTypes(analyser: *Analyser, a: Type, b: Type) error{OutOfMemory}!?Type {
@@ -2093,7 +2105,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const size = ptr_info.size;
             const is_const = ptr_info.const_token != null;
 
-            const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle) orelse .none;
+            const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle);
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(ptr_info.ast.child_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -2106,7 +2118,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const array_info = tree.fullArrayType(node).?;
 
             const elem_count = try analyser.resolveIntegerLiteral(u64, .of(array_info.ast.elem_count, handle));
-            const sentinel = try analyser.resolveOptionalIPValue(array_info.ast.sentinel, handle) orelse .none;
+            const sentinel = try analyser.resolveOptionalIPValue(array_info.ast.sentinel, handle);
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(array_info.ast.elem_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
@@ -3123,7 +3135,7 @@ pub const Type = struct {
         /// - `[*c]T`
         pointer: struct {
             size: std.builtin.Type.Pointer.Size,
-            /// `.none` means no sentinel
+            /// `.none` means no sentinel, `.unknown_unknown` means unknown sentinel
             sentinel: InternPool.Index,
             is_const: bool,
             elem_ty: *Type,
@@ -3132,7 +3144,7 @@ pub const Type = struct {
         /// `[elem_count :sentinel]elem_ty`
         array: struct {
             elem_count: ?u64,
-            /// `.none` means no sentinel
+            /// `.none` means no sentinel, `.unknown_unknown` means unknown sentinel
             sentinel: InternPool.Index,
             elem_ty: *Type,
         },
@@ -3235,11 +3247,12 @@ pub const Type = struct {
             elem_ty: Type,
         ) !Data {
             std.debug.assert(elem_ty.is_type_val);
-            if (elem_ty.ipIndex()) |elem_type| {
+            blk: {
+                const elem_type = elem_ty.ipIndex() orelse break :blk;
                 const index = try analyser.ip.get(.{
                     .pointer_type = .{
                         .elem_type = elem_type,
-                        .sentinel = sentinel,
+                        .sentinel = try analyser.coerceIP(elem_type, sentinel) orelse break :blk,
                         .flags = .{
                             .size = size,
                             .is_const = is_const,
@@ -3272,7 +3285,7 @@ pub const Type = struct {
                     .array_type = .{
                         .len = len,
                         .child = child,
-                        .sentinel = sentinel,
+                        .sentinel = try analyser.coerceIP(child, sentinel) orelse break :blk,
                     },
                 });
                 return .{ .ip_index = .{ .type = .type_type, .index = index } };
@@ -4522,14 +4535,24 @@ pub const Type = struct {
                     .many => {
                         try writer.writeAll("[*");
                         if (info.sentinel != .none) {
-                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.writeByte(':');
+                            if (info.sentinel != .unknown_unknown) {
+                                try writer.print("{f}", .{info.sentinel.fmt(analyser.ip)});
+                            } else {
+                                try writer.writeByte('?');
+                            }
                         }
                         try writer.writeByte(']');
                     },
                     .slice => {
                         try writer.writeAll("[");
                         if (info.sentinel != .none) {
-                            try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                            try writer.writeByte(':');
+                            if (info.sentinel != .unknown_unknown) {
+                                try writer.print("{f}", .{info.sentinel.fmt(analyser.ip)});
+                            } else {
+                                try writer.writeByte('?');
+                            }
                         }
                         try writer.writeByte(']');
                     },
@@ -4546,7 +4569,12 @@ pub const Type = struct {
                     try writer.writeAll("?");
                 }
                 if (info.sentinel != .none) {
-                    try writer.print(":{f}", .{info.sentinel.fmt(analyser.ip)});
+                    try writer.writeByte(':');
+                    if (info.sentinel != .unknown_unknown) {
+                        try writer.print("{f}", .{info.sentinel.fmt(analyser.ip)});
+                    } else {
+                        try writer.writeByte('?');
+                    }
                 }
                 try writer.writeByte(']');
                 try info.elem_ty.rawStringify(writer, analyser, options);
