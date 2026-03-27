@@ -1713,7 +1713,7 @@ pub fn collectIncludeDirs(
         .dynamic_linker = std.Target.DynamicLinker.none,
     };
     const arena_allocator_allocator = arena_allocator.allocator();
-    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator_allocator, store.io, &target_info, @constCast(store.config.environ_map));
+    const native_paths: std.zig.system.NativePaths = try .detect(arena_allocator_allocator, store.io, &target_info, store.config.environ_map);
 
     try include_dirs.ensureUnusedCapacity(allocator, native_paths.include_dirs.items.len);
     for (native_paths.include_dirs.items) |native_include_dir| {
