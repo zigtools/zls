@@ -11,10 +11,10 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "known_folders-0.0.0-Fy-PJiXKAACLbIUjxVqJRTSLc6HNnMkCSBnC5LW0Lx_v";
+    name = "known_folders-0.0.0-Fy-PJjrKAAAY9ALC7ALIxFsmKFP314HJw6v3NLSS3NDB";
     path = fetchzip {
-      url = "https://github.com/ziglibs/known-folders/archive/d002ad87b1f8c238eb080c185bb0b93cfd946b9d.tar.gz";
-      hash = "sha256-ZhNsjtdsqu2n3LuSVNfVktwp3mSJy367R3vR7z7NOJw=";
+      url = "https://github.com/ziglibs/known-folders/archive/71f0a3d660401ee461cc42ae1f2360f4b83084d3.tar.gz";
+      hash = "sha256-oBLYbnIjOIRL1NWYANJZcT4vfUaWy2vDgzxnf8zMSPQ=";
     };
   }
   {
