@@ -1729,7 +1729,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     };
 
     const tree = &decl_handle.handle.tree;
-    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
+    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
 
     if (is_cimport or !analyser.collect_callsite_references) return null;
 
@@ -4632,7 +4632,7 @@ pub const Type = struct {
                             error.OutOfMemory => return error.OutOfMemory,
                             error.UnsupportedScheme => handle.uri.raw,
                         };
-                        const str = std.fs.path.stem(path);
+                        const str = std.Io.Dir.path.stem(path);
                         try writer.writeAll(str);
                         if (referenced) |r| try r.put(analyser.arena, .of(str, handle, tree.firstToken(node)), {});
                     },
@@ -4954,7 +4954,7 @@ pub fn getFieldAccessType(
     source_index: usize,
     loc: offsets.Loc,
 ) Error!?Type {
-    const held_range = try analyser.arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
+    const held_range = try analyser.arena.dupeSentinel(u8, offsets.locToSlice(handle.tree.source, loc), 0);
     var tokenizer: std.zig.Tokenizer = .init(held_range);
     var current_type: ?Type = null;
 

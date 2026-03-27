@@ -913,7 +913,7 @@ fn generateVersionDataFile(
         defer allocator.free(signature1);
         const signature2 = try std.mem.replaceOwned(u8, allocator, signature1, "builtin.", "");
         defer allocator.free(signature2);
-        const signature_with_sentinel = try allocator.dupeZ(u8, signature2);
+        const signature_with_sentinel = try allocator.dupeSentinel(u8, signature2, 0);
         defer allocator.free(signature_with_sentinel);
 
         const parameters, const return_type = try extractParametersAndReturnTypeFromSignature(allocator, signature_with_sentinel);

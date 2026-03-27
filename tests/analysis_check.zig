@@ -67,7 +67,7 @@ pub fn main(init: std.process.Init) Error!void {
                 std.log.err("failed to get current working directory: {}", .{err});
                 std.process.exit(1);
             };
-            const resolved_zig_lib_path = std.fs.path.resolve(arena, &.{ cwd, zig_lib_path }) catch |err| {
+            const resolved_zig_lib_path = std.Io.Dir.path.resolve(arena, &.{ cwd, zig_lib_path }) catch |err| {
                 std.log.err("failed to resolve zig library directory '{s}/{s}': {}", .{ cwd, zig_lib_path, err });
                 std.process.exit(1);
             };

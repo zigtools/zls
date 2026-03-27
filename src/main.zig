@@ -128,7 +128,7 @@ fn defaultLogFilePath(
     if (zig_builtin.target.os.tag == .wasi) return null;
     const cache_path = try known_folders.getPath(io, allocator, environ_map.*, .cache) orelse return null;
     defer allocator.free(cache_path);
-    return try std.fs.path.join(allocator, &.{ cache_path, "zls", "zls.log" });
+    return try std.Io.Dir.path.join(allocator, &.{ cache_path, "zls", "zls.log" });
 }
 
 fn createLogFile(
@@ -143,7 +143,7 @@ fn createLogFile(
         try defaultLogFilePath(io, allocator, environ_map) orelse return null;
     errdefer allocator.free(log_file_path);
 
-    if (std.fs.path.dirname(log_file_path)) |dirname| {
+    if (std.Io.Dir.path.dirname(log_file_path)) |dirname| {
         std.Io.Dir.cwd().createDirPath(io, dirname) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             else => {},
@@ -197,7 +197,7 @@ fn @"zls env"(
     };
     defer if (global_cache_dir) |path| allocator.free(path);
 
-    const zls_global_cache_dir = if (global_cache_dir) |cache_dir| try std.fs.path.join(allocator, &.{ cache_dir, "zls" }) else null;
+    const zls_global_cache_dir = if (global_cache_dir) |cache_dir| try std.Io.Dir.path.join(allocator, &.{ cache_dir, "zls" }) else null;
     defer if (zls_global_cache_dir) |path| allocator.free(path);
 
     const global_config_dir = known_folders.getPath(io, allocator, environ_map.*, .global_configuration) catch |err| switch (err) {
@@ -354,7 +354,7 @@ fn loadConfigFromSystem(io: std.Io, allocator: std.mem.Allocator, environ_map: s
         const folder_path = try known_folders.getPath(io, allocator, environ_map, folder) orelse continue;
         defer allocator.free(folder_path);
 
-        const config_path = try std.fs.path.join(allocator, &.{ folder_path, "zls.json" });
+        const config_path = try std.Io.Dir.path.join(allocator, &.{ folder_path, "zls.json" });
         defer allocator.free(config_path);
 
         const result = try loadConfigFromFile(io, allocator, config_path);
@@ -416,7 +416,7 @@ fn loadConfiguration(
         };
         defer allocator.free(cache_dir_path);
 
-        config.global_cache_path = try std.fs.path.join(config_arena.allocator(), &.{ cache_dir_path, "zls" });
+        config.global_cache_path = try std.Io.Dir.path.join(config_arena.allocator(), &.{ cache_dir_path, "zls" });
     }
 
     try server.config_manager.setConfiguration2(.frontend, &config);

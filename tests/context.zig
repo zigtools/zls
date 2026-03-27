@@ -34,9 +34,9 @@ pub const Context = struct {
             if (builtin.target.os.tag != .wasi) {
                 const cwd = try std.process.currentPathAlloc(io, allocator);
                 defer allocator.free(cwd);
-                config.zig_exe_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
-                config.zig_lib_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.zig_lib_path });
-                config.global_cache_path = try std.fs.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
+                config.zig_exe_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
+                config.zig_lib_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.zig_lib_path });
+                config.global_cache_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
             }
 
             const environ_map = try cached_config_arena.allocator().create(std.process.Environ.Map);

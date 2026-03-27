@@ -253,11 +253,11 @@ fn collectUrisFromErrorBundle(
 }
 
 fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []const u8) error{OutOfMemory}!?Uri {
-    if (std.fs.path.isAbsolute(src_path)) {
+    if (std.Io.Dir.path.isAbsolute(src_path)) {
         return try .fromPath(allocator, src_path);
     }
     const base = base_path orelse return null;
-    const absolute_src_path = try std.fs.path.join(allocator, &.{ base, src_path });
+    const absolute_src_path = try std.Io.Dir.path.join(allocator, &.{ base, src_path });
     defer allocator.free(absolute_src_path);
 
     return try .fromPath(allocator, absolute_src_path);

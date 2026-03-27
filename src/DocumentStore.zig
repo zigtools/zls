@@ -414,7 +414,7 @@ pub const Handle = struct {
         const tracy_zone = tracy.traceNamed(@src(), "Handle.refresh");
         defer tracy_zone.end();
 
-        const mode: Ast.Mode = if (std.mem.eql(u8, std.fs.path.extension(handle.uri.raw), ".zon")) .zon else .zig;
+        const mode: Ast.Mode = if (std.mem.eql(u8, std.Io.Dir.path.extension(handle.uri.raw), ".zon")) .zon else .zig;
         var new_tree = try parseTree(allocator, text, mode);
         errdefer new_tree.deinit(allocator);
 
@@ -847,7 +847,7 @@ pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) e
         }
     }
 
-    const duped_text = try self.allocator.dupeZ(u8, text);
+    const duped_text = try self.allocator.dupeSentinel(u8, text, 0);
     _ = self.createAndStoreDocument(
         uri,
         .{ .text = duped_text },
@@ -1013,11 +1013,11 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) LoadDir
             }
             continue;
         }
-        if (!std.mem.eql(u8, std.fs.path.extension(entry.basename), ".zig")) continue;
+        if (!std.mem.eql(u8, std.Io.Dir.path.extension(entry.basename), ".zig")) continue;
 
         file_count += 1;
 
-        const path = try std.fs.path.join(store.allocator, &.{ workspace_path, entry.path });
+        const path = try std.Io.Dir.path.join(store.allocator, &.{ workspace_path, entry.path });
         defer store.allocator.free(path);
 
         const uri: Uri = try .fromPath(store.allocator, path);
@@ -1046,7 +1046,7 @@ pub fn loadTrigramStores(
     while (it.next()) |handle| {
         const uri = handle.uri.toStdUri();
 
-        var component_it = std.fs.path.componentIterator(uri.path.percent_encoded);
+        var component_it = std.Io.Dir.path.componentIterator(uri.path.percent_encoded);
         const skip = while (component_it.next()) |component| {
             // Keep in sync with `loadDirectoryRecursive`
             if (std.mem.startsWith(u8, component.name, ".")) break true;
@@ -1305,7 +1305,7 @@ fn loadBuildAssociatedConfiguration(io: std.Io, allocator: std.mem.Allocator, bu
 
     const build_file_path = try build_file.uri.toFsPath(allocator);
     defer allocator.free(build_file_path);
-    const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
+    const config_file_path = try std.Io.Dir.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
 
     const file_buf = try std.Io.Dir.cwd().readFileAlloc(
@@ -1373,7 +1373,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     const build_file_path = try build_file_uri.toFsPath(self.allocator);
     defer self.allocator.free(build_file_path);
 
-    const cwd = std.fs.path.dirname(build_file_path).?;
+    const cwd = std.Io.Dir.path.dirname(build_file_path).?;
 
     const args = try self.prepareBuildRunnerArgs(build_file_uri);
     defer {
@@ -1489,16 +1489,16 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, O
     // https://github.com/ziglang/zig/issues/15607
     const root_end_index: usize = root_end_index: {
         if (builtin.target.os.tag != .windows) break :root_end_index 0;
-        const component_iterator = std.fs.path.componentIterator(path);
+        const component_iterator = std.Io.Dir.path.componentIterator(path);
         break :root_end_index component_iterator.root_end_index;
     };
 
     var current_path: []const u8 = path;
-    while (std.fs.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
+    while (std.Io.Dir.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
         if (potential_root_path.len < root_end_index) break;
         if (!try buildDotZigExists(self.io, potential_root_path)) continue;
 
-        const build_path = try std.fs.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
+        const build_path = try std.Io.Dir.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
         defer self.allocator.free(build_path);
 
         try potential_build_files.ensureUnusedCapacity(self.allocator, 1);
@@ -1534,7 +1534,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory 
 
         if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
             const build_file_path = build_file.uri.toFsPath(self.allocator) catch break :blk;
-            const absolute_builtin_path = try std.fs.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
+            const absolute_builtin_path = try std.Io.Dir.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try .fromPath(self.allocator, absolute_builtin_path);
         }
@@ -1731,15 +1731,15 @@ pub fn collectIncludeDirs(
 
             try include_dirs.ensureUnusedCapacity(allocator, module.include_dirs.len);
             for (module.include_dirs) |include_path| {
-                const absolute_path = if (std.fs.path.isAbsolute(include_path))
+                const absolute_path = if (std.Io.Dir.path.isAbsolute(include_path))
                     try allocator.dupe(u8, include_path)
                 else blk: {
                     const build_file_path = resolved.build_file.uri.toFsPath(allocator) catch |err| switch (err) {
                         error.OutOfMemory => return error.OutOfMemory,
                         error.UnsupportedScheme => continue,
                     };
-                    const build_file_dirname = std.fs.path.dirname(build_file_path) orelse continue;
-                    break :blk try std.fs.path.join(allocator, &.{ build_file_dirname, include_path });
+                    const build_file_dirname = std.Io.Dir.path.dirname(build_file_path) orelse continue;
+                    break :blk try std.Io.Dir.path.join(allocator, &.{ build_file_dirname, include_path });
                 };
 
                 include_dirs.appendAssumeCapacity(absolute_path);

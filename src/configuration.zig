@@ -195,7 +195,7 @@ pub const Manager = struct {
             const zig_exe = manager.zig_exe orelse break :blk;
             const zig_lib_dir = zig_exe.env.lib_dir orelse break :blk;
 
-            if (std.fs.path.isAbsolute(zig_lib_dir)) {
+            if (std.Io.Dir.path.isAbsolute(zig_lib_dir)) {
                 config.zig_lib_path = try arena.dupe(u8, zig_lib_dir);
             } else {
                 const cwd = std.process.currentPathAlloc(io, manager.allocator) catch |err| switch (err) {
@@ -206,7 +206,7 @@ pub const Manager = struct {
                     },
                 };
                 defer manager.allocator.free(cwd);
-                config.zig_lib_path = try std.fs.path.join(arena, &.{ cwd, zig_lib_dir });
+                config.zig_lib_path = try std.Io.Dir.path.join(arena, &.{ cwd, zig_lib_dir });
             }
         }
 
@@ -278,7 +278,7 @@ pub const Manager = struct {
             const cache_path = try global_cache_dir.join(manager.allocator, &.{ "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
             defer manager.allocator.free(cache_path);
 
-            std.debug.assert(std.fs.path.isAbsolute(cache_path));
+            std.debug.assert(std.Io.Dir.path.isAbsolute(cache_path));
             var cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, cache_path, .{}) catch |err| switch (err) {
                 error.Canceled => return error.Canceled,
                 else => {
@@ -314,7 +314,7 @@ pub const Manager = struct {
                 },
             };
 
-            config.build_runner_path = try std.fs.path.join(arena, &.{ cache_path, "build_runner.zig" });
+            config.build_runner_path = try std.Io.Dir.path.join(arena, &.{ cache_path, "build_runner.zig" });
             manager.build_runner_supported = .yes;
         }
 
@@ -405,7 +405,7 @@ pub const Manager = struct {
                     break :ok true;
                 }
 
-                if (!std.fs.path.isAbsolute(path)) {
+                if (!std.Io.Dir.path.isAbsolute(path)) {
                     try messages.ensureUnusedCapacity(allocator, 1);
                     messages.appendAssumeCapacity(try std.fmt.allocPrint(
                         allocator,
@@ -643,7 +643,7 @@ pub fn getZigEnv(
             },
         };
     } else {
-        const source = try allocator.dupeZ(u8, zig_env_result.stdout);
+        const source = try allocator.dupeSentinel(u8, zig_env_result.stdout, 0);
         defer allocator.free(source);
 
         return std.zon.parse.fromSliceAlloc(
@@ -729,8 +729,8 @@ pub fn findZig(
     var filename_buffer: std.ArrayList(u8) = .empty;
     defer filename_buffer.deinit(allocator);
 
-    var path_it = std.mem.tokenizeScalar(u8, env_path, std.fs.path.delimiter);
-    var ext_it = if (is_windows) std.mem.tokenizeScalar(u8, env_path_ext, std.fs.path.delimiter);
+    var path_it = std.mem.tokenizeScalar(u8, env_path, std.Io.Dir.path.delimiter);
+    var ext_it = if (is_windows) std.mem.tokenizeScalar(u8, env_path_ext, std.Io.Dir.path.delimiter);
 
     while (path_it.next()) |path| : (if (is_windows) ext_it.reset()) {
         var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch |err| switch (err) {
@@ -760,17 +760,17 @@ pub fn findZig(
                 error.Canceled => return error.Canceled,
                 error.FileNotFound => continue,
                 else => |e| {
-                    log.warn("failed to access entry in PATH '{f}': {}", .{ std.fs.path.fmtJoin(&.{ path, filename }), e });
+                    log.warn("failed to access entry in PATH '{f}': {}", .{ std.Io.Dir.path.fmtJoin(&.{ path, filename }), e });
                     continue;
                 },
             };
 
             if (stat.kind == .directory) {
-                log.warn("ignoring entry in PATH '{f}' because it is a directory", .{std.fs.path.fmtJoin(&.{ path, filename })});
+                log.warn("ignoring entry in PATH '{f}' because it is a directory", .{std.Io.Dir.path.fmtJoin(&.{ path, filename })});
                 continue;
             }
 
-            return try std.fs.path.join(allocator, &.{ path, filename });
+            return try std.Io.Dir.path.join(allocator, &.{ path, filename });
         }
     }
     return null;

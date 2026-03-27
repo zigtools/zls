@@ -426,7 +426,7 @@ pub const Key = union(enum) {
             => |a_data, t| {
                 const b_data = @field(b, @tagName(t));
 
-                const Int = std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(a_data)));
+                const Int = @Int(.unsigned, @bitSizeOf(@TypeOf(a_data)));
                 return @as(Int, @bitCast(a_data)) == @as(Int, @bitCast(b_data));
             },
 
