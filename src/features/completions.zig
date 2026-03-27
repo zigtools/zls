@@ -217,7 +217,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
 fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Analyser.Error!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
-    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
+    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
     if (is_cimport) {
         if (std.mem.startsWith(u8, name, "_")) return;
         const exclusions: std.StaticStringMap(void) = .initComptime(.{
@@ -893,12 +893,12 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     const previous_separator_index: ?usize = blk: {
         var index: usize = builder.source_index;
         break :blk while (index > string_content_loc.start) : (index -= 1) {
-            if (std.fs.path.isSep(source[index - 1])) break index - 1;
+            if (std.Io.Dir.path.isSep(source[index - 1])) break index - 1;
         } else null;
     };
 
     const next_separator_index: ?usize = for (builder.source_index..string_content_loc.end) |index| {
-        if (std.fs.path.isSep(source[index])) break index;
+        if (std.Io.Dir.path.isSep(source[index])) break index;
     } else null;
 
     const completing = offsets.locToSlice(source, .{ .start = string_content_loc.start, .end = previous_separator_index orelse string_content_loc.start });
@@ -984,7 +984,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     }
 
     var search_paths: std.ArrayList([]const u8) = .empty;
-    if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
+    if (std.Io.Dir.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
         if (!DocumentStore.supports_build_system) return;
@@ -1000,12 +1000,12 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             error.OutOfMemory => return error.OutOfMemory,
             error.UnsupportedScheme => break :blk,
         };
-        try search_paths.append(builder.arena, std.fs.path.dirname(document_path).?);
+        try search_paths.append(builder.arena, std.Io.Dir.path.dirname(document_path).?);
     }
 
     for (search_paths.items) |path| {
-        if (!std.fs.path.isAbsolute(path)) continue;
-        const dir_path = if (std.fs.path.isAbsolute(completing)) path else try std.fs.path.join(builder.arena, &.{ path, completing });
+        if (!std.Io.Dir.path.isAbsolute(path)) continue;
+        const dir_path = if (std.Io.Dir.path.isAbsolute(completing)) path else try std.Io.Dir.path.join(builder.arena, &.{ path, completing });
 
         var iterable_dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
@@ -1025,7 +1025,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             };
             switch (entry.kind) {
                 .file => if (expected_extension) |expected| {
-                    const actual_extension = std.fs.path.extension(entry.name);
+                    const actual_extension = std.Io.Dir.path.extension(entry.name);
                     if (!std.mem.eql(u8, actual_extension, expected)) continue;
                 },
                 .directory => {},

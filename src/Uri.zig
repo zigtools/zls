@@ -198,8 +198,8 @@ fn fromPathWithOs(
     buf.appendSliceAssumeCapacity("file:");
     if (is_windows and
         path.len >= 2 and
-        std.fs.path.PathType.isSep(.windows, u8, path[0]) and
-        std.fs.path.PathType.isSep(.windows, u8, path[1]))
+        std.Io.Dir.path.PathType.isSep(.windows, u8, path[0]) and
+        std.Io.Dir.path.PathType.isSep(.windows, u8, path[1]))
     {
         // UNC path
     } else if (!std.mem.startsWith(u8, path, "/")) {
@@ -449,7 +449,7 @@ pub fn resolveImport(
     std.Uri.Component.percentEncode(&aw.writer, sub_path, isPathChar) catch unreachable;
 
     const percent_encoded_path = parsed_uri.path.percent_encoded;
-    const joined_path = try std.fs.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
+    const joined_path = try std.Io.Dir.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
     defer allocator.free(joined_path);
 
     var buffer = aw.toArrayList();

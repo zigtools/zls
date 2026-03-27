@@ -131,7 +131,12 @@ pub const BuildOnSaveSupport = union(enum) {
 
 /// Parses a Linux Kernel Version. The result will ignore pre-release and build metadata.
 fn parseUnameKernelVersion(kernel_version: []const u8) !std.SemanticVersion {
-    const extra_index = std.mem.indexOfAny(u8, kernel_version, "-+");
+    const extra_index = for (kernel_version, 0..) |c, i| {
+        switch (c) {
+            '-', '+' => break i,
+            else => continue,
+        }
+    } else null;
     const required = kernel_version[0..(extra_index orelse kernel_version.len)];
     var it = std.mem.splitScalar(u8, required, '.');
     return .{

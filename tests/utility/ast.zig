@@ -82,7 +82,7 @@ fn testNodesAtLoc(source: []const u8) !void {
     const inner_loc: offsets.Loc = .{ .start = locs[1].start, .end = locs[2].start };
     const outer_loc: offsets.Loc = .{ .start = locs[0].start, .end = locs[3].end };
 
-    const new_source = try allocator.dupeZ(u8, ccp.new_source);
+    const new_source = try allocator.dupeSentinel(u8, ccp.new_source, 0);
     defer allocator.free(new_source);
 
     var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);

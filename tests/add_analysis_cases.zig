@@ -37,7 +37,7 @@ pub fn addCases(
             std.debug.panic("failed to walk directory '{s}': {}", .{ cases_path_from_root, err }) orelse break;
 
         if (entry.kind != .file) continue;
-        if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".zig")) continue;
+        if (!std.mem.eql(u8, std.Io.Dir.path.extension(entry.name), ".zig")) continue;
 
         for (test_filters) |test_filter| {
             if (std.mem.find(u8, entry.name, test_filter) != null) break;

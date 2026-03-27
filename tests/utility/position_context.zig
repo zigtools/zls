@@ -728,7 +728,7 @@ fn testContext(source: []const u8, expected_tag: std.meta.Tag(Analyser.PositionC
         };
     };
 
-    const new_source = try allocator.dupeZ(u8, phr.new_source);
+    const new_source = try allocator.dupeSentinel(u8, phr.new_source, 0);
     defer allocator.free(new_source);
 
     var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);

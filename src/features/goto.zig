@@ -256,14 +256,14 @@ fn gotoDefinitionString(
         .cinclude_string_literal => blk: {
             if (!DocumentStore.supports_build_system) return null;
 
-            if (std.fs.path.isAbsolute(import_str)) {
+            if (std.Io.Dir.path.isAbsolute(import_str)) {
                 break :blk .{ .one = try .fromPath(arena, import_str) };
             }
 
             var include_dirs: std.ArrayList([]const u8) = .empty;
             _ = try document_store.collectIncludeDirs(arena, handle, &include_dirs);
             for (include_dirs.items) |dir| {
-                const path = try std.fs.path.join(arena, &.{ dir, import_str });
+                const path = try std.Io.Dir.path.join(arena, &.{ dir, import_str });
                 std.Io.Dir.accessAbsolute(io, path, .{}) catch |err| switch (err) {
                     error.Canceled => return error.Canceled,
                     else => {},

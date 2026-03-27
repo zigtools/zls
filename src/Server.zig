@@ -739,14 +739,14 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{ Canceled, O
         const field: *?[]const u8 = &@field(new_config, file_config.name);
         if (field.*) |maybe_relative| resolve: {
             if (maybe_relative.len == 0) break :resolve;
-            if (std.fs.path.isAbsolute(maybe_relative)) break :resolve;
+            if (std.Io.Dir.path.isAbsolute(maybe_relative)) break :resolve;
 
             const root_dir = maybe_root_dir orelse {
                 log.err("relative path only supported for {s} with exactly one workspace", .{runtime_known_config_name});
                 break;
             };
 
-            const absolute = try std.fs.path.resolve(arena, &.{
+            const absolute = try std.Io.Dir.path.resolve(arena, &.{
                 root_dir, maybe_relative,
             });
 
@@ -902,7 +902,7 @@ fn didChangeWatchedFilesHandler(server: *Server, arena: std.mem.Allocator, notif
             error.OutOfMemory => return error.OutOfMemory,
             else => return error.InvalidParams,
         };
-        const file_extension = std.fs.path.extension(uri.raw);
+        const file_extension = std.Io.Dir.path.extension(uri.raw);
         if (!std.mem.eql(u8, file_extension, ".zig") and !std.mem.eql(u8, file_extension, ".zon")) continue;
 
         switch (change.type) {

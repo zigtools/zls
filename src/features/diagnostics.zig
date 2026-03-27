@@ -422,7 +422,7 @@ pub fn getErrorBundleFromStderr(
         const maybe_source: ?[:0]const u8 = switch (path_resolution) {
             .single_source_file => |source| source,
             .dynamic => |dynamic| source: {
-                const file_path = try std.fs.path.resolve(allocator, &.{ dynamic.base_path, src_path });
+                const file_path = try std.Io.Dir.path.resolve(allocator, &.{ dynamic.base_path, src_path });
                 defer allocator.free(file_path);
                 const file_uri: Uri = try .fromPath(allocator, file_path);
                 defer file_uri.deinit(allocator);

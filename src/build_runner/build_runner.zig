@@ -148,7 +148,7 @@ pub fn main(init: process.Init.Minimal) !void {
             const option_contents = arg[2..];
             if (option_contents.len == 0)
                 fatalWithHint("expected option name after '-D'", .{});
-            if (mem.indexOfScalar(u8, option_contents, '=')) |name_end| {
+            if (mem.findScalar(u8, option_contents, '=')) |name_end| {
                 const option_name = option_contents[0..name_end];
                 const option_value = option_contents[name_end + 1 ..];
                 if (try builder.addUserInputOption(option_name, option_value))
@@ -369,7 +369,7 @@ pub fn main(init: process.Init.Minimal) !void {
             try buffer.appendSlice(arena, k);
             try buffer.append(arena, '\n');
         }
-        const s = std.fs.path.sep_str;
+        const s = std.Io.Dir.path.sep_str;
         const tmp_sub_path = "tmp" ++ s ++ (output_tmp_nonce orelse fatal("missing -Z arg", .{}));
         local_cache_directory.handle.writeFile(io, .{
             .sub_path = tmp_sub_path,
@@ -572,7 +572,7 @@ fn resolveStepNames(
     step_names: []const []const u8,
     check_step_only: bool,
 ) !std.AutoArrayHashMapUnmanaged(*Step, void) {
-    var starting_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .{};
+    var starting_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .empty;
     errdefer starting_steps.deinit(gpa);
 
     if (step_names.len == 0) {
@@ -1064,7 +1064,7 @@ fn extractBuildInformation(
                         if (other.generated_h) |header| {
                             try include_dirs.put(
                                 allocator,
-                                std.fs.path.dirname(header.getPath()).?,
+                                std.Io.Dir.path.dirname(header.getPath()).?,
                                 {},
                             );
                         }
@@ -1091,7 +1091,7 @@ fn extractBuildInformation(
 
             const cwd = module.owner.graph.cache.cwd;
 
-            const root_source_file_path = try std.fs.path.resolve(allocator, &.{ cwd, root_source_file.getPath2(module.owner, null) });
+            const root_source_file_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, root_source_file.getPath2(module.owner, null) });
 
             // All modules with the same root source file are merged. This limitation may be lifted in the future.
             const gop = try modules.getOrPutValue(allocator, root_source_file_path, .{
@@ -1105,7 +1105,7 @@ fn extractBuildInformation(
                 const gop_import = try gop.value_ptr.import_table.map.getOrPut(allocator, name);
                 // This does not account for the possibility of collisions (i.e. modules with same root source file import different modules under the same name).
                 if (!gop_import.found_existing) {
-                    gop_import.value_ptr.* = try std.fs.path.resolve(allocator, &.{ cwd, import_root_source_file.getPath2(import.owner, null) });
+                    gop_import.value_ptr.* = try std.Io.Dir.path.resolve(allocator, &.{ cwd, import_root_source_file.getPath2(import.owner, null) });
                 }
             }
             gop.value_ptr.c_macros = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.c_macros, c_macros.keys() });
@@ -1221,7 +1221,7 @@ fn extractBuildInformation(
     for (all_steps.keys()) |step| {
         const compile = step.cast(Step.Compile) orelse continue;
         const root_source_file = compile.root_module.root_source_file orelse continue;
-        const root_source_file_path = try std.fs.path.resolve(arena, &.{ b.graph.cache.cwd, root_source_file.getPath2(compile.root_module.owner, null) });
+        const root_source_file_path = try std.Io.Dir.path.resolve(arena, &.{ b.graph.cache.cwd, root_source_file.getPath2(compile.root_module.owner, null) });
         try compilations.append(arena, .{
             .root_module = root_source_file_path,
         });
@@ -1252,7 +1252,7 @@ fn extractBuildInformation(
                 try root_dependencies.put(
                     arena,
                     root_dep[0],
-                    try std.fs.path.join(arena, &.{ package_info.build_root, "build.zig" }),
+                    try std.Io.Dir.path.join(arena, &.{ package_info.build_root, "build.zig" }),
                 );
             }
         }
@@ -1353,7 +1353,7 @@ const copied_from_zig = struct {
 
             // Now try appending ".0".
             for (pkgs) |pkg| {
-                if (std.ascii.indexOfIgnoreCase(pkg.name, lib_name)) |pos| {
+                if (std.ascii.findIgnoreCase(pkg.name, lib_name)) |pos| {
                     if (pos != 0) continue;
                     if (mem.eql(u8, pkg.name[lib_name.len..], ".0")) {
                         break :match pkg.name;

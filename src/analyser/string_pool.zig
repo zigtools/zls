@@ -127,7 +127,7 @@ pub fn StringPool(comptime config: Config) type {
             defer pool.mutex.unlock(io);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
             const start = @intFromEnum(index);
-            return try allocator.dupeZ(u8, std.mem.sliceTo(string_bytes + start, 0));
+            return try allocator.dupeSentinel(u8, std.mem.sliceTo(string_bytes + start, 0), 0);
         }
 
         /// storage a slice that points into the internal storage of the `StringPool`.

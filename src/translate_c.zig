@@ -123,8 +123,8 @@ pub fn translate(
 
     var random_bytes: [16]u8 = undefined;
     io.random(&random_bytes);
-    var sub_path: [std.fs.base64_encoder.calcSize(16)]u8 = undefined;
-    _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
+    var sub_path: [std.base64.url_safe.Encoder.calcSize(16)]u8 = undefined;
+    _ = std.base64.url_safe.Encoder.encode(&sub_path, &random_bytes);
 
     var sub_dir = try global_cache_dir.handle.createDirPathOpen(io, &sub_path, .{});
     defer sub_dir.close(io);
@@ -144,7 +144,7 @@ pub fn translate(
         log.warn("failed to delete '{s}/{s}': {}", .{ global_cache_dir.path orelse ".", sub_path, err });
     };
 
-    const file_path = try std.fs.path.join(allocator, &.{ global_cache_dir.path orelse ".", &sub_path, "cimport.h" });
+    const file_path = try std.Io.Dir.path.join(allocator, &.{ global_cache_dir.path orelse ".", &sub_path, "cimport.h" });
     defer allocator.free(file_path);
 
     const base_args = &[_][]const u8{

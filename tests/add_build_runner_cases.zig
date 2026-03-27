@@ -34,14 +34,14 @@ pub fn addCases(
             std.debug.panic("failed to walk directory '{s}': {}", .{ cases_path_from_root, err }) orelse break;
 
         if (entry.kind != .file) continue;
-        if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".zig")) continue;
+        if (!std.mem.eql(u8, std.Io.Dir.path.extension(entry.name), ".zig")) continue;
 
         for (test_filters) |test_filter| {
             if (std.mem.find(u8, entry.name, test_filter) != null) break;
         } else if (test_filters.len > 0) continue;
 
         const build_file = cases_dir.path(b, entry.name);
-        const build_config_json_path = b.fmt("{s}/{s}.json", .{ cases_path_from_root, std.fs.path.stem(entry.name) });
+        const build_config_json_path = b.fmt("{s}/{s}.json", .{ cases_path_from_root, std.Io.Dir.path.stem(entry.name) });
         const expected_build_config_json = cases_dir.path(b, build_config_json_path);
 
         const build_cmd = std.Build.Step.Run.create(b, b.fmt("run build runner ({s})", .{entry.name}));

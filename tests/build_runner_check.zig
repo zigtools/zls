@@ -25,11 +25,11 @@ pub fn main(init: std.process.Init) !u8 {
     defer gpa.free(actual_unsanitized);
 
     std.debug.assert(std.mem.eql(u8, args[3], "--cache-dir"));
-    const local_cache_dir = try std.fs.path.resolve(gpa, &.{ cwd, args[4] });
+    const local_cache_dir = try std.Io.Dir.path.resolve(gpa, &.{ cwd, args[4] });
     defer gpa.free(local_cache_dir);
 
     std.debug.assert(std.mem.eql(u8, args[5], "--global-cache-dir"));
-    const global_cache_dir = try std.fs.path.resolve(gpa, &.{ cwd, args[6] });
+    const global_cache_dir = try std.Io.Dir.path.resolve(gpa, &.{ cwd, args[6] });
     defer gpa.free(global_cache_dir);
 
     const actual_sanitized = sanitized: {
@@ -71,8 +71,8 @@ pub fn main(init: std.process.Init) !u8 {
 
 fn stripBasePath(base_dir: []const u8, path: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, path, base_dir)) return null;
-    if (!std.mem.startsWith(u8, path[base_dir.len..], std.fs.path.sep_str)) return null;
-    return path[base_dir.len + std.fs.path.sep_str.len ..];
+    if (!std.mem.startsWith(u8, path[base_dir.len..], std.Io.Dir.path.sep_str)) return null;
+    return path[base_dir.len + std.Io.Dir.path.sep_str.len ..];
 }
 
 fn sanitizePath(
@@ -87,25 +87,25 @@ fn sanitizePath(
             break :new foo;
         }
         if (stripBasePath(local_cache_dir, path)) |to| {
-            var it = std.fs.path.componentIterator(to);
+            var it = std.Io.Dir.path.componentIterator(to);
             std.debug.assert(std.mem.eql(u8, it.next().?.name, "o"));
             std.debug.assert(it.next().?.name.len == std.Build.Cache.hex_digest_len);
             break :new try std.fmt.allocPrint(arena, ".zig-local-cache/{s}", .{to[it.end_index + 1 ..]});
         }
         if (stripBasePath(global_cache_dir, path)) |to| {
-            var it = std.fs.path.componentIterator(to);
+            var it = std.Io.Dir.path.componentIterator(to);
             std.debug.assert(std.mem.eql(u8, it.next().?.name, "o"));
             std.debug.assert(it.next().?.name.len == std.Build.Cache.hex_digest_len);
             break :new try std.fmt.allocPrint(arena, ".zig-global-cache/{s}", .{to[it.end_index + 1 ..]});
         }
-        std.debug.assert(!std.fs.path.isAbsolute(path)); // got an absolute path that is not in cwd or any cache dir
+        std.debug.assert(!std.Io.Dir.path.isAbsolute(path)); // got an absolute path that is not in cwd or any cache dir
         break :new path;
     });
 
     // Convert windows style '\\' path separators to posix style '/'.
-    if (std.fs.path.sep == '\\') {
+    if (std.Io.Dir.path.sep == '\\') {
         for (new) |*c| {
-            if (c.* == std.fs.path.sep) c.* = '/';
+            if (c.* == std.Io.Dir.path.sep) c.* = '/';
         }
     }
 
