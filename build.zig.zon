@@ -11,24 +11,20 @@
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
     .minimum_zig_version = "0.16.0-dev.2736+3b515fbed",
+    // Must be kept in sync with the `deps.nix` for the Nix flake.
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    // Whenever the dependencies are updated, run the following command:
-    // ```bash
-    // nix run github:nix-community/zon2nix#default_0_14 > deps.nix
-    // ```
-    // The `deps.nix` should also be updated to not fetch `tracy`.
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/71f0a3d660401ee461cc42ae1f2360f4b83084d3.tar.gz",
-            .hash = "known_folders-0.0.0-Fy-PJjrKAAAY9ALC7ALIxFsmKFP314HJw6v3NLSS3NDB",
+            .url = "https://github.com/ziglibs/known-folders/archive/175f5596b3d2ee3c658282bb07885580895a0e73.tar.gz",
+            .hash = "known_folders-0.0.0-Fy-PJk7KAAC41mQXzmFyGa0Q7tvmQjatENkREa6Gc4zu",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/aa11caef328a3f20f2493f8fd676a1dfa7819246.tar.gz",
-            .hash = "diffz-0.0.1-G2tlIYrNAQAQx3cuIp7EVs0xvxbv9DCPf4YuHmvubsrZ",
+            .url = "https://github.com/ziglibs/diffz/archive/d93d5737d2c19a2fb279c8dcaa80a4ce35529a3b.tar.gz",
+            .hash = "diffz-0.0.1-G2tlIXvNAQCPPTvl-leqv4d5nfEdwLw2lfE11P7EGKhy",
         },
         .lsp_kit = .{
-            .url = "git+https://github.com/zigtools/lsp-kit.git#98d6bed6e42a0866e1e2ba0867673d9f57ca6687",
-            .hash = "lsp_kit-0.1.0-bi_PLwozDAApVpvVJHz80NPklig5biWlZCkyxjFbOtiD",
+            .url = "https://github.com//zigtools/lsp-kit/archive/ec325a3c33d1da7708cf513355208f74d9560580.tar.gz",
+            .hash = "lsp_kit-0.1.0-bi_PL_kyDACVTEhLaMq2-PJx0MocqRyjXDAN0ybMUyQQ",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",
