@@ -424,21 +424,25 @@ test "imports" {
     try testFoldingRange(
         \\const std = @import("std");
         \\const builtin = @import("builtin");
+        \\const root = @import("root");
     , &.{
         .{
             .startLine = 0,
             .startCharacter = 0,
-            .endLine = 1,
-            .endCharacter = 34,
+            .endLine = 2,
+            .endCharacter = 29,
             .kind = .imports,
             .collapsedText = "@import(...)",
         },
     });
+}
+
+test "imports with aliases" {
     try testFoldingRange(
         \\const std = @import("std");
         \\const builtin = @import("builtin");
-        \\const lsp = @import("lsp");
-        \\const types = lsp.types;
+        \\const foo = @import("foo");
+        \\const bar = foo.bar;
         \\
         \\pub fn main() void {}
     , &.{
@@ -446,40 +450,45 @@ test "imports" {
             .startLine = 0,
             .startCharacter = 0,
             .endLine = 3,
-            .endCharacter = 23,
+            .endCharacter = 20,
             .kind = .imports,
             .collapsedText = "@import(...)",
         },
     });
-    // Single import should not create folding range
-    try testFoldingRange(
-        \\const std = @import("std");
-        \\
-        \\pub fn main() void {}
-    , &.{});
-    // Imports with gap in between should create separate folding ranges
+}
+
+test "imports exclude small count" {
     try testFoldingRange(
         \\const std = @import("std");
         \\const builtin = @import("builtin");
+    , &.{});
+}
+
+test "imports with gap" {
+    try testFoldingRange(
+        \\const std = @import("std");
+        \\const builtin = @import("builtin");
+        \\const root = @import("root");
         \\
         \\pub const foo = 5;
         \\
-        \\const lsp = @import("lsp");
-        \\const types = @import("types");
+        \\const foo = @import("foo");
+        \\const bar = @import("bar");
+        \\const baz = @import("baz");
     , &.{
         .{
             .startLine = 0,
             .startCharacter = 0,
-            .endLine = 1,
-            .endCharacter = 34,
+            .endLine = 2,
+            .endCharacter = 29,
             .kind = .imports,
             .collapsedText = "@import(...)",
         },
         .{
-            .startLine = 5,
+            .startLine = 6,
             .startCharacter = 0,
-            .endLine = 6,
-            .endCharacter = 30,
+            .endLine = 8,
+            .endCharacter = 27,
             .kind = .imports,
             .collapsedText = "@import(...)",
         },

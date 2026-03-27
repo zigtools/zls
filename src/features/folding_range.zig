@@ -184,18 +184,19 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
     // TODO add folding range normal comments
 
     // Folding range for top level imports
-    if (tree.mode == .zig) {
+    if (tree.mode == .zig) blk: {
         var start_import: ?Ast.Node.Index = null;
         var end_import: ?Ast.Node.Index = null;
+        var import_count: usize = 0;
 
         const root_decls = tree.rootDecls();
         for (root_decls) |node| {
-            const is_import = blk: {
-                if (tree.nodeTag(node) != .simple_var_decl) break :blk false;
+            const is_import = is_import: {
+                if (tree.nodeTag(node) != .simple_var_decl) break :is_import false;
                 const var_decl = tree.simpleVarDecl(node);
-                const init_node = var_decl.ast.init_node.unwrap() orelse break :blk false;
+                const init_node = var_decl.ast.init_node.unwrap() orelse break :is_import false;
 
-                break :blk isImportOrAlias(tree, init_node);
+                break :is_import isImportOrAlias(tree, init_node);
             };
 
             if (is_import) {
@@ -203,18 +204,26 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
                     start_import = node;
                 }
                 end_import = node;
-            } else if (start_import != null and end_import != null) {
-                // We found a non-import after a sequence of imports, create folding range
-                try builder.add(.imports, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
+                import_count += 1;
+                continue;
+            }
+            defer {
                 start_import = null;
                 end_import = null;
+                import_count = 0;
             }
+
+            const start = start_import orelse continue;
+            const end = end_import orelse continue;
+            if (import_count < 3) continue;
+            try builder.add(.imports, tree.firstToken(start), ast.lastToken(tree, end) + 1, .inclusive, .inclusive);
         }
 
         // Handle the case where imports continue to the end of the file
-        if (start_import != null and end_import != null and start_import.? != end_import.?) {
-            try builder.add(.imports, tree.firstToken(start_import.?), ast.lastToken(tree, end_import.?), .inclusive, .inclusive);
-        }
+        const start = start_import orelse break :blk;
+        const end = end_import orelse break :blk;
+        if (import_count < 3) break :blk;
+        try builder.add(.imports, tree.firstToken(start), ast.lastToken(tree, end) + 1, .inclusive, .inclusive);
     }
 
     for (0..tree.nodes.len) |i| {
