@@ -2,7 +2,6 @@
   linkFarm,
   fetchzip,
   fetchgit,
-  emptyDirectory,
 }:
 linkFarm "zig-packages" [
   {
@@ -25,10 +24,5 @@ linkFarm "zig-packages" [
       url = "https://github.com/zigtools/lsp-kit/archive/ec325a3c33d1da7708cf513355208f74d9560580.tar.gz";
       hash = "sha256-60F2BOCrl3CreQFmpH3HAz6zzxd3VgJ3iSEkP39gtgQ=";
     };
-  }
-  # workaround: https://codeberg.org/ziglang/zig/issues/31162
-  {
-    name = "N-V-__8AAOncKwEm1F9c5LrT7HMNmRMYX8-fAoqpc6YyTu9X";
-    path = emptyDirectory;
   }
 ]
