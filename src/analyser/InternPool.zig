@@ -3155,6 +3155,17 @@ pub fn isType(ip: *InternPool, ty: Index) bool {
     };
 }
 
+pub fn isUndefined(ip: *InternPool, index: Index) bool {
+    switch (index) {
+        .undefined_value => return true,
+        else => {
+            ip.lock.lockSharedUncancelable(ip.io);
+            defer ip.lock.unlockShared(ip.io);
+            return ip.items.items(.tag)[@intFromEnum(index)] == .undefined_value;
+        },
+    }
+}
+
 pub fn isUnknown(ip: *InternPool, index: Index) bool {
     switch (index) {
         .unknown_type, .unknown_unknown => return true,
@@ -3832,6 +3843,15 @@ pub fn toInt(ip: *InternPool, val: Index, comptime T: type) ?T {
         .int_big_value => |int_value| int_value.getConst(ip).toInt(T) catch null,
         .null_value => 0,
         else => null,
+    };
+}
+
+pub fn toBigInt(ip: *InternPool, gpa: Allocator, val: Index) !?std.math.big.int.Managed {
+    return switch (ip.indexToKey(val)) {
+        .int_u64_value => |int_value| try .initSet(gpa, int_value.int),
+        .int_i64_value => |int_value| try .initSet(gpa, int_value.int),
+        .int_big_value => |int_value| try int_value.getConst(ip).toManaged(gpa),
+        else => try .initSet(gpa, ip.toInt(val, i64) orelse return null),
     };
 }
 
