@@ -15,7 +15,7 @@
     parseVersionFieldFromZon = name:
       lib.pipe ./build.zig.zon [
         builtins.readFile
-        (builtins.match ".*\n[[:space:]]*\.${name}[[:space:]]=[[:space:]]\"([^\"]+)\".*")
+        (builtins.match ".*\n[[:space:]]*\\.${name}[[:space:]]=[[:space:]]\"([^\"]+)\".*")
         builtins.head
       ];
     zlsVersionShort = parseVersionFieldFromZon "version";
