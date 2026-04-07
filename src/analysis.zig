@@ -6215,7 +6215,7 @@ pub fn innermostScopeAtIndex(
     document_scope: *const DocumentScope,
     source_index: usize,
 ) Scope.Index {
-    return innermostScopeAtIndexWithTag(document_scope, source_index, .initFull()).unwrap().?;
+    return innermostScopeAtIndexWithTag(document_scope, source_index, .full).unwrap().?;
 }
 
 pub fn innermostScopeAtIndexWithTag(

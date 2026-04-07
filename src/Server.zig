@@ -1535,7 +1535,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     defer analyser.deinit();
 
     const only_kinds = if (request.context.only) |kinds| blk: {
-        var set: std.EnumSet(std.meta.Tag(types.CodeAction.Kind)) = .initEmpty();
+        var set: std.EnumSet(std.meta.Tag(types.CodeAction.Kind)) = .empty;
         for (kinds) |kind| {
             set.setPresent(kind, true);
         }
