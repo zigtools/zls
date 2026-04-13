@@ -9,7 +9,7 @@ const ErrorBuilder = @This();
 
 allocator: std.mem.Allocator,
 encoding: offsets.Encoding = .@"utf-16",
-files: std.StringArrayHashMapUnmanaged(File) = .empty,
+files: std.array_hash_map.String(File) = .empty,
 message_count: usize = 0,
 /// similar to `git diff --unified`
 /// show error messages with n lines of context.

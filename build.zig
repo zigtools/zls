@@ -188,7 +188,7 @@ pub fn build(b: *Build) !void {
         .build_options = build_options,
         .version_data = version_data_module,
     });
-    b.modules.put("zls", zls_module) catch @panic("OOM");
+    b.modules.put(b.allocator, "zls", zls_module) catch @panic("OOM");
 
     const known_folders_module = b.dependency("known_folders", .{
         .target = target,
@@ -498,7 +498,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         @"tar.gz",
     };
 
-    var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
+    var compressed_artifacts: std.array_hash_map.String(std.Build.LazyPath) = .empty;
 
     for (release_artifacts) |exe| {
         const resolved_target = exe.root_module.resolved_target.?.result;

@@ -835,7 +835,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
     var skip_set: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, root_decls.len);
     defer skip_set.deinit(allocator);
 
-    var imports: std.ArrayHashMapUnmanaged(ImportDecl, void, void, true) = .empty;
+    var imports: std.array_hash_map.Custom(ImportDecl, void, void, true) = .empty;
     defer imports.deinit(allocator);
 
     // iterate until no more imports are found

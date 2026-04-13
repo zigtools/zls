@@ -27,7 +27,7 @@ pub const Declaration = struct {
 };
 
 filter_buckets: ?[]CuckooFilter.Bucket,
-trigram_to_declarations: std.AutoArrayHashMapUnmanaged(Trigram, std.ArrayList(Declaration.Index)),
+trigram_to_declarations: std.array_hash_map.Auto(Trigram, std.ArrayList(Declaration.Index)),
 declarations: std.MultiArrayList(Declaration),
 
 pub fn init(
@@ -649,7 +649,7 @@ test CuckooFilter {
     const element_count = 499;
     const filter_size = comptime CuckooFilter.capacityForCount(element_count) catch unreachable;
 
-    var entries: std.AutoArrayHashMapUnmanaged(Trigram, void) = .empty;
+    var entries: std.array_hash_map.Auto(Trigram, void) = .empty;
     defer entries.deinit(allocator);
     try entries.ensureTotalCapacity(allocator, element_count);
 

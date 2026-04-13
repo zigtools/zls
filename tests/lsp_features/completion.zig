@@ -453,10 +453,10 @@ test "std.ArrayList" {
     });
 }
 
-test "std.ArrayHashMap" {
+test "std.array_hash_map" {
     try testCompletion(
         \\const std = @import("std");
-        \\const map: std.StringArrayHashMapUnmanaged(void) = undefined;
+        \\const map: std.array_hash_map.String(void) = undefined;
         \\const key = map.getKey("");
         \\const foo = key.?.<cursor>
     , &.{
@@ -466,7 +466,7 @@ test "std.ArrayHashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoArrayHashMapUnmanaged(u32, S) = undefined;
+        \\const map: std.array_hash_map.Auto(u32, S) = undefined;
         \\const s = map.get(0);
         \\const foo = s.?.<cursor>
     , &.{
@@ -475,7 +475,7 @@ test "std.ArrayHashMap" {
     try testCompletion(
         \\const std = @import("std");
         \\const S = struct { alpha: u32 };
-        \\const map: std.AutoArrayHashMapUnmanaged(u32, S) = undefined;
+        \\const map: std.array_hash_map.Auto(u32, S) = undefined;
         \\const gop = try map.getOrPut(undefined, 0);
         \\const foo = gop.value_ptr.<cursor>
     , &.{
@@ -4926,8 +4926,8 @@ fn testCompletionWithOptions(
     }
 }
 
-fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutOfMemory }!std.StringArrayHashMapUnmanaged(void) {
-    var set: std.StringArrayHashMapUnmanaged(void) = .empty;
+fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutOfMemory }!std.array_hash_map.String(void) {
+    var set: std.array_hash_map.String(void) = .empty;
     errdefer set.deinit(allocator);
     try set.ensureTotalCapacity(allocator, items.len);
     for (items) |item| {
@@ -4946,8 +4946,8 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
     return set;
 }
 
-fn set_intersection(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHashMapUnmanaged(void)) error{OutOfMemory}!std.StringArrayHashMapUnmanaged(void) {
-    var result: std.StringArrayHashMapUnmanaged(void) = .empty;
+fn set_intersection(a: std.array_hash_map.String(void), b: std.array_hash_map.String(void)) error{OutOfMemory}!std.array_hash_map.String(void) {
+    var result: std.array_hash_map.String(void) = .empty;
     errdefer result.deinit(allocator);
     for (a.keys()) |key| {
         if (b.contains(key)) try result.putNoClobber(allocator, key, {});
@@ -4955,8 +4955,8 @@ fn set_intersection(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArray
     return result;
 }
 
-fn set_difference(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHashMapUnmanaged(void)) error{OutOfMemory}!std.StringArrayHashMapUnmanaged(void) {
-    var result: std.StringArrayHashMapUnmanaged(void) = .empty;
+fn set_difference(a: std.array_hash_map.String(void), b: std.array_hash_map.String(void)) error{OutOfMemory}!std.array_hash_map.String(void) {
+    var result: std.array_hash_map.String(void) = .empty;
     errdefer result.deinit(allocator);
     for (a.keys()) |key| {
         if (!b.contains(key)) try result.putNoClobber(allocator, key, {});
@@ -4964,7 +4964,7 @@ fn set_difference(a: std.StringArrayHashMapUnmanaged(void), b: std.StringArrayHa
     return result;
 }
 
-fn printLabels(output: *std.ArrayList(u8), labels: std.StringArrayHashMapUnmanaged(void), name: []const u8) error{OutOfMemory}!void {
+fn printLabels(output: *std.ArrayList(u8), labels: std.array_hash_map.String(void), name: []const u8) error{OutOfMemory}!void {
     if (labels.count() != 0) {
         try output.print(allocator, "{s}:\n", .{name});
         for (labels.keys()) |label| {

@@ -26,7 +26,7 @@ mutex: std.Io.Mutex = .init,
 wait_group: if (supports_build_system) std.Io.Group else void = if (supports_build_system) .init else {},
 handles: Uri.ArrayHashMap(*Handle.Future) = .empty,
 build_files: if (supports_build_system) Uri.ArrayHashMap(*BuildFile) else void = if (supports_build_system) .empty else {},
-cimports: if (supports_build_system) std.AutoArrayHashMapUnmanaged(CImportHash, translate_c.Result) else void = if (supports_build_system) .empty else {},
+cimports: if (supports_build_system) std.array_hash_map.Auto(CImportHash, translate_c.Result) else void = if (supports_build_system) .empty else {},
 diagnostics_collection: *DiagnosticsCollection,
 builds_in_progress: std.atomic.Value(i32) = .init(0),
 transport: ?*lsp.Transport = null,
@@ -361,7 +361,7 @@ pub const Handle = struct {
         const target_index = modules.getIndex(target_root_source_file).?;
 
         // We only care about the root source file of each root module so we convert them to a set.
-        var root_modules: std.StringArrayHashMapUnmanaged(void) = .empty;
+        var root_modules: std.array_hash_map.String(void) = .empty;
         defer root_modules.deinit(allocator);
 
         try root_modules.ensureTotalCapacity(allocator, build_config.compilations.len);

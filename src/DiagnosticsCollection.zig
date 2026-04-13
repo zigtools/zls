@@ -7,7 +7,7 @@ const Uri = @import("Uri.zig");
 io: std.Io,
 allocator: std.mem.Allocator,
 mutex: std.Io.Mutex = .init,
-tag_set: std.AutoArrayHashMapUnmanaged(Tag, struct {
+tag_set: std.array_hash_map.Auto(Tag, struct {
     version: u32 = 0,
     error_bundle_src_base_path: ?[]const u8 = null,
     /// Used to store diagnostics from `pushErrorBundle`

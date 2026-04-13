@@ -599,12 +599,12 @@ fn initializedHandler(server: *Server, arena: std.mem.Allocator, notification: t
 
     if (server.client_capabilities.supports_workspace_did_change_watched_files) {
         // `{ "watchers": [ { "globPattern": "**/*.{zig,zon}" } ] }`
-        var watcher: std.json.ObjectMap = .init(arena);
-        try watcher.putNoClobber("globPattern", .{ .string = "**/*.{zig,zon}" });
+        var watcher: std.json.ObjectMap = .empty;
+        try watcher.putNoClobber(arena, "globPattern", .{ .string = "**/*.{zig,zon}" });
         var watchers_arr: std.json.Array = try .initCapacity(arena, 1);
         watchers_arr.appendAssumeCapacity(.{ .object = watcher });
-        var fs_watcher_obj: std.json.ObjectMap = .init(arena);
-        try fs_watcher_obj.putNoClobber("watchers", .{ .array = watchers_arr });
+        var fs_watcher_obj: std.json.ObjectMap = .empty;
+        try fs_watcher_obj.putNoClobber(arena, "watchers", .{ .array = watchers_arr });
         const json_val: std.json.Value = .{ .object = fs_watcher_obj };
 
         try server.registerCapability("workspace/didChangeWatchedFiles", json_val);
