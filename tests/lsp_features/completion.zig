@@ -3897,8 +3897,8 @@ test "insert replace behaviour - builtin with snippets - @errorFromInt" {
     try testCompletionTextEdit(.{
         .source = "const foo = @<cursor>;",
         .label = "@errorFromInt",
-        .expected_insert_line = "const foo = @errorFromInt(${1:value: std.meta.Int(.unsigned, @bitSizeOf(anyerror))});",
-        .expected_replace_line = "const foo = @errorFromInt(${1:value: std.meta.Int(.unsigned, @bitSizeOf(anyerror))});",
+        .expected_insert_line = "const foo = @errorFromInt(${1:value: @Int(.unsigned, @bitSizeOf(anyerror))});",
+        .expected_replace_line = "const foo = @errorFromInt(${1:value: @Int(.unsigned, @bitSizeOf(anyerror))});",
         .enable_snippets = true,
         .enable_argument_placeholders = true,
     });
