@@ -1894,7 +1894,7 @@ fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocat
         if (err == error.Canceled) return error.Canceled;
         log.err("failed to process {f}: {}", .{ fmtMessage(message), err });
         if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace);
+            std.debug.dumpErrorReturnTrace(trace);
         }
 
         switch (message) {
