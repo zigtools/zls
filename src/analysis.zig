@@ -3875,6 +3875,13 @@ pub const Type = struct {
         };
     }
 
+    pub fn ipTypeIndex(self: Type) ?InternPool.Index {
+        return switch (self.data) {
+            .ip_index => |payload| payload.type,
+            else => null,
+        };
+    }
+
     fn withoutIPIndex(self: Type, analyser: *Analyser) Type {
         return switch (self.data) {
             .ip_index => |payload| fromIP(analyser, payload.type, null),
@@ -7013,3 +7020,280 @@ pub const ReferencedType = struct {
         }
     };
 };
+
+pub const SizeAlign = struct {
+    bits: u64,
+    align_bytes: u16,
+
+    pub fn format(self: SizeAlign, arena: std.mem.Allocator) error{OutOfMemory}![]const u8 {
+        const bytes = self.bits / 8;
+        return std.fmt.allocPrint(arena, "Size: {d} byte{s} ({d} bit{s}), Align: {d}", .{
+            bytes,
+            if (bytes == 1) "" else "s",
+            self.bits,
+            if (self.bits == 1) "" else "s",
+            self.align_bytes,
+        });
+    }
+
+    pub fn fromIndex(ip: *InternPool, idx: InternPool.Index) ?SizeAlign {
+        const bits = ip.typeBitSize(idx, builtin.target) orelse return null;
+        const align_bytes = ip.typeAlignment(idx, builtin.target) orelse return null;
+        return .{ .bits = bits, .align_bytes = align_bytes };
+    }
+
+    pub fn fromType(analyser: *Analyser, ty: Analyser.Type) ?SizeAlign {
+        // Fast path if type is in the InternPool
+        const type_index = if (ty.is_type_val) ty.ipIndex() else ty.ipTypeIndex();
+        if (type_index) |idx| return fromIndex(analyser.ip, idx);
+
+        // Since not all types are in the InternPool, we need to reimplement some
+        // parts of it here
+        return switch (ty.data) {
+            .pointer => |ptr_info| .{
+                .bits = if (ptr_info.size == .slice)
+                    builtin.target.ptrBitWidth() * 2
+                else
+                    builtin.target.ptrBitWidth(),
+                .align_bytes = builtin.target.ptrBitWidth() / 8,
+            },
+            .array => |arr_info| blk: {
+                const elem_size = fromType(analyser, arr_info.elem_ty.*) orelse break :blk null;
+                const arr_len = arr_info.elem_count orelse break :blk null;
+                break :blk .{
+                    .bits = elem_size.bits * arr_len,
+                    .align_bytes = elem_size.align_bytes,
+                };
+            },
+            .optional => |opt_ty| fromOptional(analyser, opt_ty.*),
+            else => null,
+        };
+    }
+
+    pub fn fromOptional(analyser: *Analyser, payload_ty: Analyser.Type) ?SizeAlign {
+        if (payload_ty.data == .pointer) {
+            return .{
+                .bits = builtin.target.ptrBitWidth(),
+                .align_bytes = builtin.target.ptrBitWidth() / 8,
+            };
+        }
+        const payload = fromType(analyser, payload_ty) orelse return null;
+        const total_bits = payload.bits + 8;
+        const align_bits = payload.align_bytes * 8;
+        return .{
+            .bits = std.mem.alignForward(u64, total_bits, align_bits),
+            .align_bytes = payload.align_bytes,
+        };
+    }
+
+    pub fn addField(self: *SizeAlign, field: SizeAlign, is_packed: bool) void {
+        // For `extern` structs we would need exact order of fields, but I don't know
+        // if ast has a stable ordering, so for now only handle simple packed and auto layouts
+        if (!is_packed) {
+            // Assume there are no `align(...)` modifiers as well
+            self.align_bytes = @max(self.align_bytes, field.align_bytes);
+        }
+        self.bits += field.bits;
+    }
+
+    pub fn finalize(self: *SizeAlign) void {
+        self.bits = std.mem.alignForward(u64, self.bits, self.align_bytes * 8);
+    }
+};
+
+pub fn getStructSizeAlign(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    container_decl: Ast.full.ContainerDecl,
+    is_packed: bool,
+    depth: u8,
+) Analyser.Error!?SizeAlign {
+    // Fast path if there is a backing integer type
+    if (is_packed) {
+        if (container_decl.ast.arg.unwrap()) |arg_node| {
+            if (try analyser.resolveTypeOfNode(.of(arg_node, handle))) |backing_type| {
+                if (backing_type.ipIndex()) |idx| return SizeAlign.fromIndex(analyser.ip, idx);
+            }
+        }
+    }
+
+    return analyser.getStructSizeAlignFromMembers(handle, container_decl.ast.members, is_packed, depth);
+}
+
+pub fn getStructSizeAlignFromMembers(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    members: []const Ast.Node.Index,
+    is_packed: bool,
+    depth: u8,
+) Analyser.Error!?SizeAlign {
+    if (10 < depth) return null;
+
+    const tree = &handle.tree;
+    var result: SizeAlign = .{ .bits = 0, .align_bytes = 1 };
+
+    for (members) |member| {
+        switch (tree.nodeTag(member)) {
+            .container_field, .container_field_init, .container_field_align => {
+                const field = tree.fullContainerField(member) orelse continue;
+                const type_node = field.ast.type_expr.unwrap() orelse continue;
+
+                if (try analyser.getFieldSizeAlign(handle, type_node, depth + 1)) |field_size| {
+                    result.addField(field_size, is_packed);
+                } else return null;
+            },
+            else => {},
+        }
+    }
+
+    result.finalize();
+    return result;
+}
+
+pub fn getFieldSizeAlign(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    type_node: Ast.Node.Index,
+    depth: u8,
+) Analyser.Error!?SizeAlign {
+    const field_type = try analyser.resolveTypeOfNode(.of(type_node, handle)) orelse return null;
+    if (!field_type.is_type_val) return null;
+
+    // Fast path if it is a primitive type
+    if (SizeAlign.fromType(analyser, field_type)) |size_align| return size_align;
+
+    if (field_type.data == .container) {
+        const c = field_type.data.container;
+        const field_handle = c.scope_handle.handle;
+        const field_tree = &field_handle.tree;
+        const field_node = c.scope_handle.toNode();
+
+        return if (field_node == .root)
+            analyser.getStructSizeAlignFromMembers(field_handle, field_tree.rootDecls(), false, depth)
+        else
+            analyser.getSizeAlignFromNode(field_handle, field_node, depth);
+    } else return null;
+}
+
+pub fn getUnionSizeAlign(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    container_decl: Ast.full.ContainerDecl,
+    is_packed: bool,
+    depth: u8,
+) Analyser.Error!?SizeAlign {
+    // Fast path if there is a backing integer type
+    if (is_packed) {
+        if (container_decl.ast.arg.unwrap()) |arg_node| {
+            if (try analyser.resolveTypeOfNode(.of(arg_node, handle))) |backing_type| {
+                if (backing_type.ipIndex()) |idx| return SizeAlign.fromIndex(analyser.ip, idx);
+            }
+        }
+    }
+
+    const tree = &handle.tree;
+    var max_bits: u64 = 0;
+    var max_align: u16 = 1;
+
+    for (container_decl.ast.members) |member| {
+        switch (tree.nodeTag(member)) {
+            .container_field, .container_field_init, .container_field_align => {
+                const field = tree.fullContainerField(member) orelse continue;
+                const type_node = field.ast.type_expr.unwrap() orelse continue;
+
+                if (try analyser.getFieldSizeAlign(handle, type_node, depth + 1)) |field_size| {
+                    max_bits = @max(max_bits, field_size.bits);
+                    max_align = @max(max_align, field_size.align_bytes);
+                } else return null;
+            },
+            else => {},
+        }
+    }
+
+    if (is_packed) {
+        return .{ .bits = max_bits, .align_bytes = max_align };
+    } else {
+        // If there is an enum for a tag
+        if (container_decl.ast.enum_token != null or container_decl.ast.arg.unwrap() != null) {
+            const tag_size = try analyser.getEnumSizeAlign(handle, container_decl) orelse return null;
+            max_align = @max(max_align, tag_size.align_bytes);
+            max_bits += tag_size.bits;
+            max_bits = std.mem.alignForward(u64, max_bits, max_align * 8);
+        } else {
+            // non packed unions have at least 1 byte of tag inside for safety checks
+            max_bits += 8;
+            max_bits = std.mem.alignForward(u64, max_bits, max_align * 8);
+        }
+        return .{ .bits = max_bits, .align_bytes = max_align };
+    }
+}
+
+pub fn getEnumSizeAlign(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    container_decl: Ast.full.ContainerDecl,
+) Analyser.Error!?SizeAlign {
+    // Use explicit tag if there is one
+    if (container_decl.ast.arg.unwrap()) |arg_node| {
+        if (try analyser.resolveTypeOfNode(.of(arg_node, handle))) |tag_type| {
+            if (tag_type.ipIndex()) |idx| return SizeAlign.fromIndex(analyser.ip, idx);
+        }
+    }
+
+    const tree = &handle.tree;
+    var field_count: u16 = 0;
+    for (container_decl.ast.members) |member| {
+        switch (tree.nodeTag(member)) {
+            .container_field, .container_field_init => field_count += 1,
+            else => {},
+        }
+    }
+
+    if (field_count == 0) {
+        return .{ .bits = 0, .align_bytes = 1 };
+    } else {
+        // If enum does not have an explicit size with the tag, it is at least 8 bits big
+        field_count = @max(field_count, 8);
+        const bits = std.math.pow(u16, 2, std.math.log2_int_ceil(u16, field_count));
+        return .{ .bits = bits, .align_bytes = bits / 8 };
+    }
+}
+
+pub fn getSizeAlignFromNode(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    node: Ast.Node.Index,
+    depth: u8,
+) Analyser.Error!?SizeAlign {
+    const tree = &handle.tree;
+    var buf: [2]Ast.Node.Index = undefined;
+    const container_decl = tree.fullContainerDecl(&buf, node) orelse return null;
+    var is_packed = false;
+    if (container_decl.layout_token) |lt| {
+        is_packed = tree.tokenTag(lt) == .keyword_packed;
+    }
+
+    return switch (tree.tokenTag(container_decl.ast.main_token)) {
+        .keyword_struct => analyser.getStructSizeAlign(handle, container_decl, is_packed, depth),
+        .keyword_union => analyser.getUnionSizeAlign(handle, container_decl, is_packed, depth),
+        .keyword_enum => analyser.getEnumSizeAlign(handle, container_decl),
+        else => null,
+    };
+}
+
+pub fn getSizeAlignFromType(analyser: *Analyser, resolved_type: Analyser.Type) Analyser.Error!?SizeAlign {
+    // If the type in the InternPool, get info from there
+    const type_index = if (resolved_type.is_type_val) resolved_type.ipIndex() else resolved_type.ipTypeIndex();
+    if (type_index) |idx| if (SizeAlign.fromIndex(analyser.ip, idx)) |sa| return sa;
+
+    if (resolved_type.data == .container) {
+        const c = resolved_type.data.container;
+        const handle = c.scope_handle.handle;
+        const node = c.scope_handle.toNode();
+
+        return if (node == .root)
+            analyser.getStructSizeAlignFromMembers(handle, handle.tree.rootDecls(), false, 0)
+        else
+            analyser.getSizeAlignFromNode(handle, node, 0);
+    } else return null;
+}
