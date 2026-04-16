@@ -1751,9 +1751,6 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     };
 
     const tree = &decl_handle.handle.tree;
-    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
-
-    if (is_cimport or !analyser.collect_callsite_references) return null;
 
     // protection against recursive callsite resolution
     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
@@ -2404,17 +2401,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     if (try analyser.resolveImportString(handle, import_string)) |ty| return ty;
                     if (try analyser.resolveImportString(analyser.root_handle orelse return null, import_string)) |ty| return ty;
                     return null;
-                },
-                .c_import => {
-                    if (!DocumentStore.supports_build_system) return null;
-                    const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
-
-                    const new_handle = try analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
-
-                    return .{
-                        .data = .{ .container = .root(new_handle) },
-                        .is_type_val = true,
-                    };
                 },
                 .FieldType => {
                     if (params.len < 2) return null;
@@ -5213,7 +5199,6 @@ pub fn getFieldAccessType(
 pub const PositionContext = union(enum) {
     builtin: offsets.Loc,
     import_string_literal: offsets.Loc,
-    cinclude_string_literal: offsets.Loc,
     embedfile_string_literal: offsets.Loc,
     string_literal: offsets.Loc,
     field_access: offsets.Loc,
@@ -5242,7 +5227,6 @@ pub const PositionContext = union(enum) {
         return switch (self) {
             .builtin,
             .import_string_literal,
-            .cinclude_string_literal,
             .embedfile_string_literal,
             .string_literal,
             .field_access,
@@ -5266,13 +5250,11 @@ pub const PositionContext = union(enum) {
 
     /// Asserts that `self` is one of the following:
     ///  - `.import_string_literal`
-    ///  - `.cinclude_string_literal`
     ///  - `.embedfile_string_literal`
     ///  - `.string_literal`
     pub fn stringLiteralContentLoc(self: PositionContext, source: []const u8) offsets.Loc {
         var location = switch (self) {
             .import_string_literal,
-            .cinclude_string_literal,
             .embedfile_string_literal,
             .string_literal,
             => |l| l,
@@ -5500,8 +5482,6 @@ pub fn getPositionContext(
                             const builtin_name = tree.source[loc.start..loc.end];
                             if (std.mem.eql(u8, builtin_name, "@import")) {
                                 new_state = .{ .import_string_literal = tok.loc };
-                            } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
-                                new_state = .{ .cinclude_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
                                 new_state = .{ .embedfile_string_literal = tok.loc };
                             }

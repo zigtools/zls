@@ -593,10 +593,8 @@ test "enum" {
 test "union" {
     try testHover(
         \\const Comptime<cursor>Reason = union(enum) {
-        \\  c_import: struct {
-        \\      block: *Block,
-        \\      src: LazySrcLoc,
-        \\  },
+        \\  simple: std.zig.SimpleComptimeReason,
+        \\
         \\  comptime_ret_ty: struct {
         \\      block: *Block,
         \\      func: Air.Inst.Ref,
@@ -611,10 +609,7 @@ test "union" {
     ,
         \\```zig
         \\const ComptimeReason = union(enum) {
-        \\  c_import: struct {
-        \\      block: *Block,
-        \\      src: LazySrcLoc,
-        \\  },
+        \\  simple: std.zig.SimpleComptimeReason,
         \\  comptime_ret_ty: struct {
         \\      block: *Block,
         \\      func: Air.Inst.Ref,

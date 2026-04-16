@@ -25,7 +25,7 @@ When upgrading Zig, make sure to update ZLS too keep them in sync.
 
 ## Features
 
-ZLS supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, cImport and others. Support for comptime and semantic analysis is Work-in-Progress.
+ZLS supports most language features, including simple type function support, payload capture type resolution, custom packages, and others. Support for comptime and semantic analysis is Work-in-Progress.
 
 The following LSP features are supported:
 

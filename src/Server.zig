@@ -1028,13 +1028,6 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
                 server.document_store.invalidateBuildFile(build_file_uri);
             }
         }
-
-        if (new_zig_exe_path or new_zig_lib_path) {
-            for (server.document_store.cimports.values()) |*cimport| {
-                cimport.deinit(server.document_store.allocator);
-            }
-            server.document_store.cimports.clearAndFree(server.document_store.allocator);
-        }
     }
 
     if (server.status == .initialized and
