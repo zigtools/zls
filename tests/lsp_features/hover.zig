@@ -223,16 +223,19 @@ test "builtin" {
 
 test "builtin with multi line parameters" {
     try testHoverWithOptions(
-        \\@Un<cursor>ion()
+        \\@atomic<cursor>Store()
     ,
-        \\@Union(
-        \\  comptime layout: Type.ContainerLayout,
-        \\  comptime ArgType: ?type,
-        \\  comptime field_names: []const []const u8,
-        \\  comptime field_types: *const [field_names.len]type,
-        \\  comptime field_attrs: *const [field_names.len]Type.UnionField.Attributes,
-        \\) type
-        \\Returns a [union](https://ziglang.org/documentation/master/#union) type with the properties specified by the arguments.
+        \\@atomicStore(
+        \\  comptime T: type,
+        \\  ptr: *T,
+        \\  value: T,
+        \\  comptime ordering: AtomicOrder,
+        \\) void
+        \\This builtin function dereferences a pointer to a `T` and atomically stores the given value.
+        \\
+        \\`T` must be a pointer, a `bool`, a float, an integer, an enum, or a packed struct.
+        \\
+        \\`AtomicOrder` can be found with `@import("std").builtin.AtomicOrder`.
     , .{ .markup_kind = .plaintext });
 }
 
