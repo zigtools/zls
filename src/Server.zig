@@ -1276,7 +1276,7 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
     defer analyser.deinit();
     // semantic tokens can be quite expensive to compute on large files
     // and disabling callsite references can help with bringing the cost down.
-    analyser.collect_callsite_references = false;
+    analyser.max_callsite_depth = 0;
 
     return try semantic_tokens.writeSemanticTokens(
         arena,
@@ -1307,7 +1307,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     defer analyser.deinit();
     // semantic tokens can be quite expensive to compute on large files
     // and disabling callsite references can help with bringing the cost down.
-    analyser.collect_callsite_references = false;
+    analyser.max_callsite_depth = 0;
 
     return try semantic_tokens.writeSemanticTokens(
         arena,
