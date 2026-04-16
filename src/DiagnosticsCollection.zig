@@ -33,8 +33,6 @@ pub const Tag = enum(u32) {
     /// - ast-check
     /// - warn_style
     parse,
-    /// errors from `@cImport`
-    cimport,
     /// - Build On Save
     /// - Build Runner
     _,
