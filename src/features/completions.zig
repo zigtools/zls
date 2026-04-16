@@ -217,19 +217,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
 fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Analyser.Error!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
-    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
-    if (is_cimport) {
-        if (std.mem.startsWith(u8, name, "_")) return;
-        const exclusions: std.StaticStringMap(void) = .initComptime(.{
-            .{ "linux", {} },
-            .{ "unix", {} },
-            .{ "WIN32", {} },
-            .{ "WINNT", {} },
-            .{ "WIN64", {} },
-        });
-        if (exclusions.has(name)) return;
-    }
-
     var doc_comments_buffer: [2][]const u8 = undefined;
     var doc_comments: std.ArrayList([]const u8) = .initBuffer(&doc_comments_buffer);
     if (try decl_handle.docComments(builder.arena)) |docs| {
@@ -875,7 +862,6 @@ fn collectErrorSetNames(
 
 /// Asserts that `pos_context` is one of the following:
 ///  - `.import_string_literal`
-///  - `.cinclude_string_literal`
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) Analyser.Error!void {
@@ -986,15 +972,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     var search_paths: std.ArrayList([]const u8) = .empty;
     if (std.Io.Dir.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
-    } else if (pos_context == .cinclude_string_literal) {
-        if (!DocumentStore.supports_build_system) return;
-        _ = store.collectIncludeDirs(builder.arena, builder.orig_handle, &search_paths) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => {
-                log.err("failed to resolve include paths: {}", .{err});
-                return;
-            },
-        };
     } else blk: {
         const document_path = builder.orig_handle.uri.toFsPath(builder.arena) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -1018,7 +995,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             const entry = opt_entry orelse break;
             const expected_extension = switch (pos_context) {
                 .import_string_literal => ".zig",
-                .cinclude_string_literal => ".h",
                 .embedfile_string_literal => null,
                 .string_literal => null,
                 else => unreachable,
@@ -1046,7 +1022,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             try builder.completions.append(builder.arena, .{
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
-                .detail = if (pos_context == .cinclude_string_literal) path else null,
                 .textEdit = createTextEdit(builder, .{ .newText = insert_text, .insert = insert_range, .replace = replace_range }),
                 .sortText = try generateSortText(builder.arena, score, label),
             });
@@ -1094,7 +1069,6 @@ pub fn completionAtIndex(
         .error_access => |loc| try completeError(&builder, loc),
         .label_access, .label_decl => try completeLabel(&builder),
         .import_string_literal,
-        .cinclude_string_literal,
         .embedfile_string_literal,
         .string_literal,
         => try completeFileSystemStringLiteral(&builder, pos_context),

@@ -165,30 +165,7 @@ fn gotoDefinitionBuiltin(
     const tree = &handle.tree;
     const name_loc = offsets.tokenIndexToLoc(tree.source, loc.start);
     const name = offsets.locToSlice(tree.source, name_loc);
-    if (std.mem.eql(u8, name, "@cImport")) {
-        if (!DocumentStore.supports_build_system) return null;
-
-        const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = tree.nodeMainToken(cimport_node);
-            if (loc.start == tree.tokenStart(main_token)) break index;
-        } else return null;
-        const hash = handle.cimports.items(.hash)[index];
-
-        const result = analyser.store.cimports.get(hash) orelse return null;
-        const target_range: types.Range = .{
-            .start = .{ .line = 0, .character = 0 },
-            .end = .{ .line = 0, .character = 0 },
-        };
-        switch (result) {
-            .failure => return null,
-            .success => |uri| return .{
-                .originSelectionRange = offsets.locToRange(tree.source, name_loc, offset_encoding),
-                .targetUri = uri.raw,
-                .targetRange = target_range,
-                .targetSelectionRange = target_range,
-            },
-        }
-    } else if (std.mem.eql(u8, name, "@This")) {
+    if (std.mem.eql(u8, name, "@This")) {
         const ty = try analyser.innermostContainer(handle, name_loc.start);
         const definition = ty.typeDefinitionToken() orelse return null;
         const token_loc = offsets.tokenToLoc(tree, definition.token);
@@ -243,8 +220,6 @@ fn gotoDefinitionString(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const io = document_store.io;
-
     const loc = pos_context.stringLiteralContentLoc(handle.tree.source);
     if (loc.start == loc.end) return null;
     const import_str = offsets.locToSlice(handle.tree.source, loc);
@@ -253,25 +228,6 @@ fn gotoDefinitionString(
         .import_string_literal,
         .embedfile_string_literal,
         => try document_store.uriFromImportStr(arena, handle, import_str),
-        .cinclude_string_literal => blk: {
-            if (!DocumentStore.supports_build_system) return null;
-
-            if (std.Io.Dir.path.isAbsolute(import_str)) {
-                break :blk .{ .one = try .fromPath(arena, import_str) };
-            }
-
-            var include_dirs: std.ArrayList([]const u8) = .empty;
-            _ = try document_store.collectIncludeDirs(arena, handle, &include_dirs);
-            for (include_dirs.items) |dir| {
-                const path = try std.Io.Dir.path.join(arena, &.{ dir, import_str });
-                std.Io.Dir.accessAbsolute(io, path, .{}) catch |err| switch (err) {
-                    error.Canceled => return error.Canceled,
-                    else => {},
-                };
-                break :blk .{ .one = try .fromPath(arena, path) };
-            }
-            return null;
-        },
         else => unreachable,
     };
 
@@ -339,7 +295,6 @@ pub fn gotoHandler(
             }
         },
         .import_string_literal,
-        .cinclude_string_literal,
         .embedfile_string_literal,
         => {
             const links = try gotoDefinitionString(&server.document_store, arena, pos_context, handle, server.offset_encoding) orelse return null;
