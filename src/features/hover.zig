@@ -36,18 +36,37 @@ fn hoverSymbol(
     }
 
     const tree = &decl_handle.handle.tree;
+
+    // Save container node in case we cannot get size/alignment directly from the type
+    var container_init_node: ?Ast.Node.Index = null;
     const def_str = switch (decl_handle.decl) {
         .ast_node => |node| switch (tree.nodeTag(node)) {
             .global_var_decl,
             .local_var_decl,
             .aligned_var_decl,
             .simple_var_decl,
-            => try Analyser.getVariableSignature(
-                arena,
-                tree,
-                tree.fullVarDecl(node).?,
-                true,
-            ),
+            => blk: {
+                const var_decl = tree.fullVarDecl(node).?;
+                if (var_decl.ast.init_node.unwrap()) |init_node| {
+                    switch (tree.nodeTag(init_node)) {
+                        .container_decl,
+                        .container_decl_trailing,
+                        .container_decl_arg,
+                        .container_decl_arg_trailing,
+                        .container_decl_two,
+                        .container_decl_two_trailing,
+                        .tagged_union,
+                        .tagged_union_trailing,
+                        .tagged_union_two,
+                        .tagged_union_two_trailing,
+                        .tagged_union_enum_tag,
+                        .tagged_union_enum_tag_trailing,
+                        => container_init_node = init_node,
+                        else => {},
+                    }
+                }
+                break :blk try Analyser.getVariableSignature(arena, tree, var_decl, true);
+            },
             .container_field,
             .container_field_init,
             .container_field_align,
@@ -80,24 +99,30 @@ fn hoverSymbol(
     return try hoverSymbolResolvedType(
         analyser,
         arena,
+        decl_handle.handle,
         def_str,
         markup_kind,
         &doc_strings,
         maybe_resolved_type,
+        container_init_node,
     );
 }
 
 fn hoverSymbolResolvedType(
     analyser: *Analyser,
     arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
     def_str: []const u8,
     markup_kind: types.MarkupKind,
     doc_strings: *std.ArrayList([]const u8),
     resolved_type_maybe: ?Analyser.Type,
-) error{OutOfMemory}!?[]const u8 {
+    container_init_node: ?Ast.Node.Index,
+) Analyser.Error!?[]const u8 {
     var referenced: Analyser.ReferencedType.Set = .empty;
     var resolved_type_strings: std.ArrayList([]const u8) = .empty;
     var has_more = false;
+    var size_align_str: ?[]const u8 = null;
+
     if (resolved_type_maybe) |resolved_type| {
         if (try resolved_type.docComments(arena)) |doc|
             try doc_strings.append(arena, doc);
@@ -121,6 +146,12 @@ fn hoverSymbolResolvedType(
                 try resolved_type_strings.append(arena, type_str);
             }
         }
+
+        var size_align = try analyser.getSizeAlignFromType(resolved_type);
+        if (size_align == null and container_init_node != null) {
+            size_align = try analyser.getSizeAlignFromNode(handle, container_init_node.?, 0);
+        }
+        if (size_align) |sa| size_align_str = try sa.format(arena);
     }
     const referenced_types: []const Analyser.ReferencedType = referenced.keys();
     return try hoverSymbolResolved(
@@ -131,6 +162,7 @@ fn hoverSymbolResolvedType(
         resolved_type_strings.items,
         has_more,
         referenced_types,
+        size_align_str,
     );
 }
 
@@ -142,6 +174,7 @@ fn hoverSymbolResolved(
     resolved_type_strings: []const []const u8,
     has_more: bool,
     referenced_types: []const Analyser.ReferencedType,
+    size_align_str: ?[]const u8,
 ) error{OutOfMemory}![]const u8 {
     var output: std.ArrayList(u8) = .empty;
 
@@ -153,6 +186,8 @@ fn hoverSymbolResolved(
             try output.appendSlice(arena, "\n```zig\n(unknown)\n```");
         if (has_more)
             try output.print(arena, "\n```txt\n(...)\n```", .{});
+        if (size_align_str) |sa|
+            try output.print(arena, "\n\n{s}", .{sa});
         if (referenced_types.len > 0)
             try output.print(arena, "\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
@@ -170,6 +205,8 @@ fn hoverSymbolResolved(
             try output.appendSlice(arena, "\n(unknown)");
         if (has_more)
             try output.print(arena, "\n(...)", .{});
+        if (size_align_str) |sa|
+            try output.print(arena, "\n\n{s}", .{sa});
     }
 
     if (doc_strings.len > 0) {
@@ -308,7 +345,18 @@ fn hoverDefinitionGlobal(
             if (std.mem.eql(u8, name, "_")) return null;
             if (try analyser.resolvePrimitive(name)) |ip_index| {
                 const resolved_type_str = try std.fmt.allocPrint(arena, "{f}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
-                break :blk try hoverSymbolResolved(arena, markup_kind, &.{}, name, &.{resolved_type_str}, false, &.{});
+                const size_align = Analyser.SizeAlign.fromIndex(analyser.ip, ip_index);
+                const size_align_str = if (size_align) |sa| try sa.format(arena) else null;
+                break :blk try hoverSymbolResolved(
+                    arena,
+                    markup_kind,
+                    &.{},
+                    name,
+                    &.{resolved_type_str},
+                    false,
+                    &.{},
+                    size_align_str,
+                );
             }
         }
         const decl = (try analyser.lookupSymbolGlobal(handle, name, pos_index)) orelse return null;
@@ -358,7 +406,16 @@ fn hoverDefinitionStructInit(
         .contents = .{
             .markup_content = .{
                 .kind = markup_kind,
-                .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
+                .value = try hoverSymbolResolved(
+                    arena,
+                    markup_kind,
+                    doc_strings.items,
+                    def_str,
+                    &.{"type"},
+                    false,
+                    referenced_types,
+                    null,
+                ),
             },
         },
         .range = offsets.tokenToRange(&handle.tree, token, offset_encoding),
@@ -417,7 +474,16 @@ fn hoverDefinitionFieldAccess(
     for (tys.items) |ty| {
         const def_str = offsets.locToSlice(handle.tree.source, highlight_loc);
         var doc_strings: std.ArrayList([]const u8) = .empty;
-        content.appendAssumeCapacity(try hoverSymbolResolvedType(analyser, arena, def_str, markup_kind, &doc_strings, ty) orelse continue);
+        content.appendAssumeCapacity(try hoverSymbolResolvedType(
+            analyser,
+            arena,
+            handle,
+            def_str,
+            markup_kind,
+            &doc_strings,
+            ty,
+            null,
+        ) orelse continue);
     }
 
     return .{

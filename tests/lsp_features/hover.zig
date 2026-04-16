@@ -18,6 +18,8 @@ test "primitive" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
     try testHover(
         \\const foo = true<cursor>;
@@ -38,6 +40,8 @@ test "primitive" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
     try testHover(
         \\const foo = f32<cursor>;
@@ -48,6 +52,8 @@ test "primitive" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
     try testHover(
         \\const foo = i64<cursor>;
@@ -58,6 +64,8 @@ test "primitive" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     );
     try testHover(
         \\const foo = null<cursor>;
@@ -246,6 +254,8 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
     try testHover(
         \\const Str<cursor>uct = struct {
@@ -258,6 +268,8 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
     );
     try testHover(
         \\const <cursor>S = struct {
@@ -276,6 +288,8 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
     try testHover(
         \\/// Foo doc comment
@@ -300,7 +314,47 @@ test "struct" {
         \\(type)
         \\```
         \\
+        \\Size: 8 bytes (64 bits), Align: 4
+        \\
         \\Foo doc comment
+    );
+    try testHover(
+        \\const FooStruct = struct {
+        \\    ba<cursor>r: [*]u32,
+        \\};
+    ,
+        \\```zig
+        \\bar: [*]u32
+        \\```
+        \\```zig
+        \\([*]u32)
+        \\```
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
+    );
+    try testHover(
+        \\/// Foo doc comment
+        \\const FooStruct = struct {
+        \\    bar: u32,
+        \\    baz: bool,
+        \\    boo: MyInner,
+        \\
+        \\    pub const MyInner = struct {
+        \\        another_field: bool,
+        \\    };
+        \\};
+        \\const m: FooStruct.My<cursor>Inner = undefined;
+    ,
+        \\```zig
+        \\const MyInner = struct {
+        \\    another_field: bool,
+        \\}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
     try testHover(
         \\const Edge<cursor>Cases = struct {
@@ -317,6 +371,23 @@ test "struct" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
+    );
+    try testHover(
+        \\const <cursor>S = @This();
+        \\v: u32,
+    ,
+        \\```zig
+        \\const S = @This()
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
+        \\
+        \\
     );
     try testHover(
         \\<cursor>foo: u32,
@@ -327,6 +398,8 @@ test "struct" {
         \\```zig
         \\(u32)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
     try testHover(
         \\const S = struct { foo: u32 };
@@ -338,6 +411,8 @@ test "struct" {
         \\```zig
         \\(u32)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
 }
 
@@ -351,6 +426,8 @@ test "root struct" {
         \\```zig
         \\(Untitled-0)
         \\```
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
         \\
         \\Go to [Untitled-0](untitled:///Untitled-0.zig#L1)
     );
@@ -399,6 +476,8 @@ test "decl literal" {
         \\```zig
         \\(S)
         \\```
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
         \\
         \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
@@ -574,6 +653,8 @@ test "enum" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
     try testHover(
         \\pub const M<cursor>ode = enum { zig, zon };
@@ -584,6 +665,20 @@ test "enum" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
+    );
+    try testHover(
+        \\const En<cursor>um = enum(u32) {a, b};
+    ,
+        \\```zig
+        \\const Enum = enum(u32) {a, b}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
 }
 
@@ -624,6 +719,42 @@ test "union" {
         \\(type)
         \\```
     );
+    try testHover(
+        \\const Uni<cursor>on = union {a: u32, b: u16};
+    ,
+        \\```zig
+        \\const Union = union {a: u32, b: u16}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 8 bytes (64 bits), Align: 4
+    );
+    try testHover(
+        \\const Uni<cursor>on = union(enum) {a: u32, b: u16};
+    ,
+        \\```zig
+        \\const Union = union(enum) {a: u32, b: u16}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 8 bytes (64 bits), Align: 4
+    );
+    try testHover(
+        \\const Uni<cursor>on = packed union(u2) {a: u2, b: i2};
+    ,
+        \\```zig
+        \\const Union = packed union(u2) {a: u2, b: i2}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+        \\
+        \\Size: 0 bytes (2 bits), Align: 1
+    );
 }
 
 test "enum member" {
@@ -637,6 +768,8 @@ test "enum member" {
         \\```zig
         \\(Enum)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
         \\
         \\Go to [Enum](untitled:///Untitled-0.zig#L1)
     );
@@ -660,6 +793,8 @@ test "generic type" {
         \\(GenericType(StructType,EnumType))
         \\```
         \\
+        \\Size: 0 bytes (0 bits), Align: 1
+        \\
         \\Go to [GenericType](untitled:///Untitled-0.zig#L3) | [StructType](untitled:///Untitled-0.zig#L1) | [EnumType](untitled:///Untitled-0.zig#L2)
     );
 }
@@ -677,6 +812,8 @@ test "block label" {
         \\```zig
         \\(i32)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
     try testHover(
         \\const foo: i32 = undefined;
@@ -690,6 +827,8 @@ test "block label" {
         \\```zig
         \\(i32)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     );
 }
 
@@ -704,6 +843,8 @@ test "enum literal" {
         \\```zig
         \\(E)
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
         \\
         \\Go to [E](untitled:///Untitled-0.zig#L1)
     );
@@ -760,6 +901,8 @@ test "function" {
         \\```zig
         \\(enum { fizz, buzz })
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
     try testHover(
         \\fn f<cursor>oo() !i32 {}
@@ -804,6 +947,8 @@ test "function parameter" {
         \\```zig
         \\(u32)
         \\```
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
         \\
         \\hello world
     );
@@ -862,6 +1007,8 @@ test "either types" {
         \\(type = u32)
         \\```
         \\
+        \\Size: 4 bytes (32 bits), Align: 4
+        \\
         \\small type
         \\
         \\```zig
@@ -870,6 +1017,8 @@ test "either types" {
         \\```zig
         \\(type = u64)
         \\```
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
         \\
         \\large type
     );
@@ -888,10 +1037,14 @@ test "either types" {
         \\const T = u32
         \\(type = u32)
         \\
+        \\Size: 4 bytes (32 bits), Align: 4
+        \\
         \\small type
         \\
         \\const T = u64
         \\(type = u64)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
         \\
         \\large type
     , .{ .markup_kind = .plaintext });
@@ -1098,6 +1251,8 @@ test "alias with different type" {
     ,
         \\const foo: i32 = 1
         \\(?i32 = 1)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 4
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1184,6 +1339,8 @@ test "escaped identifier in enum literal" {
         \\(E)
         \\```
         \\
+        \\Size: 1 byte (8 bits), Align: 1
+        \\
         \\Go to [E](untitled:///Untitled-0.zig#L1)
     , .{
         .highlight = "@\"hello world\"",
@@ -1223,6 +1380,8 @@ test "integer overflow on top level container" {
         \\```zig
         \\(enum {  foo.bar: baz,})
         \\```
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     );
 }
 
@@ -1242,6 +1401,8 @@ test "combine doc comments of declaration and definition" {
         \\(type)
         \\```
         \\
+        \\Size: 0 bytes (0 bits), Align: 1
+        \\
         \\Foo
         \\
         \\Bar
@@ -1256,6 +1417,8 @@ test "combine doc comments of declaration and definition" {
     ,
         \\const baz = struct
         \\(type)
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
         \\
         \\Foo
         \\
@@ -1276,6 +1439,8 @@ test "top-level doc comment" {
         \\```zig
         \\(type)
         \\```
+        \\
+        \\Size: 0 bytes (0 bits), Align: 1
         \\
         \\A
         \\
@@ -1303,6 +1468,8 @@ test "slice properties" {
     ,
         \\len
         \\(usize)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
         \\const foo: []const u8 = undefined;
@@ -1310,6 +1477,8 @@ test "slice properties" {
     ,
         \\ptr
         \\([*]const u8)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1320,6 +1489,8 @@ test "array properties" {
     ,
         \\len
         \\(usize = 3)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{ .markup_kind = .plaintext });
 }
 
@@ -1330,6 +1501,8 @@ test "tuple properties" {
     ,
         \\len
         \\(usize = 2)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{ .markup_kind = .plaintext });
     try testHoverWithOptions(
         \\const foo: struct { i32, bool } = undefined;
@@ -1337,6 +1510,8 @@ test "tuple properties" {
     ,
         \\@"0"
         \\(i32)
+        \\
+        \\Size: 4 bytes (32 bits), Align: 4
     , .{
         .highlight = "@\"0\"",
         .markup_kind = .plaintext,
@@ -1347,6 +1522,8 @@ test "tuple properties" {
     ,
         \\@"1"
         \\(bool)
+        \\
+        \\Size: 1 byte (8 bits), Align: 1
     , .{
         .highlight = "@\"1\"",
         .markup_kind = .plaintext,
@@ -1360,6 +1537,8 @@ test "optional unwrap" {
     ,
         \\?
         \\(f64)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{
         .highlight = "?",
         .markup_kind = .plaintext,
@@ -1370,6 +1549,8 @@ test "optional unwrap" {
     ,
         \\?
         \\(f64)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{
         .highlight = "?",
         .markup_kind = .plaintext,
@@ -1383,6 +1564,8 @@ test "pointer dereference" {
     ,
         \\*
         \\(f64)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{
         .highlight = "*",
         .markup_kind = .plaintext,
@@ -1393,6 +1576,8 @@ test "pointer dereference" {
     ,
         \\*
         \\(f64)
+        \\
+        \\Size: 8 bytes (64 bits), Align: 8
     , .{
         .highlight = "*",
         .markup_kind = .plaintext,

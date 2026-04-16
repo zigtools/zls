@@ -3604,6 +3604,348 @@ pub fn getNamespace(ip: *InternPool, ty: Index) NamespaceIndex {
     };
 }
 
+pub fn typeAlignment(ip: *InternPool, ty: Index, target: std.Target) ?u16 {
+    return switch (ty) {
+        .bool_type => 1,
+        .void_type => 1,
+        .u1_type, .u8_type, .i8_type => 1,
+        .u16_type, .i16_type, .f16_type => 2,
+        .u29_type, .u32_type, .i32_type, .f32_type => 4,
+        .u64_type, .i64_type, .f64_type => 8,
+        .u128_type, .i128_type, .f128_type => 16,
+        .f80_type => 16, // x86 extended precision
+        .usize_type, .isize_type => @intCast(target.ptrBitWidth() / 8),
+
+        .c_char_type => target.cTypeBitSize(.char) / 8,
+        .c_short_type, .c_ushort_type => target.cTypeBitSize(.short) / 8,
+        .c_int_type, .c_uint_type => target.cTypeBitSize(.int) / 8,
+        .c_long_type, .c_ulong_type => target.cTypeBitSize(.long) / 8,
+        .c_longlong_type, .c_ulonglong_type => target.cTypeBitSize(.longlong) / 8,
+        .c_longdouble_type => target.cTypeBitSize(.longdouble) / 8,
+
+        .anyerror_type => 2,
+
+        .comptime_int_type,
+        .comptime_float_type,
+        .type_type,
+        .noreturn_type,
+        .anyopaque_type,
+        .anyframe_type,
+        .null_type,
+        .undefined_type,
+        .enum_literal_type,
+        .generic_poison_type,
+        .unknown_type,
+        => null,
+
+        else => switch (ip.indexToKey(ty)) {
+            .int_type => |int_info| blk: {
+                // Round up bits to the nearest power of 2
+                var bits = @max(int_info.bits, 8);
+                bits = std.math.pow(u16, 2, std.math.log2_int_ceil(u16, bits));
+                const bytes = bits / 8;
+                // Any integer type above u128 seems to have 16 byte aligment. Maybe
+                // AVX-512 changes this
+                const max_align = 16;
+                break :blk @min(bytes, max_align);
+            },
+            .pointer_type => target.ptrBitWidth() / 8,
+            .array_type => |arr| ip.typeAlignment(arr.child, target),
+            .optional_type => |opt| blk: {
+                break :blk if (ip.indexToKey(opt.payload_type) == .pointer_type)
+                    target.ptrBitWidth() / 8
+                else
+                    ip.typeAlignment(opt.payload_type, target);
+            },
+            .enum_type => |enum_idx| ip.typeAlignment(ip.getEnum(enum_idx).tag_type, target),
+            .struct_type => |struct_idx| ip.structAlignment(struct_idx, target),
+            .union_type => |union_idx| ip.unionAlignment(union_idx, target),
+            .error_union_type => 2, // error_unions are 2 bytes long
+            .vector_type => blk: {
+                if (ip.typeBitSize(ty, target)) |vec_size| {
+                    // From experiments, this seems to hold, but maybe AVX-512 adds 64 byte alignment
+                    // as well. Maybe can check the target.cpu.features for this
+                    if (vec_size < 256) break :blk 16 else break :blk 32;
+                } else break :blk null;
+            },
+            else => null,
+        },
+    };
+}
+
+fn structAlignment(ip: *InternPool, struct_idx: Struct.Index, target: std.Target) ?u16 {
+    const struct_info = ip.getStruct(struct_idx);
+
+    if (struct_info.layout == .@"packed" and struct_info.backing_int_ty != .none) {
+        return ip.typeAlignment(struct_info.backing_int_ty, target);
+    }
+
+    var max_align: u16 = 1;
+    for (struct_info.fields.values()) |field| {
+        if (field.is_comptime) continue;
+        if (field.alignment != 0) {
+            max_align = @max(max_align, field.alignment);
+        } else {
+            const field_align = ip.typeAlignment(field.ty, target) orelse return null;
+            max_align = @max(max_align, field_align);
+        }
+    }
+    return max_align;
+}
+
+fn unionAlignment(ip: *InternPool, union_idx: Union.Index, target: std.Target) ?u16 {
+    const union_info = ip.getUnion(union_idx);
+
+    var max_align: u16 = 1;
+    if (union_info.tag_type != .none) {
+        const tag_align = ip.typeAlignment(union_info.tag_type, target) orelse return null;
+        max_align = @max(max_align, tag_align);
+    }
+
+    for (union_info.fields.values()) |field| {
+        if (field.alignment != 0) {
+            max_align = @max(max_align, field.alignment);
+        } else {
+            const field_align = ip.typeAlignment(field.ty, target) orelse return null;
+            max_align = @max(max_align, field_align);
+        }
+    }
+    return max_align;
+}
+
+pub fn typeBitSize(ip: *InternPool, ty: Index, target: std.Target) ?u64 {
+    return switch (ty) {
+        .bool_type => 8,
+        .void_type => 0,
+        .u1_type => 1,
+        .u8_type, .i8_type => 8,
+        .u16_type, .i16_type => 16,
+        .u29_type => 29,
+        .u32_type, .i32_type => 32,
+        .u64_type, .i64_type => 64,
+        .u128_type, .i128_type => 128,
+        .usize_type, .isize_type => target.ptrBitWidth(),
+
+        .f16_type => 16,
+        .f32_type => 32,
+        .f64_type => 64,
+        .f80_type => 80,
+        .f128_type => 128,
+
+        .c_char_type => target.cTypeBitSize(.char),
+        .c_short_type, .c_ushort_type => target.cTypeBitSize(.short),
+        .c_int_type, .c_uint_type => target.cTypeBitSize(.int),
+        .c_long_type, .c_ulong_type => target.cTypeBitSize(.long),
+        .c_longlong_type, .c_ulonglong_type => target.cTypeBitSize(.longlong),
+        .c_longdouble_type => target.cTypeBitSize(.longdouble),
+
+        .anyerror_type => 16,
+
+        .comptime_int_type,
+        .comptime_float_type,
+        .type_type,
+        .noreturn_type,
+        .anyopaque_type,
+        .anyframe_type,
+        .null_type,
+        .undefined_type,
+        .enum_literal_type,
+        .generic_poison_type,
+        .unknown_type,
+        => null,
+
+        .empty_struct_type => 0,
+
+        else => switch (ip.indexToKey(ty)) {
+            .int_type => |int_info| int_info.bits,
+            .pointer_type => |ptr_info| if (ptr_info.flags.size == .slice)
+                target.ptrBitWidth() * 2
+            else
+                target.ptrBitWidth(),
+            .array_type => |arr| blk: {
+                const elem_size = ip.typeBitSize(arr.child, target) orelse return null;
+                break :blk elem_size * arr.len;
+            },
+            .optional_type => |opt| ip.optionalBitSize(opt.payload_type, target),
+            .enum_type => |enum_idx| ip.typeBitSize(ip.getEnum(enum_idx).tag_type, target),
+            .struct_type => |struct_idx| ip.structBitSize(struct_idx, target),
+            .union_type => |union_idx| ip.unionBitSize(union_idx, target),
+            .error_union_type => 16,
+            .vector_type => |vec| blk: {
+                if (ip.typeBitSize(vec.child, target)) |child_size| {
+                    const child_bits = std.math.pow(u64, 2, std.math.log2_int_ceil(u64, child_size));
+                    var total_bits = child_bits * vec.len;
+                    // At lest it would be 128 SIMD lane
+                    total_bits = @max(total_bits, 128);
+                    // And if it is bigger, go for a next power of 2
+                    total_bits = std.math.pow(u64, 2, std.math.log2_int_ceil(u64, total_bits));
+                    break :blk total_bits;
+                } else {
+                    break :blk null;
+                }
+            },
+            else => null,
+        },
+    };
+}
+
+fn optionalBitSize(ip: *InternPool, payload_ty: Index, target: std.Target) ?u64 {
+    if (ip.indexToKey(payload_ty) == .pointer_type) {
+        return target.ptrBitWidth();
+    }
+
+    const payload_bits = ip.typeBitSize(payload_ty, target) orelse return null;
+    const payload_align = ip.typeAlignment(payload_ty, target) orelse return null;
+
+    // The optional part will be smallest type with same alignment. Just add 8 bits
+    // pretending it is a u8 value. alignForward will do the rest.
+    const total_bits = payload_bits + 8;
+    const align_bits = payload_align * 8;
+    return std.mem.alignForward(u64, total_bits, align_bits);
+}
+
+fn structBitSize(ip: *InternPool, struct_idx: Struct.Index, target: std.Target) ?u64 {
+    const struct_info = ip.getStruct(struct_idx);
+
+    return switch (struct_info.layout) {
+        .@"packed" => ip.structBitSizePacked(struct_info, target),
+        .@"extern" => ip.structBitSizeExtern(struct_info, target),
+        .auto => ip.structBitSizeAuto(struct_info, target),
+    };
+}
+
+fn structBitSizePacked(ip: *InternPool, struct_info: *const Struct, target: std.Target) ?u64 {
+    if (struct_info.backing_int_ty != .none) {
+        return ip.typeBitSize(struct_info.backing_int_ty, target);
+    }
+
+    var total_bits: u64 = 0;
+    for (struct_info.fields.values()) |field| {
+        if (field.is_comptime) continue;
+        const field_bits = ip.typeBitSize(field.ty, target) orelse return null;
+        total_bits += field_bits;
+    }
+    return total_bits;
+}
+
+fn structBitSizeExtern(ip: *InternPool, struct_info: *const Struct, target: std.Target) ?u64 {
+    var total_bits: u64 = 0;
+    var max_align: u16 = 1;
+
+    for (struct_info.fields.values()) |field| {
+        if (field.is_comptime) continue;
+        const field_align = if (field.alignment != 0)
+            field.alignment
+        else
+            ip.typeAlignment(field.ty, target) orelse return null;
+        const field_bits = ip.typeBitSize(field.ty, target) orelse return null;
+
+        max_align = @max(max_align, field_align);
+
+        const align_bits = field_align * 8;
+        total_bits = std.mem.alignForward(u64, total_bits, align_bits);
+
+        total_bits += field_bits;
+    }
+
+    const final_align_bits = max_align * 8;
+    return std.mem.alignForward(u64, total_bits, final_align_bits);
+}
+
+fn structBitSizeAuto(ip: *InternPool, struct_info: *const Struct, target: std.Target) ?u64 {
+    const Inner = struct {
+        size_bits: u64 = 0,
+        alignment: u16 = 0,
+
+        fn cmp(_: void, s1: @This(), s2: @This()) bool {
+            // inverse sort by alignment
+            return s2.alignment < s1.alignment;
+        }
+    };
+    // no allocations, no size calculations
+    const data = ip.gpa.alloc(Inner, struct_info.fields.values().len) catch return null;
+    defer ip.gpa.free(data);
+
+    for (struct_info.fields.values(), data) |*field, *d| {
+        if (field.is_comptime) {
+            d.* = .{};
+        } else {
+            d.size_bits = ip.typeBitSize(field.ty, target) orelse return null;
+            d.alignment = if (field.alignment != 0)
+                field.alignment
+            else
+                ip.typeAlignment(field.ty, target) orelse return null;
+        }
+    }
+    std.mem.sortUnstable(Inner, data, {}, Inner.cmp);
+
+    var total_bits: u64 = 0;
+    var max_align: u16 = 1;
+
+    for (data) |d| {
+        max_align = @max(max_align, d.alignment);
+
+        const align_bits = d.alignment * 8;
+        total_bits = std.mem.alignForward(u64, total_bits, align_bits);
+
+        total_bits += d.size_bits;
+    }
+
+    const final_align_bits = max_align * 8;
+    return std.mem.alignForward(u64, total_bits, final_align_bits);
+}
+
+fn unionBitSize(ip: *InternPool, union_idx: Union.Index, target: std.Target) ?u64 {
+    const union_info = ip.getUnion(union_idx);
+
+    if (union_info.layout == .@"packed" or union_info.layout == .@"extern") {
+        return ip.unionBitSizePackedOrExtern(union_info, target);
+    }
+
+    return switch (union_info.layout) {
+        .@"packed", .@"extern" => ip.unionBitSizePackedOrExtern(union_info, target),
+        .auto => ip.unionBitSizeAuto(union_info, target),
+    };
+}
+
+fn unionBitSizeAuto(ip: *InternPool, union_info: *const Union, target: std.Target) ?u64 {
+    var total_bits: u64 = 0;
+    var max_align: u16 = 1;
+
+    for (union_info.fields.values()) |field| {
+        const field_bits = ip.typeBitSize(field.ty, target) orelse return null;
+        const field_align = if (field.alignment != 0)
+            field.alignment
+        else
+            ip.typeAlignment(field.ty, target) orelse return null;
+
+        total_bits = @max(total_bits, field_bits);
+        max_align = @max(max_align, field_align);
+    }
+
+    if (union_info.tag_type != .none) {
+        const tag_bits = ip.typeBitSize(union_info.tag_type, target) orelse return null;
+        const tag_align = ip.typeAlignment(union_info.tag_type, target) orelse return null;
+        max_align = @max(max_align, tag_align);
+        total_bits += tag_bits;
+    } else {
+        // normal unions have at least a byte tag for safety checks
+        total_bits += 8;
+    }
+
+    const final_align_bits = max_align * 8;
+    return std.mem.alignForward(u64, total_bits, final_align_bits);
+}
+
+fn unionBitSizePackedOrExtern(ip: *InternPool, union_info: *const Union, target: std.Target) ?u64 {
+    var max_size: u64 = 0;
+    for (union_info.fields.values()) |field| {
+        const field_size = ip.typeBitSize(field.ty, target) orelse return null;
+        max_size = @max(max_size, field_size);
+    }
+    return max_size;
+}
+
 pub fn onePossibleValue(ip: *InternPool, ty: Index) Index {
     return switch (ip.indexToKey(ty)) {
         .simple_type => |simple| switch (simple) {
@@ -5357,4 +5699,385 @@ fn testCoerce(ip: *InternPool, dest_ty: Index, inst: Index, expected: Index) !vo
     }
 
     return error.TestExpectedEqual;
+}
+
+test "typeBitSize/Alignment: basic types" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const Inner = struct {
+        fn expect(i: *InternPool, t: std.Target, ty: Index, b: u64, a: u16) !void {
+            try std.testing.expectEqual(b, i.typeBitSize(ty, t));
+            try std.testing.expectEqual(a, i.typeAlignment(ty, t));
+        }
+    };
+
+    try Inner.expect(&ip, target, .bool_type, 8, 1);
+    try Inner.expect(&ip, target, .void_type, 0, 1);
+
+    try Inner.expect(&ip, target, .u8_type, 8, 1);
+    try Inner.expect(&ip, target, .i8_type, 8, 1);
+    try Inner.expect(&ip, target, .u16_type, 16, 2);
+    try Inner.expect(&ip, target, .i16_type, 16, 2);
+    try Inner.expect(&ip, target, .u32_type, 32, 4);
+    try Inner.expect(&ip, target, .i32_type, 32, 4);
+    try Inner.expect(&ip, target, .u64_type, 64, 8);
+    try Inner.expect(&ip, target, .i64_type, 64, 8);
+    try Inner.expect(&ip, target, .u128_type, 128, 16);
+    try Inner.expect(&ip, target, .i128_type, 128, 16);
+    try Inner.expect(&ip, target, .usize_type, 64, 8);
+    try Inner.expect(&ip, target, .isize_type, 64, 8);
+
+    try Inner.expect(&ip, target, .f16_type, 16, 2);
+    try Inner.expect(&ip, target, .f32_type, 32, 4);
+    try Inner.expect(&ip, target, .f64_type, 64, 8);
+    try Inner.expect(&ip, target, .f80_type, 80, 16);
+    try Inner.expect(&ip, target, .f128_type, 128, 16);
+
+    try Inner.expect(&ip, target, .anyerror_type, 16, 2);
+
+    const u7_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 7 } });
+    try Inner.expect(&ip, target, u7_type, 7, 1);
+
+    const u24_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 24 } });
+    try Inner.expect(&ip, target, u24_type, 24, 4);
+
+    const u256_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 256 } });
+    try Inner.expect(&ip, target, u256_type, 256, 16);
+}
+
+test "typeBitSize/Alignment: slices and pointers" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const Inner = struct {
+        fn expect(i: *InternPool, t: std.Target, ty: Index, b: u64, a: u16) !void {
+            try std.testing.expectEqual(b, i.typeBitSize(ty, t));
+            try std.testing.expectEqual(a, i.typeAlignment(ty, t));
+        }
+    };
+
+    // Regular pointer: 64 bits on x86_64
+    const ptr_i32 = try ip.get(.{ .pointer_type = .{
+        .elem_type = .i32_type,
+        .flags = .{ .size = .one },
+    } });
+    try Inner.expect(&ip, target, ptr_i32, 64, 8);
+
+    const slice_u8 = try ip.get(.{ .pointer_type = .{
+        .elem_type = .u8_type,
+        .flags = .{ .size = .slice },
+    } });
+    try Inner.expect(&ip, target, slice_u8, 128, 8);
+
+    const many_ptr_f64 = try ip.get(.{ .pointer_type = .{
+        .elem_type = .f64_type,
+        .flags = .{ .size = .many },
+    } });
+    try Inner.expect(&ip, target, many_ptr_f64, 64, 8);
+}
+
+test "typeBitSize/Alignment: vectors" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const Inner = struct {
+        fn expect(i: *InternPool, t: std.Target, ty: Index, b: u64, a: u16) !void {
+            try std.testing.expectEqual(b, i.typeBitSize(ty, t));
+            try std.testing.expectEqual(a, i.typeAlignment(ty, t));
+        }
+    };
+
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 1, .child = .u8_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 2, .child = .u8_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 4, .child = .u8_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 8, .child = .u8_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 16, .child = .u8_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 32, .child = .u8_type } }), 256, 32);
+
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 1, .child = .u16_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 2, .child = .u16_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 4, .child = .u16_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 8, .child = .u16_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 16, .child = .u16_type } }), 256, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 32, .child = .u16_type } }), 512, 32);
+
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 1, .child = .u32_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 2, .child = .u32_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 4, .child = .u32_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 8, .child = .u32_type } }), 256, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 16, .child = .u32_type } }), 512, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 32, .child = .u32_type } }), 1024, 32);
+
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 1, .child = .u64_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 2, .child = .u64_type } }), 128, 16);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 4, .child = .u64_type } }), 256, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 8, .child = .u64_type } }), 512, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 16, .child = .u64_type } }), 1024, 32);
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 32, .child = .u64_type } }), 2048, 32);
+
+    const u7_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 7 } });
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 1, .child = u7_type } }), 128, 16);
+    const u33_type = try ip.get(.{ .int_type = .{ .signedness = .unsigned, .bits = 33 } });
+    try Inner.expect(&ip, target, try ip.get(.{ .vector_type = .{ .len = 4, .child = u33_type } }), 256, 32);
+}
+
+test "typeBitSize/Alignment: structs" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const field_a = try ip.string_pool.getOrPutString(io, gpa, "a");
+    const field_b = try ip.string_pool.getOrPutString(io, gpa, "b");
+    const field_c = try ip.string_pool.getOrPutString(io, gpa, "c");
+
+    const auto_struct_idx = try ip.createStruct(.{
+        .fields = .empty,
+        .owner_decl = .none,
+        .namespace = .none,
+        .layout = .auto,
+        .backing_int_ty = .none,
+        .status = .none,
+    });
+    const auto_struct = ip.getStructMut(auto_struct_idx);
+    try auto_struct.fields.put(gpa, field_a, .{ .ty = .u8_type });
+    try auto_struct.fields.put(gpa, field_b, .{ .ty = .u32_type });
+    try auto_struct.fields.put(gpa, field_c, .{ .ty = .u8_type });
+
+    const auto_struct_type = try ip.get(.{ .struct_type = auto_struct_idx });
+    try std.testing.expectEqual(64, ip.typeBitSize(auto_struct_type, target));
+    try std.testing.expectEqual(4, ip.typeAlignment(auto_struct_type, target));
+
+    const extern_struct_idx = try ip.createStruct(.{
+        .fields = .empty,
+        .owner_decl = .none,
+        .namespace = .none,
+        .layout = .@"extern",
+        .backing_int_ty = .none,
+        .status = .none,
+    });
+    const extern_struct = ip.getStructMut(extern_struct_idx);
+    try extern_struct.fields.put(gpa, field_a, .{ .ty = .u8_type });
+    try extern_struct.fields.put(gpa, field_b, .{ .ty = .u32_type });
+    try extern_struct.fields.put(gpa, field_c, .{ .ty = .u8_type });
+
+    const extern_struct_type = try ip.get(.{ .struct_type = extern_struct_idx });
+    try std.testing.expectEqual(96, ip.typeBitSize(extern_struct_type, target));
+    try std.testing.expectEqual(4, ip.typeAlignment(extern_struct_type, target));
+
+    const packed_struct_idx = try ip.createStruct(.{
+        .fields = .empty,
+        .owner_decl = .none,
+        .namespace = .none,
+        .layout = .@"packed",
+        .backing_int_ty = .u32_type,
+        .status = .none,
+    });
+    const packed_struct = ip.getStructMut(packed_struct_idx);
+    try packed_struct.fields.put(gpa, field_a, .{ .ty = .u8_type });
+    try packed_struct.fields.put(gpa, field_b, .{ .ty = .u16_type });
+    try packed_struct.fields.put(gpa, field_c, .{ .ty = .u8_type });
+
+    const packed_struct_type = try ip.get(.{ .struct_type = packed_struct_idx });
+    try std.testing.expectEqual(32, ip.typeBitSize(packed_struct_type, target));
+    try std.testing.expectEqual(4, ip.typeAlignment(packed_struct_type, target));
+}
+
+test "typeBitSize/Alignment: enums" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const enum_u8_idx = try ip.createEnum(.{
+        .tag_type = .u8_type,
+        .fields = .{},
+        .values = .{},
+        .namespace = .none,
+        .tag_type_inferred = false,
+    });
+    const enum_u8_type = try ip.get(.{ .enum_type = enum_u8_idx });
+    try std.testing.expectEqual(8, ip.typeBitSize(enum_u8_type, target));
+    try std.testing.expectEqual(1, ip.typeAlignment(enum_u8_type, target));
+
+    const enum_u16_idx = try ip.createEnum(.{
+        .tag_type = .u16_type,
+        .fields = .{},
+        .values = .{},
+        .namespace = .none,
+        .tag_type_inferred = false,
+    });
+    const enum_u16_type = try ip.get(.{ .enum_type = enum_u16_idx });
+    try std.testing.expectEqual(16, ip.typeBitSize(enum_u16_type, target));
+    try std.testing.expectEqual(2, ip.typeAlignment(enum_u16_type, target));
+
+    const enum_u32_idx = try ip.createEnum(.{
+        .tag_type = .u32_type,
+        .fields = .{},
+        .values = .{},
+        .namespace = .none,
+        .tag_type_inferred = false,
+    });
+    const enum_u32_type = try ip.get(.{ .enum_type = enum_u32_idx });
+    try std.testing.expectEqual(32, ip.typeBitSize(enum_u32_type, target));
+    try std.testing.expectEqual(4, ip.typeAlignment(enum_u32_type, target));
+}
+
+test "typeBitSize/Alignment: unions" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var ip: InternPool = try .init(io, gpa);
+    defer ip.deinit(gpa);
+
+    const target: std.Target = .{
+        .cpu = .{
+            .arch = .x86_64,
+            .model = undefined,
+            .features = .empty,
+        },
+        .os = .{ .tag = .linux, .version_range = undefined },
+        .abi = .gnu,
+        .ofmt = .elf,
+    };
+
+    const field_a = try ip.string_pool.getOrPutString(io, gpa, "a");
+    const field_b = try ip.string_pool.getOrPutString(io, gpa, "b");
+    const field_c = try ip.string_pool.getOrPutString(io, gpa, "c");
+
+    const auto_union_idx = try ip.createUnion(.{
+        .tag_type = .none,
+        .fields = .empty,
+        .namespace = .none,
+        .layout = .auto,
+        .status = .none,
+    });
+    const auto_union = ip.getUnionMut(auto_union_idx);
+    try auto_union.fields.put(gpa, field_a, .{ .ty = .i32_type, .alignment = 0 });
+    try auto_union.fields.put(gpa, field_b, .{ .ty = .f64_type, .alignment = 0 });
+
+    const auto_union_type = try ip.get(.{ .union_type = auto_union_idx });
+    try std.testing.expectEqual(128, ip.typeBitSize(auto_union_type, target));
+    try std.testing.expectEqual(8, ip.typeAlignment(auto_union_type, target));
+
+    const u64_tag_enum_idx = try ip.createEnum(.{
+        .tag_type = .u64_type,
+        .fields = .{},
+        .values = .{},
+        .namespace = .none,
+        .tag_type_inferred = false,
+    });
+    const u64_tag_type = try ip.get(.{ .enum_type = u64_tag_enum_idx });
+
+    const tagged_union_idx = try ip.createUnion(.{
+        .tag_type = u64_tag_type,
+        .fields = .empty,
+        .namespace = .none,
+        .layout = .auto,
+        .status = .none,
+    });
+    const tagged_union = ip.getUnionMut(tagged_union_idx);
+    try tagged_union.fields.put(gpa, field_a, .{ .ty = .i8_type, .alignment = 0 });
+    try tagged_union.fields.put(gpa, field_b, .{ .ty = .u16_type, .alignment = 0 });
+
+    const tagged_union_type = try ip.get(.{ .union_type = tagged_union_idx });
+    try std.testing.expectEqual(128, ip.typeBitSize(tagged_union_type, target));
+    try std.testing.expectEqual(8, ip.typeAlignment(tagged_union_type, target));
+
+    const extern_union_idx = try ip.createUnion(.{
+        .tag_type = .none,
+        .fields = .empty,
+        .namespace = .none,
+        .layout = .@"extern",
+        .status = .none,
+    });
+    const extern_union = ip.getUnionMut(extern_union_idx);
+    try extern_union.fields.put(gpa, field_a, .{ .ty = .i32_type, .alignment = 0 });
+    try extern_union.fields.put(gpa, field_c, .{ .ty = .f64_type, .alignment = 0 });
+
+    const extern_union_type = try ip.get(.{ .union_type = extern_union_idx });
+    try std.testing.expectEqual(64, ip.typeBitSize(extern_union_type, target));
+    try std.testing.expectEqual(8, ip.typeAlignment(extern_union_type, target));
+
+    const packed_union_idx = try ip.createUnion(.{
+        .tag_type = .none,
+        .fields = .empty,
+        .namespace = .none,
+        .layout = .@"packed",
+        .status = .none,
+    });
+    const packed_union = ip.getUnionMut(packed_union_idx);
+    try packed_union.fields.put(gpa, field_a, .{ .ty = .i32_type, .alignment = 0 });
+    try packed_union.fields.put(gpa, field_b, .{ .ty = .f32_type, .alignment = 0 });
+
+    const packed_union_type = try ip.get(.{ .union_type = packed_union_idx });
+    try std.testing.expectEqual(32, ip.typeBitSize(packed_union_type, target));
+    try std.testing.expectEqual(4, ip.typeAlignment(packed_union_type, target));
 }
