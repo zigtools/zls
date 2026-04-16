@@ -6,10 +6,10 @@ const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) 
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
 /// Specify the minimum Zig version that is usable with ZLS:
-/// std.Io: move netReceive to become an Operation
+/// Release 0.16.0
 ///
 /// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.16.0-dev.2736+3b515fbed";
+const minimum_runtime_zig_version = "0.16.0";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
@@ -171,7 +171,7 @@ pub fn build(b: *Build) !void {
             artifact.* = b.addExecutable(.{
                 .name = "zls",
                 .root_module = exe_module,
-                .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_200_000_000 else 1_800_000_000,
+                .max_rss = if (optimize == .Debug and target_query.os_tag == .wasi) 2_600_000_000 else 2_000_000_000,
                 .use_llvm = use_llvm,
                 .use_lld = use_llvm,
             });
@@ -188,7 +188,7 @@ pub fn build(b: *Build) !void {
         .build_options = build_options,
         .version_data = version_data_module,
     });
-    b.modules.put("zls", zls_module) catch @panic("OOM");
+    b.modules.put(b.allocator, "zls", zls_module) catch @panic("OOM");
 
     const known_folders_module = b.dependency("known_folders", .{
         .target = target,
@@ -498,7 +498,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
         @"tar.gz",
     };
 
-    var compressed_artifacts: std.StringArrayHashMapUnmanaged(std.Build.LazyPath) = .empty;
+    var compressed_artifacts: std.array_hash_map.String(std.Build.LazyPath) = .empty;
 
     for (release_artifacts) |exe| {
         const resolved_target = exe.root_module.resolved_target.?.result;

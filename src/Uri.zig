@@ -166,7 +166,7 @@ pub const format = @compileError("Cannot format @import(\"Uri.zig\") directly!. 
 pub const jsonStringify = @compileError("Cannot stringify @import(\"Uri.zig\") directly!. Access the underlying raw string field instead.");
 
 pub fn ArrayHashMap(comptime V: type) type {
-    return std.ArrayHashMapUnmanaged(Uri, V, Context, true);
+    return std.array_hash_map.Custom(Uri, V, Context, true);
 }
 
 const Context = struct {

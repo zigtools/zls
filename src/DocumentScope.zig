@@ -16,7 +16,7 @@ extra: std.ArrayList(u32),
 
 /// Every `index` inside this `ArrayhashMap` is equivalent to a `Declaration.Index`
 /// This means that every declaration is only the child of a single scope
-pub const DeclarationLookupMap = std.ArrayHashMapUnmanaged(
+pub const DeclarationLookupMap = std.array_hash_map.Custom(
     DeclarationLookup,
     void,
     DeclarationLookupContext,

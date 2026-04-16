@@ -626,7 +626,7 @@ pub const BuildOnSave = struct {
         const stdout = multi_reader.reader(0);
         const stderr = multi_reader.reader(1);
 
-        var diagnostic_tags: std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void) = .empty;
+        var diagnostic_tags: std.array_hash_map.Auto(DiagnosticsCollection.Tag, void) = .empty;
         defer diagnostic_tags.deinit(allocator);
 
         defer {
@@ -711,7 +711,7 @@ pub const BuildOnSave = struct {
         body: []u8,
         collection: *DiagnosticsCollection,
         workspace_path: []const u8,
-        diagnostic_tags: *std.AutoArrayHashMapUnmanaged(DiagnosticsCollection.Tag, void),
+        diagnostic_tags: *std.array_hash_map.Auto(DiagnosticsCollection.Tag, void),
     ) (error{ OutOfMemory, InvalidMessage } || std.Io.File.Writer.Error)!void {
         var reader: std.Io.Reader = .fixed(body);
 

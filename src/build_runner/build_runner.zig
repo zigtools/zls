@@ -571,8 +571,8 @@ fn resolveStepNames(
     b: *std.Build,
     step_names: []const []const u8,
     check_step_only: bool,
-) !std.AutoArrayHashMapUnmanaged(*Step, void) {
-    var starting_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .empty;
+) !std.array_hash_map.Auto(*Step, void) {
+    var starting_steps: std.array_hash_map.Auto(*Step, void) = .empty;
     errdefer starting_steps.deinit(gpa);
 
     if (step_names.len == 0) {
@@ -598,7 +598,7 @@ fn resolveStepNames(
 
 fn prepare(
     b: *std.Build,
-    unpopulated_step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
+    unpopulated_step_stack: *std.array_hash_map.Auto(*Step, void),
     run: *Run,
 ) error{ OutOfMemory, DependencyLoopDetected }!void {
     const gpa = run.gpa;
@@ -644,7 +644,7 @@ fn prepare(
 
 fn runSteps(
     b: *std.Build,
-    step_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    step_stack: *const std.array_hash_map.Auto(*Step, void),
     parent_prog_node: std.Progress.Node,
     run: *Run,
 ) (Io.Cancelable || mem.Allocator.Error)!void {
@@ -689,7 +689,7 @@ fn constructGraphAndCheckForDependencyLoop(
     gpa: Allocator,
     b: *std.Build,
     s: *Step,
-    step_stack: *std.AutoArrayHashMapUnmanaged(*Step, void),
+    step_stack: *std.array_hash_map.Auto(*Step, void),
     rand: std.Random,
 ) !void {
     switch (s.state) {
@@ -738,7 +738,7 @@ fn constructGraphAndCheckForDependencyLoop(
 fn makeStep(
     group: *Io.Group,
     b: *std.Build,
-    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    steps_stack: *const std.array_hash_map.Auto(*Step, void),
     s: *Step,
     root_prog_node: std.Progress.Node,
     run: *Run,
@@ -837,7 +837,7 @@ fn makeStep(
 fn stepReady(
     group: *Io.Group,
     b: *std.Build,
-    steps_stack: *const std.AutoArrayHashMapUnmanaged(*Step, void),
+    steps_stack: *const std.array_hash_map.Auto(*Step, void),
     s: *Step,
     root_prog_node: std.Progress.Node,
     run: *Run,
@@ -903,7 +903,7 @@ fn validateSystemLibraryOptions(b: *std.Build) void {
 fn createModuleDependencies(b: *std.Build) Allocator.Error!void {
     const arena = b.graph.arena;
 
-    var all_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .empty;
+    var all_steps: std.array_hash_map.Auto(*Step, void) = .empty;
     var next_step_idx: usize = 0;
 
     try all_steps.ensureUnusedCapacity(arena, b.top_level_steps.count());
@@ -993,13 +993,13 @@ fn extractBuildInformation(
     run: *Run,
 ) !void {
     const helper = struct {
-        fn addLazyPathStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), lazy_path: std.Build.LazyPath) !void {
+        fn addLazyPathStepDependencies(allocator: Allocator, set: *std.array_hash_map.Auto(*Step, void), lazy_path: std.Build.LazyPath) !void {
             switch (lazy_path) {
                 .src_path, .cwd_relative, .dependency => {},
                 .generated => |gen| try set.put(allocator, gen.file.step, {}),
             }
         }
-        fn addIncludeDirStepDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), include_dir: std.Build.Module.IncludeDir) !void {
+        fn addIncludeDirStepDependencies(allocator: Allocator, set: *std.array_hash_map.Auto(*Step, void), include_dir: std.Build.Module.IncludeDir) !void {
             switch (include_dir) {
                 .path,
                 .path_system,
@@ -1022,7 +1022,7 @@ fn extractBuildInformation(
             }
         }
         /// Only adds the necessary dependencies to resolve the `root_source_file` and `include_dirs`. Does not include dependencies of imported modules.
-        fn addModuleDependencies(allocator: Allocator, set: *std.AutoArrayHashMapUnmanaged(*Step, void), module: *std.Build.Module) !void {
+        fn addModuleDependencies(allocator: Allocator, set: *std.array_hash_map.Auto(*Step, void), module: *std.Build.Module) !void {
             if (module.root_source_file) |root_source_file| {
                 try addLazyPathStepDependencies(allocator, set, root_source_file);
             }
@@ -1033,14 +1033,14 @@ fn extractBuildInformation(
         }
         fn processModule(
             allocator: Allocator,
-            modules: *std.StringArrayHashMapUnmanaged(shared.BuildConfig.Module),
+            modules: *std.array_hash_map.String(shared.BuildConfig.Module),
             module: *std.Build.Module,
             compile: ?*Step.Compile,
         ) !void {
             const root_source_file = module.root_source_file orelse return;
 
-            var include_dirs: std.StringArrayHashMapUnmanaged(void) = .empty;
-            var c_macros: std.StringArrayHashMapUnmanaged(void) = .empty;
+            var include_dirs: std.array_hash_map.String(void) = .empty;
+            var c_macros: std.array_hash_map.String(void) = .empty;
 
             if (compile) |exe| {
                 try processPkgConfig(allocator, &include_dirs, &c_macros, exe);
@@ -1115,7 +1115,7 @@ fn extractBuildInformation(
     const gpa = run.gpa;
 
     // The value tracks whether the step is a decendant of the "install" step.
-    var all_steps: std.AutoArrayHashMapUnmanaged(*Step, bool) = .empty;
+    var all_steps: std.array_hash_map.Auto(*Step, bool) = .empty;
     defer all_steps.deinit(gpa);
 
     // collect all steps that are decendants of the "install" step.
@@ -1154,10 +1154,10 @@ fn extractBuildInformation(
 
     // Collect all steps that need to be run so that we can resolve the lazy paths we are interested in (e.g. root_source_file).
     {
-        var needed_steps: std.AutoArrayHashMapUnmanaged(*Step, void) = .empty;
+        var needed_steps: std.array_hash_map.Auto(*Step, void) = .empty;
         defer needed_steps.deinit(gpa);
 
-        var modules: std.AutoArrayHashMapUnmanaged(*std.Build.Module, void) = .empty;
+        var modules: std.array_hash_map.Auto(*std.Build.Module, void) = .empty;
         defer modules.deinit(gpa);
 
         try modules.ensureUnusedCapacity(gpa, b.modules.count());
@@ -1195,7 +1195,7 @@ fn extractBuildInformation(
     // - public modules (`std.Build.addModule`)
     // - modules that are reachable from the "install" step
     // - all other reachable modules
-    var modules: std.StringArrayHashMapUnmanaged(BuildConfig.Module) = .empty;
+    var modules: std.array_hash_map.String(BuildConfig.Module) = .empty;
 
     for (b.modules.values()) |root_module| {
         const graph = root_module.getGraph();
@@ -1242,7 +1242,7 @@ fn extractBuildInformation(
     // };
 
     // Collect the dependencies from `build.zig.zon`
-    var root_dependencies: std.StringArrayHashMapUnmanaged([]const u8) = .empty;
+    var root_dependencies: std.array_hash_map.String([]const u8) = .empty;
     for (dependencies.root_deps) |root_dep| {
         inline for (comptime std.meta.declarations(dependencies.packages)) |package| blk: {
             if (std.mem.eql(u8, package.name, root_dep[1])) {
@@ -1258,7 +1258,7 @@ fn extractBuildInformation(
         }
     }
 
-    var available_options: std.StringArrayHashMapUnmanaged(BuildConfig.AvailableOption) = .empty;
+    var available_options: std.array_hash_map.String(BuildConfig.AvailableOption) = .empty;
     try available_options.ensureTotalCapacity(arena, b.available_options_map.count());
 
     var it = b.available_options_map.iterator();
@@ -1284,8 +1284,8 @@ fn extractBuildInformation(
 
 fn processPkgConfig(
     allocator: Allocator,
-    include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    c_macros: *std.StringArrayHashMapUnmanaged(void),
+    include_dirs: *std.array_hash_map.String(void),
+    c_macros: *std.array_hash_map.String(void),
     exe: *Step.Compile,
 ) !void {
     for (exe.root_module.link_objects.items) |link_object| {
