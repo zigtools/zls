@@ -266,12 +266,12 @@ pub fn getSignatureInfo(
                 var ty = switch (tree.tokenTag(expr_first_token)) {
                     .period => blk: { // decl literal
                         loc.start += 1;
-                        const decl = try analyser.getSymbolEnumLiteral(
+                        const decl, const type_maybe = try analyser.getSymbolEnumLiteral(
                             handle,
                             loc.start,
                             offsets.locToSlice(tree.source, loc),
                         ) orelse continue;
-                        break :blk try decl.resolveType(analyser) orelse continue;
+                        break :blk type_maybe orelse try decl.resolveType(analyser) orelse continue;
                     },
                     else => try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue,
                 };

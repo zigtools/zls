@@ -149,7 +149,7 @@ fn gotoDefinitionEnumLiteral(
         return gotoDefinitionStructInit(analyser, handle, source_index, kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
+    const decl, _ = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
     return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
 }
 
