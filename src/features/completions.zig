@@ -30,7 +30,7 @@ const Builder = struct {
 };
 
 pub const Completions = struct {
-    map: std.StringArrayHashMapUnmanaged(types.completion.Item),
+    map: std.array_hash_map.String(types.completion.Item),
 
     pub const empty: Completions = .{ .map = .empty };
 

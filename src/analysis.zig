@@ -2229,7 +2229,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .error_set_decl => {
             const lbrace, const rbrace = tree.nodeData(node).token_and_token;
-            var strings: std.AutoArrayHashMapUnmanaged(InternPool.String, void) = .empty;
+            var strings: std.array_hash_map.Auto(InternPool.String, void) = .empty;
             defer strings.deinit(analyser.gpa);
             var i: usize = 0;
             for (lbrace + 1..rbrace) |tok_i| {
@@ -3852,7 +3852,7 @@ pub const Type = struct {
     pub const ArraySet = ArrayMap(void);
 
     pub fn ArrayMap(comptime V: type) type {
-        return std.ArrayHashMapUnmanaged(Type, V, ArrayMapContext, true);
+        return std.array_hash_map.Custom(Type, V, ArrayMapContext, true);
     }
 
     pub const ArrayMapContext = struct {
@@ -3931,7 +3931,7 @@ pub const Type = struct {
                 return a_ty.eql(b_ty);
             }
         };
-        const Deduplicator = std.ArrayHashMapUnmanaged(Type.Data.EitherEntry, void, DeduplicatorContext, true);
+        const Deduplicator = std.array_hash_map.Custom(Type.Data.EitherEntry, void, DeduplicatorContext, true);
 
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
@@ -5644,7 +5644,7 @@ pub fn getPositionContext(
     return .empty;
 }
 
-pub const TokenToTypeMap = std.ArrayHashMapUnmanaged(TokenWithHandle, Type, TokenWithHandle.Context, true);
+pub const TokenToTypeMap = std.array_hash_map.Custom(TokenWithHandle, Type, TokenWithHandle.Context, true);
 
 pub const TokenWithHandle = struct {
     token: Ast.TokenIndex,
@@ -6992,7 +6992,7 @@ pub const ReferencedType = struct {
         return .{ .str = str, .handle = handle, .token = token };
     }
 
-    pub const Set = std.ArrayHashMapUnmanaged(ReferencedType, void, SetContext, true);
+    pub const Set = std.array_hash_map.Custom(ReferencedType, void, SetContext, true);
 
     const SetContext = struct {
         pub fn hash(self: SetContext, item: ReferencedType) u32 {

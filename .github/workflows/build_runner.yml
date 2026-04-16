@@ -15,7 +15,6 @@ on:
 
 jobs:
   check_build_runner:
-    if: false
     strategy:
       fail-fast: false
       matrix:

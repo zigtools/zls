@@ -364,13 +364,13 @@ fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool
     const File = struct { source: []const u8, new_source: []const u8 };
     const LocPair = struct { file_index: usize, old: offsets.Loc, new: offsets.Loc };
 
-    var files: std.StringArrayHashMapUnmanaged(File) = .empty;
+    var files: std.array_hash_map.String(File) = .empty;
     defer {
         for (files.values()) |file| allocator.free(file.new_source);
         files.deinit(allocator);
     }
 
-    var loc_set: std.StringArrayHashMapUnmanaged(std.MultiArrayList(LocPair)) = .empty;
+    var loc_set: std.array_hash_map.String(std.MultiArrayList(LocPair)) = .empty;
     defer {
         for (loc_set.values()) |*locs| locs.deinit(allocator);
         loc_set.deinit(allocator);

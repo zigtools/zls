@@ -60,7 +60,7 @@ warn_style: bool = false,
 /// Whether to highlight global var declarations
 highlight_global_var_declarations: bool = false,
 
-/// When true, skips searching for references in the standard library. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
+/// No longer used. May be brought back to configure how symbol references in the standard library should behave
 skip_std_references: bool = false,
 
 /// Favor using `zig ast-check` instead of the builtin one

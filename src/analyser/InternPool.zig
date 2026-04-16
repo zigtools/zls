@@ -4,7 +4,7 @@
 io: std.Io,
 gpa: Allocator,
 
-map: std.AutoArrayHashMapUnmanaged(void, void),
+map: std.array_hash_map.Auto(void, void),
 items: std.MultiArrayList(Item),
 extra: std.ArrayList(u32),
 string_pool: StringPool,
@@ -115,11 +115,11 @@ pub const Key = union(enum) {
     pub const Function = struct {
         args: Index.Slice,
         /// zig only lets the first 32 arguments be `comptime`
-        args_is_comptime: std.StaticBitSet(32) = .initEmpty(),
+        args_is_comptime: std.StaticBitSet(32) = .empty,
         /// zig only lets the first 32 arguments be generic
-        args_is_generic: std.StaticBitSet(32) = .initEmpty(),
+        args_is_generic: std.StaticBitSet(32) = .empty,
         /// zig only lets the first 32 arguments be `noalias`
-        args_is_noalias: std.StaticBitSet(32) = .initEmpty(),
+        args_is_noalias: std.StaticBitSet(32) = .empty,
         return_type: Index,
         flags: Flags = .{},
 
@@ -990,7 +990,7 @@ pub const FieldStatus = enum {
 };
 
 pub const Struct = struct {
-    fields: std.AutoArrayHashMapUnmanaged(String, Field),
+    fields: std.array_hash_map.Auto(String, Field),
     owner_decl: Decl.OptionalIndex,
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .auto,
@@ -1009,8 +1009,8 @@ pub const Struct = struct {
 
 pub const Enum = struct {
     tag_type: InternPool.Index,
-    fields: std.AutoArrayHashMapUnmanaged(String, void),
-    values: std.AutoArrayHashMapUnmanaged(InternPool.Index, void),
+    fields: std.array_hash_map.Auto(String, void),
+    values: std.array_hash_map.Auto(InternPool.Index, void),
     namespace: NamespaceIndex,
     tag_type_inferred: bool,
 
@@ -1019,7 +1019,7 @@ pub const Enum = struct {
 
 pub const Union = struct {
     tag_type: InternPool.Index,
-    fields: std.AutoArrayHashMapUnmanaged(String, Field),
+    fields: std.array_hash_map.Auto(String, Field),
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .auto,
     status: FieldStatus,
@@ -3558,7 +3558,7 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
     const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
     defer ip.gpa.free(b_names);
 
-    var set: std.AutoArrayHashMapUnmanaged(String, void) = .empty;
+    var set: std.array_hash_map.Auto(String, void) = .empty;
     defer set.deinit(ip.gpa);
 
     try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
@@ -4688,9 +4688,9 @@ test "function type" {
         .return_type = .bool_type,
     } });
 
-    var args_is_comptime: std.StaticBitSet(32) = .initEmpty();
+    var args_is_comptime: std.StaticBitSet(32) = .empty;
     args_is_comptime.set(0);
-    var args_is_noalias: std.StaticBitSet(32) = .initEmpty();
+    var args_is_noalias: std.StaticBitSet(32) = .empty;
     args_is_noalias.set(1);
 
     const @"fn(comptime type, noalias i32) type" = try ip.get(.{ .function_type = .{
