@@ -1,7 +1,7 @@
 .{
     .name = .zls,
     // Remove `-dev` when tagging a new ZLS release and add it back on the next development cycle.
-    .version = "0.16.0",
+    .version = "0.16.1-dev",
     // Specifies the minimum Zig version that is required to compile and test ZLS.
     // Must be a Zig version that is downloadable from https://ziglang.org/download/ or a mirror.
     //
