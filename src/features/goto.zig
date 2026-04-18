@@ -266,7 +266,7 @@ fn gotoDefinitionString(
                 const path = try std.Io.Dir.path.join(arena, &.{ dir, import_str });
                 std.Io.Dir.accessAbsolute(io, path, .{}) catch |err| switch (err) {
                     error.Canceled => return error.Canceled,
-                    else => {},
+                    else => continue,
                 };
                 break :blk .{ .one = try .fromPath(arena, path) };
             }
