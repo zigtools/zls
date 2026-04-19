@@ -2,16 +2,12 @@
   "dependencies": {},
   "modules": {
     "baz.zig": {
-      "import_table": {},
-      "c_macros": [],
-      "include_dirs": []
+      "import_table": {}
     },
     "bar.zig": {
       "import_table": {
         "with-root-source-file": "baz.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
+      }
     }
   },
   "compilations": [],
