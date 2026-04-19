@@ -4,9 +4,7 @@
     "root.zig": {
       "import_table": {
         "bar": "root.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
+      }
     }
   },
   "compilations": [],
