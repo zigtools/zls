@@ -1454,6 +1454,19 @@ fn getReturnTypeNode(tree: *const Ast, nodes: []const Ast.Node.Index) ?Ast.Node.
     return null;
 }
 
+fn isTaggedUnionFieldWithOPV(
+    builder: *Builder,
+    container: Analyser.Type,
+    field_type: Analyser.Type,
+) bool {
+    if (!container.isTaggedUnion()) return false;
+    const ip_index = switch (field_type.data) {
+        .ip_index => |payload| payload.type,
+        else => return false,
+    };
+    return builder.analyser.ip.onePossibleValue(ip_index) != .none;
+}
+
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 fn collectContainerFields(
     builder: *Builder,
@@ -1461,8 +1474,13 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) Analyser.Error!void {
-    const info = switch (container.data) {
-        .container => |info| info,
+    const info, const type_maybe = switch (container.data) {
+        .container => |info| .{ info, null },
+        .union_tag => |union_ty| blk: {
+            const info = union_ty.data.container;
+            const ty = try container.instanceTypeVal(builder.analyser) orelse container;
+            break :blk .{ info, ty };
+        },
         else => return,
     };
 
@@ -1474,7 +1492,7 @@ fn collectContainerFields(
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
-        const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
+        const maybe_resolved_ty = type_maybe orelse try decl_handle.resolveType(builder.analyser);
         const tree = &scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
@@ -1487,18 +1505,16 @@ fn collectContainerFields(
             => {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
-                const kind: types.completion.Item.Kind =
-                    if (field.ast.tuple_like) .EnumMember else .Field;
+                const kind: types.completion.Item.Kind = switch (container.data) {
+                    .union_tag => .EnumMember,
+                    else => if (field.ast.tuple_like) .EnumMember else .Field,
+                };
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and kind == .Field) {
-                        if (container.isTaggedUnion() and
-                            maybe_resolved_ty != null and
-                            maybe_resolved_ty.?.data == .ip_index and
-                            maybe_resolved_ty.?.data.ip_index.type != .unknown_type and
-                            builder.analyser.ip.onePossibleValue(maybe_resolved_ty.?.data.ip_index.type) != .none)
-                        {
-                            break :insert_text .{ name, .PlainText };
+                        if (maybe_resolved_ty) |ty| {
+                            if (isTaggedUnionFieldWithOPV(builder, container, ty))
+                                break :insert_text .{ name, .PlainText };
                         }
 
                         if (!builder.use_snippets) {
@@ -1588,6 +1604,7 @@ fn collectContainerFields(
                 // decl literal
                 const resolved_ty = maybe_resolved_ty orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                expected_ty = try expected_ty.typeOf(builder.analyser);
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;

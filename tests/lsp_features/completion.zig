@@ -1761,6 +1761,32 @@ test "tagged union" {
     });
 }
 
+test "tagged union - tag" {
+    try testCompletion(
+        \\const std = @import("std");
+        \\const Ue = union(enum) {
+        \\    alpha,
+        \\    beta: []const u8,
+        \\};
+        \\const foo: std.meta.Tag(Ue) = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember, .detail = "@typeInfo(Ue).@\"union\".tag_type.?" },
+        .{ .label = "beta", .kind = .EnumMember, .detail = "@typeInfo(Ue).@\"union\".tag_type.?" },
+    });
+    try testCompletion(
+        \\const std = @import("std");
+        \\const Ue = union(enum) {
+        \\    alpha,
+        \\    beta: []const u8,
+        \\};
+        \\const S = struct { foo: std.meta.Tag(Ue) };
+        \\const s = S{ .foo = .<cursor> };
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember, .detail = "@typeInfo(Ue).@\"union\".tag_type.?" },
+        .{ .label = "beta", .kind = .EnumMember, .detail = "@typeInfo(Ue).@\"union\".tag_type.?" },
+    });
+}
+
 test "switch cases" {
     // Because current logic is to list all enums if all else fails,
     // the following tests include an extra enum to ensure that we're not just 'getting lucky'
