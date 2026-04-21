@@ -17,7 +17,6 @@ pub const print_ast = @import("print_ast.zig");
 pub const Server = @import("Server.zig");
 pub const snippets = @import("snippets.zig");
 pub const testing = @import("testing.zig");
-pub const translate_c = @import("translate_c.zig");
 pub const TrigramStore = @import("TrigramStore.zig");
 pub const Uri = @import("Uri.zig");
 

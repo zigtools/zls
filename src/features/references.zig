@@ -186,7 +186,7 @@ const Builder = struct {
                         else => unreachable,
                     };
 
-                    const candidate = try builder.analyser.lookupSymbolFieldInit(
+                    const candidate, _ = try builder.analyser.lookupSymbolFieldInit(
                         handle,
                         name,
                         nodes[0],
@@ -204,7 +204,7 @@ const Builder = struct {
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
-                const candidate = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
+                const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
                 break :candidate .{ candidate, name_token };
             },
             .global_var_decl,
@@ -728,7 +728,10 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
                 break :z null;
             },
             .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
-            .enum_literal => try analyser.getSymbolEnumLiteral(handle, source_index, name),
+            .enum_literal => blk: {
+                const decl, _ = try analyser.getSymbolEnumLiteral(handle, source_index, name) orelse break :blk null;
+                break :blk decl;
+            },
             .keyword => null,
             else => null,
         } orelse return null;

@@ -4,24 +4,18 @@
     "foo.zig": {
       "import_table": {
         "bar_in_foo": "bar.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
+      }
     },
     "bar.zig": {
       "import_table": {
         "foo_in_bar": "foo.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
+      }
     },
     "main.zig": {
       "import_table": {
         "foo_in_main": "foo.zig",
         "bar_in_main": "bar.zig"
-      },
-      "c_macros": [],
-      "include_dirs": []
+      }
     }
   },
   "compilations": [],

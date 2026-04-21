@@ -38,9 +38,6 @@ const excluded_builtins_set: std.EnumArray(std.zig.BuiltinFn.Tag, bool) = .init(
     .bit_reverse = true,
     .offset_of = false,
     .call = false,
-    .c_define = true,
-    .c_import = true,
-    .c_include = true,
     .clz = true,
     .cmpxchg_strong = false,
     .cmpxchg_weak = false,
@@ -48,7 +45,6 @@ const excluded_builtins_set: std.EnumArray(std.zig.BuiltinFn.Tag, bool) = .init(
     .compile_log = true, // variadic
     .const_cast = true,
     .ctz = true,
-    .c_undef = true,
     .c_va_arg = false,
     .c_va_copy = false,
     .c_va_end = false,
@@ -530,8 +526,8 @@ fn writeNodeInlayHint(
                 const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                 const name_loc = offsets.tokenToLoc(tree, name_token);
                 const name = offsets.locToSlice(tree.source, name_loc);
-                const decl = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
-                const ty = try decl.resolveType(builder.analyser) orelse continue;
+                const decl, const type_maybe = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
+                const ty = type_maybe orelse try decl.resolveType(builder.analyser) orelse continue;
                 const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true });
                 if (type_str.len == 0) continue;
                 try appendTypeHintString(

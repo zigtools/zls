@@ -19,13 +19,23 @@ fn hoverSymbol(
     param_decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
 ) Analyser.Error!?[]const u8 {
+    return try hoverSymbolWithType(analyser, arena, param_decl_handle, null, markup_kind);
+}
+
+fn hoverSymbolWithType(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    param_decl_handle: Analyser.DeclWithHandle,
+    type_maybe: ?Analyser.Type,
+    markup_kind: types.MarkupKind,
+) Analyser.Error!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var doc_strings: std.ArrayList([]const u8) = .empty;
 
     var decl_handle: Analyser.DeclWithHandle = param_decl_handle;
-    var maybe_resolved_type = try param_decl_handle.resolveType(analyser);
+    var maybe_resolved_type = type_maybe orelse try param_decl_handle.resolveType(analyser);
 
     while (true) {
         if (try decl_handle.docComments(arena)) |doc_string| {
@@ -213,7 +223,6 @@ fn hoverDefinitionBuiltin(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
-    pos_index: usize,
     name_loc: offsets.Loc,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
@@ -225,33 +234,6 @@ fn hoverDefinitionBuiltin(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
     var contents: std.ArrayList(u8) = .empty;
-
-    if (std.mem.eql(u8, name, "@cImport")) blk: {
-        const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = handle.tree.nodeMainToken(cimport_node);
-            const cimport_loc = offsets.tokenToLoc(&handle.tree, main_token);
-            if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
-        } else break :blk;
-
-        const source = handle.cimports.items(.source)[index];
-
-        switch (markup_kind) {
-            .plaintext, .unknown_value => {
-                try contents.print(arena,
-                    \\{s}
-                    \\
-                , .{source});
-            },
-            .markdown => {
-                try contents.print(arena,
-                    \\```c
-                    \\{s}
-                    \\```
-                    \\
-                , .{source});
-            },
-        }
-    }
 
     const builtin = data.builtins.get(name) orelse return null;
     const signature = try Analyser.renderBuiltinFunctionSignature(
@@ -380,13 +362,13 @@ fn hoverDefinitionEnumLiteral(
         return try hoverDefinitionStructInit(analyser, arena, handle, source_index, markup_kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
+    const decl, const type_maybe = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
 
     return .{
         .contents = .{
             .markup_content = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(analyser, arena, decl, markup_kind)) orelse return null,
+                .value = (try hoverSymbolWithType(analyser, arena, decl, type_maybe, markup_kind)) orelse return null,
             },
         },
         .range = offsets.tokenToRange(&handle.tree, name_token, offset_encoding),
@@ -523,7 +505,7 @@ pub fn hover(
     const pos_context = try Analyser.getPositionContext(arena, &handle.tree, source_index, true);
 
     const response = switch (pos_context) {
-        .builtin => |loc| try hoverDefinitionBuiltin(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
+        .builtin => |loc| try hoverDefinitionBuiltin(analyser, arena, handle, loc, markup_kind, offset_encoding),
         .var_access, .test_doctest_name => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind, offset_encoding),
         .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
         .label_access, .label_decl => |loc| try hoverDefinitionLabel(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),

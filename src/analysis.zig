@@ -1751,9 +1751,6 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
     };
 
     const tree = &decl_handle.handle.tree;
-    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
-
-    if (is_cimport or !analyser.collect_callsite_references) return null;
 
     // protection against recursive callsite resolution
     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
@@ -2405,17 +2402,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                     if (try analyser.resolveImportString(analyser.root_handle orelse return null, import_string)) |ty| return ty;
                     return null;
                 },
-                .c_import => {
-                    if (!DocumentStore.supports_build_system) return null;
-                    const cimport_uri = (try analyser.store.resolveCImport(handle, node)) orelse return null;
-
-                    const new_handle = try analyser.store.getOrLoadHandle(cimport_uri) orelse return null;
-
-                    return .{
-                        .data = .{ .container = .root(new_handle) },
-                        .is_type_val = true,
-                    };
-                },
                 .FieldType => {
                     if (params.len < 2) return null;
 
@@ -2876,8 +2862,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             defer analyser.arena.free(lineage);
 
             const tag = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(node));
-            const decl = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
-            return decl.resolveType(analyser);
+            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
+            return type_maybe orelse decl.resolveType(analyser);
         },
 
         .unreachable_literal => return Type.fromIP(analyser, .noreturn_type, null),
@@ -4359,6 +4345,7 @@ pub const Type = struct {
     }
 
     pub fn resolveDeclLiteralResultType(ty: Type) Type {
+        std.debug.assert(ty.is_type_val);
         var result_type = ty;
         while (true) {
             result_type = switch (result_type.data) {
@@ -5213,7 +5200,6 @@ pub fn getFieldAccessType(
 pub const PositionContext = union(enum) {
     builtin: offsets.Loc,
     import_string_literal: offsets.Loc,
-    cinclude_string_literal: offsets.Loc,
     embedfile_string_literal: offsets.Loc,
     string_literal: offsets.Loc,
     field_access: offsets.Loc,
@@ -5242,7 +5228,6 @@ pub const PositionContext = union(enum) {
         return switch (self) {
             .builtin,
             .import_string_literal,
-            .cinclude_string_literal,
             .embedfile_string_literal,
             .string_literal,
             .field_access,
@@ -5266,13 +5251,11 @@ pub const PositionContext = union(enum) {
 
     /// Asserts that `self` is one of the following:
     ///  - `.import_string_literal`
-    ///  - `.cinclude_string_literal`
     ///  - `.embedfile_string_literal`
     ///  - `.string_literal`
     pub fn stringLiteralContentLoc(self: PositionContext, source: []const u8) offsets.Loc {
         var location = switch (self) {
             .import_string_literal,
-            .cinclude_string_literal,
             .embedfile_string_literal,
             .string_literal,
             => |l| l,
@@ -5500,8 +5483,6 @@ pub fn getPositionContext(
                             const builtin_name = tree.source[loc.start..loc.end];
                             if (std.mem.eql(u8, builtin_name, "@import")) {
                                 new_state = .{ .import_string_literal = tok.loc };
-                            } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
-                                new_state = .{ .cinclude_string_literal = tok.loc };
                             } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
                                 new_state = .{ .embedfile_string_literal = tok.loc };
                             }
@@ -6383,7 +6364,7 @@ pub fn lookupSymbolFieldInit(
     field_name: []const u8,
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
-) Error!?DeclWithHandle {
+) Error!?struct { DeclWithHandle, ?Type } {
     var container_type = (try analyser.resolveExpressionType(
         handle,
         node,
@@ -6405,18 +6386,27 @@ pub fn lookupSymbolFieldInit(
         else => false,
     };
 
-    container_type = try container_type
-        .resolveDeclLiteralResultType()
-        .instanceTypeVal(analyser) orelse container_type;
+    container_type = try container_type.typeOf(analyser);
+    container_type = container_type.resolveDeclLiteralResultType();
+    container_type = try container_type.instanceUnchecked(analyser);
 
     if (is_struct_init) {
-        return try container_type.lookupSymbol(analyser, field_name);
+        const decl = try container_type.lookupSymbol(analyser, field_name) orelse return null;
+        return .{ decl, null };
+    }
+
+    switch (container_type.data) {
+        .union_tag => |t| {
+            const decl = try t.lookupSymbol(analyser, field_name) orelse return null;
+            return .{ decl, container_type };
+        },
+        else => {},
     }
 
     switch (container_type.getContainerKind() orelse return null) {
         .keyword_struct, .keyword_opaque => {},
-        .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |ty| return ty,
-        .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |ty| return ty,
+        .keyword_enum => if (try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name)) |decl| return .{ decl, null },
+        .keyword_union => if (try container_type.lookupSymbol(analyser, field_name)) |decl| return .{ decl, null },
         else => return null,
     }
 
@@ -6424,8 +6414,10 @@ pub fn lookupSymbolFieldInit(
     const decl = try (try container_type.typeOf(analyser)).lookupSymbol(analyser, field_name) orelse return null;
     var resolved_type = try decl.resolveType(analyser) orelse return null;
     resolved_type = try analyser.resolveReturnType(resolved_type) orelse resolved_type;
+    resolved_type = try resolved_type.typeOf(analyser);
     resolved_type = resolved_type.resolveDeclLiteralResultType();
-    if (resolved_type.eql(container_type) or resolved_type.eql(try container_type.typeOf(analyser))) return decl;
+    resolved_type = try resolved_type.instanceUnchecked(analyser);
+    if (resolved_type.eql(container_type)) return .{ decl, null };
     return null;
 }
 
@@ -6468,8 +6460,9 @@ pub fn resolveExpressionTypeFromAncestors(
                 const field_name_token = tree.firstToken(node) - 2;
                 if (tree.tokenTag(field_name_token) != .identifier) return null;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
-                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field_decl| {
-                    return try field_decl.resolveType(analyser);
+                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors[0], ancestors[1..])) |field| {
+                    const decl, const type_maybe = field;
+                    return type_maybe orelse try decl.resolveType(analyser);
                 }
             }
         },
@@ -6611,8 +6604,8 @@ pub fn resolveExpressionTypeFromAncestors(
 
             var fn_type = if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) blk: {
                 const field_name = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(call.ast.fn_expr));
-                const decl = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
-                const ty = try decl.resolveType(analyser) orelse return null;
+                const decl, const type_maybe = try analyser.lookupSymbolFieldInit(handle, field_name, call.ast.fn_expr, ancestors) orelse return null;
+                const ty = type_maybe orelse try decl.resolveType(analyser) orelse return null;
                 break :blk try analyser.resolveFuncProtoOfCallable(ty) orelse return null;
             } else blk: {
                 const ty = try analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return null;
@@ -6872,7 +6865,7 @@ pub fn getSymbolEnumLiteral(
     handle: *DocumentStore.Handle,
     source_index: usize,
     name: []const u8,
-) Error!?DeclWithHandle {
+) Error!?struct { DeclWithHandle, ?Type } {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

@@ -282,8 +282,6 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.verbose_llvm_ir = arg["--verbose-llvm-ir=".len..];
             } else if (mem.startsWith(u8, arg, "--verbose-llvm-bc=")) {
                 builder.verbose_llvm_bc = arg["--verbose-llvm-bc=".len..];
-            } else if (mem.eql(u8, arg, "--verbose-cimport")) {
-                builder.verbose_cimport = true;
             } else if (mem.eql(u8, arg, "--verbose-cc")) {
                 builder.verbose_cc = true;
             } else if (mem.eql(u8, arg, "--verbose-llvm-cpu-features")) {
@@ -983,7 +981,6 @@ fn createModuleDependenciesForStep(step: *Step) Allocator.Error!void {
 //
 
 const shared = @import("shared.zig");
-const Transport = shared.Transport;
 const BuildConfig = shared.BuildConfig;
 
 fn extractBuildInformation(
@@ -999,95 +996,20 @@ fn extractBuildInformation(
                 .generated => |gen| try set.put(allocator, gen.file.step, {}),
             }
         }
-        fn addIncludeDirStepDependencies(allocator: Allocator, set: *std.array_hash_map.Auto(*Step, void), include_dir: std.Build.Module.IncludeDir) !void {
-            switch (include_dir) {
-                .path,
-                .path_system,
-                .path_after,
-                .framework_path,
-                .framework_path_system,
-                => |lazy_path| try addLazyPathStepDependencies(allocator, set, lazy_path),
-                .other_step => |other| {
-                    if (other.generated_h) |header| {
-                        try set.put(allocator, header.step, {});
-                    }
-                    if (other.installed_headers_include_tree) |include_tree| {
-                        try set.put(allocator, include_tree.generated_directory.step, {});
-                    }
-                },
-                .embed_path => {
-                    // This only affects C source files
-                },
-                .config_header_step => |config_header| try set.put(allocator, &config_header.step, {}),
-            }
-        }
-        /// Only adds the necessary dependencies to resolve the `root_source_file` and `include_dirs`. Does not include dependencies of imported modules.
+        /// Only adds the necessary dependencies to resolve the `root_source_file`. Does not include dependencies of imported modules.
         fn addModuleDependencies(allocator: Allocator, set: *std.array_hash_map.Auto(*Step, void), module: *std.Build.Module) !void {
             if (module.root_source_file) |root_source_file| {
                 try addLazyPathStepDependencies(allocator, set, root_source_file);
             }
-
-            for (module.include_dirs.items) |include_dir| {
-                try addIncludeDirStepDependencies(allocator, set, include_dir);
-            }
         }
         fn processModule(
             allocator: Allocator,
-            modules: *std.array_hash_map.String(shared.BuildConfig.Module),
+            modules: *std.array_hash_map.String(BuildConfig.Module),
             module: *std.Build.Module,
             compile: ?*Step.Compile,
         ) !void {
+            _ = compile;
             const root_source_file = module.root_source_file orelse return;
-
-            var include_dirs: std.array_hash_map.String(void) = .empty;
-            var c_macros: std.array_hash_map.String(void) = .empty;
-
-            if (compile) |exe| {
-                try processPkgConfig(allocator, &include_dirs, &c_macros, exe);
-            }
-
-            try c_macros.ensureUnusedCapacity(allocator, module.c_macros.items.len);
-            for (module.c_macros.items) |c_macro| {
-                c_macros.putAssumeCapacity(c_macro, {});
-            }
-
-            for (module.include_dirs.items) |include_dir| {
-                switch (include_dir) {
-                    .path,
-                    .path_system,
-                    .path_after,
-                    .framework_path,
-                    .framework_path_system,
-                    => |include_path| try include_dirs.put(allocator, include_path.getPath(module.owner), {}),
-
-                    .other_step => |other| {
-                        if (other.generated_h) |header| {
-                            try include_dirs.put(
-                                allocator,
-                                std.Io.Dir.path.dirname(header.getPath()).?,
-                                {},
-                            );
-                        }
-                        if (other.installed_headers_include_tree) |include_tree| {
-                            try include_dirs.put(
-                                allocator,
-                                include_tree.generated_directory.getPath(),
-                                {},
-                            );
-                        }
-                    },
-                    .embed_path => {
-                        // This only affects C source files
-                    },
-                    .config_header_step => |config_header| {
-                        try include_dirs.put(
-                            allocator,
-                            config_header.generated_dir.getPath(),
-                            {},
-                        );
-                    },
-                }
-            }
 
             const cwd = module.owner.graph.cache.cwd;
 
@@ -1096,8 +1018,6 @@ fn extractBuildInformation(
             // All modules with the same root source file are merged. This limitation may be lifted in the future.
             const gop = try modules.getOrPutValue(allocator, root_source_file_path, .{
                 .import_table = .{},
-                .c_macros = &.{},
-                .include_dirs = &.{},
             });
 
             for (module.import_table.keys(), module.import_table.values()) |name, import| {
@@ -1108,8 +1028,6 @@ fn extractBuildInformation(
                     gop_import.value_ptr.* = try std.Io.Dir.path.resolve(allocator, &.{ cwd, import_root_source_file.getPath2(import.owner, null) });
                 }
             }
-            gop.value_ptr.c_macros = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.c_macros, c_macros.keys() });
-            gop.value_ptr.include_dirs = try std.mem.concat(allocator, []const u8, &.{ gop.value_ptr.include_dirs, include_dirs.keys() });
         }
     };
     const gpa = run.gpa;
@@ -1281,185 +1199,6 @@ fn extractBuildInformation(
     var file_writer = Io.File.stdout().writer(b.graph.io, &.{});
     file_writer.interface.writeAll(stringified_build_config) catch return file_writer.err.?;
 }
-
-fn processPkgConfig(
-    allocator: Allocator,
-    include_dirs: *std.array_hash_map.String(void),
-    c_macros: *std.array_hash_map.String(void),
-    exe: *Step.Compile,
-) !void {
-    for (exe.root_module.link_objects.items) |link_object| {
-        if (link_object != .system_lib) continue;
-        const system_lib = link_object.system_lib;
-
-        if (system_lib.use_pkg_config == .no) continue;
-
-        const args = copied_from_zig.runPkgConfig(exe, system_lib.name) catch |err| switch (err) {
-            error.PkgConfigInvalidOutput,
-            error.PkgConfigCrashed,
-            error.PkgConfigFailed,
-            error.PkgConfigNotInstalled,
-            error.PackageNotFound,
-            => switch (system_lib.use_pkg_config) {
-                .yes => {
-                    // pkg-config failed, so zig will not add any include paths
-                    continue;
-                },
-                .force => {
-                    std.log.warn("pkg-config failed for library {s}", .{system_lib.name});
-                    continue;
-                },
-                .no => unreachable,
-            },
-            else => |e| return e,
-        };
-        for (args) |arg| {
-            if (std.mem.startsWith(u8, arg, "-I")) {
-                const candidate = arg[2..];
-                try include_dirs.put(allocator, candidate, {});
-            } else if (std.mem.startsWith(u8, arg, "-D")) {
-                try c_macros.put(allocator, arg, {});
-            }
-        }
-    }
-}
-
-const copied_from_zig = struct {
-    /// Run pkg-config for the given library name and parse the output, returning the arguments
-    /// that should be passed to zig to link the given library.
-    fn runPkgConfig(self: *Step.Compile, lib_name: []const u8) ![]const []const u8 {
-        const b = self.step.owner;
-        const pkg_name = match: {
-            // First we have to map the library name to pkg config name. Unfortunately,
-            // there are several examples where this is not straightforward:
-            // -lSDL2 -> pkg-config sdl2
-            // -lgdk-3 -> pkg-config gdk-3.0
-            // -latk-1.0 -> pkg-config atk
-            const pkgs = try getPkgConfigList(b);
-
-            // Exact match means instant winner.
-            for (pkgs) |pkg| {
-                if (mem.eql(u8, pkg.name, lib_name)) {
-                    break :match pkg.name;
-                }
-            }
-
-            // Next we'll try ignoring case.
-            for (pkgs) |pkg| {
-                if (std.ascii.eqlIgnoreCase(pkg.name, lib_name)) {
-                    break :match pkg.name;
-                }
-            }
-
-            // Now try appending ".0".
-            for (pkgs) |pkg| {
-                if (std.ascii.findIgnoreCase(pkg.name, lib_name)) |pos| {
-                    if (pos != 0) continue;
-                    if (mem.eql(u8, pkg.name[lib_name.len..], ".0")) {
-                        break :match pkg.name;
-                    }
-                }
-            }
-
-            // Trimming "-1.0".
-            if (mem.endsWith(u8, lib_name, "-1.0")) {
-                const trimmed_lib_name = lib_name[0 .. lib_name.len - "-1.0".len];
-                for (pkgs) |pkg| {
-                    if (std.ascii.eqlIgnoreCase(pkg.name, trimmed_lib_name)) {
-                        break :match pkg.name;
-                    }
-                }
-            }
-
-            return error.PackageNotFound;
-        };
-
-        var code: u8 = undefined;
-        const stdout = if (b.runAllowFail(&.{
-            "pkg-config",
-            pkg_name,
-            "--cflags",
-            "--libs",
-        }, &code, .ignore)) |stdout| stdout else |err| switch (err) {
-            error.ProcessTerminated => return error.PkgConfigCrashed,
-            error.ExecNotSupported => return error.PkgConfigFailed,
-            error.ExitCodeFailure => return error.PkgConfigFailed,
-            error.FileNotFound => return error.PkgConfigNotInstalled,
-            else => return err,
-        };
-
-        var zig_args = std.array_list.Managed([]const u8).init(b.allocator);
-        defer zig_args.deinit();
-
-        var it = mem.tokenizeAny(u8, stdout, " \r\n\t");
-        while (it.next()) |tok| {
-            if (mem.eql(u8, tok, "-I")) {
-                const dir = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&.{ "-I", dir });
-            } else if (mem.startsWith(u8, tok, "-I")) {
-                try zig_args.append(tok);
-            } else if (mem.eql(u8, tok, "-L")) {
-                const dir = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&.{ "-L", dir });
-            } else if (mem.startsWith(u8, tok, "-L")) {
-                try zig_args.append(tok);
-            } else if (mem.eql(u8, tok, "-l")) {
-                const lib = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&.{ "-l", lib });
-            } else if (mem.startsWith(u8, tok, "-l")) {
-                try zig_args.append(tok);
-            } else if (mem.eql(u8, tok, "-D")) {
-                const macro = it.next() orelse return error.PkgConfigInvalidOutput;
-                try zig_args.appendSlice(&.{ "-D", macro });
-            } else if (mem.startsWith(u8, tok, "-D")) {
-                try zig_args.append(tok);
-            } else if (b.debug_pkg_config) {
-                return self.step.fail("unknown pkg-config flag '{s}'", .{tok});
-            }
-        }
-
-        return zig_args.toOwnedSlice();
-    }
-
-    fn execPkgConfigList(self: *std.Build, out_code: *u8) (std.Build.PkgConfigError || std.Build.RunError)![]const std.Build.PkgConfigPkg {
-        const stdout = try self.runAllowFail(&.{ "pkg-config", "--list-all" }, out_code, .ignore);
-        var list = std.array_list.Managed(std.Build.PkgConfigPkg).init(self.allocator);
-        errdefer list.deinit();
-        var line_it = mem.tokenizeAny(u8, stdout, "\r\n");
-        while (line_it.next()) |line| {
-            if (mem.trim(u8, line, " \t").len == 0) continue;
-            var tok_it = mem.tokenizeAny(u8, line, " \t");
-            try list.append(.{
-                .name = tok_it.next() orelse return error.PkgConfigInvalidOutput,
-                .desc = tok_it.rest(),
-            });
-        }
-        return list.toOwnedSlice();
-    }
-
-    fn getPkgConfigList(self: *std.Build) ![]const std.Build.PkgConfigPkg {
-        if (self.pkg_config_pkg_list) |res| {
-            return res;
-        }
-        var code: u8 = undefined;
-        if (execPkgConfigList(self, &code)) |list| {
-            self.pkg_config_pkg_list = list;
-            return list;
-        } else |err| {
-            const result = switch (err) {
-                error.ProcessTerminated => error.PkgConfigCrashed,
-                error.ExecNotSupported => error.PkgConfigFailed,
-                error.ExitCodeFailure => error.PkgConfigFailed,
-                error.FileNotFound => error.PkgConfigNotInstalled,
-                error.InvalidName => error.PkgConfigNotInstalled,
-                error.PkgConfigInvalidOutput => error.PkgConfigInvalidOutput,
-                else => return err,
-            };
-            self.pkg_config_pkg_list = result;
-            return result;
-        }
-    }
-};
 
 fn serveWatchErrorBundle(
     io: std.Io,

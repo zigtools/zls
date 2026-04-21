@@ -217,19 +217,6 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
 fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Analyser.Error!void {
     const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
 
-    const is_cimport = std.mem.eql(u8, std.Io.Dir.path.basename(decl_handle.handle.uri.raw), "cimport.zig");
-    if (is_cimport) {
-        if (std.mem.startsWith(u8, name, "_")) return;
-        const exclusions: std.StaticStringMap(void) = .initComptime(.{
-            .{ "linux", {} },
-            .{ "unix", {} },
-            .{ "WIN32", {} },
-            .{ "WINNT", {} },
-            .{ "WIN64", {} },
-        });
-        if (exclusions.has(name)) return;
-    }
-
     var doc_comments_buffer: [2][]const u8 = undefined;
     var doc_comments: std.ArrayList([]const u8) = .initBuffer(&doc_comments_buffer);
     if (try decl_handle.docComments(builder.arena)) |docs| {
@@ -875,7 +862,6 @@ fn collectErrorSetNames(
 
 /// Asserts that `pos_context` is one of the following:
 ///  - `.import_string_literal`
-///  - `.cinclude_string_literal`
 ///  - `.embedfile_string_literal`
 ///  - `.string_literal`
 fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.PositionContext) Analyser.Error!void {
@@ -986,15 +972,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
     var search_paths: std.ArrayList([]const u8) = .empty;
     if (std.Io.Dir.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(builder.arena, completing);
-    } else if (pos_context == .cinclude_string_literal) {
-        if (!DocumentStore.supports_build_system) return;
-        _ = store.collectIncludeDirs(builder.arena, builder.orig_handle, &search_paths) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => {
-                log.err("failed to resolve include paths: {}", .{err});
-                return;
-            },
-        };
     } else blk: {
         const document_path = builder.orig_handle.uri.toFsPath(builder.arena) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -1018,7 +995,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             const entry = opt_entry orelse break;
             const expected_extension = switch (pos_context) {
                 .import_string_literal => ".zig",
-                .cinclude_string_literal => ".h",
                 .embedfile_string_literal => null,
                 .string_literal => null,
                 else => unreachable,
@@ -1046,7 +1022,6 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             try builder.completions.append(builder.arena, .{
                 .label = label,
                 .kind = if (entry.kind == .file) .File else .Folder,
-                .detail = if (pos_context == .cinclude_string_literal) path else null,
                 .textEdit = createTextEdit(builder, .{ .newText = insert_text, .insert = insert_range, .replace = replace_range }),
                 .sortText = try generateSortText(builder.arena, score, label),
             });
@@ -1094,7 +1069,6 @@ pub fn completionAtIndex(
         .error_access => |loc| try completeError(&builder, loc),
         .label_access, .label_decl => try completeLabel(&builder),
         .import_string_literal,
-        .cinclude_string_literal,
         .embedfile_string_literal,
         .string_literal,
         => try completeFileSystemStringLiteral(&builder, pos_context),
@@ -1480,6 +1454,19 @@ fn getReturnTypeNode(tree: *const Ast, nodes: []const Ast.Node.Index) ?Ast.Node.
     return null;
 }
 
+fn isTaggedUnionFieldWithOPV(
+    builder: *Builder,
+    container: Analyser.Type,
+    field_type: Analyser.Type,
+) bool {
+    if (!container.isTaggedUnion()) return false;
+    const ip_index = switch (field_type.data) {
+        .ip_index => |payload| payload.type,
+        else => return false,
+    };
+    return builder.analyser.ip.onePossibleValue(ip_index) != .none;
+}
+
 /// Given a Type that is a container, adds it's `.container_field*`s to completions
 fn collectContainerFields(
     builder: *Builder,
@@ -1487,8 +1474,13 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) Analyser.Error!void {
-    const info = switch (container.data) {
-        .container => |info| info,
+    const info, const type_maybe = switch (container.data) {
+        .container => |info| .{ info, null },
+        .union_tag => |union_ty| blk: {
+            const info = union_ty.data.container;
+            const ty = try container.instanceTypeVal(builder.analyser) orelse container;
+            break :blk .{ info, ty };
+        },
         else => return,
     };
 
@@ -1500,7 +1492,7 @@ fn collectContainerFields(
         const decl = document_scope.declarations.get(@intFromEnum(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
-        const maybe_resolved_ty = try decl_handle.resolveType(builder.analyser);
+        const maybe_resolved_ty = type_maybe orelse try decl_handle.resolveType(builder.analyser);
         const tree = &scope_handle.handle.tree;
 
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
@@ -1513,18 +1505,16 @@ fn collectContainerFields(
             => {
                 const field = tree.fullContainerField(decl.ast_node).?;
 
-                const kind: types.completion.Item.Kind =
-                    if (field.ast.tuple_like) .EnumMember else .Field;
+                const kind: types.completion.Item.Kind = switch (container.data) {
+                    .union_tag => .EnumMember,
+                    else => if (field.ast.tuple_like) .EnumMember else .Field,
+                };
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
                     if (likely != .struct_field and likely != .enum_comparison and likely != .switch_case and kind == .Field) {
-                        if (container.isTaggedUnion() and
-                            maybe_resolved_ty != null and
-                            maybe_resolved_ty.?.data == .ip_index and
-                            maybe_resolved_ty.?.data.ip_index.type != .unknown_type and
-                            builder.analyser.ip.onePossibleValue(maybe_resolved_ty.?.data.ip_index.type) != .none)
-                        {
-                            break :insert_text .{ name, .PlainText };
+                        if (maybe_resolved_ty) |ty| {
+                            if (isTaggedUnionFieldWithOPV(builder, container, ty))
+                                break :insert_text .{ name, .PlainText };
                         }
 
                         if (!builder.use_snippets) {
@@ -1614,6 +1604,7 @@ fn collectContainerFields(
                 // decl literal
                 const resolved_ty = maybe_resolved_ty orelse continue;
                 var expected_ty = try builder.analyser.resolveReturnType(resolved_ty) orelse continue;
+                expected_ty = try expected_ty.typeOf(builder.analyser);
                 expected_ty = expected_ty.resolveDeclLiteralResultType();
                 if (expected_ty.data != .container) continue;
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;

@@ -2,9 +2,7 @@
   "dependencies": {},
   "modules": {
     "root.zig": {
-      "import_table": {},
-      "c_macros": [],
-      "include_dirs": []
+      "import_table": {}
     }
   },
   "compilations": [],
