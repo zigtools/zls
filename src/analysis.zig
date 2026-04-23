@@ -126,7 +126,12 @@ pub fn getDocCommentTokenIndex(tree: *const Ast, base_token: Ast.TokenIndex) ?As
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: std.mem.Allocator, tree: *const Ast, doc_comments: Ast.TokenIndex, container_doc: bool) error{OutOfMemory}![]const u8 {
+pub fn collectDocComments(
+    allocator: std.mem.Allocator,
+    tree: *const Ast,
+    doc_comments: Ast.TokenIndex,
+    container_doc: bool,
+) error{OutOfMemory}!?[]const u8 {
     var lines: std.ArrayList([]const u8) = .empty;
     defer lines.deinit(allocator);
 
@@ -134,13 +139,16 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: *const Ast, doc_co
 
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
-        const comm = tree.tokenTag(curr_line_tok);
-        if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
-            const line = tree.tokenSlice(curr_line_tok)[3..];
-            if (line.len > 1 and line[0] != ' ') lines_start_with_space = false;
-            try lines.append(allocator, line);
-        } else break;
+        switch (tree.tokenTag(curr_line_tok)) {
+            .container_doc_comment => if (!container_doc) break,
+            .doc_comment => if (container_doc) break,
+            else => break,
+        }
+        const line = tree.tokenSlice(curr_line_tok)[3..];
+        if (!std.mem.startsWith(u8, line, " ")) lines_start_with_space = false;
+        try lines.append(allocator, line);
     }
+    if (lines.items.len == 0) return null;
 
     // If all of the lines that aren't empty start with a space, remove the first space
     if (lines_start_with_space) {
