@@ -231,10 +231,11 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
         }
     }
 
-    const documentation: ?types.Documentation = if (doc_comments.items.len > 0) .{
+    const documentation_string = try std.mem.join(builder.arena, "\n\n", doc_comments.items);
+    const documentation: ?types.Documentation = if (documentation_string.len > 0) .{
         .markup_content = .{
             .kind = if (builder.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
-            .value = try std.mem.join(builder.arena, "\n\n", doc_comments.items),
+            .value = documentation_string,
         },
     } else null;
 

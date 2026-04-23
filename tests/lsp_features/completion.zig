@@ -3656,6 +3656,28 @@ test "top-level doc comment" {
     });
 }
 
+test "empty doc comment" {
+    try testCompletion(
+        \\///
+        \\const foo<cursor> = 5;
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Constant,
+        },
+    });
+    try testCompletion(
+        \\///
+        \\const foo<cursor> = 5;
+    , &.{
+        .{
+            .label = "foo",
+            .kind = .Constant,
+            .documentation = "",
+        },
+    });
+}
+
 test "filesystem" {
     if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
 
@@ -4824,6 +4846,7 @@ fn testCompletionWithOptions(
             } else null;
 
             if (actual_doc != null and std.mem.eql(u8, expected_doc, actual_doc.?)) break :doc_blk;
+            if (actual_doc == null and expected_doc.len == 0) break :doc_blk;
 
             try error_builder.msgAtIndex("completion item '{s}' should have doc '{f}' but was '{?f}'!", test_uri.raw, cursor_idx, .err, .{
                 label,
@@ -4832,8 +4855,9 @@ fn testCompletionWithOptions(
             });
             return error.InvalidCompletionDoc;
         } else blk: {
-            if (!options.check_null_fields) break :blk;
             const actual_doc = actual_completion.documentation orelse break :blk;
+            std.debug.assert(actual_doc.markup_content.value.len > 0); // the whole documentation field should be set to null instead
+            if (!options.check_null_fields) break :blk;
             try error_builder.msgAtIndex("completion item '{s}' has unexpected doc '{f}'", test_uri.raw, cursor_idx, .err, .{
                 label,
                 std.zig.fmtString(actual_doc.markup_content.value),
