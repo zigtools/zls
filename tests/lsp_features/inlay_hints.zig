@@ -286,6 +286,33 @@ test "var decl" {
     , .{ .kind = .Type });
 }
 
+test "var decl - pointer modifiers" {
+    try testInlayHints(
+        \\const a: *u8 = undefined;
+        \\const b<*u8> = a;
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\const a: *allowzero u8 = undefined;
+        \\const b<*allowzero u8> = a;
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\const a: *align(4) u8 = undefined;
+        \\const b<*align(4) u8> = a;
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\const a: *volatile u8 = undefined;
+        \\const b<*volatile u8> = a;
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\const a: *allowzero align(8) const volatile u8 = undefined;
+        \\const b<*allowzero align(8) const volatile u8> = a;
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\const a: [*]allowzero u8 = undefined;
+        \\const b<[*]allowzero u8> = a;
+    , .{ .kind = .Type });
+}
+
 test "comptime return types" {
     try testInlayHints(
         \\fn Box(comptime T: type) type {
