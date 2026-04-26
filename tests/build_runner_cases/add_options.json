@@ -1,0 +1,23 @@
+{
+  "dependencies": {},
+  "modules": {
+    "root.zig": {
+      "import_table": {
+        "options": ".zig-local-cache/options.zig"
+      },
+      "c_macros": [],
+      "include_dirs": []
+    },
+    ".zig-local-cache/options.zig": {
+      "import_table": {},
+      "c_macros": [],
+      "include_dirs": []
+    }
+  },
+  "compilations": [],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}
