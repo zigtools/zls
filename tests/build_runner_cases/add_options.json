@@ -1,0 +1,19 @@
+{
+  "dependencies": {},
+  "modules": {
+    "root.zig": {
+      "import_table": {
+        "options": ".zig-local-cache/options.zig"
+      }
+    },
+    ".zig-local-cache/options.zig": {
+      "import_table": {}
+    }
+  },
+  "compilations": [],
+  "top_level_steps": [
+    "install",
+    "uninstall"
+  ],
+  "available_options": {}
+}

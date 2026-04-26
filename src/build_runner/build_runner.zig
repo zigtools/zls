@@ -1078,9 +1078,11 @@ fn extractBuildInformation(
         var modules: std.array_hash_map.Auto(*std.Build.Module, void) = .empty;
         defer modules.deinit(gpa);
 
-        try modules.ensureUnusedCapacity(gpa, b.modules.count());
+        // collect all modules of root modules
         for (b.modules.values()) |root_module| {
-            modules.putAssumeCapacity(root_module, {});
+            const graph = root_module.getGraph();
+            try modules.ensureUnusedCapacity(gpa, graph.modules.len);
+            for (graph.modules) |module| modules.putAssumeCapacity(module, {});
         }
 
         // collect all modules of `Step.Compile`
