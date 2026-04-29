@@ -371,6 +371,15 @@ fn testSignatureHelp(source: []const u8, expected_label: []const u8, expected_ac
         return error.InvalidResponse;
     };
 
+    for (response.signatures) |signature| {
+        if (signature.documentation) |documentation| std.debug.assert(documentation.markup_content.value.len > 0); // the whole documentation field should be set to null instead
+        if (signature.parameters) |parameters| {
+            for (parameters) |parameter| {
+                if (parameter.documentation) |documentation| std.debug.assert(documentation.markup_content.value.len > 0); // the whole documentation field should be set to null instead
+            }
+        }
+    }
+
     try std.testing.expectEqual(@as(?u32, 0), response.activeSignature);
     try std.testing.expectEqual(@as(usize, 1), response.signatures.len);
 

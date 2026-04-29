@@ -88,13 +88,13 @@ fn sanitizePath(
         }
         if (stripBasePath(local_cache_dir, path)) |to| {
             var it = std.Io.Dir.path.componentIterator(to);
-            std.debug.assert(std.mem.eql(u8, it.next().?.name, "o"));
+            _ = it.next().?; // skip cache namespace (o, c, h, z, tmp, ...)
             std.debug.assert(it.next().?.name.len == std.Build.Cache.hex_digest_len);
             break :new try std.fmt.allocPrint(arena, ".zig-local-cache/{s}", .{to[it.end_index + 1 ..]});
         }
         if (stripBasePath(global_cache_dir, path)) |to| {
             var it = std.Io.Dir.path.componentIterator(to);
-            std.debug.assert(std.mem.eql(u8, it.next().?.name, "o"));
+            _ = it.next().?; // skip cache namespace (o, c, h, z, tmp, ...)
             std.debug.assert(it.next().?.name.len == std.Build.Cache.hex_digest_len);
             break :new try std.fmt.allocPrint(arena, ".zig-global-cache/{s}", .{to[it.end_index + 1 ..]});
         }
