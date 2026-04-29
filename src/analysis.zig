@@ -916,7 +916,7 @@ pub fn resolveOrelseType(analyser: *Analyser, lhs: Type, rhs: Type) error{OutOfM
 
 pub fn resolveAddressOf(analyser: *Analyser, is_const: bool, ty: Type) error{OutOfMemory}!Type {
     const elem_ty = try ty.typeOf(analyser);
-    const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, elem_ty);
+    const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, false, false, 0, .generic, elem_ty);
     return try pointer_ty.instanceUnchecked(analyser);
 }
 
@@ -1239,12 +1239,12 @@ pub fn resolveBracketAccess(analyser: *Analyser, lhs_binding: Binding, rhs: Brac
     switch (result) {
         .array => |elem_count| {
             const array_ty = try Type.createArrayType(analyser, elem_count, sentinel, elem_ty.*);
-            const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, array_ty);
+            const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, false, false, 0, .generic, array_ty);
             const pointer_instance = try pointer_ty.instanceUnchecked(analyser);
             return .{ .type = pointer_instance, .is_const = true };
         },
         .slice => {
-            const slice_ty = try Type.createPointerType(analyser, .slice, sentinel, is_const, elem_ty.*);
+            const slice_ty = try Type.createPointerType(analyser, .slice, sentinel, is_const, false, false, 0, .generic, elem_ty.*);
             const slice_instance = try slice_ty.instanceUnchecked(analyser);
             return .{ .type = slice_instance, .is_const = true };
         },
@@ -2163,13 +2163,30 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const ptr_info = ast.fullPtrType(tree, node).?;
             const size = ptr_info.size;
             const is_const = ptr_info.const_token != null;
+            const is_volatile = ptr_info.volatile_token != null;
+            const is_allowzero = ptr_info.allowzero_token != null;
 
             const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle);
+
+            const alignment: u16 = if (ptr_info.ast.align_node.unwrap()) |align_node|
+                try analyser.resolveIntegerLiteral(u16, .of(align_node, handle)) orelse 0
+            else
+                0;
 
             const elem_ty = try analyser.resolveTypeOfNodeInternal(.of(ptr_info.ast.child_type, handle)) orelse return null;
             if (!elem_ty.is_type_val) return null;
 
-            return try Type.createPointerType(analyser, size, sentinel, is_const, elem_ty);
+            return try Type.createPointerType(
+                analyser,
+                size,
+                sentinel,
+                is_const,
+                is_volatile,
+                is_allowzero,
+                alignment,
+                .generic,
+                elem_ty,
+            );
         },
         .array_type,
         .array_type_sentinel,
@@ -2967,7 +2984,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 elem_ty = try elem_ty.instanceUnchecked(analyser);
                 elem_ty = try analyser.resolveArrayMult(elem_ty, mult_lit) orelse return null;
                 elem_ty = try elem_ty.typeOf(analyser);
-                const pointer_ty = try Type.createPointerType(analyser, .one, .none, true, elem_ty);
+                const pointer_ty = try Type.createPointerType(analyser, .one, .none, true, false, false, 0, .generic, elem_ty);
                 return try pointer_ty.instanceUnchecked(analyser);
             }
 
@@ -2989,7 +3006,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 r_elem_ty = try r_elem_ty.instanceUnchecked(analyser);
                 var elem_ty = try analyser.resolveArrayCat(l_elem_ty, r_elem_ty) orelse return null;
                 elem_ty = try elem_ty.typeOf(analyser);
-                const pointer_ty = try Type.createPointerType(analyser, .one, .none, true, elem_ty);
+                const pointer_ty = try Type.createPointerType(analyser, .one, .none, true, false, false, 0, .generic, elem_ty);
                 return try pointer_ty.instanceUnchecked(analyser);
             }
 
@@ -3194,6 +3211,11 @@ pub const Type = struct {
             /// `.none` means no sentinel, `.unknown_unknown` means unknown sentinel
             sentinel: InternPool.Index,
             is_const: bool,
+            is_volatile: bool = false,
+            is_allowzero: bool = false,
+            /// `0` means default alignment.
+            alignment: u16 = 0,
+            address_space: std.builtin.AddressSpace = .generic,
             elem_ty: *Type,
         },
 
@@ -3300,6 +3322,10 @@ pub const Type = struct {
             size: std.builtin.Type.Pointer.Size,
             sentinel: InternPool.Index,
             is_const: bool,
+            is_volatile: bool,
+            is_allowzero: bool,
+            alignment: u16,
+            address_space: std.builtin.AddressSpace,
             elem_ty: Type,
         ) !Data {
             std.debug.assert(elem_ty.is_type_val);
@@ -3312,6 +3338,10 @@ pub const Type = struct {
                         .flags = .{
                             .size = size,
                             .is_const = is_const,
+                            .is_volatile = is_volatile,
+                            .is_allowzero = is_allowzero,
+                            .alignment = alignment,
+                            .address_space = address_space,
                         },
                     },
                 });
@@ -3322,6 +3352,10 @@ pub const Type = struct {
                     .size = size,
                     .sentinel = sentinel,
                     .is_const = is_const,
+                    .is_volatile = is_volatile,
+                    .is_allowzero = is_allowzero,
+                    .alignment = alignment,
+                    .address_space = address_space,
                     .elem_ty = try analyser.allocType(elem_ty),
                 },
             };
@@ -3676,11 +3710,18 @@ pub const Type = struct {
                     return t.data.resolveGeneric(analyser, bound_params, visiting);
                 },
                 .pointer => |info| {
-                    const size = info.size;
-                    const sentinel = info.sentinel;
-                    const is_const = info.is_const;
                     const elem_ty = try analyser.resolveGenericTypeInternal(info.elem_ty.*, bound_params, visiting);
-                    return try createPointer(analyser, size, sentinel, is_const, elem_ty);
+                    return try createPointer(
+                        analyser,
+                        info.size,
+                        info.sentinel,
+                        info.is_const,
+                        info.is_volatile,
+                        info.is_allowzero,
+                        info.alignment,
+                        info.address_space,
+                        elem_ty,
+                    );
                 },
                 .array => |info| {
                     const elem_count = info.elem_count;
@@ -3779,10 +3820,24 @@ pub const Type = struct {
         size: std.builtin.Type.Pointer.Size,
         sentinel: InternPool.Index,
         is_const: bool,
+        is_volatile: bool,
+        is_allowzero: bool,
+        alignment: u16,
+        address_space: std.builtin.AddressSpace,
         elem_ty: Type,
     ) !Type {
         return .{
-            .data = try Data.createPointer(analyser, size, sentinel, is_const, elem_ty),
+            .data = try Data.createPointer(
+                analyser,
+                size,
+                sentinel,
+                is_const,
+                is_volatile,
+                is_allowzero,
+                alignment,
+                address_space,
+                elem_ty,
+            ),
             .is_type_val = true,
         };
     }
@@ -4615,7 +4670,11 @@ pub const Type = struct {
                     },
                     .c => try writer.writeAll("[*c]"),
                 }
+                if (info.is_allowzero and info.size != .c) try writer.writeAll("allowzero ");
+                if (info.alignment != 0) try writer.print("align({d}) ", .{info.alignment});
+                if (info.address_space != .generic) try writer.print("addrspace(.{t}) ", .{info.address_space});
                 if (info.is_const) try writer.writeAll("const ");
+                if (info.is_volatile) try writer.writeAll("volatile ");
                 try info.elem_ty.rawStringify(writer, analyser, options);
             },
             .array => |info| {
@@ -4888,7 +4947,7 @@ fn resolveLangrefType(analyser: *Analyser, type_str: []const u8) Error!?Type {
             elem_str = elem_str[6..];
         const elem_instance = try analyser.resolveLangrefType(elem_str) orelse return null;
         const elem_ty = try elem_instance.typeOf(analyser);
-        const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, elem_ty);
+        const pointer_ty = try Type.createPointerType(analyser, .one, .none, is_const, false, false, 0, .generic, elem_ty);
         return try pointer_ty.instanceUnchecked(analyser);
     }
 
@@ -4924,7 +4983,7 @@ fn resolveLangrefType(analyser: *Analyser, type_str: []const u8) Error!?Type {
             elem_str = elem_str[6..];
         const elem_instance = try analyser.resolveLangrefType(elem_str) orelse return null;
         const elem_ty = try elem_instance.typeOf(analyser);
-        const slice_ty = try Type.createPointerType(analyser, .slice, sentinel, is_const, elem_ty);
+        const slice_ty = try Type.createPointerType(analyser, .slice, sentinel, is_const, false, false, 0, .generic, elem_ty);
         return try slice_ty.instanceUnchecked(analyser);
     }
 
@@ -6028,7 +6087,7 @@ pub const DeclWithHandle = struct {
         if (!self.isCaptureByRef()) return resolved_ty;
 
         const elem_ty = try resolved_ty.typeOf(analyser);
-        const pointer_ty = try Type.createPointerType(analyser, .one, .none, false, elem_ty);
+        const pointer_ty = try Type.createPointerType(analyser, .one, .none, false, false, false, 0, .generic, elem_ty);
         return try pointer_ty.instanceUnchecked(analyser);
     }
 };
