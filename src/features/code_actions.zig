@@ -8,6 +8,7 @@ const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
+const diff = @import("../diff.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
 const tracy = @import("tracy");
@@ -681,6 +682,9 @@ fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
             });
         }
     }
+
+    const resulting_source = try diff.applyTextEdits(builder.arena, tree.source, edits.items, builder.offset_encoding);
+    if (std.mem.eql(u8, resulting_source, tree.source)) return;
 
     const workspace_edit = try builder.createWorkspaceEdit(edits.items);
 
