@@ -1760,6 +1760,8 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
 
     const tree = &decl_handle.handle.tree;
 
+    if (!analyser.collect_callsite_references) return null;
+
     // protection against recursive callsite resolution
     const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
     if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
