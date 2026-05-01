@@ -70,6 +70,7 @@ const Builder = struct {
     did_add_target_symbol: bool = false,
     analyser: *Analyser,
     encoding: offsets.Encoding,
+    resolve_aliases: bool = true,
 
     fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
         if (self.target_symbol.handle == handle and
@@ -235,8 +236,9 @@ const Builder = struct {
             },
             else => return,
         };
-
-        candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+        if (builder.resolve_aliases) {
+            candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+        }
 
         if (builder.target_symbol.eql(candidate)) {
             try builder.add(handle, name_token);
@@ -296,6 +298,7 @@ fn symbolReferences(
         .target_symbol = target_symbol,
         .local_only_decl = local_node != null,
         .encoding = encoding,
+        .resolve_aliases = request != .rename,
     };
 
     blk: {
@@ -735,8 +738,9 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             .keyword => null,
             else => null,
         } orelse return null;
-
-        target_decl = try analyser.resolveVarDeclAlias(target_decl) orelse target_decl;
+        if (request != .rename) {
+            target_decl = try analyser.resolveVarDeclAlias(target_decl) orelse target_decl;
+        }
 
         break :locs switch (target_decl.decl) {
             .label => |payload| try labelReferences(
