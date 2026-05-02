@@ -301,6 +301,20 @@ test "switch case capture - union tag" {
     );
 }
 
+test "var decl alias to function" {
+    // although <0> and <1> point to the same thing, the symbols returned
+    // should be different, which is a prerequisite for renaming to work
+    try testSymbolReferences(
+        \\const S = struct {
+        \\    fn <1>() void {}
+        \\};
+        \\const <0> = S.<1>;
+        \\comptime {
+        \\    <0>();
+        \\}
+    );
+}
+
 test "cross-file reference" {
     try testMultiFileSymbolReferences(&.{
         // Untitled-0.zig
@@ -650,7 +664,27 @@ test "escaped identifier with same name as primitive" {
     );
 }
 
+test "document highlight - var decl alias to function" {
+    try testSimpleHighlights(
+        \\const S = struct {
+        \\    fn print() void {}
+        \\};
+        \\const <loc>testName</loc><cursor> = S.print;
+        \\comptime {
+        \\    <loc>testName</loc>();
+        \\}
+    );
+}
+
 fn testSimpleReferences(source: []const u8) !void {
+    return testSimpleRequest(source, .references);
+}
+
+fn testSimpleHighlights(source: []const u8) !void {
+    return testSimpleRequest(source, .highlight);
+}
+
+fn testSimpleRequest(source: []const u8, comptime mode: enum { references, highlight }) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
@@ -689,14 +723,27 @@ fn testSimpleReferences(source: []const u8) !void {
     errdefer error_builder.writeDebug();
 
     try error_builder.addFile(file_uri.raw, phr.new_source);
-    try error_builder.msgAtIndex("requested references here", file_uri.raw, cursor_index, .info, .{});
 
-    const params: types.reference.Params = .{
-        .textDocument = .{ .uri = file_uri.raw },
-        .position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding),
-        .context = .{ .includeDeclaration = false },
+    const method, const name = comptime switch (mode) {
+        .references => .{ "textDocument/references", "reference" },
+        .highlight => .{ "textDocument/documentHighlight", "highlight" },
     };
-    const actual_locations: []const types.Location = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params) orelse {
+
+    try error_builder.msgAtIndex("requested {s}s here", file_uri.raw, cursor_index, .info, .{name});
+
+    const position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding);
+    const params = switch (mode) {
+        .references => types.reference.Params{
+            .textDocument = .{ .uri = file_uri.raw },
+            .position = position,
+            .context = .{ .includeDeclaration = false },
+        },
+        .highlight => types.DocumentHighlight.Params{
+            .textDocument = .{ .uri = file_uri.raw },
+            .position = position,
+        },
+    };
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), method, params) orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };
@@ -706,9 +753,12 @@ fn testSimpleReferences(source: []const u8) !void {
     var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, expected_locations.items.len);
     defer visited.deinit(allocator);
 
-    for (actual_locations) |response_location| {
-        std.debug.assert(std.mem.eql(u8, response_location.uri, file_uri.raw));
-        const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
+    for (response) |item| {
+        if (@TypeOf(item) == types.Location) {
+            std.debug.assert(std.mem.eql(u8, item.uri, file_uri.raw));
+        }
+
+        const actual_loc = offsets.rangeToLoc(phr.new_source, item.range, ctx.server.offset_encoding);
 
         const index = found_index: {
             for (expected_locations.items, 0..) |expected_loc, idx| {
@@ -716,23 +766,23 @@ fn testSimpleReferences(source: []const u8) !void {
                 if (expected_loc.end != actual_loc.end) continue;
                 break :found_index idx;
             }
-            try error_builder.msgAtLoc("server returned unexpected reference!", file_uri.raw, actual_loc, .err, .{});
+            try error_builder.msgAtLoc("server returned unexpected {s}!", file_uri.raw, actual_loc, .err, .{name});
             return error.UnexpectedReference;
         };
 
         if (visited.isSet(index)) {
-            try error_builder.msgAtLoc("server returned duplicate reference!", file_uri.raw, actual_loc, .err, .{});
+            try error_builder.msgAtLoc("server returned duplicate {s}!", file_uri.raw, actual_loc, .err, .{name});
             return error.DuplicateReference;
-        } else {
-            visited.set(index);
         }
+
+        visited.set(index);
     }
 
     var has_unvisited = false;
     var unvisited_it = visited.iterator(.{ .kind = .unset });
     while (unvisited_it.next()) |index| {
         const unvisited_loc = expected_locations.items[index];
-        try error_builder.msgAtLoc("expected reference here!", file_uri.raw, unvisited_loc, .err, .{});
+        try error_builder.msgAtLoc("expected {s} here!", file_uri.raw, unvisited_loc, .err, .{name});
         has_unvisited = true;
     }
 
