@@ -755,6 +755,15 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, decl: DeclWithHandle) Error!?Dec
     }
 }
 
+/// Like `resolveVarDeclAlias`, but only follows the alias when the resolved
+/// symbol is a type value (things like containers and imported modules).
+pub fn resolveVarDeclAliasType(analyser: *Analyser, decl: DeclWithHandle) Error!?DeclWithHandle {
+    const resolved = try analyser.resolveVarDeclAlias(decl) orelse return null;
+    const ty = try resolved.resolveType(analyser) orelse return null;
+
+    return if (ty.is_type_val) resolved else null;
+}
+
 /// resolves `@field(lhs, field_name)`
 pub fn resolveFieldAccess(analyser: *Analyser, lhs: Type, field_name: []const u8) Error!?Type {
     const binding = try analyser.resolveFieldAccessBinding(.{ .type = lhs, .is_const = false }, field_name) orelse return null;

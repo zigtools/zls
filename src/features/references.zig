@@ -231,12 +231,17 @@ const Builder = struct {
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                 const candidate = try deref_lhs.lookupSymbol(builder.analyser, field_name) orelse return;
+
+                // Only match container/type aliases, not value aliases like `const f = ns.someFunction`.
+                const candidate_type = try candidate.resolveType(builder.analyser) orelse return;
+                if (!candidate_type.is_type_val) return;
+
                 break :candidate .{ candidate, alias_name_token };
             },
             else => return,
         };
 
-        candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+        candidate = try builder.analyser.resolveVarDeclAliasType(candidate) orelse candidate;
 
         if (builder.target_symbol.eql(candidate)) {
             try builder.add(handle, name_token);
@@ -736,7 +741,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             else => null,
         } orelse return null;
 
-        target_decl = try analyser.resolveVarDeclAlias(target_decl) orelse target_decl;
+        target_decl = try analyser.resolveVarDeclAliasType(target_decl) orelse target_decl;
 
         break :locs switch (target_decl.decl) {
             .label => |payload| try labelReferences(
