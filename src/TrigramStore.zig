@@ -96,7 +96,7 @@ pub fn init(
                 .simple_var_decl,
                 .aligned_var_decl,
                 => {
-                    const in_function = in_function_stack.getLastOrNull() orelse false;
+                    const in_function = in_function_stack.getLast() orelse false;
                     if (in_function) continue;
 
                     const main_token = tree.nodeMainToken(node);
@@ -297,7 +297,7 @@ fn appendOneTrigram(
 
     const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
 
-    if (gop.value_ptr.getLastOrNull() != declaration_index) {
+    if (gop.value_ptr.getLast() != declaration_index) {
         try gop.value_ptr.append(allocator, declaration_index);
     }
 }
