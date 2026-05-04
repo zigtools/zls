@@ -135,15 +135,3 @@ fn switch_capture_1() void {
         },
     }
 }
-
-//
-// errdefer
-//
-
-fn func() error{A}!void {
-    errdefer |foo| {
-        //    ^^^ (unknown)()
-        _ = foo;
-        //  ^^^ (unknown)()
-    }
-}

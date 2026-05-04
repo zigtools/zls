@@ -167,7 +167,6 @@ const PrintAst = struct {
             .mul,
             .div,
             .mod,
-            .array_mult,
             .mul_wrap,
             .mul_sat,
             .add,
@@ -201,6 +200,7 @@ const PrintAst = struct {
                 try p.renderOptField(opt_rhs, "rhs", .always_render);
             },
 
+            .@"errdefer",
             .@"defer",
             .optional_type,
             .bool_not,
@@ -219,11 +219,6 @@ const PrintAst = struct {
                 try p.renderField(expr, "expr");
             },
 
-            .@"errdefer" => {
-                const payload_token, const expr = tree.nodeData(node).opt_token_and_node;
-                try p.renderOptTokenField(payload_token.unwrap(), "payload_token", .hide_if_none);
-                try p.renderField(expr, "expr");
-            },
             .unwrap_optional => {
                 const expr = tree.nodeData(node).node_and_token[0];
                 try p.renderField(expr, "expr");
@@ -786,7 +781,6 @@ fn nodeTagName(tag: Ast.Node.Tag) []const u8 {
         .mul => "Mul",
         .div => "Div",
         .mod => "Mod",
-        .array_mult => "ArrayMult",
         .mul_wrap => "MulWrap",
         .mul_sat => "MulSat",
         .add => "Add",

@@ -1602,25 +1602,32 @@ fn createAndStoreDocument(
         break :handle_future gop.value_ptr.*;
     };
     defer handle_future.event.set(store.io);
-    errdefer |err| {
-        const should_log = err != error.Canceled and err != error.FileNotFound;
-        if (should_log) log.err("failed to read document '{s}': {}", .{ uri.raw, err });
-        handle_future.handle = undefined;
-        handle_future.err = err;
-    }
 
     const text: [:0]const u8 = switch (file_source) {
         .text => |text| text,
-        .uri => try store.readFile(uri),
+        .uri => store.readFile(uri) catch |err| {
+            const should_log = err != error.Canceled and err != error.FileNotFound;
+            if (should_log) log.err("failed to read document '{s}': {}", .{ uri.raw, err });
+            handle_future.handle = undefined;
+            handle_future.err = err;
+            return err;
+        },
     };
 
     var old_handle: Handle = .dead;
-    try Handle.refresh(
+    Handle.refresh(
         &handle_future.handle,
         &old_handle,
         text,
         store.allocator,
-    );
+    ) catch |err| switch (err) {
+        error.OutOfMemory => {
+            log.err("failed to read document '{s}': {}", .{ uri.raw, err });
+            handle_future.handle = undefined;
+            handle_future.err = err;
+            return err;
+        },
+    };
     old_handle.deinit(store.allocator);
 
     handle_future.err = null;

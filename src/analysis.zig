@@ -2954,25 +2954,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             return lhs_ty.withoutIPIndex(analyser);
         },
 
-        .array_mult => {
-            const elem_idx, const mult_idx = tree.nodeData(node).node_and_node;
-
-            var elem_ty = try analyser.resolveTypeOfNodeInternal(.of(elem_idx, handle)) orelse return null;
-            if (elem_ty.is_type_val) return null;
-
-            const mult_lit = try analyser.resolveIntegerLiteral(u64, .of(mult_idx, handle));
-
-            blk: {
-                elem_ty = elem_ty.pointerElementType(analyser, .one) orelse break :blk;
-                elem_ty = try elem_ty.instanceUnchecked(analyser);
-                elem_ty = try analyser.resolveArrayMult(elem_ty, mult_lit) orelse return null;
-                elem_ty = try elem_ty.typeOf(analyser);
-                const pointer_ty = try Type.createPointerType(analyser, .one, .none, true, elem_ty);
-                return try pointer_ty.instanceUnchecked(analyser);
-            }
-
-            return try analyser.resolveArrayMult(elem_ty, mult_lit);
-        },
         .array_cat => {
             const l_elem_idx, const r_elem_idx = tree.nodeData(node).node_and_node;
 
