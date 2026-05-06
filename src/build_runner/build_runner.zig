@@ -813,7 +813,7 @@ fn makeStep(
             defer run.max_rss_mutex.unlock(io);
             run.available_rss += s.max_rss;
             dispatch_set.ensureUnusedCapacity(gpa, run.memory_blocked_steps.items.len) catch @panic("OOM");
-            while (run.memory_blocked_steps.getLastOrNull()) |candidate| {
+            while (run.memory_blocked_steps.getLast()) |candidate| {
                 if (run.available_rss < candidate.max_rss) break;
                 assert(run.memory_blocked_steps.pop() == candidate);
                 dispatch_set.appendAssumeCapacity(candidate);
