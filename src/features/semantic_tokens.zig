@@ -89,6 +89,8 @@ const Builder = struct {
     encoding: offsets.Encoding,
     limited: bool,
     overlappingTokenSupport: bool,
+    /// Only emit tokens for the given source range.
+    loc: ?offsets.Loc,
 
     fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
         const tree = &self.handle.tree;
@@ -284,6 +286,10 @@ fn colorIdentifierBasedOnType(
 fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &handle.tree;
+
+    if (builder.loc) |loc| {
+        if (!offsets.locIntersect(loc, offsets.nodeToLoc(tree, node))) return;
+    }
 
     const main_token = tree.nodeMainToken(node);
 
@@ -1164,22 +1170,20 @@ pub fn writeSemanticTokens(
     limited: bool,
     overlappingTokenSupport: bool,
 ) Analyser.Error!types.semantic_tokens.Result {
-    var builder = Builder{
+    const tree = &handle.tree;
+
+    var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,
         .handle = handle,
         .encoding = encoding,
         .limited = limited,
         .overlappingTokenSupport = overlappingTokenSupport,
+        .loc = loc,
     };
 
-    var nodes = if (loc) |l| try ast.nodesAtLoc(arena, &handle.tree, l) else handle.tree.rootDecls();
-    if (nodes.len == 1 and nodes[0] == .root) {
-        nodes = handle.tree.rootDecls();
-    }
-
     // reverse the ast from the root declarations
-    for (nodes) |child| {
+    for (tree.rootDecls()) |child| {
         try writeNodeTokens(&builder, child);
     }
 

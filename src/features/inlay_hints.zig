@@ -565,15 +565,13 @@ pub fn writeRangeInlayHint(
         .hover_kind = hover_kind,
     };
 
-    const nodes = try ast.nodesAtLoc(arena, &handle.tree, loc);
-
-    for (nodes) |child| {
-        try writeNodeInlayHint(&builder, &handle.tree, child);
-
-        var walker: ast.Walker = try .init(arena, &handle.tree, child);
-        defer walker.deinit(arena);
-        while (try walker.nextIgnoreClose(arena, &handle.tree)) |node| {
+    var walker: ast.Walker = try .init(arena, &handle.tree, .root);
+    defer walker.deinit(arena);
+    while (try walker.nextIgnoreClose(arena, &handle.tree)) |node| {
+        if (offsets.locIntersect(loc, offsets.nodeToLoc(&handle.tree, node))) {
             try writeNodeInlayHint(&builder, &handle.tree, node);
+        } else {
+            walker.skip();
         }
     }
 
