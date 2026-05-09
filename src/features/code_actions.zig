@@ -92,6 +92,8 @@ pub const Builder = struct {
 
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
+        try generateSimplifyVarInitCodeAction(builder, source_index);
+
         const ctx = try Analyser.getPositionContext(builder.arena, tree, source_index, true);
         if (ctx != .string_literal) return;
 
@@ -227,6 +229,104 @@ pub fn generateMultilineStringCodeActions(
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
     });
+}
+
+/// Generates a "simplify variable initialization" code action when the cursor
+/// is on a variable declaration whose init expression is `@as(T, value)` or a
+/// typed struct init like `T{ ... }`. The action rewrites the declaration to use
+/// an explicit type annotation instead:
+///   `const x = @as(T, value)` => `const x: T = value`
+///   `const x = T{ ... }`     => `const x: T = .{ ... }`
+fn generateSimplifyVarInitCodeAction(
+    builder: *Builder,
+    source_index: usize,
+) error{OutOfMemory}!void {
+    if (!builder.wantKind(.refactor)) return;
+
+    const tree = &builder.handle.tree;
+    const nodes = try ast.nodesAtLoc(builder.arena, tree, .{ .start = source_index, .end = source_index });
+
+    for (nodes) |node| {
+        const var_decl = tree.fullVarDecl(node) orelse continue;
+
+        // Skip if the variable already has a type annotation.
+        if (var_decl.ast.type_node != .none) continue;
+
+        const init_node = var_decl.ast.init_node.unwrap() orelse continue;
+
+        switch (tree.nodeTag(init_node)) {
+            .builtin_call_two, .builtin_call_two_comma => {
+                // Check if this is `@as(T, value)`.
+                const builtin_token = tree.nodeMainToken(init_node);
+                const builtin_name = offsets.tokenToSlice(tree, builtin_token);
+                if (!std.mem.eql(u8, builtin_name, "@as")) continue;
+
+                const first_param, const second_param = tree.nodeData(init_node).opt_node_and_opt_node;
+                const type_node = first_param.unwrap() orelse continue;
+                const value_node = second_param.unwrap() orelse continue;
+
+                const type_loc = offsets.nodeToLoc(tree, type_node);
+                const type_str = offsets.locToSlice(tree.source, type_loc);
+
+                const value_loc = offsets.nodeToLoc(tree, value_node);
+                const value_str = offsets.locToSlice(tree.source, value_loc);
+
+                // Replace `= @as(T, value)` with `: T = value`.
+                // Start right after the name token to avoid a stray space.
+                const name_token = var_decl.ast.mut_token + 1;
+                const name_end = offsets.tokenToLoc(tree, name_token).end;
+                const init_loc = offsets.nodeToLoc(tree, init_node);
+                const edit_loc: offsets.Loc = .{ .start = name_end, .end = init_loc.end };
+
+                const new_text = try std.fmt.allocPrint(builder.arena, ": {s} = {s}", .{ type_str, value_str });
+
+                try builder.actions.append(builder.arena, .{
+                    .title = "simplify variable initialization",
+                    .kind = .refactor,
+                    .isPreferred = false,
+                    .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(edit_loc, new_text)}),
+                });
+                return;
+            },
+            .struct_init_one,
+            .struct_init_one_comma,
+            .struct_init,
+            .struct_init_comma,
+            => {
+                // Check if this is a typed struct init like `T{ ... }` (not `.{ ... }`).
+                var buf: [2]Ast.Node.Index = undefined;
+                const struct_init = tree.fullStructInit(&buf, init_node) orelse continue;
+
+                // type_expr is `.none` for anonymous inits `.{ ... }`.
+                const type_node = struct_init.ast.type_expr.unwrap() orelse continue;
+
+                const type_loc = offsets.nodeToLoc(tree, type_node);
+                const type_str = offsets.locToSlice(tree.source, type_loc);
+
+                // Build the anonymous init text: replace `T{` with `.{`
+                const init_loc = offsets.nodeToLoc(tree, init_node);
+                const lbrace_start = type_loc.end; // right after the type name
+                const init_body = tree.source[lbrace_start..init_loc.end]; // `{ ... }`
+                const dot_init = try std.fmt.allocPrint(builder.arena, ".{s}", .{init_body});
+
+                // Replace `= T{ ... }` with `: T = .{ ... }`.
+                const name_token = var_decl.ast.mut_token + 1;
+                const name_end = offsets.tokenToLoc(tree, name_token).end;
+                const edit_loc: offsets.Loc = .{ .start = name_end, .end = init_loc.end };
+
+                const new_text = try std.fmt.allocPrint(builder.arena, ": {s} = {s}", .{ type_str, dot_init });
+
+                try builder.actions.append(builder.arena, .{
+                    .title = "simplify variable initialization",
+                    .kind = .refactor,
+                    .isPreferred = false,
+                    .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(edit_loc, new_text)}),
+                });
+                return;
+            },
+            else => continue,
+        }
+    }
 }
 
 /// To report server capabilities
