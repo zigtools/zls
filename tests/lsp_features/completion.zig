@@ -1337,11 +1337,13 @@ test "struct" {
         \\fn fooImpl(_: Foo) void {}
         \\fn barImpl(_: *const Foo) void {}
         \\fn bazImpl(_: u32) void {}
+        \\fn quxImpl(_: [*c]const Foo) void {}
         \\const Foo = struct {
         \\    alpha: u32,
         \\    pub const foo = fooImpl;
         \\    pub const bar = barImpl;
         \\    pub const baz = bazImpl;
+        \\    pub const qux = quxImpl;
         \\};
         \\const foo = Foo{};
         \\const baz = foo.<cursor>;
@@ -1349,6 +1351,7 @@ test "struct" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "foo", .kind = .Method, .detail = "fn (_: Foo) void" },
         .{ .label = "bar", .kind = .Method, .detail = "fn (_: *const Foo) void" },
+        .{ .label = "qux", .kind = .Method, .detail = "fn (_: [*c]const Foo) void" },
     });
     try testCompletion(
         \\alpha: u32,

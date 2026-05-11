@@ -461,16 +461,16 @@ pub fn firstParamIs(
 
     const deref_type = switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.*,
-            .many, .slice, .c => return false,
+            .one, .c => info.elem_ty.*,
+            .many, .slice => return false,
         },
         else => resolved_type,
     };
 
     const deref_expected_type = switch (expected_type.data) {
         .pointer => |info| switch (info.size) {
-            .one => info.elem_ty.*,
-            .many, .slice, .c => return false,
+            .one, .c => info.elem_ty.*,
+            .many, .slice => return false,
         },
         else => expected_type,
     };
