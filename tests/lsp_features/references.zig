@@ -302,7 +302,7 @@ test "switch case capture - union tag" {
 }
 
 test "cross-file reference" {
-    try testMultiFileSymbolReferences(&.{
+    try testReferences(&.{
         // Untitled-0.zig
         \\pub const <0> = struct {};
         ,
@@ -315,11 +315,11 @@ test "cross-file reference" {
         \\    _ = renamed;
         \\}
         ,
-    }, true);
+    }, .{ .format = .symmetric });
 }
 
 test "cross-file - transitive import" {
-    try testMultiFileSymbolReferences(&.{
+    try testReferences(&.{
         // Untitled-0.zig
         \\pub const <0> = struct {};
         ,
@@ -330,11 +330,11 @@ test "cross-file - transitive import" {
         \\const file = @import("Untitled-1.zig").file;
         \\const foo: file.<0> = undefined;
         ,
-    }, true);
+    }, .{ .format = .symmetric });
 }
 
 test "cross-file - alias" {
-    try testMultiFileSymbolReferences(&.{
+    try testReferences(&.{
         // Untitled-0.zig
         \\pub const <0> = struct {
         \\    fn foo(_: <0>) void {}
@@ -347,155 +347,36 @@ test "cross-file - alias" {
         \\    _ = <0>;
         \\}
         ,
-    }, true);
-}
-
-fn testSymbolReferences(source: []const u8) !void {
-    return testMultiFileSymbolReferences(&.{source}, true);
-}
-
-/// source files have the following name pattern: `untitled-{d}.zig`
-fn testMultiFileSymbolReferences(sources: []const []const u8, include_decl: bool) !void {
-    const placeholder_name = "placeholder";
-
-    var ctx: Context = try .init();
-    defer ctx.deinit();
-
-    const File = struct { source: []const u8, new_source: []const u8 };
-    const LocPair = struct { file_index: usize, old: offsets.Loc, new: offsets.Loc };
-
-    var files: std.array_hash_map.String(File) = .empty;
-    defer {
-        for (files.values()) |file| allocator.free(file.new_source);
-        files.deinit(allocator);
-    }
-
-    var loc_set: std.array_hash_map.String(std.MultiArrayList(LocPair)) = .empty;
-    defer {
-        for (loc_set.values()) |*locs| locs.deinit(allocator);
-        loc_set.deinit(allocator);
-    }
-
-    try files.ensureTotalCapacity(allocator, sources.len);
-    for (sources, 0..) |source, file_index| {
-        var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
-        defer phr.deinit(allocator);
-
-        const uri = try ctx.addDocument(.{ .source = phr.new_source });
-        files.putAssumeCapacityNoClobber(uri.raw, .{ .source = source, .new_source = phr.new_source });
-        phr.new_source = ""; // `files` takes ownership of `new_source` from `phr`
-
-        for (phr.locations.items(.old), phr.locations.items(.new)) |old, new| {
-            const name = offsets.locToSlice(source, old);
-            const gop = try loc_set.getOrPutValue(allocator, name, .{});
-            try gop.value_ptr.append(allocator, .{ .file_index = file_index, .old = old, .new = new });
-        }
-    }
-
-    var error_builder: ErrorBuilder = .init(allocator);
-    defer error_builder.deinit();
-    errdefer error_builder.writeDebug();
-
-    for (files.keys(), files.values()) |file_uri, file| {
-        try error_builder.addFile(file_uri, file.new_source);
-    }
-
-    for (loc_set.values()) |locs| {
-        error_builder.clearMessages();
-
-        for (locs.items(.file_index), locs.items(.new)) |file_index, new_loc| {
-            const file = files.values()[file_index];
-            const file_uri = files.keys()[file_index];
-
-            const middle = new_loc.start + (new_loc.end - new_loc.start) / 2;
-            const params: types.reference.Params = .{
-                .textDocument = .{ .uri = file_uri },
-                .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
-                .context = .{ .includeDeclaration = include_decl },
-            };
-            const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params);
-
-            try error_builder.msgAtLoc("asked for references here", file_uri, new_loc, .info, .{});
-
-            const actual_locations: []const types.Location = response orelse {
-                std.debug.print("Server returned `null` as the result\n", .{});
-                return error.InvalidResponse;
-            };
-
-            // keeps track of expected locations that have been given by the server
-            // used to detect double references and missing references
-            var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, locs.len);
-            defer visited.deinit(allocator);
-
-            for (actual_locations) |response_location| {
-                const actual_file_index = files.getIndex(response_location.uri) orelse {
-                    std.debug.print("received location to unknown file `{s}` as the result\n", .{response_location.uri});
-                    return error.InvalidReference;
-                };
-                const actual_file_source = files.values()[actual_file_index].new_source;
-                const actual_loc = offsets.rangeToLoc(actual_file_source, response_location.range, ctx.server.offset_encoding);
-
-                const index = found_index: {
-                    for (locs.items(.new), locs.items(.file_index), 0..) |expected_loc, expected_file_index, idx| {
-                        if (expected_file_index != actual_file_index) continue;
-                        if (expected_loc.start != actual_loc.start) continue;
-                        if (expected_loc.end != actual_loc.end) continue;
-                        break :found_index idx;
-                    }
-                    try error_builder.msgAtLoc("server returned unexpected reference!", response_location.uri, actual_loc, .err, .{});
-                    return error.UnexpectedReference;
-                };
-
-                if (visited.isSet(index)) {
-                    try error_builder.msgAtLoc("server returned duplicate reference!", response_location.uri, actual_loc, .err, .{});
-                    return error.DuplicateReference;
-                } else {
-                    visited.set(index);
-                }
-            }
-
-            var has_unvisited = false;
-            var unvisited_it = visited.iterator(.{ .kind = .unset });
-            while (unvisited_it.next()) |index| {
-                const unvisited_file_index = locs.items(.file_index)[index];
-                const unvisited_uri = files.keys()[unvisited_file_index];
-                const unvisited_loc = locs.items(.new)[index];
-                try error_builder.msgAtLoc("expected reference here!", unvisited_uri, unvisited_loc, .err, .{});
-                has_unvisited = true;
-            }
-
-            if (has_unvisited) return error.ExpectedReference;
-        }
-    }
+    }, .{ .format = .symmetric });
 }
 
 test "matching control flow - unlabeled loop" {
     try testSimpleReferences(
-        \\const foo = for<cursor> (0..1) |i| {
+        \\const foo = <loc>for<cursor></loc> (0..1) |i| {
         \\    <loc>break</loc> i;
         \\};
     );
     try testSimpleReferences(
         \\const foo = <loc>for</loc> (0..1) |i| {
-        \\    break<cursor> i;
+        \\    <loc>break<cursor></loc> i;
         \\};
     );
 
     try testSimpleReferences(
-        \\const foo = while<cursor> (true) {
+        \\const foo = <loc>while<cursor></loc> (true) {
         \\    <loc>continue</loc>;
         \\};
     );
     try testSimpleReferences(
         \\const foo = <loc>for</loc> (0..1) |i| {
-        \\    continue<cursor> i;
+        \\    <loc>continue<cursor></loc> i;
         \\};
     );
 }
 
 test "matching control flow - labeled loop" {
     try testSimpleReferences(
-        \\const foo = blk: for<cursor> (0..1) |i| {
+        \\const foo = blk: <loc>for<cursor></loc> (0..1) |i| {
         \\    if (i == 0) {
         \\        <loc>continue</loc>;
         \\    } else {
@@ -506,7 +387,7 @@ test "matching control flow - labeled loop" {
     try testSimpleReferences(
         \\const foo = blk: <loc>for</loc> (0..1) |i| {
         \\    if (i == 0) {
-        \\        continue<cursor>;
+        \\        <loc>continue<cursor></loc>;
         \\    } else {
         \\        break :blk 5;
         \\    }
@@ -517,7 +398,7 @@ test "matching control flow - labeled loop" {
         \\    if (i == 0) {
         \\        continue;
         \\    } else {
-        \\        break<cursor> :blk 5;
+        \\        <loc>break<cursor></loc> :blk 5;
         \\    }
         \\};
     );
@@ -525,7 +406,7 @@ test "matching control flow - labeled loop" {
 
 test "matching control flow - nested loop with outer label" {
     try testSimpleReferences(
-        \\const foo = outer: for<cursor> (0..1) |i| {
+        \\const foo = outer: <loc>for<cursor></loc> (0..1) |i| {
         \\    for (0..1) |j| {
         \\        if (i == j) {
         \\            break;
@@ -539,7 +420,7 @@ test "matching control flow - nested loop with outer label" {
         \\const foo = outer: for (0..1) |i| {
         \\    <loc>for</loc> (0..1) |j| {
         \\        if (i == j) {
-        \\            break<cursor>;
+        \\            <loc>break<cursor></loc>;
         \\        } else {
         \\            break :outer 5;
         \\        }
@@ -552,7 +433,7 @@ test "matching control flow - nested loop with outer label" {
         \\        if (i == j) {
         \\            break;
         \\        } else {
-        \\            break<cursor> :outer 5;
+        \\            <loc>break<cursor></loc> :outer 5;
         \\        }
         \\    }
         \\};
@@ -562,7 +443,7 @@ test "matching control flow - nested loop with outer label" {
 test "matching control flow - nested loop with inner label" {
     try testSimpleReferences(
         \\const foo = for (0..1) |i| {
-        \\    inner: for<cursor> (0..1) |j| {
+        \\    inner: <loc>for<cursor></loc> (0..1) |j| {
         \\        if (i == j) {
         \\            <loc>break</loc>;
         \\        } else {
@@ -575,7 +456,7 @@ test "matching control flow - nested loop with inner label" {
         \\const foo = for (0..1) |i| {
         \\    inner: <loc>for</loc> (0..1) |j| {
         \\        if (i == j) {
-        \\            break<cursor>;
+        \\            <loc>break<cursor></loc>;
         \\        } else {
         \\            break :outer 5;
         \\        }
@@ -588,7 +469,7 @@ test "matching control flow - nested loop with inner label" {
         \\        if (i == j) {
         \\            break;
         \\        } else {
-        \\            break<cursor> :inner 5;
+        \\            <loc>break<cursor></loc> :inner 5;
         \\        }
         \\    }
         \\};
@@ -597,21 +478,21 @@ test "matching control flow - nested loop with inner label" {
 
 test "matching control flow - labeled switch" {
     try testSimpleReferences(
-        \\const foo = blk: switch<cursor> (undefined) {
+        \\const foo = blk: <loc>switch<cursor></loc> (undefined) {
         \\    .foo => <loc>break</loc> :blk 5,
         \\    .bar => <loc>continue</loc> :blk 5,
         \\};
     );
     try testSimpleReferences(
         \\const foo = blk: <loc>switch</loc> (undefined) {
-        \\    .foo => break<cursor> :blk 5,
+        \\    .foo => <loc>break<cursor></loc> :blk 5,
         \\    .bar => continue :blk 5,
         \\};
     );
     try testSimpleReferences(
         \\const foo = blk: <loc>switch</loc> (undefined) {
         \\    .foo => break :blk 5,
-        \\    .bar => continue<cursor> :blk 5,
+        \\    .bar => <loc>continue<cursor></loc> :blk 5,
         \\};
     );
 }
@@ -625,116 +506,349 @@ test "matching control flow - unlabeled switch" {
     );
     try testSimpleReferences(
         \\const foo = switch (undefined) {
-        \\    .foo => break<cursor> 5,
+        \\    .foo => <loc>break<cursor></loc> 5,
         \\    .foo => continue 5,
         \\};
     );
     try testSimpleReferences(
         \\const foo = switch (undefined) {
         \\    .foo => break 5,
-        \\    .foo => continue<cursor> 5,
+        \\    .foo => <loc>continue<cursor></loc> 5,
         \\};
     );
 }
 
 test "escaped identifier with same name as primitive" {
     try testSimpleReferences(
-        \\const @"null"<cursor> = undefined;
+        \\const <loc>@"null"<cursor></loc> = undefined;
         \\const foo = null;
         \\const bar = <loc>@"null"</loc>;
     );
     try testSimpleReferences(
-        \\const @"i32"<cursor> = undefined;
+        \\const <loc>@"i32"<cursor></loc> = undefined;
         \\const foo = i32;
         \\const bar = <loc>@"i32"</loc>;
     );
 }
 
+const TestOptions = struct {
+    request_kind: RequestKind = .references,
+    format: TestFormat,
+    /// Only applies to `TestFormat.symmetric` test cases.
+    placeholder_name: []const u8 = "placeholder",
+};
+
+const TestFormat = enum {
+    /// The cursor position of the request is marked with `<cursor>`.
+    ///
+    /// The expected references are marked with `<loc>here</loc>`.
+    ///
+    /// Example source:
+    ///
+    /// ```zig
+    /// const <loc>foo</loc> = 0;
+    /// comptime {
+    ///     _ = foo<cursor>;
+    /// }
+    /// ```
+    asymmetric,
+    /// A `textDocument/references` test on symbols that all
+    /// reference each other.
+    ///
+    /// Example source:
+    ///
+    /// ```zig
+    /// const <0> = 0;
+    /// const foo = <0>;
+    /// ```
+    ///
+    /// The `<0>` markers will be internally replaced with an identifier name:
+    ///
+    /// ```zig
+    /// const placeholder = 0;
+    /// const foo = placeholder;
+    /// ```
+    ///
+    /// This test function will then verify that a references request on any of
+    /// the placeholder identifiers will respond with locations to all the
+    /// other identifiers.
+    ///
+    /// Use `<1>`, `<2>`, etc. to mark multiple distinct symbols in the same test.
+    symmetric,
+};
+
+const RequestKind = enum {
+    // `textDocument/references`
+    references,
+    // `textDocument/rename`
+    rename,
+    // `textDocument/documentHighlight`
+    highlight,
+};
+
 fn testSimpleReferences(source: []const u8) !void {
-    var phr = try helper.collectClearPlaceholders(allocator, source);
-    defer phr.deinit(allocator);
+    try testReferences(&.{source}, .{ .format = .asymmetric });
+}
 
-    std.debug.assert(phr.locations.len % 2 == 1);
-    var expected_locations: std.ArrayList(offsets.Loc) = try .initCapacity(allocator, phr.locations.len / 2);
-    defer expected_locations.deinit(allocator);
+fn testSymbolReferences(source: []const u8) !void {
+    try testReferences(&.{source}, .{ .format = .symmetric });
+}
 
-    const cursor_index = for (phr.locations.items(.old), phr.locations.items(.new), 0..) |old, new, i| {
-        const name = offsets.locToSlice(source, old);
-        if (!std.mem.eql(u8, name, "<cursor>")) continue;
-        phr.locations.orderedRemove(i);
-        std.debug.assert(new.start == new.end);
-        break new.start;
-    } else @panic("missing <cursor> placeholder");
-
-    {
-        var i: usize = 0;
-        while (i != phr.locations.len) : (i += 2) {
-            std.debug.assert(std.mem.eql(u8, "<loc>", offsets.locToSlice(source, phr.locations.items(.old)[i])));
-            std.debug.assert(std.mem.eql(u8, "</loc>", offsets.locToSlice(source, phr.locations.items(.old)[i + 1])));
-            const start_loc = phr.locations.items(.new)[i];
-            const end_loc = phr.locations.items(.new)[i + 1];
-            std.debug.assert(start_loc.start == start_loc.end);
-            std.debug.assert(end_loc.start == end_loc.end);
-            expected_locations.appendAssumeCapacity(.{ .start = start_loc.start, .end = end_loc.start });
-        }
-    }
-
+fn testReferences(
+    /// source files have the following name pattern: `untitled-{d}.zig`
+    sources: []const []const u8,
+    options: TestOptions,
+) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    const file_uri = try ctx.addDocument(.{ .source = phr.new_source });
+    const File = struct {
+        source: []const u8,
+        new_source: []const u8,
+        placeholders: std.MultiArrayList(helper.CollectPlaceholdersResult.LocPair),
+    };
+
+    var files: zls.Uri.ArrayHashMap(File) = .empty;
+    defer {
+        for (files.values()) |*file| {
+            allocator.free(file.new_source);
+            file.placeholders.deinit(allocator);
+        }
+        files.deinit(allocator);
+    }
+
+    try files.ensureTotalCapacity(allocator, sources.len);
+    for (sources) |source| {
+        const placeholder_name = switch (options.format) {
+            .asymmetric => "", // remove placeholders
+            .symmetric => options.placeholder_name,
+        };
+        var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
+        errdefer phr.deinit(allocator);
+
+        const uri = try ctx.addDocument(.{ .source = phr.new_source });
+        files.putAssumeCapacityNoClobber(uri, .{
+            .source = source,
+            .new_source = phr.new_source,
+            .placeholders = phr.locations,
+        });
+    }
 
     var error_builder: ErrorBuilder = .init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
-    try error_builder.addFile(file_uri.raw, phr.new_source);
-    try error_builder.msgAtIndex("requested references here", file_uri.raw, cursor_index, .info, .{});
+    for (files.keys(), files.values()) |file_uri, file| {
+        try error_builder.addFile(file_uri.raw, file.new_source);
+    }
 
-    const params: types.reference.Params = .{
-        .textDocument = .{ .uri = file_uri.raw },
-        .position = offsets.indexToPosition(phr.new_source, cursor_index, ctx.server.offset_encoding),
-        .context = .{ .includeDeclaration = false },
-    };
-    const actual_locations: []const types.Location = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params) orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
-    };
+    const Position = struct { file_index: usize, source_index: usize };
+    const Location = struct { file_index: usize, loc: offsets.Loc };
 
-    // keeps track of expected locations that have been given by the server
-    // used to detect double references and missing references
-    var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, expected_locations.items.len);
-    defer visited.deinit(allocator);
+    var test_cases: std.ArrayList(struct {
+        cursor_position: Position,
+        expected_locations: std.ArrayList(Location),
+    }) = .empty;
+    defer {
+        for (test_cases.items) |*test_case| test_case.expected_locations.deinit(allocator);
+        test_cases.deinit(allocator);
+    }
 
-    for (actual_locations) |response_location| {
-        std.debug.assert(std.mem.eql(u8, response_location.uri, file_uri.raw));
-        const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
+    switch (options.format) {
+        .asymmetric => {
+            const cursor_position: Position = cursor_position: for (files.values(), 0..) |*file, file_index| {
+                for (file.placeholders.items(.old), file.placeholders.items(.new), 0..) |old, new, i| {
+                    const name = offsets.locToSlice(file.source, old);
+                    if (!std.mem.eql(u8, name, "<cursor>")) continue;
+                    std.debug.assert(new.start == new.end);
+                    file.placeholders.orderedRemove(i);
+                    break :cursor_position .{ .file_index = file_index, .source_index = new.start };
+                }
+            } else @panic("missing <cursor> placeholder");
 
-        const index = found_index: {
-            for (expected_locations.items, 0..) |expected_loc, idx| {
-                if (expected_loc.start != actual_loc.start) continue;
-                if (expected_loc.end != actual_loc.end) continue;
-                break :found_index idx;
+            var expected_locations: std.ArrayList(Location) = .empty;
+            errdefer expected_locations.deinit(allocator);
+
+            for (files.values(), 0..) |file, file_index| {
+                std.debug.assert(file.placeholders.len % 2 == 0);
+                try expected_locations.ensureUnusedCapacity(allocator, file.placeholders.len / 2);
+
+                var i: usize = 0;
+                while (i != file.placeholders.len) : (i += 2) {
+                    std.debug.assert(std.mem.eql(u8, "<loc>", offsets.locToSlice(file.source, file.placeholders.items(.old)[i])));
+                    std.debug.assert(std.mem.eql(u8, "</loc>", offsets.locToSlice(file.source, file.placeholders.items(.old)[i + 1])));
+                    const start_loc = file.placeholders.items(.new)[i];
+                    const end_loc = file.placeholders.items(.new)[i + 1];
+                    std.debug.assert(start_loc.start == start_loc.end);
+                    std.debug.assert(end_loc.start == end_loc.end);
+                    expected_locations.appendAssumeCapacity(.{
+                        .file_index = file_index,
+                        .loc = .{ .start = start_loc.start, .end = end_loc.start },
+                    });
+                }
             }
-            try error_builder.msgAtLoc("server returned unexpected reference!", file_uri.raw, actual_loc, .err, .{});
-            return error.UnexpectedReference;
+
+            try test_cases.append(allocator, .{
+                .cursor_position = cursor_position,
+                .expected_locations = expected_locations,
+            });
+        },
+        .symmetric => {
+            const Marker = struct { file_index: usize, old: offsets.Loc, new: offsets.Loc };
+            var marker_sets: std.array_hash_map.Auto(usize, std.ArrayList(Marker)) = .empty;
+            defer {
+                for (marker_sets.values()) |*locs| locs.deinit(allocator);
+                marker_sets.deinit(allocator);
+            }
+
+            for (files.values(), 0..) |file, file_index| {
+                for (file.placeholders.items(.old), file.placeholders.items(.new)) |old, new| {
+                    const name = offsets.locToSlice(file.source, .{ .start = old.start + 1, .end = old.end - 1 });
+                    const key = std.fmt.parseInt(usize, name, 10) catch
+                        std.debug.panic("symmetric placeholder '{s}' must be a number", .{name});
+                    const gop = try marker_sets.getOrPutValue(allocator, key, .empty);
+                    try gop.value_ptr.append(allocator, .{ .file_index = file_index, .old = old, .new = new });
+                }
+            }
+
+            for (marker_sets.values()) |markers| {
+                for (markers.items) |cursor_marker| {
+                    var expected_locations: std.ArrayList(Location) = try .initCapacity(allocator, markers.items.len);
+                    errdefer expected_locations.deinit(allocator);
+
+                    for (markers.items) |marker| {
+                        expected_locations.appendAssumeCapacity(.{
+                            .file_index = marker.file_index,
+                            .loc = marker.new,
+                        });
+                    }
+
+                    const cursor_loc = cursor_marker.new;
+                    const middle = cursor_loc.start + (cursor_loc.end - cursor_loc.start) / 2;
+
+                    try test_cases.append(allocator, .{
+                        .cursor_position = .{ .file_index = cursor_marker.file_index, .source_index = middle },
+                        .expected_locations = expected_locations,
+                    });
+                }
+            }
+        },
+    }
+
+    for (test_cases.items) |test_case| {
+        const expected_locations = test_case.expected_locations;
+        const cursor_file_index = test_case.cursor_position.file_index;
+        const cursor_file_uri = files.keys()[cursor_file_index];
+
+        const position = offsets.indexToPosition(
+            files.values()[cursor_file_index].new_source,
+            test_case.cursor_position.source_index,
+            ctx.server.offset_encoding,
+        );
+
+        error_builder.clearMessages();
+        try error_builder.msgAtIndex("asked for {t} here!", cursor_file_uri.raw, test_case.cursor_position.source_index, .info, .{options.request_kind});
+
+        const actual_locations: []const types.Location = try sendRequest(
+            ctx.server,
+            ctx.arena.allocator(),
+            options.request_kind,
+            cursor_file_uri,
+            position,
+        ) orelse {
+            std.debug.print("Server returned `null` as the result\n", .{});
+            return error.InvalidResponse;
         };
 
-        if (visited.isSet(index)) {
-            try error_builder.msgAtLoc("server returned duplicate reference!", file_uri.raw, actual_loc, .err, .{});
-            return error.DuplicateReference;
-        } else {
-            visited.set(index);
+        // keeps track of expected locations that have been given by the server
+        // used to detect double references and missing references
+        var visited: std.bit_set.Dynamic = try .initEmpty(allocator, expected_locations.items.len);
+        defer visited.deinit(allocator);
+
+        for (actual_locations) |response_location| {
+            const actual_uri: zls.Uri = try .parse(allocator, response_location.uri);
+            defer actual_uri.deinit(allocator);
+
+            const actual_file_index = files.getIndex(actual_uri) orelse {
+                std.debug.print("received location to unknown file `{s}` as the result\n", .{actual_uri.raw});
+                return error.InvalidLocation;
+            };
+            const actual_file_source = files.values()[actual_file_index].new_source;
+            const actual_loc = offsets.rangeToLoc(actual_file_source, response_location.range, ctx.server.offset_encoding);
+
+            const index = for (expected_locations.items, 0..) |expected_loc, idx| {
+                if (expected_loc.file_index != actual_file_index) continue;
+                if (expected_loc.loc.start != actual_loc.start) continue;
+                if (expected_loc.loc.end != actual_loc.end) continue;
+                break idx;
+            } else {
+                try error_builder.msgAtLoc("server returned unexpected location", response_location.uri, actual_loc, .err, .{});
+                return error.UnexpectedLocation;
+            };
+
+            if (visited.isSet(index)) {
+                try error_builder.msgAtLoc("server returned duplicate location", response_location.uri, actual_loc, .err, .{});
+                return error.DuplicateReference;
+            } else {
+                visited.set(index);
+            }
         }
-    }
 
-    var has_unvisited = false;
-    var unvisited_it = visited.iterator(.{ .kind = .unset });
-    while (unvisited_it.next()) |index| {
-        const unvisited_loc = expected_locations.items[index];
-        try error_builder.msgAtLoc("expected reference here!", file_uri.raw, unvisited_loc, .err, .{});
-        has_unvisited = true;
-    }
+        var has_unvisited = false;
+        var unvisited_it = visited.iterator(.{ .kind = .unset });
+        while (unvisited_it.next()) |index| {
+            const unvisited_file_index = expected_locations.items[index].file_index;
+            const unvisited_uri = files.keys()[unvisited_file_index];
+            const unvisited_loc = expected_locations.items[index].loc;
+            try error_builder.msgAtLoc("expected location here", unvisited_uri.raw, unvisited_loc, .err, .{});
+            has_unvisited = true;
+        }
 
-    if (has_unvisited) return error.ExpectedReference;
+        if (has_unvisited) return error.MissingLocation;
+    }
+}
+
+fn sendRequest(
+    server: *zls.Server,
+    arena: std.mem.Allocator,
+    kind: RequestKind,
+    uri: zls.Uri,
+    position: types.Position,
+) !?[]const types.Location {
+    switch (kind) {
+        .references => {
+            return try server.sendRequestSync(arena, "textDocument/references", .{
+                .textDocument = .{ .uri = uri.raw },
+                .position = position,
+                .context = .{ .includeDeclaration = true },
+            });
+        },
+        .highlight => {
+            const result: []const types.DocumentHighlight = try server.sendRequestSync(arena, "textDocument/documentHighlight", .{
+                .textDocument = .{ .uri = uri.raw },
+                .position = position,
+            }) orelse return null;
+            const locations = try arena.alloc(types.Location, result.len);
+            for (locations, result) |*location, highlighting| {
+                location.* = .{ .uri = uri.raw, .range = highlighting.range };
+            }
+            return locations;
+        },
+        .rename => {
+            const result: types.WorkspaceEdit = try server.sendRequestSync(arena, "textDocument/rename", .{
+                .textDocument = .{ .uri = uri.raw },
+                .position = position,
+                .newName = "placeholder",
+            }) orelse return null;
+            std.debug.assert(result.documentChanges == null);
+            std.debug.assert(result.changeAnnotations == null);
+            const changes = result.changes orelse return null;
+            const text_edits = changes.map.get(uri.raw) orelse return &.{};
+            const locations = try arena.alloc(types.Location, text_edits.len);
+            for (locations, text_edits) |*location, text_edit| {
+                location.* = .{ .uri = uri.raw, .range = text_edit.range };
+            }
+            return locations;
+        },
+    }
 }
