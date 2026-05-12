@@ -9,7 +9,7 @@ const Node = Ast.Node;
 const full = Ast.full;
 
 fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.PtrType {
-    const size: std.builtin.Type.Pointer.Size = switch (tree.tokenTag(info.main_token)) {
+    const size: std.lang.Type.Pointer.Size = switch (tree.tokenTag(info.main_token)) {
         .asterisk => .one,
         .l_bracket => switch (tree.tokenTag(info.main_token + 1)) {
             .asterisk => if (tree.tokenTag(info.main_token + 2) == .identifier) .c else .many,

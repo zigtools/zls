@@ -1521,7 +1521,7 @@ pub fn resolvePrimitive(analyser: *Analyser, identifier_name: []const u8) error{
     if (primitives.get(identifier_name)) |primitive| return primitive;
 
     if (identifier_name.len < 2) return null;
-    const signedness: std.builtin.Signedness = switch (identifier_name[0]) {
+    const signedness: std.lang.Signedness = switch (identifier_name[0]) {
         'i' => .signed,
         'u' => .unsigned,
         else => return null,
@@ -3171,7 +3171,7 @@ pub const Type = struct {
         /// - `[]const T`
         /// - `[*c]T`
         pointer: struct {
-            size: std.builtin.Type.Pointer.Size,
+            size: std.lang.Type.Pointer.Size,
             /// `.none` means no sentinel, `.unknown_unknown` means unknown sentinel
             sentinel: InternPool.Index,
             is_const: bool,
@@ -3278,7 +3278,7 @@ pub const Type = struct {
 
         fn createPointer(
             analyser: *Analyser,
-            size: std.builtin.Type.Pointer.Size,
+            size: std.lang.Type.Pointer.Size,
             sentinel: InternPool.Index,
             is_const: bool,
             elem_ty: Type,
@@ -3757,7 +3757,7 @@ pub const Type = struct {
 
     fn createPointerType(
         analyser: *Analyser,
-        size: std.builtin.Type.Pointer.Size,
+        size: std.lang.Type.Pointer.Size,
         sentinel: InternPool.Index,
         is_const: bool,
         elem_ty: Type,
@@ -4386,7 +4386,7 @@ pub const Type = struct {
         };
     }
 
-    fn pointerSize(self: Type, analyser: *Analyser) ?std.builtin.Type.Pointer.Size {
+    fn pointerSize(self: Type, analyser: *Analyser) ?std.lang.Type.Pointer.Size {
         if (self.is_type_val) return null;
         return switch (self.data) {
             .pointer => |info| info.size,
@@ -4401,7 +4401,7 @@ pub const Type = struct {
     fn pointerElementType(
         self: Type,
         analyser: *Analyser,
-        size: std.builtin.Type.Pointer.Size,
+        size: std.lang.Type.Pointer.Size,
     ) ?Type {
         if (self.is_type_val) return null;
         return switch (self.data) {
@@ -4912,11 +4912,11 @@ fn resolveLangrefType(analyser: *Analyser, type_str: []const u8) Error!?Type {
     return analyser.instanceStdBuiltinType(type_str);
 }
 
-/// Look up `type_name` in 'zig_lib_dir/std/builtin.zig' and return it as an instance
+/// Look up `type_name` in 'zig_lib_dir/std/lang.zig' and return it as an instance
 /// Useful for functionality related to builtin fns
 pub fn instanceStdBuiltinType(analyser: *Analyser, type_name: []const u8) Error!?Type {
     const zig_lib_dir = analyser.store.config.zig_lib_dir orelse return null;
-    const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "builtin.zig" });
+    const builtin_path = try zig_lib_dir.join(analyser.arena, &.{ "std", "lang.zig" });
     const builtin_uri: Uri = try .fromPath(analyser.arena, builtin_path);
 
     const builtin_handle = try analyser.store.getOrLoadHandle(builtin_uri) orelse return null;

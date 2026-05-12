@@ -6,7 +6,7 @@ const std = @import("std");
 pub fn addCases(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.OptimizeMode,
     test_step: *std.Build.Step,
     test_filters: []const []const u8,
 ) void {

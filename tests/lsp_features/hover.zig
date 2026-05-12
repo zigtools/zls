@@ -235,7 +235,7 @@ test "builtin with multi line parameters" {
         \\
         \\`T` must be a pointer, a `bool`, a float, an integer, an enum, or a packed struct.
         \\
-        \\`AtomicOrder` can be found with `@import("std").builtin.AtomicOrder`.
+        \\`AtomicOrder` can be found with `@import("std").lang.AtomicOrder`.
     , .{ .markup_kind = .plaintext });
 }
 

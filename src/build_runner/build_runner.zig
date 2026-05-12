@@ -258,7 +258,7 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.debug_pkg_config = true;
             } else if (mem.cutPrefix(u8, arg, "--debug-rt=")) |rest| {
                 graph.debug_compiler_runtime_libs =
-                    std.meta.stringToEnum(std.builtin.OptimizeMode, rest) orelse
+                    std.meta.stringToEnum(std.lang.OptimizeMode, rest) orelse
                     fatal("unrecognized optimization mode: '{s}'", .{rest});
             } else if (mem.eql(u8, arg, "--debug-compile-errors")) {
                 builder.debug_compile_errors = true;
