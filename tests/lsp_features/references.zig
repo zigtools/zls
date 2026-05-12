@@ -301,21 +301,113 @@ test "switch case capture - union tag" {
     );
 }
 
+test "alias with same name - cursor on declaration" {
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo<cursor></loc>() void {}
+        \\};
+        \\comptime {
+        \\    const <loc>foo</loc> = S.<loc>foo</loc>;
+        \\    <loc>foo</loc>();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .references });
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo<cursor></loc>() void {}
+        \\};
+        \\comptime {
+        \\    const <loc>foo</loc> = S.<loc>foo</loc>;
+        \\    <loc>foo</loc>();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .rename });
+}
+
+test "alias with same name - cursor on alias" {
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo</loc>() void {}
+        \\};
+        \\comptime {
+        \\    const <loc>foo</loc> = S.<loc>foo</loc>;
+        \\    <loc>foo<cursor></loc>();
+        \\}
+        \\comptime {
+        \\    const <loc>foo</loc> = S.<loc>foo</loc>;
+        \\    <loc>foo</loc>();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .references });
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn foo() void {}
+        \\};
+        \\comptime {
+        \\    const <loc>foo</loc> = S.foo;
+        \\    <loc>foo<cursor></loc>();
+        \\}
+        \\comptime {
+        \\    const foo = S.foo;
+        \\    foo();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .rename });
+}
+
+test "alias with different name - cursor on declaration" {
+    // No references on renamed symbols is mainly an optimization rather than intended behaviour.
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo<cursor></loc>() void {}
+        \\};
+        \\comptime {
+        \\    const bar = S.<loc>foo</loc>;
+        \\    bar();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .references });
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo<cursor></loc>() void {}
+        \\};
+        \\comptime {
+        \\    const bar = S.<loc>foo</loc>;
+        \\    bar();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .rename });
+}
+
+test "alias with different name - cursor on alias" {
+    // No references on renamed symbols is mainly an optimization rather than intended behaviour.
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn <loc>foo</loc>() void {}
+        \\};
+        \\comptime {
+        \\    const bar = S.<loc>foo</loc>;
+        \\    bar<cursor>();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .references });
+    try testReferences(&.{
+        \\const S = struct {
+        \\    fn foo() void {}
+        \\};
+        \\comptime {
+        \\    const <loc>bar</loc> = S.foo;
+        \\    <loc>bar<cursor></loc>();
+        \\}
+    }, .{ .format = .asymmetric, .request_kind = .rename });
+}
+
 test "cross-file reference" {
     try testReferences(&.{
         // Untitled-0.zig
-        \\pub const <0> = struct {};
+        \\pub const <loc>Foo<cursor></loc> = struct {};
         ,
         // Untitled-1.zig
         \\const file = @import("Untitled-0.zig");
-        \\const <0> = file.<0>;
-        \\const renamed = file.<0>;
+        \\const <loc>Foo</loc> = file.<loc>Foo</loc>;
         \\comptime {
-        \\    _ = <0>;
-        \\    _ = renamed;
+        \\    _ = <loc>Foo</loc>;
         \\}
         ,
-    }, .{ .format = .symmetric });
+    }, .{ .format = .asymmetric });
 }
 
 test "cross-file - transitive import" {
@@ -336,18 +428,32 @@ test "cross-file - transitive import" {
 test "cross-file - alias" {
     try testReferences(&.{
         // Untitled-0.zig
-        \\pub const <0> = struct {
-        \\    fn foo(_: <0>) void {}
-        \\    var bar: <0> = undefined;
+        \\pub const <loc>Foo<cursor></loc> = struct {
+        \\    fn foo(_: <loc>Foo</loc>) void {}
+        \\    var bar: <loc>Foo</loc> = undefined;
         \\};
         ,
         // Untitled-1.zig
-        \\const <0> = @import("Untitled-0.zig").<0>;
+        \\const <loc>Foo</loc> = @import("Untitled-0.zig").<loc>Foo</loc>;
         \\comptime {
-        \\    _ = <0>;
+        \\    _ = <loc>Foo</loc>;
         \\}
         ,
-    }, .{ .format = .symmetric });
+    }, .{ .format = .asymmetric });
+    try testReferences(&.{
+        // Untitled-0.zig
+        \\pub const <loc>Foo<cursor></loc> = struct {};
+        ,
+        // Untitled-1.zig
+        \\const file = @import("Untitled-0.zig");
+        \\const <loc>Foo</loc> = file.<loc>Foo</loc>;
+        \\const renamed = file.<loc>Foo</loc>;
+        \\comptime {
+        \\    _ = <loc>Foo</loc>;
+        \\    _ = renamed;
+        \\}
+        ,
+    }, .{ .format = .asymmetric });
 }
 
 test "matching control flow - unlabeled loop" {
