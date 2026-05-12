@@ -26,7 +26,7 @@ pub const top_level: []const Item = &.{
     .{ .label = "panic", .snippet =
     \\pub fn panic(
     \\    msg: []const u8,
-    \\    trace: ?*std.builtin.StackTrace,
+    \\    trace: ?*std.lang.StackTrace,
     \\    ret_addr: ?usize,
     \\) noreturn {$0}
     },

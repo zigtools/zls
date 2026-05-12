@@ -258,7 +258,7 @@ pub fn main(init: process.Init.Minimal) !void {
                 builder.debug_pkg_config = true;
             } else if (mem.cutPrefix(u8, arg, "--debug-rt=")) |rest| {
                 graph.debug_compiler_runtime_libs =
-                    std.meta.stringToEnum(std.builtin.OptimizeMode, rest) orelse
+                    std.meta.stringToEnum(std.lang.OptimizeMode, rest) orelse
                     fatal("unrecognized optimization mode: '{s}'", .{rest});
             } else if (mem.eql(u8, arg, "--debug-compile-errors")) {
                 builder.debug_compile_errors = true;
@@ -813,7 +813,7 @@ fn makeStep(
             defer run.max_rss_mutex.unlock(io);
             run.available_rss += s.max_rss;
             dispatch_set.ensureUnusedCapacity(gpa, run.memory_blocked_steps.items.len) catch @panic("OOM");
-            while (run.memory_blocked_steps.getLastOrNull()) |candidate| {
+            while (run.memory_blocked_steps.getLast()) |candidate| {
                 if (run.available_rss < candidate.max_rss) break;
                 assert(run.memory_blocked_steps.pop() == candidate);
                 dispatch_set.appendAssumeCapacity(candidate);

@@ -57,7 +57,7 @@ pub const ServerToClient = struct {
 
 pub const BuildOnSaveSupport = union(enum) {
     supported,
-    invalid_linux_kernel_version: if (builtin.os.tag == .linux) @FieldType(std.posix.utsname, "release") else noreturn,
+    invalid_linux_kernel_version: if (builtin.os.tag == .linux) @FieldType(std.os.linux.utsname, "release") else noreturn,
     unsupported_linux_kernel_version: if (builtin.os.tag == .linux) std.SemanticVersion else noreturn,
     unsupported_zig_version: if (@TypeOf(os_support) == std.SemanticVersion) void else noreturn,
     unsupported_os: if (@TypeOf(os_support) == bool and !os_support) void else noreturn,
@@ -97,7 +97,8 @@ pub const BuildOnSaveSupport = union(enum) {
         comptime std.debug.assert(isSupportedComptime());
 
         if (builtin.os.tag == .linux) blk: {
-            const utsname = std.posix.uname();
+            var utsname: std.os.linux.utsname = undefined;
+            std.debug.assert(std.os.linux.uname(&utsname) == 0);
             const unparsed_version = std.mem.sliceTo(&utsname.release, 0);
             const version = parseUnameKernelVersion(unparsed_version) catch
                 return .{ .invalid_linux_kernel_version = utsname.release };

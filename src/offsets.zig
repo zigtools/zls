@@ -602,7 +602,7 @@ pub fn multilineSliceAtIndex(text: []const u8, index: usize, n: usize) []const u
 
 /// see `multilineLocAtIndex`
 pub fn multilineLocAtPosition(text: []const u8, position: Position, n: usize, encoding: Encoding) Loc {
-    return lineLocAtIndex(text, positionToIndex(text, position, n, encoding));
+    return multilineLocAtIndex(text, positionToIndex(text, position, encoding), n);
 }
 
 /// see `multilineLocAtIndex`

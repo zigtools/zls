@@ -13,7 +13,7 @@ pub const ErrorMsg = union(enum) {
     /// zig: expected error set type, found '{}'
     /// zig: expected pointer, found '{}'
     expected_tag_type: struct {
-        expected_tag: std.builtin.TypeId,
+        expected_tag: std.lang.TypeId,
         actual: Index,
     },
     /// zig: comparison of '{}' with null

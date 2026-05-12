@@ -1848,17 +1848,6 @@ test "errdefer" {
         .{ "void", .type, .{} },
         .{ "errdefer", .keyword, .{} },
     });
-    try testSemanticTokens(
-        \\fn foo() void {
-        \\    errdefer |err| {};
-        \\}
-    , &.{
-        .{ "fn", .keyword, .{} },
-        .{ "foo", .function, .{ .declaration = true } },
-        .{ "void", .type, .{} },
-        .{ "errdefer", .keyword, .{} },
-        .{ "err", .variable, .{ .declaration = true } },
-    });
 }
 
 test "test decl" {

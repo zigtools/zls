@@ -612,8 +612,8 @@ fn walkNode(
         .@"switch",
         .switch_comma,
         => walkSwitchNode(context, tree, node_idx),
-        .@"errdefer" => walkErrdeferNode(context, tree, node_idx),
 
+        .@"errdefer",
         .@"defer",
         .bool_not,
         .negation,
@@ -657,7 +657,6 @@ fn walkNode(
         .mul,
         .div,
         .mod,
-        .array_mult,
         .mul_wrap,
         .mul_sat,
         .add,
@@ -1207,26 +1206,6 @@ noinline fn walkSwitchNode(
         }
     }
     if (switch_scope) |scope| try scope.finalize();
-}
-
-noinline fn walkErrdeferNode(
-    context: *ScopeContext,
-    tree: *const Ast,
-    node_idx: Ast.Node.Index,
-) error{OutOfMemory}!void {
-    const opt_payload_token, const rhs = tree.nodeData(node_idx).opt_token_and_node;
-
-    if (opt_payload_token.unwrap()) |payload_token| {
-        const expr_scope = try walkNodeEnsureScope(context, tree, rhs, payload_token);
-        try expr_scope.pushDeclaration(
-            payload_token,
-            .{ .error_union_error = .{ .identifier = payload_token, .condition = .none } },
-            .other,
-        );
-        try expr_scope.finalize();
-    } else {
-        return try walkNode(context, tree, rhs);
-    }
 }
 
 noinline fn walkUnaryOpNode(context: *ScopeContext, tree: *const Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {

@@ -388,22 +388,15 @@
       </p>
       {#see_also|Values|Tuples|@import|Errors|Entry Point|Source Encoding|try#}
       {#header_close#}
+
       {#header_open|Comments#}
-      <p>
-      Zig supports 3 types of comments. Normal comments are ignored, but doc comments
-      and top-level doc comments are used by the compiler to generate the package documentation.
-      </p>
-      <p>
-      The generated documentation is still experimental, and can be produced with:
-      </p>
-      {#shell_samp#}zig test -femit-docs main.zig{#end_shell_samp#}
+      <p>There are three types of comments. Normal comments are ignored, while {#link|Doc Comments#}
+      and {#link|Top-Level Doc Comments#} are used by the compiler to generate
+      the package documentation.</p>
       {#code|comments.zig#}
 
-      <p>
-      There are no multiline comments in Zig (e.g. like <code class="c">/* */</code>
-      comments in C).  This allows Zig to have the property that each line
-      of code can be tokenized out of context.
-      </p>
+      <p>There are no multiline comments. Zig has the property that each line
+      of code can be tokenized independently.</p>
       {#header_open|Doc Comments#}
       <p>
       A doc comment is one that begins with exactly three slashes (i.e.
@@ -429,15 +422,26 @@
       {#header_open|Top-Level Doc Comments#}
       <p>
       A top-level doc comment is one that begins with two slashes and an exclamation
-      point: {#syntax#}//!{#endsyntax#}; it documents the current module.
+      point: {#syntax#}//!{#endsyntax#}; it documents the type which owns the containing
+      {#link|Namespace#}.
       </p>
       <p>
       It is a compile error if a top-level doc comment is not placed at the start
-      of a {#link|container|Containers#}, before any expressions.
+      of a namespace, before any expressions.
       </p>
       {#code|tldoc_comments.zig#}
 
       {#header_close#}
+      {#header_close#}
+
+      {#header_open|Namespace#}
+      <p>A namespace in Zig is created by {#link|struct#}, {#link|enum#}, {#link|union#}, and {#link|opaque#}.</p>
+      <p>They contain {#link|Namespace Level Variables#},
+      {#link|function|Functions#} declarations, and {#link|comptime#} blocks.</p>
+      <p>Although namespaces use curly braces to surround their definition,
+      they should not be confused with {#link|blocks|Blocks#} or function bodies.</p>
+      <p><strong>Every Zig source file is implicitly a struct</strong>, with the keyword
+      {#syntax#}struct{#endsyntax#} and curly braces omitted.</p>
       {#header_close#}
 
       {#header_open|Identifiers#}
@@ -525,7 +529,7 @@
         </tr>
         <tr>
             <th scope="row">{#syntax#}isize{#endsyntax#}</th>
-          <td><code class="c">intptr_t</code></td>
+          <td><code class="c">intptr_t</code>, <code class="c">ssize_t</code></td>
           <td>signed pointer sized integer</td>
         </tr>
         <tr>
@@ -619,11 +623,6 @@
             <th scope="row">{#syntax#}anyopaque{#endsyntax#}</th>
           <td><code class="c">void</code></td>
           <td>Used for type-erased pointers.</td>
-        </tr>
-        <tr>
-            <th scope="row">{#syntax#}void{#endsyntax#}</th>
-          <td>(none)</td>
-          <td>Always the value {#syntax#}void{}{#endsyntax#}</td>
         </tr>
         <tr>
             <th scope="row">{#syntax#}noreturn{#endsyntax#}</th>
@@ -813,7 +812,7 @@
       {#code|destructuring_to_existing.zig#}
 
       <p>
-        A destructuring expression may only appear within a block (i.e. not at container scope).
+        A destructuring expression may only appear within a block (i.e. not at {#link|Namespace#} scope).
         The left hand side of the assignment must consist of a comma separated list,
         each element of which may be either an lvalue (for instance, an existing `var`) or a variable declaration:
       </p>
@@ -993,27 +992,23 @@
       </p>
       {#see_also|Exporting a C Library#}
 
-      {#header_open|Container Level Variables#}
-      <p>
-      {#link|Container|Containers#} level variables have static lifetime and are order-independent and lazily analyzed.
-      The initialization value of container level variables is implicitly
-      {#link|comptime#}. If a container level variable is {#syntax#}const{#endsyntax#} then its value is
-      {#syntax#}comptime{#endsyntax#}-known, otherwise it is runtime-known.
-      </p>
-      {#code|test_container_level_variables.zig#}
-
-      <p>
-      Container level variables may be declared inside a {#link|struct#}, {#link|union#}, {#link|enum#}, or {#link|opaque#}:
-      </p>
-      {#code|test_namespaced_container_level_variable.zig#}
+      {#header_open|Namespace Level Variables#}
+      <p>{#link|Namespace|Namespace#} level variables have global lifetime and are
+      order-independent and lazily analyzed. The initialization value of
+      namespace level variables is implicitly {#link|comptime#}. If a namespace
+      level variable is {#syntax#}const{#endsyntax#} then its value is
+      {#syntax#}comptime{#endsyntax#}-known, otherwise it is runtime-known.</p>
+      {#code|test_namespace_level_variables.zig#}
+      <p>Namespace level variables may be declared inside a {#link|struct#},
+      {#link|union#}, {#link|enum#}, or {#link|opaque#}:</p>
+      {#code|test_namespaced_variable.zig#}
 
       {#header_close#}
 
-      {#header_open|Static Local Variables#}
-      <p>
-        It is also possible to have local variables with static lifetime by using containers inside functions.
-      </p>
-      {#code|test_static_local_variable.zig#}
+      {#header_open|Locally-Scoped Global Variables#}
+      <p>It is also possible to have local variables with global lifetime by
+      using {#link|namespaces|Namespace#} inside functions.</p>
+      {#code|test_locally_scoped_global_variable.zig#}
 
       {#header_close#}
 
@@ -1022,10 +1017,8 @@
       {#syntax#}threadlocal{#endsyntax#} keyword,
       which makes each thread work with a separate instance of the variable:</p>
       {#code|test_thread_local_variables.zig#}
-
-      <p>
-      For {#link|Single Threaded Builds#}, all thread local variables are treated as regular {#link|Container Level Variables#}.
-      </p>
+      <p>For {#link|Single Threaded Builds#}, all thread local variables are
+      treated as regular {#link|Namespace Level Variables#}.</p>
       <p>
       Thread local variables may not be {#syntax#}const{#endsyntax#}.
       </p>
@@ -1466,7 +1459,15 @@ a >>= b{#endsyntax#}</pre></td>
           </td>
           <td>
             <ul>
-              <li>Moves all bits to the right, inserting zeroes at the most-significant bit.</li>
+              <li>When LHS is unsigned, performs a <strong>logical
+              shift</strong>, moving all bits to the right, inserting zeroes at
+              the most-significant bit.</li>
+
+              <li>When LHS is signed, performs an <strong>arithmetic
+              shift</strong>, moving all bits to the right, inserting ones at
+              the most-significant bit if and only if the most significant bit
+              is one.</li>
+
               <li>{#syntax#}b{#endsyntax#} must be
                 {#link|comptime-known|comptime#} or have a type with log2 number
                 of bits as {#syntax#}a{#endsyntax#}.</li>
@@ -1809,25 +1810,6 @@ mem.eql(u32, &together, &[_]u32{1,2,3,4}){#endsyntax#}</pre>
           </td>
         </tr>
         <tr>
-          <td>Array Multiplication</td>
-          <td><pre>{#syntax#}a ** b{#endsyntax#}</pre></td>
-          <td>
-            <ul>
-              <li>{#link|Arrays#}</li>
-            </ul>
-          </td>
-          <td>
-            <ul>
-              <li>Only available when the length of {#syntax#}a{#endsyntax#} and {#syntax#}b{#endsyntax#} are {#link|compile-time known|comptime#}.</li>
-            </ul>
-          </td>
-          <td>
-            <pre>{#syntax#}const mem = @import("std").mem;
-const pattern = "ab" ** 3;
-mem.eql(u8, pattern, "ababab"){#endsyntax#}</pre>
-          </td>
-        </tr>
-        <tr>
           <td>Pointer Dereference</td>
           <td><pre>{#syntax#}a.*{#endsyntax#}</pre></td>
           <td>
@@ -1884,7 +1866,7 @@ const B = error{Two};
 a!b
 x{}
 !x -x -%x ~x &x ?x
-* / % ** *% *| ||
+* / % *% *| ||
 + - ++ +% -% +| -|
 << >> <<|
 & ^ | orelse catch
@@ -2373,7 +2355,7 @@ or
       </p>
       <p>
       Like arrays, tuples have a .len field, can be indexed (provided the index is comptime-known)
-      and work with the ++ and ** operators. They can also be iterated over with {#link|inline for#}.
+      and work with the ++ operator. They can also be iterated over with {#link|inline for#}.
       </p>
       {#code|test_tuples.zig#}
 
@@ -2470,7 +2452,7 @@ or
       <p>Unions can be declared with an enum tag type.
       This turns the union into a <em>tagged</em> union, which makes it eligible
       to use with {#link|switch#} expressions. When switching on tagged unions,
-      the tag value can be obtained using an additional capture. 
+      the tag value can be obtained using an additional capture.
       Tagged unions coerce to their tag type: {#link|Type Coercion: Unions and Enums#}.
       </p>
       {#code|test_tagged_union.zig#}
@@ -2573,7 +2555,7 @@ or
       {#header_close#}
 
       {#header_open|Empty Blocks#}
-      <p>An empty block is equivalent to {#syntax#}void{}{#endsyntax#}:</p>
+      <p>An empty block returns the single value of type {#syntax#}void{#endsyntax#}:</p>
       {#code|test_empty_block.zig#}
 
       {#header_close#}
@@ -3161,10 +3143,6 @@ fn createFoo(param: i32) !Foo {
       the verbosity and cognitive overhead of trying to make sure every exit path
       is covered. The deallocation code is always directly following the allocation code.
       </p>
-      <p>
-      The {#syntax#}errdefer{#endsyntax#} statement can optionally capture the error:
-      </p>
-      {#code|test_errdefer_capture.zig#}
       {#header_close#}
       <p>
       A couple of other tidbits about error handling:
@@ -3629,7 +3607,7 @@ void do_a_thing(struct Foo *foo) {
       <p>For some types, {#link|@sizeOf#} is 0:</p>
       <ul>
           <li>{#link|void#}</li>
-          <li>The {#link|Integers#} {#syntax#}u0{#endsyntax#} and {#syntax#}i0{#endsyntax#}.</li>
+          <li>The {#link|integer type|Integers#} {#syntax#}u0{#endsyntax#}.</li>
           <li>{#link|Arrays#} and {#link|Vectors#} with len 0, or with an element type that is a zero bit type.</li>
           <li>An {#link|enum#} with only 1 tag.</li>
           <li>A {#link|struct#} with all fields being zero bit types.</li>
@@ -3793,7 +3771,7 @@ void do_a_thing(struct Foo *foo) {
           <tr>
             <th scope="row">{#syntax#}@Int(x, y){#endsyntax#}</th>
             <td>-</td>
-            <td>{#syntax#}x{#endsyntax#} is a {#syntax#}std.builtin.Signedness{#endsyntax#}, {#syntax#}y{#endsyntax#} is a {#syntax#}u16{#endsyntax#}</td>
+            <td>{#syntax#}x{#endsyntax#} is a {#syntax#}std.lang.Signedness{#endsyntax#}, {#syntax#}y{#endsyntax#} is a {#syntax#}u16{#endsyntax#}</td>
           </tr>
           <tr>
             <th scope="row">{#syntax#}@typeInfo(x){#endsyntax#}</th>
@@ -4123,13 +4101,11 @@ fn performFn(start_value: i32) i32 {
       </p>
       {#code|test_fibonacci_comptime_unreachable.zig#}
 
-
-      <p>
-      At {#link|container|Containers#} level (outside of any function), all expressions are implicitly
-      {#syntax#}comptime{#endsyntax#} expressions. This means that we can use functions to
-      initialize complex static data. For example:
-      </p>
-      {#code|test_container-level_comptime_expressions.zig#}
+      <p>At {#link|Namespace#} level (outside of any function), all expressions
+      are implicitly {#syntax#}comptime{#endsyntax#} expressions. This means
+      that we can use functions to initialize complex constant data. For
+      example:</p>
+      {#code|test_namespace-level_comptime_expressions.zig#}
 
       <p>
       When we compile this program, Zig generates the constants
@@ -4309,7 +4285,7 @@ pub fn print(self: *Writer, arg0: []const u8, arg1: i32) !void {
 
       {#header_open|Global Assembly#}
       <p>
-      When an assembly expression occurs in a {#link|container|Containers#} level {#link|comptime#} block, this is
+      When an assembly expression occurs in a {#link|Namespace#} level {#link|comptime#} block, this is
       <strong>global assembly</strong>.
       </p>
       <p>
@@ -4405,7 +4381,7 @@ comptime {
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
       an integer, an enum, or a packed struct.
       </p>
-      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicOrder{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicStore|@atomicRmw||@cmpxchgWeak|@cmpxchgStrong#}
       {#header_close#}
 
@@ -4419,8 +4395,8 @@ comptime {
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
       an integer, an enum, or a packed struct.
       </p>
-      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicOrder{#endsyntax#}.</p>
-      <p>{#syntax#}AtomicRmwOp{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicRmwOp{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicRmwOp{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicRmwOp{#endsyntax#}.</p>
       {#see_also|@atomicStore|@atomicLoad|@cmpxchgWeak|@cmpxchgStrong#}
       {#header_close#}
 
@@ -4433,7 +4409,7 @@ comptime {
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
       an integer, an enum, or a packed struct.
       </p>
-      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicOrder{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicLoad|@atomicRmw|@cmpxchgWeak|@cmpxchgStrong#}
       {#header_close#}
 
@@ -4491,7 +4467,7 @@ comptime {
       {#header_open|@branchHint#}
       <pre>{#syntax#}@branchHint(hint: BranchHint) void{#endsyntax#}</pre>
       <p>Hints to the optimizer how likely a given branch of control flow is to be reached.</p>
-      <p>{#syntax#}BranchHint{#endsyntax#} can be found with {#syntax#}@import("std").builtin.BranchHint{#endsyntax#}.</p>
+      <p>{#syntax#}BranchHint{#endsyntax#} can be found with {#syntax#}@import("std").lang.BranchHint{#endsyntax#}.</p>
       <p>This function is only valid as the first statement in a control flow branch, or the first statement in a function.</p>
       {#header_close#}
 
@@ -4558,7 +4534,7 @@ comptime {
       {#header_close#}
 
       {#header_open|@call#}
-      <pre>{#syntax#}@call(modifier: std.builtin.CallModifier, function: anytype, args: anytype) anytype{#endsyntax#}</pre>
+      <pre>{#syntax#}@call(modifier: std.lang.CallModifier, function: anytype, args: anytype) anytype{#endsyntax#}</pre>
       <p>
       Calls a function, in the same way that invoking an expression with parentheses does:
       </p>
@@ -4568,7 +4544,7 @@ comptime {
       {#syntax#}@call{#endsyntax#} allows more flexibility than normal function call syntax does. The
       {#syntax#}CallModifier{#endsyntax#} enum is reproduced here:
       </p>
-      {#code|builtin.CallModifier struct.zig#}
+      {#code|lang.CallModifier struct.zig#}
 
       {#header_close#}
 
@@ -4608,7 +4584,7 @@ comptime {
       an integer, an enum, or a packed struct.
       </p>
       <p>{#syntax#}@typeInfo(@TypeOf(ptr)).pointer.alignment{#endsyntax#} must be {#syntax#}>= @sizeOf(T).{#endsyntax#}</p>
-      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicOrder{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicStore|@atomicLoad|@atomicRmw|@cmpxchgWeak#}
       {#header_close#}
 
@@ -4640,7 +4616,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       an integer, an enum, or a packed struct.
       </p>
       <p>{#syntax#}@typeInfo(@TypeOf(ptr)).pointer.alignment{#endsyntax#} must be {#syntax#}>= @sizeOf(T).{#endsyntax#}</p>
-      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").builtin.AtomicOrder{#endsyntax#}.</p>
+      <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicStore|@atomicLoad|@atomicRmw|@cmpxchgStrong#}
       {#header_close#}
 
@@ -4702,28 +4678,28 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@cVaArg#}
-      <pre>{#syntax#}@cVaArg(operand: *std.builtin.VaList, comptime T: type) T{#endsyntax#}</pre>
+      <pre>{#syntax#}@cVaArg(operand: *std.lang.VaList, comptime T: type) T{#endsyntax#}</pre>
       <p>
       Implements the C macro {#syntax#}va_arg{#endsyntax#}.
       </p>
       {#see_also|@cVaCopy|@cVaEnd|@cVaStart#}
       {#header_close#}
       {#header_open|@cVaCopy#}
-      <pre>{#syntax#}@cVaCopy(src: *std.builtin.VaList) std.builtin.VaList{#endsyntax#}</pre>
+      <pre>{#syntax#}@cVaCopy(src: *std.lang.VaList) std.lang.VaList{#endsyntax#}</pre>
       <p>
       Implements the C macro {#syntax#}va_copy{#endsyntax#}.
       </p>
       {#see_also|@cVaArg|@cVaEnd|@cVaStart#}
       {#header_close#}
       {#header_open|@cVaEnd#}
-      <pre>{#syntax#}@cVaEnd(src: *std.builtin.VaList) void{#endsyntax#}</pre>
+      <pre>{#syntax#}@cVaEnd(src: *std.lang.VaList) void{#endsyntax#}</pre>
       <p>
       Implements the C macro {#syntax#}va_end{#endsyntax#}.
       </p>
       {#see_also|@cVaArg|@cVaCopy|@cVaStart#}
       {#header_close#}
       {#header_open|@cVaStart#}
-      <pre>{#syntax#}@cVaStart() std.builtin.VaList{#endsyntax#}</pre>
+      <pre>{#syntax#}@cVaStart() std.lang.VaList{#endsyntax#}</pre>
       <p>
       Implements the C macro {#syntax#}va_start{#endsyntax#}. Only valid inside a variadic function.
       </p>
@@ -4832,7 +4808,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@errorReturnTrace#}
-      <pre>{#syntax#}@errorReturnTrace() ?*builtin.StackTrace{#endsyntax#}</pre>
+      <pre>{#syntax#}@errorReturnTrace() ?*std.lang.StackTrace{#endsyntax#}</pre>
       <p>
       If the binary is built with error return tracing, and this function is invoked in a
       function that calls a function with an error or error union return type, returns a
@@ -4850,7 +4826,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@export#}
-      <pre>{#syntax#}@export(comptime ptr: *const anyopaque, comptime options: std.builtin.ExportOptions) void{#endsyntax#}</pre>
+      <pre>{#syntax#}@export(comptime ptr: *const anyopaque, comptime options: std.lang.ExportOptions) void{#endsyntax#}</pre>
       <p>Creates a symbol in the output object file which refers to the target of <code>ptr</code>.</p>
       <p><code>ptr</code> must point to a global variable or a comptime-known constant.</p>
       <p>
@@ -4876,7 +4852,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@extern#}
-      <pre>{#syntax#}@extern(T: type, comptime options: std.builtin.ExternOptions) T{#endsyntax#}</pre>
+      <pre>{#syntax#}@extern(T: type, comptime options: std.lang.ExternOptions) T{#endsyntax#}</pre>
       <p>
       Creates a reference to an external symbol in the output object file.
       T must be a pointer type.
@@ -4946,25 +4922,18 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@hasDecl#}
-      <pre>{#syntax#}@hasDecl(comptime Container: type, comptime name: []const u8) bool{#endsyntax#}</pre>
-      <p>
-      Returns whether or not a {#link|container|Containers#} has a declaration
-      matching {#syntax#}name{#endsyntax#}.
-      </p>
+      <pre>{#syntax#}@hasDecl(comptime Namespace: type, comptime name: []const u8) bool{#endsyntax#}</pre>
+      <p>Returns whether or not a {#link|Namespace#} has a declaration matching {#syntax#}name{#endsyntax#}.</p>
       {#code|test_hasDecl_builtin.zig#}
 
       {#see_also|@hasField#}
       {#header_close#}
 
       {#header_open|@hasField#}
-      <pre>{#syntax#}@hasField(comptime Container: type, comptime name: []const u8) bool{#endsyntax#}</pre>
+      <pre>{#syntax#}@hasField(comptime T: type, comptime name: []const u8) bool{#endsyntax#}</pre>
       <p>Returns whether the field name of a struct, union, or enum exists.</p>
-      <p>
-      The result is a compile time constant.
-      </p>
-      <p>
-      It does not include functions, variables, or constants.
-      </p>
+      <p>The result is a compile time constant.</p>
+      <p>It does not include functions, variables, or constants.</p>
       {#see_also|@hasDecl#}
       {#header_close#}
 
@@ -5204,8 +5173,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       <p>
       Invokes the panic handler function. By default the panic handler function
       calls the public {#syntax#}panic{#endsyntax#} function exposed in the root source file, or
-      if there is not one specified, the {#syntax#}std.builtin.default_panic{#endsyntax#}
-      function from {#syntax#}std/builtin.zig{#endsyntax#}.
+      if there is not one specified, the {#syntax#}std.lang.default_panic{#endsyntax#}
+      function from {#syntax#}std/lang.zig{#endsyntax#}.
       </p>
       <p>Generally it is better to use {#syntax#}@import("std").debug.panic{#endsyntax#}.
           However, {#syntax#}@panic{#endsyntax#} can be useful for 2 scenarios:
@@ -5244,7 +5213,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       address to prefetch. This function does not dereference the pointer, it is perfectly legal
       to pass a pointer to invalid memory to this function and no Illegal Behavior will result.
       </p>
-      <p>{#syntax#}PrefetchOptions{#endsyntax#} can be found with {#syntax#}@import("std").builtin.PrefetchOptions{#endsyntax#}.</p>
+      <p>{#syntax#}PrefetchOptions{#endsyntax#} can be found with {#syntax#}@import("std").lang.PrefetchOptions{#endsyntax#}.</p>
       {#header_close#}
 
       {#header_open|@ptrCast#}
@@ -5367,7 +5336,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       The floating point mode is inherited by child scopes, and can be overridden in any scope.
       You can set the floating point mode in a struct or module scope by using a comptime block.
       </p>
-      <p>{#syntax#}FloatMode{#endsyntax#} can be found with {#syntax#}@import("std").builtin.FloatMode{#endsyntax#}.</p>
+      <p>{#syntax#}FloatMode{#endsyntax#} can be found with {#syntax#}@import("std").lang.FloatMode{#endsyntax#}.</p>
       {#see_also|Floating Point Operations#}
       {#header_close#}
 
@@ -5503,7 +5472,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@reduce#}
-      <pre>{#syntax#}@reduce(comptime op: std.builtin.ReduceOp, value: anytype) E{#endsyntax#}</pre>
+      <pre>{#syntax#}@reduce(comptime op: std.lang.ReduceOp, value: anytype) E{#endsyntax#}</pre>
       <p>
       Transforms a {#link|vector|Vectors#} into a scalar value (of type <code>E</code>)
       by performing a sequential horizontal reduction of its elements using the
@@ -5533,7 +5502,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@src#}
-      <pre>{#syntax#}@src() std.builtin.SourceLocation{#endsyntax#}</pre>
+      <pre>{#syntax#}@src() std.lang.SourceLocation{#endsyntax#}</pre>
       <p>
       Returns a {#syntax#}SourceLocation{#endsyntax#} struct representing the function's name and location in the source code. This must be called in a function.
       </p>
@@ -5760,7 +5729,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@Int#}
-      <pre>{#syntax#}@Int(comptime signedness: std.builtin.Signedness, comptime bits: u16) type{#endsyntax#}</pre>
+      <pre>{#syntax#}@Int(comptime signedness: std.lang.Signedness, comptime bits: u16) type{#endsyntax#}</pre>
       <p>Returns an integer type with the given signedness and bit width.</p>
       <p>For instance, {#syntax#}@Int(.unsigned, 18){#endsyntax#} returns the type {#syntax#}u18{#endsyntax#}.</p>
       {#header_close#}
@@ -5772,8 +5741,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
 
       {#header_open|@Pointer#}
       <pre>{#syntax#}@Pointer(
-    comptime size: std.builtin.Type.Pointer.Size,
-    comptime attrs: std.builtin.Type.Pointer.Attributes,
+    comptime size: std.lang.Type.Pointer.Size,
+    comptime attrs: std.lang.Type.Pointer.Attributes,
     comptime Element: type,
     comptime sentinel: ?Element,
 ) type{#endsyntax#}</pre>
@@ -5783,32 +5752,32 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@Fn#}
       <pre>{#syntax#}@Fn(
     comptime param_types: []const type,
-    comptime param_attrs: *const [param_types.len]std.builtin.Type.Fn.Param.Attributes,
+    comptime param_attrs: *const [param_types.len]std.lang.Type.Fn.Param.Attributes,
     comptime ReturnType: type,
-    comptime attrs: std.builtin.Type.Fn.Attributes,
+    comptime attrs: std.lang.Type.Fn.Attributes,
 ) type{#endsyntax#}</pre>
       <p>Returns a {#link|function|Functions#} type with the properties specified by the arguments.</p>
       {#header_close#}
 
       {#header_open|@Struct#}
       <pre>{#syntax#}@Struct(
-    comptime layout: std.builtin.Type.ContainerLayout,
+    comptime layout: std.lang.Type.ContainerLayout,
     comptime BackingInt: ?type,
     comptime field_names: []const []const u8,
     comptime field_types: *const [field_names.len]type,
-    comptime field_attrs: *const [field_names.len]std.builtin.Type.StructField.Attributes,
+    comptime field_attrs: *const [field_names.len]std.lang.Type.StructField.Attributes,
 ) type{#endsyntax#}</pre>
       <p>Returns a {#link|struct#} type with the properties specified by the arguments.</p>
       {#header_close#}
 
       {#header_open|@Union#}
       <pre>{#syntax#}@Union(
-    comptime layout: std.builtin.Type.ContainerLayout,
+    comptime layout: std.lang.Type.ContainerLayout,
     /// Either the integer tag type, or the integer backing type, depending on `layout`.
     comptime ArgType: ?type,
     comptime field_names: []const []const u8,
     comptime field_types: *const [field_names.len]type,
-    comptime field_attrs: *const [field_names.len]std.builtin.Type.UnionField.Attributes,
+    comptime field_attrs: *const [field_names.len]std.lang.Type.UnionField.Attributes,
 ) type{#endsyntax#}</pre>
       <p>Returns a {#link|union#} type with the properties specified by the arguments.</p>
       {#header_close#}
@@ -5816,7 +5785,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@Enum#}
       <pre>{#syntax#}@Enum(
     comptime TagInt: type,
-    comptime mode: std.builtin.Type.Enum.Mode,
+    comptime mode: std.lang.Type.Enum.Mode,
     comptime field_names: []const []const u8,
     comptime field_values: *const [field_names.len]TagInt,
 ) type{#endsyntax#}</pre>
@@ -5824,7 +5793,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@typeInfo#}
-      <pre>{#syntax#}@typeInfo(comptime T: type) std.builtin.Type{#endsyntax#}</pre>
+      <pre>{#syntax#}@typeInfo(comptime T: type) std.lang.Type{#endsyntax#}</pre>
       <p>
       Provides type reflection.
       </p>
@@ -5980,7 +5949,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|Single Threaded Builds#}
       <p>Zig has a compile option <kbd>-fsingle-threaded</kbd> which has the following effects:</p>
       <ul>
-        <li>All {#link|Thread Local Variables#} are treated as regular {#link|Container Level Variables#}.</li>
+        <li>All {#link|Thread Local Variables#} are treated as regular {#link|Namespace Level Variables#}.</li>
         <li>The overhead of {#link|Async Functions#} becomes equivalent to function call overhead.</li>
         <li>The {#syntax#}@import("builtin").single_threaded{#endsyntax#} becomes {#syntax#}true{#endsyntax#}
           and therefore various userland APIs which read this variable become more efficient.
@@ -6635,7 +6604,7 @@ const builtin = @import("builtin");
       {#header_open|Panic Handler#}
       <p>
       The Zig Standard Library looks for a declaration named {#syntax#}panic{#endsyntax#} in the root module's
-      root source file. If present, it is expected to be a namespace (container type) with declarations
+      root source file. If present, it is expected to be a {#link|Namespace#} with declarations
       providing different panic handlers.
       </p>
       <p>
@@ -7755,18 +7724,6 @@ fn readU32Be() u32 {}
       {#header_close#}
 
       {#header_open|Appendix#}
-      {#header_open|Containers#}
-      <p>
-      A <em>container</em> in Zig is any syntactical construct that acts as a namespace to hold {#link|variable|Container Level Variables#} and {#link|function|Functions#} declarations.
-      Containers are also type definitions which can be instantiated.
-      {#link|Structs|struct#}, {#link|enums|enum#}, {#link|unions|union#}, {#link|opaques|opaque#}, and even Zig source files themselves are containers.
-      </p>
-      <p>
-      Although containers (except Zig source files) use curly braces to surround their definition, they should not be confused with {#link|blocks|Blocks#} or functions.
-      Containers do not contain statements.
-      </p>
-      {#header_close#}
-
       {#header_open|Grammar#}
       {#syntax_block|peg|grammar.peg#}
 Root <- skip ContainerMembers eof
@@ -7797,7 +7754,7 @@ ContainerField <- doc_comment? (KEYWORD_comptime / !KEYWORD_comptime) !KEYWORD_f
 BlockStatement
     <- Statement
      / KEYWORD_defer BlockExprStatement
-     / KEYWORD_errdefer Payload? BlockExprStatement
+     / KEYWORD_errdefer BlockExprStatement
      / !ExprStatement (KEYWORD_comptime !BlockExpr)? VarAssignStatement
 
 Statement
@@ -8059,7 +8016,6 @@ MultiplyOp
      / ASTERISK
      / SLASH
      / PERCENT
-     / ASTERISK2
      / ASTERISKPERCENT
      / ASTERISKPIPE
 
@@ -8106,11 +8062,11 @@ LabelableExpr
 # Ptr specific
 SliceTypeStart <- LBRACKET (COLON Expr)? RBRACKET
 
-SinglePtrTypeStart <- ASTERISK / ASTERISK2
+SinglePtrTypeStart <- ASTERISK
 
 ManyPtrTypeStart <- LBRACKET ASTERISK (LETTERC / COLON Expr)? RBRACKET
 
-ArrayTypeStart <- LBRACKET Expr !(ASTERISK / ASTERISK2) (COLON Expr)? RBRACKET
+ArrayTypeStart <- LBRACKET Expr !ASTERISK (COLON Expr)? RBRACKET
 
 # ContainerDecl specific
 ContainerDeclAuto <- ContainerDeclType LBRACE ContainerMembers RBRACE
@@ -8238,7 +8194,6 @@ BUILTINIDENTIFIER <- '@'[A-Za-z_][A-Za-z0-9_]* skip
 AMPERSAND            <- '&'      ![=]      skip
 AMPERSANDEQUAL       <- '&='               skip
 ASTERISK             <- '*'      ![*%=|]   skip
-ASTERISK2            <- '**'               skip
 ASTERISKEQUAL        <- '*='               skip
 ASTERISKPERCENT      <- '*%'     ![=]      skip
 ASTERISKPERCENTEQUAL <- '*%='              skip

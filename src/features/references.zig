@@ -68,6 +68,7 @@ const Builder = struct {
     local_only_decl: bool,
     /// Whether the `target_symbol` has been added
     did_add_target_symbol: bool = false,
+    resolve_aliases: bool,
     analyser: *Analyser,
     encoding: offsets.Encoding,
 
@@ -236,7 +237,9 @@ const Builder = struct {
             else => return,
         };
 
-        candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+        if (builder.resolve_aliases) {
+            candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+        }
 
         if (builder.target_symbol.eql(candidate)) {
             try builder.add(handle, name_token);
@@ -247,9 +250,9 @@ const Builder = struct {
 fn symbolReferences(
     analyser: *Analyser,
     request: GeneralReferencesRequest,
-    target_symbol: Analyser.DeclWithHandle,
+    root_symbol: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
-    /// add `target_symbol` as a references
+    /// `types.reference.Context.includeDeclaration`
     include_decl: bool,
     /// The file on which the request was initiated.
     current_handle: *DocumentStore.Handle,
@@ -257,7 +260,14 @@ fn symbolReferences(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    std.debug.assert(target_symbol.decl != .label); // use `labelReferences` instead
+    std.debug.assert(root_symbol.decl != .label); // use `labelReferences` instead
+
+    const dealiased_symbol = try analyser.resolveVarDeclAlias(root_symbol) orelse root_symbol;
+
+    const target_symbol, const resolve_aliases = switch (request) {
+        .highlight, .rename => .{ root_symbol, dealiased_symbol.eql(root_symbol) },
+        .references => .{ dealiased_symbol, true },
+    };
 
     const doc_scope = try target_symbol.handle.getDocumentScope();
     const source_index = target_symbol.handle.tree.tokenStart(target_symbol.nameToken());
@@ -295,6 +305,7 @@ fn symbolReferences(
         .analyser = analyser,
         .target_symbol = target_symbol,
         .local_only_decl = local_node != null,
+        .resolve_aliases = resolve_aliases,
         .encoding = encoding,
     };
 
@@ -716,7 +727,7 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
         const name_loc = offsets.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
-        var target_decl = switch (pos_context) {
+        const target_decl = switch (pos_context) {
             .var_access, .test_doctest_name => try analyser.lookupSymbolGlobal(handle, name, source_index),
             .field_access => |loc| z: {
                 const held_loc = offsets.locMerge(loc, name_loc);
@@ -735,8 +746,6 @@ pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: Gen
             .keyword => null,
             else => null,
         } orelse return null;
-
-        target_decl = try analyser.resolveVarDeclAlias(target_decl) orelse target_decl;
 
         break :locs switch (target_decl.decl) {
             .label => |payload| try labelReferences(

@@ -459,7 +459,7 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
         /// Builtin functions are provided by the compiler and are prefixed ...
         prefix,
         /// every entry begins with this:
-        /// {#syntax#}@addrSpaceCast(comptime addrspace: std.builtin.AddressSpace, ptr: anytype) anytype{#endsyntax#}
+        /// {#syntax#}@addrSpaceCast(comptime addrspace: std.lang.AddressSpace, ptr: anytype) anytype{#endsyntax#}
         builtin_begin,
         /// iterate over documentation
         builtin_content,
@@ -909,9 +909,9 @@ fn generateVersionDataFile(
 
     for (builtins) |builtin| {
         const signature0 = builtin.signature[builtin.name.len + 1 ..];
-        const signature1 = try std.mem.replaceOwned(u8, allocator, signature0, "std.builtin.", "");
+        const signature1 = try std.mem.replaceOwned(u8, allocator, signature0, "std.lang.", "");
         defer allocator.free(signature1);
-        const signature2 = try std.mem.replaceOwned(u8, allocator, signature1, "builtin.", "");
+        const signature2 = try std.mem.replaceOwned(u8, allocator, signature1, "lang.", "");
         defer allocator.free(signature2);
         const signature_with_sentinel = try allocator.dupeSentinel(u8, signature2, 0);
         defer allocator.free(signature_with_sentinel);
