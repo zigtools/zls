@@ -989,16 +989,12 @@ fn testOrganizeImportsNoAction(source: []const u8) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    var phr = try helper.collectClearPlaceholders(allocator, source);
-    defer phr.deinit(allocator);
-    const clean_source = phr.new_source;
-
     const range: types.Range = .{
         .start = .{ .line = 0, .character = 0 },
-        .end = offsets.indexToPosition(clean_source, clean_source.len, ctx.server.offset_encoding),
+        .end = offsets.indexToPosition(source, source.len, ctx.server.offset_encoding),
     };
 
-    const uri = try ctx.addDocument(.{ .source = clean_source });
+    const uri = try ctx.addDocument(.{ .source = source });
 
     const params: types.CodeAction.Params = .{
         .textDocument = .{ .uri = uri.raw },
@@ -1012,12 +1008,9 @@ fn testOrganizeImportsNoAction(source: []const u8) !void {
     @setEvalBranchQuota(5000);
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return;
 
-    for (response) |action| {
-        const kind = action.code_action.kind orelse continue;
-        if (kind == .@"source.organizeImports") {
-            std.debug.print("expected no organize-imports code action for already-organized source, got: {s}\n", .{action.code_action.title});
-            return error.UnexpectedOrganizeImportsAction;
-        }
+    if (response.len != 0) {
+        std.debug.print("expected no organize-imports code action for already-organized source, got: {s}\n", .{response[0].code_action.title});
+        return error.UnexpectedOrganizeImportsAction;
     }
 }
 
