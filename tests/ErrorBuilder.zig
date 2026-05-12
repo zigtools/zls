@@ -181,8 +181,6 @@ pub fn writeDebug(builder: *const ErrorBuilder) void {
     var buffer: [4096]u8 = undefined;
     const stderr = std.debug.lockStderr(&buffer).terminal();
     defer std.debug.unlockStderr();
-    // does zig trim the output or why is this needed?
-    stderr.writer.writeAll(" ") catch return;
     std.debug.print("\n{f}\n", .{builder.fmt(stderr.mode)});
 }
 
@@ -192,6 +190,10 @@ pub fn format(builder: *const ErrorBuilder, writer: *std.Io.Writer) std.Io.Write
 
 fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     const builder = context.builder;
+    const terminal: std.Io.Terminal = .{
+        .writer = writer,
+        .mode = context.terminal_mode,
+    };
     var first = true;
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
@@ -210,7 +212,10 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
                     try writer.writeAll("\n\n");
                 }
                 if (builder.files.count() > 1) {
-                    try writer.print("{s}:\n", .{file_name});
+                    terminal.setColor(.dim) catch {};
+                    try writer.writeAll(file_name);
+                    terminal.setColor(.reset) catch {};
+                    try writer.writeAll(":\n");
                 }
             },
             .always => {
@@ -276,8 +281,11 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
                 => {
                     if (builder.file_name_visibility == .always) {
                         const pos = offsets.indexToPosition(file.source, some_line_source_index, builder.encoding);
+                        terminal.setColor(.dim) catch {};
                         try writer.print("{s}:{}:{}:\n", .{ file_name, pos.line + 1, pos.character + 1 });
+                        terminal.setColor(.reset) catch {};
                     }
+
                     try writer.writeAll(file.source[unified_loc.start..line_loc.end]);
                 },
                 .intersection => {},
@@ -286,8 +294,10 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
             for (line_messages) |item| {
                 try writer.writeByte('\n');
                 for (line_loc.start..item.loc.start) |_| try writer.writeByte(' ');
+                terminal.setColor(.dim) catch {};
                 for (item.loc.start..item.loc.end) |_| try writer.writeByte('^');
                 if (item.loc.start == item.loc.end) try writer.writeByte('^');
+                terminal.setColor(.reset) catch {};
 
                 const level_txt: []const u8 = switch (item.level) {
                     .err => "error",
@@ -301,10 +311,7 @@ fn render(context: FormatContext, writer: *std.Io.Writer) std.Io.Writer.Error!vo
                     .info => .white,
                     .debug => .white,
                 };
-                const terminal: std.Io.Terminal = .{
-                    .writer = writer,
-                    .mode = context.terminal_mode,
-                };
+                terminal.setColor(.dim) catch {};
                 terminal.setColor(color) catch {};
                 try writer.print(" {s}: ", .{level_txt});
                 terminal.setColor(.reset) catch {};
