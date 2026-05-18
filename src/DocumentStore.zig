@@ -1441,20 +1441,18 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, O
     };
     defer self.allocator.free(path);
 
-    // Zig's filesystem API does not handle `OBJECT_PATH_INVALID` being returned when dealing with invalid UNC paths on Windows.
-    // https://github.com/ziglang/zig/issues/15607
-    const root_end_index: usize = root_end_index: {
-        if (builtin.target.os.tag != .windows) break :root_end_index 0;
-        const component_iterator = std.Io.Dir.path.componentIterator(path);
-        break :root_end_index component_iterator.root_end_index;
-    };
+    var it = std.Io.Dir.path.componentIterator(path);
+    _ = it.last();
+    var did_check_root = false;
+    while (true) {
+        const dir_path = if (it.previous()) |comp| comp.path else blk: {
+            if (did_check_root) break :blk null;
+            did_check_root = true;
+            break :blk it.root();
+        } orelse break;
+        if (!try buildDotZigExists(self.io, dir_path)) continue;
 
-    var current_path: []const u8 = path;
-    while (std.Io.Dir.path.dirname(current_path)) |potential_root_path| : (current_path = potential_root_path) {
-        if (potential_root_path.len < root_end_index) break;
-        if (!try buildDotZigExists(self.io, potential_root_path)) continue;
-
-        const build_path = try std.Io.Dir.path.join(self.allocator, &.{ potential_root_path, "build.zig" });
+        const build_path = try std.Io.Dir.path.join(self.allocator, &.{ dir_path, "build.zig" });
         defer self.allocator.free(build_path);
 
         try potential_build_files.ensureUnusedCapacity(self.allocator, 1);
