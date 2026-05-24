@@ -23,6 +23,15 @@ test "between nodes" {
     , &.{});
 }
 
+test "variadic function" {
+    try testSelectionRange(
+        \\fn foo(...<>) void {}
+    , &.{
+        "...",
+        "fn foo(...) void",
+    });
+}
+
 test "expression inside function" {
     try testSelectionRange(
         \\fn main() void {

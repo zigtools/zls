@@ -859,7 +859,10 @@ pub fn paramFirstToken(tree: *const Ast, param: Ast.full.FnProto.Param, include_
     return (if (include_doc_comment) param.first_doc_comment else null) orelse
         param.comptime_noalias orelse
         param.name_token orelse
-        tree.firstToken(param.type_expr.?);
+        if (param.type_expr) |te|
+            tree.firstToken(te)
+        else
+            param.anytype_ellipsis3.?;
 }
 
 pub fn paramLastToken(tree: *const Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
