@@ -601,19 +601,6 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
 const Build = blk: {
     @setEvalBranchQuota(10_000);
 
-    {
-        const version = std.SemanticVersion.parse("0.17.0-dev.601+0ff175b69") catch unreachable;
-        if (builtin.zig_version.order(version) != .lt) {
-            const message = std.fmt.comptimePrint(
-                \\The used Zig version ({s}) is not yet supported by ZLS.
-                \\
-                \\For more information please visit the following issue:
-                \\> https://github.com/zigtools/zls/issues/3208
-            , .{builtin.zig_version_string});
-            @compileError(message);
-        }
-    }
-
     const min_build_zig = std.SemanticVersion.parse(minimum_build_zig_version) catch unreachable;
     const min_runtime_zig = std.SemanticVersion.parse(minimum_runtime_zig_version) catch unreachable;
 

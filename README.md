@@ -13,7 +13,7 @@ The complete installation guide is available on the [Zigtools website](https://z
 
 ### Build From Source
 
-The default branch of ZLS targets `0.17.0-dev.387+31f157d80` until [#3208](https://github.com/zigtools/zls/issues/3208) has been resolved.
+The default branch of ZLS targets [Zig master](https://ziglang.org/download/).
 
 ```bash
 git clone https://github.com/zigtools/zls
