@@ -42,6 +42,12 @@ The following LSP features are supported:
 - Selection ranges
 - Folding regions
 
+## Custom features
+
+Custom (non-standard) server endpoints:
+
+- **`customZig/listBuildSteps`**: Can be used by the client to request the list of top-level steps for a given workspace. The endpoint expects a mandatory `{workspaceUri: string}` as the `params` object. Internally, the `workspaceUri` property is used to identify the root `build.zig` file for the workspace, from which the top-level steps (and their corresponding descriptions) are extracted and returned as `{name: string, description: string}[]`. The main use case for this endpoint is to allow client IDEs to generate automatic tasks (e.g., to implement a `vscode.TaskProvider` in VS Code) based on the top-level steps in a workspace's root `build.zig` without the IDEs having to implement a custom build runner themselves (since that job is already being done by ZLS).
+
 ## Related Projects
 
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)

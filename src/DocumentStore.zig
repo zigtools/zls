@@ -835,6 +835,22 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemo
     return new_build_file;
 }
 
+/// When a new workspace containing build.zig files is added, those files are loaded lazily.
+/// While this is desirable for most cases, certain edge cases benefit from having
+/// `BuildConfig` objects readily available. This method primes the internal worker process
+/// to immediately analyze the target build.zig file.
+pub fn primeBuildFile(self: *DocumentStore, build_file_uri: Uri) error{ Canceled, OutOfMemory, InvalidBuildFileUri, DocumentStoreDoesNotSupportBuildSystem }!void {
+    if (!isBuildFile(build_file_uri)) {
+        return error.InvalidBuildFileUri;
+    }
+
+    if (!supports_build_system) {
+        return error.DocumentStoreDoesNotSupportBuildSystem;
+    }
+
+    _ = try self.getOrLoadBuildFile(build_file_uri);
+}
+
 /// Opens a document that is synced over the LSP protocol (`textDocument/didOpen`).
 /// **Not thread safe**
 pub fn openLspSyncedDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{ Canceled, OutOfMemory }!void {

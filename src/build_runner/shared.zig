@@ -11,8 +11,8 @@ pub const BuildConfig = struct {
     modules: std.json.ArrayHashMap(Module),
     /// List of all compilations units.
     compilations: []const Compile,
-    /// The names of all top level steps.
-    top_level_steps: []const []const u8,
+    /// The "name and description" pairs of all top level steps.
+    top_level_steps: []const TopLevelStepInfo,
     available_options: std.json.ArrayHashMap(AvailableOption),
 
     pub const Module = struct {
@@ -30,6 +30,17 @@ pub const BuildConfig = struct {
 
     /// Equivalent to `std.Build.AvailableOption` which is not accessible because it non-pub.
     pub const AvailableOption = @FieldType(@FieldType(std.Build, "available_options_map").KV, "value");
+
+    pub const TopLevelStepInfo = struct {
+        name: []const u8,
+        description: []const u8,
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            allocator.free(self.name);
+            allocator.free(self.description);
+            self.* = undefined;
+        }
+    };
 };
 
 pub const ServerToClient = struct {

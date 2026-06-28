@@ -32,8 +32,14 @@
     }
   ],
   "top_level_steps": [
-    "install",
-    "uninstall"
+    {
+      "name": "install",
+      "description": "Copy build artifacts to prefix path"
+    },
+    {
+      "name": "uninstall",
+      "description": "Remove build artifacts from prefix path"
+    }
   ],
   "available_options": {}
 }

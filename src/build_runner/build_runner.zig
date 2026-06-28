@@ -1266,13 +1266,19 @@ fn extractBuildInformation(
         available_options.putAssumeCapacityNoClobber(available_option.key_ptr.*, available_option.value_ptr.*);
     }
 
+    const top_level_steps = try gpa.alloc(BuildConfig.TopLevelStepInfo, b.top_level_steps.count());
+    defer gpa.free(top_level_steps);
+    for (b.top_level_steps.values(), top_level_steps) |v, *i| {
+        i.* = .{ .name = v.step.name, .description = v.description };
+    }
+
     const stringified_build_config = try std.json.Stringify.valueAlloc(
         gpa,
         BuildConfig{
             .dependencies = .{ .map = root_dependencies },
             .modules = .{ .map = modules },
             .compilations = compilations.items,
-            .top_level_steps = b.top_level_steps.keys(),
+            .top_level_steps = top_level_steps,
             .available_options = .{ .map = available_options },
         },
         .{ .whitespace = .indent_2 },

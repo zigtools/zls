@@ -35,6 +35,8 @@ const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
+const list_build_steps = @import("custom_features/list_build_steps.zig");
+
 const BuildOnSave = diagnostics_gen.BuildOnSave;
 const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
 
@@ -1869,7 +1871,13 @@ fn processMessage(server: *Server, arena: std.mem.Allocator, message: Message) E
 
     switch (message) {
         .request => |request| switch (request.params) {
-            .other => return try server.sendToClientResponse(request.id, @as(?void, null)),
+            .other => |method_with_params| {
+                if (std.mem.eql(u8, method_with_params.method, list_build_steps.method_name)) {
+                    const result = try list_build_steps.extractBuildStepsInfoHandler(server, arena, method_with_params.params);
+                    return try server.sendToClientResponse(request.id, result.items);
+                }
+                return try server.sendToClientResponse(request.id, @as(?void, null));
+            },
             inline else => |params, method| {
                 const result = try server.sendRequestSync(arena, @tagName(method), params);
                 return try server.sendToClientResponse(request.id, result);
