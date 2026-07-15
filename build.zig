@@ -321,6 +321,14 @@ fn getVersion(b: *Build) std.SemanticVersion {
     }
 
     if (zls_version.pre == null) return zls_version;
+    if (!b.isRoot()) {
+        return .{
+            .major = zls_version.major,
+            .minor = zls_version.minor,
+            .patch = zls_version.patch,
+            .pre = "dev",
+        };
+    }
 
     // Ensure git version changes get picked up.
     git: {
