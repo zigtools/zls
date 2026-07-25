@@ -11,7 +11,8 @@ pub fn addCases(
     test_filters: []const []const u8,
 ) void {
     const cases_dir = b.path("tests/analysis");
-    const cases_path_from_root = b.pathFromRoot("tests/analysis");
+    const cases_path = b.root.join(b.allocator, "tests/analysis") catch @panic("OOM");
+    const cases_path_from_root = cases_path.toString(b.allocator) catch @panic("OOM");
 
     const check_exe = b.addExecutable(.{
         .name = "analysis_check",
@@ -51,7 +52,6 @@ pub fn addCases(
             run_check.addArgs(&.{
                 "wasmtime",
                 "--dir=.",
-                b.fmt("--dir={f}::/lib", .{b.graph.zig_lib_directory}),
                 "--",
             });
         }
@@ -63,7 +63,7 @@ pub fn addCases(
         }
         if (!target.result.cpu.arch.isWasm()) {
             run_check.addArg("--zig-lib-path");
-            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
+            run_check.addDirectoryArg(std.Build.LazyPath.zig_lib);
         }
 
         const input_file = cases_dir.path(b, entry.name);

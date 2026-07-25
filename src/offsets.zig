@@ -177,7 +177,7 @@ pub fn sourceIndexToTokenIndex(tree: *const Ast, source_index: usize) SourceInde
 }
 
 test sourceIndexToTokenIndex {
-    var tree: Ast = try .parse(std.testing.allocator, " a  bb; ", .zig);
+    var tree: Ast = try .parse(std.testing.allocator, " a  bb; ", .{ .mode = .zig });
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
@@ -203,7 +203,7 @@ test sourceIndexToTokenIndex {
 }
 
 test "sourceIndexToTokenIndex - token at end" {
-    var tree: Ast = try .parse(std.testing.allocator, " a", .zig);
+    var tree: Ast = try .parse(std.testing.allocator, " a", .{ .mode = .zig });
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
@@ -327,7 +327,7 @@ pub fn identifierTokenAndLocFromIndex(tree: *const Ast, source_index: usize) ?st
 test identifierLocFromIndex {
     var tree = try Ast.parse(std.testing.allocator,
         \\ name  @builtin  @"escaped"  @"s p a c e"  end
-    , .zig);
+    , .{ .mode = .zig });
     defer tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(
@@ -441,7 +441,7 @@ test tokenToLoc {
 }
 
 fn testTokenToLoc(text: [:0]const u8, token_index: Ast.TokenIndex, start: usize, end: usize) !void {
-    var tree = try Ast.parse(std.testing.allocator, text, .zig);
+    var tree = try Ast.parse(std.testing.allocator, text, .{ .mode = .zig });
     defer tree.deinit(std.testing.allocator);
 
     const actual = tokenToLoc(&tree, token_index);

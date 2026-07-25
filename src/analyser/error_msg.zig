@@ -92,6 +92,7 @@ pub const ErrorMsg = union(enum) {
                     .@"anyframe" => "anyframe",
                     .vector => "vector",
                     .enum_literal => "enum literal",
+                    .spirv => "spirv",
                 };
                 try writer.print(
                     "expected {s} type, found '{f}'",

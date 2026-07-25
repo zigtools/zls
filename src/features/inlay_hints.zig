@@ -137,10 +137,14 @@ const excluded_builtins_set: std.EnumArray(std.zig.BuiltinFn.Tag, bool) = .init(
     .TypeOf = true, // variadic
     .union_init = false,
     .Vector = false,
+    .SpirvType = false,
     .volatile_cast = true,
     .work_item_id = false,
     .work_group_size = false,
     .work_group_id = false,
+    .div_ceil = true,
+    .backing_int = true,
+    .from_backing_int = true,
 });
 
 pub const InlayHint = struct {

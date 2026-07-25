@@ -22,6 +22,7 @@ fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.P
         .allowzero_token = null,
         .const_token = null,
         .volatile_token = null,
+        .duplicate_token = null,
         .ast = info,
     };
     // We need to be careful that we don't iterate over any sub-expressions

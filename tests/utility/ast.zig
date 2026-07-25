@@ -85,7 +85,7 @@ fn testNodesAtLoc(source: []const u8) !void {
     const new_source = try allocator.dupeSentinel(u8, ccp.new_source, 0);
     defer allocator.free(new_source);
 
-    var tree: std.zig.Ast = try .parse(allocator, new_source, .zig);
+    var tree: std.zig.Ast = try .parse(allocator, new_source, .{ .mode = .zig });
     defer tree.deinit(allocator);
 
     const nodes = try ast.nodesAtLoc(allocator, &tree, inner_loc);
