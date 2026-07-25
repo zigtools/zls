@@ -43,6 +43,8 @@ pub const Config = struct {
     build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
+    /// The Zig global cache directory (from `zig env`), where packages are cached at `<path>/p/`.
+    zig_global_cache_dir: ?[]const u8 = null,
     wasi_preopens: switch (builtin.os.tag) {
         .wasi => std.process.Preopens,
         else => void,
@@ -143,6 +145,31 @@ pub const BuildFile = struct {
 
                 try found_uris.ensureUnusedCapacity(arena, handle.file_imports.len);
                 for (handle.file_imports) |import_uri| found_uris.putAssumeCapacity(try import_uri.dupe(arena), {});
+            }
+        }
+
+        // Fallback: if the file wasn't found via file-import BFS, check if it's in
+        // the same directory tree as a module's root source file. This handles the
+        // case where a file is part of a module but not explicitly file-imported
+        // from the root source file (e.g., the root only imports other modules).
+        if (uri.isFileScheme()) {
+            const uri_path = uri.toFsPath(arena) catch return .no;
+            var best_match: ?usize = null;
+            var best_len: usize = 0;
+            for (module_root_source_file_paths.items, 0..) |root_source_file, idx| {
+                const dir = std.Io.Dir.path.dirname(root_source_file) orelse continue;
+                if (uri_path.len > dir.len and
+                    std.mem.startsWith(u8, uri_path, dir) and
+                    (uri_path[dir.len] == '/' or uri_path[dir.len] == '\\'))
+                {
+                    if (dir.len > best_len) {
+                        best_match = idx;
+                        best_len = dir.len;
+                    }
+                }
+            }
+            if (best_match) |idx| {
+                return .{ .yes = try allocator.dupe(u8, module_root_source_file_paths.items[idx]) };
             }
         }
 
@@ -449,7 +476,7 @@ pub const Handle = struct {
         const tracy_zone = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone.end();
 
-        var tree = try Ast.parse(allocator, new_text, mode);
+        var tree = try Ast.parse(allocator, new_text, .{ .mode = mode });
         errdefer tree.deinit(allocator);
 
         // remove unused capacity
@@ -477,7 +504,7 @@ pub const Handle = struct {
 
         const node_tags = tree.nodes.items(.tag);
         for (node_tags, 0..) |tag, i| {
-            const node: Ast.Node.Index = @enumFromInt(i);
+            const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
 
             switch (tag) {
                 .builtin_call,
@@ -500,7 +527,7 @@ pub const Handle = struct {
                 var import_string = offsets.tokenToSlice(tree, tree.nodeMainToken(params[0]));
                 import_string = import_string[1 .. import_string.len - 1];
 
-                if (!std.mem.endsWith(u8, import_string, ".zig")) continue;
+                if (!std.mem.endsWith(u8, import_string, ".zig") and !std.mem.endsWith(u8, import_string, ".zon")) continue;
 
                 const import_uri = try Uri.resolveImport(allocator, uri, parsed_uri, import_string);
                 file_imports.appendAssumeCapacity(import_uri);
@@ -1165,6 +1192,17 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
 
     self.notifyBuildStart();
 
+    if (self.config.build_runner_path == null) {
+        // Build runner is not supported (e.g. Zig 0.17+ removed --build-runner flag).
+        // Skip the build runner entirely and notify failure.
+        log.warn("Build runner is not supported for this Zig version; skipping build configuration", .{});
+        build_file.impl.mutex.lockUncancelable(self.io);
+        defer build_file.impl.mutex.unlock(self.io);
+        build_file.impl.build_runner_state = .idle;
+        self.notifyBuildEnd(.failed);
+        return;
+    }
+
     while (true) {
         build_file.impl.version += 1;
         const new_version = build_file.impl.version;
@@ -1287,10 +1325,6 @@ fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: Uri) error{OutOf
     const base_args = &[_][]const u8{
         self.config.zig_exe_path.?,
         "build",
-        "--build-runner",
-        self.config.build_runner_path.?,
-        "--zig-lib-dir",
-        self.config.zig_lib_dir.?.path orelse ".",
     };
 
     var args: std.ArrayList([]const u8) = try .initCapacity(self.allocator, base_args.len);
@@ -1362,7 +1396,7 @@ fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_
     const diagnostic_tag: DiagnosticsCollection.Tag = tag: {
         var hasher: std.hash.Wyhash = .init(47); // Chosen by the following prompt: Pwease give a wandom nyumbew
         hasher.update(build_file_uri.raw);
-        break :tag @enumFromInt(@as(u32, @truncate(hasher.final())));
+        break :tag @fromBackingInt(@intCast(@as(u32, @truncate(hasher.final()))));
     };
 
     if (!is_ok) {
@@ -1649,6 +1683,323 @@ pub const UriFromImportStringResult = union(enum) {
     }
 };
 
+/// Returns the contents of a string literal node without the surrounding quotes.
+fn stringLiteralSlice(tree: *const Ast, node: Ast.Node.Index) ?[]const u8 {
+    if (tree.nodeTag(node) != .string_literal) return null;
+    const slice = tree.tokenSlice(tree.nodeMainToken(node));
+    if (slice.len >= 2 and slice[0] == '"' and slice[slice.len - 1] == '"') {
+        return slice[1 .. slice.len - 1];
+    }
+    return null;
+}
+
+const ZonDependency = struct {
+    name: []const u8,
+    hash: ?[]const u8 = null,
+    path: ?[]const u8 = null,
+};
+
+/// Parses the package's own `build.zig` and looks for a
+/// `b.addModule(<module_name>, .{ .root_source_file = ... })` declaration.
+/// This recovers the mapping that the build runner would normally provide,
+/// because the name imported via `@import(...)` is the *module* name, which may
+/// differ from the dependency name in `build.zig.zon`
+/// (e.g. `@import("raylib")` comes from the `raylib_zig` package).
+fn findModuleRootInPackage(
+    self: *DocumentStore,
+    allocator: std.mem.Allocator,
+    pkg_dir: []const u8,
+    module_name: []const u8,
+) error{ Canceled, OutOfMemory }!?Uri {
+    const build_zig_path = try std.Io.Dir.path.join(allocator, &.{ pkg_dir, "build.zig" });
+    defer allocator.free(build_zig_path);
+
+    const source = std.Io.Dir.cwd().readFileAllocOptions(self.io, build_zig_path, allocator, .limited(std.zig.max_src_size), .@"1", 0) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Canceled => return error.Canceled,
+        else => {
+            log.debug("module '{s}': no readable build.zig in '{s}'", .{ module_name, pkg_dir });
+            return null;
+        },
+    };
+    defer allocator.free(source);
+
+    var tree = Ast.parse(allocator, source, .{ .mode = .zig }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    defer tree.deinit(allocator);
+
+    var call_buf: [1]Ast.Node.Index = undefined;
+    var node_index: usize = 0;
+    while (node_index < tree.nodes.len) : (node_index += 1) {
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(node_index));
+        const call = tree.fullCall(&call_buf, node) orelse continue;
+
+        // The callee must be a member call named `addModule` (e.g. `b.addModule(...)`).
+        // Note: the main token of a field access is the period; the member name
+        // is the second element of `node_and_token`.
+        if (tree.nodeTag(call.ast.fn_expr) != .field_access) continue;
+        if (!std.mem.eql(u8, tree.tokenSlice(tree.nodeData(call.ast.fn_expr).node_and_token[1]), "addModule")) continue;
+
+        if (call.ast.params.len < 2) continue;
+        const name = stringLiteralSlice(&tree, call.ast.params[0]) orelse continue;
+        if (!std.mem.eql(u8, name, module_name)) continue;
+
+        var init_buf: [2]Ast.Node.Index = undefined;
+        const init = tree.fullStructInit(&init_buf, call.ast.params[1]) orelse continue;
+        for (init.ast.fields) |field_init| {
+            const field_name_token = tree.firstToken(field_init) - 2;
+            if (!std.mem.eql(u8, tree.tokenSlice(field_name_token), "root_source_file")) continue;
+
+            const relative_path = blk: {
+                // `.root_source_file = b.path("...")`
+                if (tree.fullCall(&call_buf, field_init)) |path_call| {
+                    if (tree.nodeTag(path_call.ast.fn_expr) == .field_access and
+                        std.mem.eql(u8, tree.tokenSlice(tree.nodeData(path_call.ast.fn_expr).node_and_token[1]), "path") and
+                        path_call.ast.params.len == 1)
+                    {
+                        if (stringLiteralSlice(&tree, path_call.ast.params[0])) |path| break :blk path;
+                    }
+                }
+                // `.root_source_file = "..."`
+                if (stringLiteralSlice(&tree, field_init)) |path| break :blk path;
+                continue;
+            };
+
+            const abs_path = try std.Io.Dir.path.join(allocator, &.{ pkg_dir, relative_path });
+            defer allocator.free(abs_path);
+            if (std.Io.Dir.cwd().access(self.io, abs_path, .{})) |_| {
+                return try .fromPath(allocator, abs_path);
+            } else |_| {
+                log.debug("module '{s}': declared root_source_file '{s}' does not exist", .{ module_name, abs_path });
+            }
+        }
+    }
+    log.debug("module '{s}': no matching addModule call with a resolvable root_source_file in '{s}'", .{ module_name, build_zig_path });
+    return null;
+}
+
+/// Tries conventional entry file names inside a package directory.
+/// Only used as a last resort for dependencies that don't declare
+/// a matching module in their `build.zig`.
+fn guessPackageEntry(
+    self: *DocumentStore,
+    allocator: std.mem.Allocator,
+    pkg_dir: []const u8,
+    import_str: []const u8,
+) error{ Canceled, OutOfMemory }!?Uri {
+    std.Io.Dir.cwd().access(self.io, pkg_dir, .{}) catch return null;
+
+    const name_file = try std.fmt.allocPrint(allocator, "{s}.zig", .{import_str});
+    defer allocator.free(name_file);
+    const src_name_file = try std.fmt.allocPrint(allocator, "src/{s}", .{name_file});
+    defer allocator.free(src_name_file);
+
+    const suffixes: []const []const u8 = &.{
+        "main.zig",    "lib.zig",    "root.zig",    name_file,
+        "src/main.zig", "src/lib.zig", src_name_file,
+    };
+    for (suffixes) |suffix| {
+        const candidate = try std.Io.Dir.path.join(allocator, &.{ pkg_dir, suffix });
+        defer allocator.free(candidate);
+        if (std.Io.Dir.cwd().access(self.io, candidate, .{})) |_| {
+            return try .fromPath(allocator, candidate);
+        } else |_| {}
+    }
+    return null;
+}
+
+fn resolveZonDependency(
+    self: *DocumentStore,
+    allocator: std.mem.Allocator,
+    handle: *Handle,
+    import_str: []const u8,
+    zig_global_cache_dir: ?[]const u8,
+) error{ Canceled, OutOfMemory }!?Uri {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    // Find build.zig.zon by scanning parent directories of the current file.
+    // This is more robust than relying on getAssociatedBuildFile, which may
+    // return unresolved for files in a new project.
+    if (!handle.uri.isFileScheme()) return null;
+
+    var tmp_arena: std.heap.ArenaAllocator = .init(allocator);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const handle_path = handle.uri.toFsPath(tmp) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    const base_dir = std.Io.Dir.path.dirname(handle_path) orelse return null;
+
+    // Scan up to 3 parent directories for build.zig.zon
+    const zon_path = blk: {
+        var search_dir = try tmp.dupe(u8, base_dir);
+        var level: usize = 0;
+        while (level < 3) : (level += 1) {
+            const candidate = try std.Io.Dir.path.join(tmp, &.{ search_dir, "build.zig.zon" });
+            if (std.Io.Dir.cwd().access(self.io, candidate, .{})) |_| {
+                break :blk try allocator.dupe(u8, candidate);
+            } else |_| {}
+
+            // Move up one directory
+            const parent = std.Io.Dir.path.dirname(search_dir) orelse break;
+            search_dir = try tmp.dupe(u8, parent);
+        }
+        log.debug("import '{s}': no build.zig.zon found within 3 parent directories of '{s}'", .{ import_str, handle_path });
+        return null;
+    };
+    defer allocator.free(zon_path);
+    log.debug("import '{s}': found '{s}'", .{ import_str, zon_path });
+
+    // Read the build.zig.zon file as a sentinel-terminated slice
+    const file_content = std.Io.Dir.cwd().readFileAllocOptions(self.io, zon_path, allocator, .limited(std.zig.max_src_size), .@"1", 0) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Canceled => return error.Canceled,
+        else => return null,
+    };
+    defer allocator.free(file_content);
+
+    // Parse the build.zig.zon file using the Zig AST parser
+    var tree = std.zig.Ast.parse(allocator, file_content, .{ .mode = .zon }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    defer tree.deinit(allocator);
+
+    // In .zon files the root node is only a wrapper; the top-level expression
+    // (the struct init) is the single "root declaration".
+    const root_decls = tree.rootDecls();
+    if (root_decls.len != 1) {
+        log.debug("import '{s}': '{s}' has no single top-level expression", .{ import_str, zon_path });
+        return null;
+    }
+
+    // Get the root struct init
+    var root_buffer: [2]Ast.Node.Index = undefined;
+    const root_struct = tree.fullStructInit(&root_buffer, root_decls[0]) orelse {
+        log.debug("import '{s}': '{s}' is not a top-level struct", .{ import_str, zon_path });
+        return null;
+    };
+
+    // Find the .dependencies field in the root struct
+    const dependencies_node = find: {
+        for (root_struct.ast.fields) |field_init| {
+            const name_token = tree.firstToken(field_init) - 2;
+            const name = offsets.identifierTokenToNameSlice(&tree, name_token);
+            if (std.mem.eql(u8, name, "dependencies")) {
+                break :find field_init;
+            }
+        }
+        log.debug("import '{s}': '{s}' declares no dependencies", .{ import_str, zon_path });
+        return null;
+    };
+
+    // The value of the .dependencies field is a struct init
+    var dep_buffer: [2]Ast.Node.Index = undefined;
+    const dep_struct = tree.fullStructInit(&dep_buffer, dependencies_node) orelse return null;
+
+    // Collect all dependencies declared in `build.zig.zon`, each with its
+    // package hash (URL dependency) or relative path (path dependency).
+    var deps: std.ArrayList(ZonDependency) = .empty;
+    defer deps.deinit(allocator);
+
+    for (dep_struct.ast.fields) |field_init| {
+        const name_token = tree.firstToken(field_init) - 2;
+        const name = offsets.identifierTokenToNameSlice(&tree, name_token);
+
+        var dep: ZonDependency = .{ .name = name };
+        var dep_value_buffer: [2]Ast.Node.Index = undefined;
+        if (tree.fullStructInit(&dep_value_buffer, field_init)) |dep_value_struct| {
+            for (dep_value_struct.ast.fields) |value_field| {
+                const value_name_token = tree.firstToken(value_field) - 2;
+                const value_name = offsets.identifierTokenToNameSlice(&tree, value_name_token);
+                if (std.mem.eql(u8, value_name, "hash")) {
+                    dep.hash = stringLiteralSlice(&tree, value_field);
+                } else if (std.mem.eql(u8, value_name, "path")) {
+                    dep.path = stringLiteralSlice(&tree, value_field);
+                }
+            }
+        }
+        try deps.append(allocator, dep);
+    }
+
+    for (deps.items) |dep| {
+        log.debug("import '{s}': found dependency '{s}' (hash={?s}, path={?s})", .{ import_str, dep.name, dep.hash, dep.path });
+    }
+
+    const zon_dir = std.Io.Dir.path.dirname(zon_path) orelse return null;
+
+    // Two passes:
+    // 1. The dependency whose name matches the import string (the common case).
+    // 2. Every dependency: the import name is the *module* name exposed by the
+    //    dependency's `build.zig` via `b.addModule`, which may differ from the
+    //    dependency name (e.g. `@import("raylib")` vs. the `raylib_zig` package).
+    var pass: usize = 0;
+    while (pass < 2) : (pass += 1) {
+        for (deps.items) |dep| {
+            const name_matches = std.mem.eql(u8, dep.name, import_str);
+            if (pass == 0 and !name_matches) continue;
+            if (pass == 1 and name_matches) continue; // already checked in pass 0
+
+            var pkg_dirs: std.ArrayList([]const u8) = .empty;
+            defer {
+                for (pkg_dirs.items) |pkg_dir| allocator.free(pkg_dir);
+                pkg_dirs.deinit(allocator);
+            }
+
+            if (dep.path) |relative_path| {
+                const pkg_dir = try std.Io.Dir.path.join(allocator, &.{ zon_dir, relative_path });
+                try pkg_dirs.append(allocator, pkg_dir);
+            }
+            if (dep.hash) |hash| {
+                // The project-local cache where the Zig package manager
+                // extracts fetched packages during `zig build`.
+                const local_dir = try std.Io.Dir.path.join(allocator, &.{ zon_dir, "zig-pkg", hash });
+                try pkg_dirs.append(allocator, local_dir);
+                // When resolving imports from *inside* a cached package, the
+                // packages are stored flat in the *project's* zig-pkg directory,
+                // which is an ancestor of the current file.
+                var ancestor = std.Io.Dir.path.dirname(handle_path);
+                var climb: usize = 0;
+                while (climb < 6) : (climb += 1) {
+                    const dir = ancestor orelse break;
+                    if (std.mem.eql(u8, std.Io.Dir.path.basename(dir), "zig-pkg")) {
+                        const nested_dir = try std.Io.Dir.path.join(allocator, &.{ dir, hash });
+                        try pkg_dirs.append(allocator, nested_dir);
+                        break;
+                    }
+                    ancestor = std.Io.Dir.path.dirname(dir);
+                }
+                // The global cache may hold extracted packages on older Zig versions.
+                if (zig_global_cache_dir) |cache_dir| {
+                    const global_dir = try std.Io.Dir.path.join(allocator, &.{ cache_dir, "p", hash });
+                    try pkg_dirs.append(allocator, global_dir);
+                }
+            }
+
+            for (pkg_dirs.items) |pkg_dir| {
+                if (try findModuleRootInPackage(self, allocator, pkg_dir, import_str)) |uri| {
+                    log.debug("resolved import '{s}' to '{s}' via addModule in '{s}'", .{ import_str, uri.raw, pkg_dir });
+                    return uri;
+                }
+                // Only guess conventional entry files for the same-named
+                // dependency to avoid false positives in unrelated packages.
+                if (name_matches) {
+                    if (try guessPackageEntry(self, allocator, pkg_dir, import_str)) |uri| {
+                        log.debug("resolved import '{s}' to '{s}' by guessing the entry file in '{s}'", .{ import_str, uri.raw, pkg_dir });
+                        return uri;
+                    }
+                }
+            }
+        }
+    }
+
+    log.debug("failed to resolve import '{s}'", .{import_str});
+    return null;
+}
+
 /// takes the string inside a @import() node (without the quotation marks)
 /// and returns it's uri
 /// caller owns the returned memory
@@ -1723,14 +2074,71 @@ pub fn uriFromImportStr(
     }
 
     switch (try handle.getAssociatedBuildFile(self)) {
-        .none, .unresolved => return .none,
+        .none, .unresolved => {},
         .resolved => |resolved| {
-            const build_config = resolved.build_file.tryLockConfig(self.io) orelse return .none;
-            defer resolved.build_file.unlockConfig(self.io);
+            if (resolved.build_file.tryLockConfig(self.io)) |bc| {
+                defer resolved.build_file.unlockConfig(self.io);
 
-            const module = build_config.modules.map.get(resolved.root_source_file) orelse return .none;
-            const imported_root_source_file = module.import_table.map.get(import_str) orelse return .none;
-            return .{ .one = try .fromPath(allocator, imported_root_source_file) };
+                if (bc.modules.map.get(resolved.root_source_file)) |module| {
+                    if (module.import_table.map.get(import_str)) |imported_root_source_file| {
+                        return .{ .one = try .fromPath(allocator, imported_root_source_file) };
+                    }
+                }
+            }
         },
     }
+
+    // Fallback: try to resolve from build.zig.zon dependencies in the package cache.
+    // This is used when the build runner is not available (e.g. Zig 0.17+).
+    if (try resolveZonDependency(self, allocator, handle, import_str, self.config.zig_global_cache_dir)) |uri| {
+        return .{ .one = uri };
+    }
+
+    // Fallback: when the build config is not available (e.g. build runner not supported),
+    // try to resolve the import by scanning the file system.
+    // This handles the common case where @import("module_name") refers to
+    // a directory or file in the project tree.
+    if (handle.uri.isFileScheme()) {
+        var tmp_arena: std.heap.ArenaAllocator = .init(allocator);
+        defer tmp_arena.deinit();
+        const tmp = tmp_arena.allocator();
+
+        const handle_path = handle.uri.toFsPath(tmp) catch return .none;
+        const base_dir = std.Io.Dir.path.dirname(handle_path) orelse return .none;
+
+        // Try looking in the current directory and up to 3 parent directories
+        var search_dir = try tmp.dupe(u8, base_dir);
+        var level: usize = 0;
+        while (level < 3) : (level += 1) {
+            // Try <search_dir>/<import_str>/main.zig
+            {
+                const candidate = try std.Io.Dir.path.join(tmp, &.{ search_dir, import_str, "main.zig" });
+                if (std.Io.Dir.cwd().access(self.io, candidate, .{})) |_| {
+                    return .{ .one = try .fromPath(allocator, candidate) };
+                } else |_| {}
+            }
+            // Try <search_dir>/<import_str>/<import_str>.zig
+            {
+                const filename = try std.fmt.allocPrint(tmp, "{s}.zig", .{import_str});
+                const candidate = try std.Io.Dir.path.join(tmp, &.{ search_dir, import_str, filename });
+                if (std.Io.Dir.cwd().access(self.io, candidate, .{})) |_| {
+                    return .{ .one = try .fromPath(allocator, candidate) };
+                } else |_| {}
+            }
+            // Try <search_dir>/<import_str>.zig
+            {
+                const filename = try std.fmt.allocPrint(tmp, "{s}.zig", .{import_str});
+                const candidate = try std.Io.Dir.path.join(tmp, &.{ search_dir, filename });
+                if (std.Io.Dir.cwd().access(self.io, candidate, .{})) |_| {
+                    return .{ .one = try .fromPath(allocator, candidate) };
+                } else |_| {}
+            }
+
+            // Move up one directory
+            const parent = std.Io.Dir.path.dirname(search_dir) orelse break;
+            search_dir = try tmp.dupe(u8, parent);
+        }
+    }
+
+    return .none;
 }

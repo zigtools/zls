@@ -97,8 +97,9 @@ pub const Manager = struct {
         defer manager.impl.arena = arena_allocator.state;
 
         var duped: UnresolvedConfig = .{};
-        inline for (std.meta.fields(UnresolvedConfig)) |field| {
-            @field(duped, field.name) = try option.dupe(field.type, @field(config, field.name), arena_allocator.allocator());
+        const uconfig_fields = @typeInfo(UnresolvedConfig).@"struct";
+        inline for (uconfig_fields.field_names, uconfig_fields.field_types) |field_name, field_type| {
+            @field(duped, field_name) = try option.dupe(field_type, @field(config, field_name), arena_allocator.allocator());
         }
         manager.impl.configs.set(tag, duped);
         manager.impl.is_dirty = true;
@@ -111,8 +112,9 @@ pub const Manager = struct {
         config: *const Config,
     ) error{OutOfMemory}!void {
         var cfg: UnresolvedConfig = .{};
-        inline for (std.meta.fields(Config)) |field| {
-            @field(cfg, field.name) = @field(config, field.name);
+        const config_fields = @typeInfo(Config).@"struct";
+        inline for (config_fields.field_names) |field_name| {
+            @field(cfg, field_name) = @field(config, field_name);
         }
         try manager.setConfiguration(tag, &cfg);
     }
@@ -149,10 +151,11 @@ pub const Manager = struct {
             .zig_lib_path = if (builtin.os.tag == .wasi) "/lib" else null,
             .global_cache_path = if (builtin.os.tag == .wasi) "/cache" else null,
         };
+        const uconfig_fields = @typeInfo(UnresolvedConfig).@"struct";
         for (manager.impl.configs.values) |unresolved_config| {
-            inline for (std.meta.fields(UnresolvedConfig)) |field| {
-                if (@field(unresolved_config, field.name)) |new_value| {
-                    @field(config, field.name) = new_value;
+            inline for (uconfig_fields.field_names) |field_name| {
+                if (@field(unresolved_config, field_name)) |new_value| {
+                    @field(config, field_name) = new_value;
                 }
             }
         }
@@ -251,6 +254,19 @@ pub const Manager = struct {
                 continue;
             }
             comptime unreachable;
+        }
+
+        // Validate whether the build runner is supported, regardless of whether
+        // the path is already configured. If the build runner is not supported
+        // (e.g., --build-runner flag removed in Zig 0.17+), clear the path to
+        // prevent stale config from causing errors.
+        if (std.process.can_spawn) {
+            if (manager.zig_exe) |zig_exe| {
+                if (!@import("build_runner/check.zig").isBuildRunnerSupported(zig_exe.version)) {
+                    config.build_runner_path = null;
+                    manager.build_runner_supported = .no;
+                }
+            }
         }
 
         if (config.build_runner_path == null) blk: {
@@ -364,15 +380,16 @@ pub const Manager = struct {
 
         var did_change: DidConfigChange = .{};
 
-        inline for (std.meta.fields(Config)) |field| {
-            const old_value = &@field(manager.config, field.name);
-            const new_value = @field(config, field.name);
+        const config_fields = @typeInfo(Config).@"struct";
+        inline for (config_fields.field_names, config_fields.field_types) |field_name, field_type| {
+            const old_value = &@field(manager.config, field_name);
+            const new_value = @field(config, field_name);
 
-            const is_eql = option.eql(field.type, old_value.*, new_value);
-            @field(did_change, field.name) = !is_eql;
+            const is_eql = option.eql(field_type, old_value.*, new_value);
+            @field(did_change, field_name) = !is_eql;
 
             if (!is_eql) {
-                old_value.* = try option.dupe(field.type, new_value, arena_allocator.allocator());
+                old_value.* = try option.dupe(field_type, new_value, arena_allocator.allocator());
             }
         }
 
@@ -698,10 +715,10 @@ comptime {
 /// The same struct as `Config` but every field is optional.
 pub const UnresolvedConfig = blk: {
     const struct_info: std.lang.Type.Struct = @typeInfo(Config).@"struct";
-    var field_types: [struct_info.fields.len]type = undefined;
-    var field_attrs: [struct_info.fields.len]std.lang.Type.StructField.Attributes = undefined;
-    for (&field_types, &field_attrs, struct_info.fields) |*ty, *attr, field| {
-        ty.* = if (@typeInfo(field.type) != .optional) ?field.type else field.type;
+    var field_types: [struct_info.field_names.len]type = undefined;
+    var field_attrs: [struct_info.field_names.len]std.lang.Type.Struct.FieldAttributes = undefined;
+    for (&field_types, &field_attrs, struct_info.field_types) |*ty, *attr, ftype| {
+        ty.* = if (@typeInfo(ftype) != .optional) ?ftype else ftype;
         attr.* = .{ .default_value_ptr = &@as(ty.*, null) };
     }
     break :blk @Struct(.auto, null, std.meta.fieldNames(Config), &field_types, &field_attrs);

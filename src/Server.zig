@@ -983,11 +983,12 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         server.showMessage(.Error, "{s}", .{msg});
     }
 
-    inline for (std.meta.fields(Config)) |field| {
-        if (@field(result.did_change, field.name)) {
+    const config_fields = @typeInfo(Config).@"struct";
+    inline for (config_fields.field_names) |field_name| {
+        if (@field(result.did_change, field_name)) {
             var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
-            runtime_known_field_name = field.name;
-            const new_value = @field(server.config_manager.config, field.name);
+            runtime_known_field_name = field_name;
+            const new_value = @field(server.config_manager.config, field_name);
             log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
         }
     }
@@ -1084,10 +1085,15 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
                 .{ zls_version, zls_version.major, zls_version.minor, zig_version },
             );
         } else {
+            // NOTE: `isBuildRunnerSupported` currently always returns false because the
+            // `--build-runner` flag was removed in Zig 0.17.0-dev, so this branch is hit
+            // regardless of the actual Zig version. The message must not claim that the
+            // Zig version is outdated.
             server.showMessage(
                 .Warning,
-                "ZLS '{f}' requires at least Zig '{s}' but got Zig '{f}'. Update Zig to avoid unexpected behavior.",
-                .{ zls_version, build_options.minimum_runtime_zig_version_string, zig_version },
+                "ZLS '{f}': the build runner is unavailable with Zig '{f}' (the '--build-runner' flag was removed). " ++
+                    "Build-aware features will fall back to heuristics (minimum Zig version for the build runner was '{s}').",
+                .{ zls_version, zig_version, build_options.minimum_runtime_zig_version_string },
             );
         }
     }
@@ -1134,6 +1140,7 @@ fn createDocumentStoreConfig(config_manager: *const configuration.Manager) Docum
         .build_runner_path = config_manager.config.build_runner_path,
         .builtin_path = config_manager.config.builtin_path,
         .global_cache_dir = config_manager.global_cache_dir,
+        .zig_global_cache_dir = if (config_manager.zig_exe) |exe| exe.env.global_cache_dir else null,
         .wasi_preopens = config_manager.wasi_preopens,
     };
 }
