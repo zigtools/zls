@@ -527,10 +527,6 @@ pub const BuildOnSave = struct {
         const base_args: []const []const u8 = &.{
             options.zig_exe_path,
             "build",
-            "--build-runner",
-            options.build_runner_path,
-            "--zig-lib-dir",
-            options.zig_lib_path,
             "--watch",
         };
         var argv: std.ArrayList([]const u8) = try .initCapacity(

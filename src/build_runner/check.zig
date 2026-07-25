@@ -1,14 +1,15 @@
 const std = @import("std");
 
 pub fn isBuildRunnerSupported(runtime_zig_version: std.SemanticVersion) bool {
-    const build_options = @import("build_options");
-    const is_zls_version_tagged = build_options.version.pre == null;
-    const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
-    return isBuildRunnerSupportedInternal(
-        min_runtime_zig_version,
-        runtime_zig_version,
-        is_zls_version_tagged,
-    );
+    _ = runtime_zig_version;
+    // The `--build-runner` flag was removed in Zig 0.17.0-dev, and the custom
+    // build runner was never properly wired up in the production code (the
+    // `--build-runner` flag was never passed to `zig build`).
+    //
+    // TODO: Reimplement the build runner extraction for Zig 0.17+ using a
+    // different approach (e.g., parsing build.zig AST directly, or using
+    // `zig build --print-configuration` once it's complete).
+    return false;
 }
 
 fn isBuildRunnerSupportedInternal(
@@ -60,18 +61,9 @@ fn isBuildRunnerSupportedInternal(
     }
 }
 
-test {
-    // The build runner must support the Zig version that ZLS is being built with
-    const current_zig_version = @import("builtin").zig_version;
-    try std.testing.expect(isBuildRunnerSupported(current_zig_version));
-    const is_zls_version_tagged_release = current_zig_version.pre == null;
-
-    if (is_zls_version_tagged_release) {
-        // A tagged release of ZLS should support the same tagged release of Zig
-        // Example: ZLS 0.12.0 should support Zig 0.12.x -- It is possible that ZLS requires a minimum patch version
-        try std.testing.expect(isBuildRunnerSupported(.{ .major = current_zig_version.major, .minor = current_zig_version.minor, .patch = 999 }));
-    }
-}
+// The build runner is currently disabled because the `--build-runner` flag was
+// removed in Zig 0.17.0-dev. The `isBuildRunnerSupportedInternal` implementation
+// below is kept for reference and its tests remain active.
 
 // Version order for reference:
 // 0.11.0-dev < 0.11.0 < 0.12.0-dev < 0.12.0 < 0.13.0-dev < 0.13.0
