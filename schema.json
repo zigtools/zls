@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-04/schema",
+    "$schema": "https://json-schema.org/draft-07/schema",
     "title": "ZLS Config",
     "description": "Configuration file for ZLS",
     "type": "object",
@@ -20,7 +20,7 @@
             "default": true
         },
         "enable_build_on_save": {
-            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.\n\nFor more infromation, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.",
+            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.\n\nFor more information, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.",
             "type": "boolean",
             "default": null
         },
@@ -78,7 +78,7 @@
             "default": false
         },
         "force_autofix": {
-            "description": "Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.",
+            "description": "Work around editors that do not support 'source.fixall' code actions on save. This option may deliver a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.",
             "type": "boolean",
             "default": false
         },

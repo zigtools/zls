@@ -15,7 +15,7 @@ completion_label_details: bool = true,
 
 /// Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.
 ///
-/// For more infromation, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.
+/// For more information, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.
 enable_build_on_save: ?bool = null,
 
 /// Specify which arguments should be passed to Zig when running build-on-save.
@@ -51,7 +51,7 @@ inlay_hints_hide_redundant_param_names: bool = false,
 /// Hides inlay hints when parameter name matches the last token of a parameter node (e.g. `foo: bar.foo`, `foo: &foo`)
 inlay_hints_hide_redundant_param_names_last_token: bool = false,
 
-/// Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.
+/// Work around editors that do not support 'source.fixall' code actions on save. This option may deliver a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.
 force_autofix: bool = false,
 
 /// Enables warnings for style guideline mismatches
