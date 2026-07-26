@@ -20,7 +20,7 @@
         },
         {
             "name": "enable_build_on_save",
-            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.\n\nFor more infromation, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.",
+            "description": "Whether to enable build-on-save diagnostics. Will be automatically enabled if the `build.zig` has declared a 'check' step.\n\nFor more information, checkout the [Build-On-Save](https://zigtools.org/zls/guides/build-on-save/) Guide.",
             "type": "?bool",
             "default": null
         },
@@ -85,7 +85,7 @@
         },
         {
             "name": "force_autofix",
-            "description": "Work around editors that do not support 'source.fixall' code actions on save. This option may delivered a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.",
+            "description": "Work around editors that do not support 'source.fixall' code actions on save. This option may deliver a substandard user experience. Please refer to the installation guide to see which editors natively support code actions on save.",
             "type": "bool",
             "default": false
         },
