@@ -170,6 +170,14 @@ pub fn main() !void {
     _ = noreturn_1;
     //  ^^^^^^^^^^ (S)()
 
+    const undefined_0 = if (runtime_bool) s else undefined;
+    _ = undefined_0;
+    //  ^^^^^^^^^^^ (S)()
+
+    const undefined_1 = if (runtime_bool) undefined else s;
+    _ = undefined_1;
+    //  ^^^^^^^^^^^ (S)()
+
     // Use @compileLog to verify the expected type with the compiler:
     // @compileLog(error_union_0);
 

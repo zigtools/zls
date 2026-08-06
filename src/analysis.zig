@@ -3881,9 +3881,49 @@ pub const Type = struct {
         if (entries.len == 1)
             return entries[0].type;
 
+        // Mirror Zig's peer type resolution by ignoring branches that never
+        // produce a value (`noreturn`, `@compileError`) or that coerce to
+        // any of the other peers (`undefined`).
+        var filtered: std.ArrayList(TypeWithDescriptor) = try .initCapacity(arena, entries.len);
+        for (entries) |entry| {
+            switch (entry.type.data) {
+                .compile_error => continue,
+                .ip_index => |payload| switch (payload.type) {
+                    .noreturn_type, .undefined_type => continue,
+                    else => {},
+                },
+                else => {},
+            }
+            filtered.appendAssumeCapacity(entry);
+        }
+        const remaining = filtered.items;
+
+        if (remaining.len == 0) {
+            // Every branch is `noreturn`, `undefined` or `@compileError`.
+            // An `undefined` branch determines the result; otherwise prefer
+            // `noreturn` over `@compileError` so that the result does not
+            // depend on branch order.
+            for (entries) |entry| {
+                switch (entry.type.data) {
+                    .ip_index => |payload| if (payload.type == .undefined_type) return entry.type,
+                    else => {},
+                }
+            }
+            for (entries) |entry| {
+                switch (entry.type.data) {
+                    .ip_index => |payload| if (payload.type == .noreturn_type) return entry.type,
+                    else => {},
+                }
+            }
+            return entries[0].type;
+        }
+
+        if (remaining.len == 1)
+            return remaining[0].type;
+
         peer_type_resolution: {
-            var chosen = entries[0].type;
-            for (entries[1..]) |entry| {
+            var chosen = remaining[0].type;
+            for (remaining[1..]) |entry| {
                 const candidate = entry.type;
                 chosen = try analyser.resolvePeerTypes(chosen, candidate) orelse break :peer_type_resolution;
             }
@@ -3913,29 +3953,21 @@ pub const Type = struct {
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
 
-        const has_type_val = for (entries) |entry| {
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
-            break entry.type.is_type_val;
-        } else entries[0].type.is_type_val;
+        const has_type_val = remaining[0].type.is_type_val;
 
-        for (entries) |entry| {
+        for (remaining) |entry| {
             try deduplicator.put(
                 arena,
                 .{ .type_data = entry.type.data, .descriptor = entry.descriptor },
                 {},
             );
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
             if (entry.type.is_type_val != has_type_val) {
                 return null;
             }
         }
 
         if (deduplicator.count() == 1)
-            return entries[0].type;
+            return remaining[0].type;
 
         return .{
             .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },

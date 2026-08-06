@@ -138,4 +138,41 @@ const labeled_switch_2 = blk: switch (undefined) {
     2 => B{},
     else => unreachable,
 };
+
+// https://github.com/zigtools/zls/issues/3210
+const switch_with_unreachable = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)(A)
+    1 => A,
+    else => unreachable,
+};
+
+const switch_with_undefined = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^ (type)(A)
+    1 => A,
+    else => undefined,
+};
+
+const switch_with_compile_error = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (type)(A)
+    1 => A,
+    else => @compileError(""),
+};
+
+const switch_only_noreturn = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^ (noreturn)()
+    1 => unreachable,
+    else => @compileError(""),
+};
+
+const switch_only_noreturn_2 = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^ (noreturn)()
+    1 => @compileError(""),
+    else => unreachable,
+};
+
+const switch_undefined_and_noreturn = switch (some_u8) {
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (@TypeOf(undefined))(undefined)
+    1 => unreachable,
+    else => undefined,
+};
 // zig fmt: on
