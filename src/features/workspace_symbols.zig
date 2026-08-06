@@ -74,7 +74,7 @@ pub fn handler(server: *Server, arena: std.mem.Allocator, request: types.workspa
                     .constant => .Constant,
                     .field => .Field,
                     .function => .Function,
-                    .test_function => .Method, // there is no SymbolKind that represents a tests,
+                    .test_function => .Function, // there is no SymbolKind that represents a test
                 },
                 .location = .{
                     .location = .{
