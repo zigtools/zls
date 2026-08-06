@@ -22,6 +22,10 @@ tag_set: std.array_hash_map.Auto(Tag, struct {
 outdated_files: Uri.ArrayHashMap(void) = .empty,
 transport: ?*lsp.Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
+/// When a compile error is located outside of the workspace (e.g. the standard
+/// library or a dependency), report it at the innermost reference trace
+/// location that is inside the workspace instead.
+promote_reference_traces: bool = true,
 
 const DiagnosticsCollection = @This();
 
@@ -53,6 +57,13 @@ pub fn deinit(collection: *DiagnosticsCollection) void {
     for (collection.outdated_files.keys()) |uri| uri.deinit(collection.allocator);
     collection.outdated_files.deinit(collection.allocator);
     collection.* = undefined;
+}
+
+/// Thread-safe setter for `promote_reference_traces`.
+pub fn setPromoteReferenceTraces(collection: *DiagnosticsCollection, promote_reference_traces: bool) void {
+    collection.mutex.lockUncancelable(collection.io);
+    defer collection.mutex.unlock(collection.io);
+    collection.promote_reference_traces = promote_reference_traces;
 }
 
 pub fn pushSingleDocumentDiagnostics(
@@ -144,7 +155,7 @@ pub fn pushErrorBundle(
     if (error_bundle.errorMessageCount() == 0 and gop.value_ptr.error_bundle.errorMessageCount() == 0) return;
 
     if (error_bundle.errorMessageCount() != 0) {
-        try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, &collection.outdated_files);
+        try collectUrisFromErrorBundle(collection.allocator, error_bundle, src_base_path, collection.promote_reference_traces, &collection.outdated_files);
         try new_error_bundle.addBundleAsRoots(error_bundle);
     }
 
@@ -153,6 +164,7 @@ pub fn pushErrorBundle(
             collection.allocator,
             gop.value_ptr.error_bundle,
             gop.value_ptr.error_bundle_src_base_path,
+            collection.promote_reference_traces,
             &collection.outdated_files,
         );
     } else {
@@ -196,6 +208,7 @@ pub fn clearErrorBundle(collection: *DiagnosticsCollection, tag: Tag) void {
         collection.allocator,
         item.error_bundle,
         item.error_bundle_src_base_path,
+        collection.promote_reference_traces,
         &collection.outdated_files,
     ) catch |err| switch (err) {
         error.OutOfMemory => return,
@@ -233,21 +246,122 @@ fn collectUrisFromErrorBundle(
     allocator: std.mem.Allocator,
     error_bundle: std.zig.ErrorBundle,
     src_base_path: ?[]const u8,
+    promote_reference_traces: bool,
     uri_set: *Uri.ArrayHashMap(void),
 ) error{OutOfMemory}!void {
     if (error_bundle.errorMessageCount() == 0) return;
     for (error_bundle.getMessages()) |msg_index| {
         const err = error_bundle.getErrorMessage(msg_index);
         if (err.src_loc == .none) continue;
-        const src_loc = error_bundle.getSourceLocation(err.src_loc);
-        const src_path = error_bundle.nullTerminatedString(src_loc.src_path);
 
-        try uri_set.ensureUnusedCapacity(allocator, 1);
-        const uri = try pathToUri(allocator, src_base_path, src_path) orelse continue;
-        if (uri_set.fetchPutAssumeCapacity(uri, {})) |_| {
-            uri.deinit(allocator);
+        const promoted_src_loc: std.zig.ErrorBundle.SourceLocationIndex = if (promote_reference_traces)
+            promoteSourceLocation(error_bundle, err.src_loc, src_base_path) orelse .none
+        else
+            .none;
+
+        for ([2]std.zig.ErrorBundle.SourceLocationIndex{ err.src_loc, promoted_src_loc }) |src_loc_index| {
+            if (src_loc_index == .none) continue;
+            const src_loc = error_bundle.getSourceLocation(src_loc_index);
+            const src_path = error_bundle.nullTerminatedString(src_loc.src_path);
+
+            try uri_set.ensureUnusedCapacity(allocator, 1);
+            const uri = try pathToUri(allocator, src_base_path, src_path) orelse continue;
+            if (uri_set.fetchPutAssumeCapacity(uri, {})) |_| {
+                uri.deinit(allocator);
+            }
         }
     }
+}
+
+/// Implements "trace promotion": If an error is located outside of the
+/// workspace (e.g. the standard library or a dependency), returns the location
+/// of the innermost reference trace entry that is inside the workspace.
+///
+/// Returns `null` if the error should be reported at its original location.
+fn promoteSourceLocation(
+    error_bundle: std.zig.ErrorBundle,
+    src_loc_index: std.zig.ErrorBundle.SourceLocationIndex,
+    src_base_path: ?[]const u8,
+) ?std.zig.ErrorBundle.SourceLocationIndex {
+    std.debug.assert(src_loc_index != .none);
+    // Without a base path, a promoted location with a relative path could not be resolved to a URI.
+    const base_path = src_base_path orelse return null;
+    const src_loc = error_bundle.getSourceLocation(src_loc_index);
+    if (src_loc.reference_trace_len == 0) return null;
+    if (isWorkspacePath(error_bundle.nullTerminatedString(src_loc.src_path), base_path)) return null;
+
+    var it: ReferenceTraceIterator = .init(error_bundle, src_loc_index, src_loc);
+    while (it.next()) |ref_trace| {
+        if (ref_trace.src_loc == .none) continue; // sentinel that indicates hidden references
+        const ref_src_loc = error_bundle.getSourceLocation(ref_trace.src_loc);
+        const ref_src_path = error_bundle.nullTerminatedString(ref_src_loc.src_path);
+        if (isWorkspacePath(ref_src_path, base_path)) return ref_trace.src_loc;
+    }
+    return null;
+}
+
+/// Iterates over the `std.zig.ErrorBundle.ReferenceTrace` items that trail a
+/// `std.zig.ErrorBundle.SourceLocation`.
+const ReferenceTraceIterator = struct {
+    error_bundle: std.zig.ErrorBundle,
+    index: usize,
+    remaining: u32,
+
+    comptime {
+        // `init` and `next` assume that every field is encoded as a single item in `extra`.
+        for (@typeInfo(std.zig.ErrorBundle.SourceLocation).@"struct".fields ++
+            @typeInfo(std.zig.ErrorBundle.ReferenceTrace).@"struct".fields) |field|
+        {
+            std.debug.assert(@bitSizeOf(field.type) == 32);
+        }
+    }
+
+    fn init(
+        error_bundle: std.zig.ErrorBundle,
+        src_loc_index: std.zig.ErrorBundle.SourceLocationIndex,
+        src_loc: std.zig.ErrorBundle.SourceLocation,
+    ) ReferenceTraceIterator {
+        return .{
+            .error_bundle = error_bundle,
+            .index = @intFromEnum(src_loc_index) + @typeInfo(std.zig.ErrorBundle.SourceLocation).@"struct".fields.len,
+            .remaining = src_loc.reference_trace_len,
+        };
+    }
+
+    fn next(it: *ReferenceTraceIterator) ?std.zig.ErrorBundle.ReferenceTrace {
+        if (it.remaining == 0) return null;
+        it.remaining -= 1;
+        defer it.index += @typeInfo(std.zig.ErrorBundle.ReferenceTrace).@"struct".fields.len;
+        return .{
+            .decl_name = it.error_bundle.extra[it.index],
+            .src_loc = @enumFromInt(it.error_bundle.extra[it.index + 1]),
+        };
+    }
+};
+
+/// Whether `src_path` refers to a file inside the workspace at `src_base_path`,
+/// excluding generated files inside cache directories.
+fn isWorkspacePath(src_path: []const u8, src_base_path: []const u8) bool {
+    const workspace_relative_path = if (std.Io.Dir.path.isAbsolute(src_path)) blk: {
+        var base_path = src_base_path;
+        while (base_path.len != 0 and std.Io.Dir.path.isSep(base_path[base_path.len - 1])) {
+            base_path.len -= 1;
+        }
+        if (base_path.len == 0) return false;
+        if (!std.mem.startsWith(u8, src_path, base_path)) return false;
+        if (src_path.len == base_path.len) return true;
+        if (!std.Io.Dir.path.isSep(src_path[base_path.len])) return false;
+        break :blk src_path[base_path.len + 1 ..];
+    } else src_path;
+
+    var component_it = std.Io.Dir.path.componentIterator(workspace_relative_path);
+    while (component_it.next()) |component| {
+        // Keep in sync with `DocumentStore.loadDirectoryRecursive`
+        if (std.mem.startsWith(u8, component.name, ".")) return false;
+        if (std.mem.eql(u8, component.name, "zig-cache")) return false;
+        if (std.mem.eql(u8, component.name, "zig-pkg")) return false;
+    }
+    return true;
 }
 
 fn pathToUri(allocator: std.mem.Allocator, base_path: ?[]const u8, src_path: []const u8) error{OutOfMemory}!?Uri {
@@ -321,6 +435,7 @@ fn collectLspDiagnosticsForDocument(
                 arena,
                 diagnostics,
                 true,
+                collection.promote_reference_traces,
             );
         }
 
@@ -332,6 +447,7 @@ fn collectLspDiagnosticsForDocument(
             arena,
             diagnostics,
             false,
+            collection.promote_reference_traces,
         );
     }
 }
@@ -346,13 +462,19 @@ fn convertErrorBundleToLSPDiangostics(
     arena: std.mem.Allocator,
     diagnostics: *std.ArrayList(lsp.types.Diagnostic),
     is_single_document: bool,
+    promote_reference_traces: bool,
 ) error{OutOfMemory}!void {
     if (eb.errorMessageCount() == 0) return; // `getMessages` can't be called on an empty ErrorBundle
     for (eb.getMessages()) |msg_index| {
         const err = eb.getErrorMessage(msg_index);
         if (err.src_loc == .none) continue;
 
-        const src_loc = eb.getSourceLocation(err.src_loc);
+        const promoted_src_loc_index: ?std.zig.ErrorBundle.SourceLocationIndex = if (promote_reference_traces and !is_single_document)
+            promoteSourceLocation(eb, err.src_loc, error_bundle_src_base_path)
+        else
+            null;
+
+        const src_loc = eb.getSourceLocation(promoted_src_loc_index orelse err.src_loc);
         const src_path = eb.nullTerminatedString(src_loc.src_path);
 
         if (!is_single_document) {
@@ -362,32 +484,64 @@ fn convertErrorBundleToLSPDiangostics(
 
         const src_range = errorBundleSourceLocationToRange(eb, src_loc, offset_encoding);
 
-        const eb_notes = eb.getNotes(msg_index);
-        const relatedInformation = if (eb_notes.len == 0) null else blk: {
-            const lsp_notes = try arena.alloc(lsp.types.Diagnostic.RelatedInformation, eb_notes.len);
-            for (lsp_notes, eb_notes) |*lsp_note, eb_note_index| {
-                const eb_note = eb.getErrorMessage(eb_note_index);
-                if (eb_note.src_loc == .none) continue;
+        var related_information: std.ArrayList(lsp.types.Diagnostic.RelatedInformation) = .empty;
 
-                const note_src_loc = eb.getSourceLocation(eb_note.src_loc);
-                const note_src_path = eb.nullTerminatedString(note_src_loc.src_path);
-                const note_src_range = errorBundleSourceLocationToRange(eb, note_src_loc, offset_encoding);
-
-                const note_uri: Uri = if (is_single_document)
-                    document_uri
-                else
-                    try pathToUri(arena, error_bundle_src_base_path, note_src_path) orelse continue;
-
-                lsp_note.* = .{
+        if (promoted_src_loc_index != null) {
+            const original_src_loc = eb.getSourceLocation(err.src_loc);
+            const original_src_path = eb.nullTerminatedString(original_src_loc.src_path);
+            if (try pathToUri(arena, error_bundle_src_base_path, original_src_path)) |original_uri| {
+                try related_information.append(arena, .{
                     .location = .{
-                        .uri = note_uri.raw,
-                        .range = note_src_range,
+                        .uri = original_uri.raw,
+                        .range = errorBundleSourceLocationToRange(eb, original_src_loc, offset_encoding),
                     },
-                    .message = eb.nullTerminatedString(eb_note.msg),
-                };
+                    .message = "error occurred here",
+                });
             }
-            break :blk lsp_notes;
-        };
+        }
+
+        for (eb.getNotes(msg_index)) |eb_note_index| {
+            const eb_note = eb.getErrorMessage(eb_note_index);
+            if (eb_note.src_loc == .none) continue;
+
+            const note_src_loc = eb.getSourceLocation(eb_note.src_loc);
+            const note_src_path = eb.nullTerminatedString(note_src_loc.src_path);
+            const note_src_range = errorBundleSourceLocationToRange(eb, note_src_loc, offset_encoding);
+
+            const note_uri: Uri = if (is_single_document)
+                document_uri
+            else
+                try pathToUri(arena, error_bundle_src_base_path, note_src_path) orelse continue;
+
+            try related_information.append(arena, .{
+                .location = .{
+                    .uri = note_uri.raw,
+                    .range = note_src_range,
+                },
+                .message = eb.nullTerminatedString(eb_note.msg),
+            });
+        }
+
+        if (promoted_src_loc_index) |promoted_index| {
+            // Preserve the remaining reference trace entries.
+            var it: ReferenceTraceIterator = .init(eb, err.src_loc, eb.getSourceLocation(err.src_loc));
+            while (it.next()) |ref_trace| {
+                if (ref_trace.src_loc == .none) continue; // sentinel that indicates hidden references
+                if (ref_trace.src_loc == promoted_index) continue;
+
+                const ref_src_loc = eb.getSourceLocation(ref_trace.src_loc);
+                const ref_src_path = eb.nullTerminatedString(ref_src_loc.src_path);
+                const ref_uri = try pathToUri(arena, error_bundle_src_base_path, ref_src_path) orelse continue;
+
+                try related_information.append(arena, .{
+                    .location = .{
+                        .uri = ref_uri.raw,
+                        .range = errorBundleSourceLocationToRange(eb, ref_src_loc, offset_encoding),
+                    },
+                    .message = try std.fmt.allocPrint(arena, "referenced by '{s}'", .{eb.nullTerminatedString(ref_trace.decl_name)}),
+                });
+            }
+        }
 
         var tags: std.ArrayList(lsp.types.Diagnostic.Tag) = .empty;
 
@@ -406,7 +560,7 @@ fn convertErrorBundleToLSPDiangostics(
             .source = "zls",
             .message = message,
             .tags = if (tags.items.len != 0) tags.items else null,
-            .relatedInformation = relatedInformation,
+            .relatedInformation = if (related_information.items.len != 0) related_information.items else null,
         });
     }
 }
@@ -600,24 +754,529 @@ test "DiagnosticsCollection - compile_log_text" {
     try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
 }
 
+test "DiagnosticsCollection - trace promotion" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'comptime_int'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "print", .src_path = testing_std_debug_path, .line = 3, .column = 4 },
+                .{ .decl_name = "main", .src_path = "src/main.zig", .line = 8, .column = 4 },
+            },
+            .hidden_references = 2,
+        },
+        .notes = &.{"some note"},
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const main_uri: Uri = try .fromPath(std.testing.allocator, testing_main_path);
+    defer main_uri.deinit(std.testing.allocator);
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+    const std_debug_uri: Uri = try .fromPath(std.testing.allocator, testing_std_debug_path);
+    defer std_debug_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb);
+
+    // Both the promoted and the original location must be republished.
+    try std.testing.expect(collection.outdated_files.contains(main_uri));
+    try std.testing.expect(collection.outdated_files.contains(std_fmt_uri));
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(main_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(1, diagnostics.items.len);
+        const diagnostic = diagnostics.items[0];
+        try std.testing.expectEqualStrings("invalid format string 's' for type 'comptime_int'", diagnostic.message);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 8, .character = 4 },
+            .end = .{ .line = 8, .character = 4 },
+        }, diagnostic.range);
+
+        const related_information = diagnostic.relatedInformation.?;
+        try std.testing.expectEqual(3, related_information.len);
+
+        try std.testing.expectEqualStrings("error occurred here", related_information[0].message);
+        try std.testing.expectEqualStrings(std_fmt_uri.raw, related_information[0].location.uri);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 5, .character = 8 },
+            .end = .{ .line = 5, .character = 8 },
+        }, related_information[0].location.range);
+
+        try std.testing.expectEqualStrings("some note", related_information[1].message);
+        try std.testing.expectEqualStrings(std_fmt_uri.raw, related_information[1].location.uri);
+
+        try std.testing.expectEqualStrings("referenced by 'print'", related_information[2].message);
+        try std.testing.expectEqualStrings(std_debug_uri.raw, related_information[2].location.uri);
+        try std.testing.expectEqual(3, related_information[2].location.range.start.line);
+    }
+
+    {
+        // The error is no longer reported at its original location.
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(std_fmt_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(0, diagnostics.items.len);
+    }
+}
+
+test "DiagnosticsCollection - trace promotion disabled" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .promote_reference_traces = false,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'comptime_int'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "main", .src_path = "src/main.zig", .line = 8, .column = 4 },
+            },
+        },
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const main_uri: Uri = try .fromPath(std.testing.allocator, testing_main_path);
+    defer main_uri.deinit(std.testing.allocator);
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb);
+
+    try std.testing.expect(!collection.outdated_files.contains(main_uri));
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(std_fmt_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(1, diagnostics.items.len);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 5, .character = 8 },
+            .end = .{ .line = 5, .character = 8 },
+        }, diagnostics.items[0].range);
+        try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
+    }
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(main_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(0, diagnostics.items.len);
+    }
+}
+
+test "DiagnosticsCollection - trace promotion without workspace reference" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'comptime_int'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "print", .src_path = testing_std_debug_path, .line = 3, .column = 4 },
+            },
+            .hidden_references = 2,
+        },
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb);
+
+    // The diagnostic degrades gracefully to its original location.
+    var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+    try collection.collectLspDiagnosticsForDocument(std_fmt_uri, .@"utf-8", arena, &diagnostics);
+
+    try std.testing.expectEqual(1, diagnostics.items.len);
+    try std.testing.expectEqual(lsp.types.Range{
+        .start = .{ .line = 5, .character = 8 },
+        .end = .{ .line = 5, .character = 8 },
+    }, diagnostics.items[0].range);
+    try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
+}
+
+test "DiagnosticsCollection - trace promotion keeps errors inside the workspace unchanged" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "expected type 'u32', found 'bool'",
+        .source_location = .{
+            .src_path = "src/main.zig",
+            .line = 8,
+            .column = 4,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "foo", .src_path = "src/other.zig", .line = 3, .column = 4 },
+            },
+        },
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const main_uri: Uri = try .fromPath(std.testing.allocator, testing_main_path);
+    defer main_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb);
+
+    var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+    try collection.collectLspDiagnosticsForDocument(main_uri, .@"utf-8", arena, &diagnostics);
+
+    try std.testing.expectEqual(1, diagnostics.items.len);
+    try std.testing.expectEqual(lsp.types.Range{
+        .start = .{ .line = 8, .character = 4 },
+        .end = .{ .line = 8, .character = 4 },
+    }, diagnostics.items[0].range);
+    try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
+}
+
+test "DiagnosticsCollection - trace promotion picks the innermost workspace reference" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'u32'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "logLine", .src_path = "src/log.zig", .line = 3, .column = 4 },
+                .{ .decl_name = "main", .src_path = "src/main.zig", .line = 31, .column = 4 },
+            },
+        },
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const log_uri: Uri = try .fromPath(std.testing.allocator, testing_log_path);
+    defer log_uri.deinit(std.testing.allocator);
+    const main_uri: Uri = try .fromPath(std.testing.allocator, testing_main_path);
+    defer main_uri.deinit(std.testing.allocator);
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb);
+
+    {
+        // The innermost workspace reference is chosen even though 'main' also references the error.
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(log_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(1, diagnostics.items.len);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 3, .character = 4 },
+            .end = .{ .line = 3, .character = 4 },
+        }, diagnostics.items[0].range);
+
+        const related_information = diagnostics.items[0].relatedInformation.?;
+        try std.testing.expectEqual(2, related_information.len);
+
+        try std.testing.expectEqualStrings("error occurred here", related_information[0].message);
+        try std.testing.expectEqualStrings(std_fmt_uri.raw, related_information[0].location.uri);
+
+        try std.testing.expectEqualStrings("referenced by 'main'", related_information[1].message);
+        try std.testing.expectEqualStrings(main_uri.raw, related_information[1].location.uri);
+        try std.testing.expectEqual(31, related_information[1].location.range.start.line);
+    }
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(main_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(0, diagnostics.items.len);
+    }
+}
+
+test "DiagnosticsCollection - trace promotion without src_base_path" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'comptime_int'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "main", .src_path = "src/main.zig", .line = 8, .column = 4 },
+            },
+        },
+    }}, "");
+    defer eb.deinit(std.testing.allocator);
+
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, null, eb);
+
+    // A relative promoted location could not be resolved to a URI, so the
+    // diagnostic must remain at its original location instead of being dropped.
+    var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+    try collection.collectLspDiagnosticsForDocument(std_fmt_uri, .@"utf-8", arena, &diagnostics);
+
+    try std.testing.expectEqual(1, diagnostics.items.len);
+    try std.testing.expectEqual(lsp.types.Range{
+        .start = .{ .line = 5, .character = 8 },
+        .end = .{ .line = 5, .character = 8 },
+    }, diagnostics.items[0].range);
+    try std.testing.expectEqual(null, diagnostics.items[0].relatedInformation);
+}
+
+test "DiagnosticsCollection - trace promotion after merging error bundles" {
+    var arena_allocator: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var collection: DiagnosticsCollection = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+    };
+    defer collection.deinit();
+
+    var eb1 = try createTestingErrorBundle(&.{.{
+        .message = "invalid format string 's' for type 'comptime_int'",
+        .source_location = .{
+            .src_path = testing_std_fmt_path,
+            .line = 5,
+            .column = 8,
+            .source_line = null,
+            .reference_trace = &.{
+                .{ .decl_name = "print", .src_path = testing_std_debug_path, .line = 3, .column = 4 },
+                .{ .decl_name = "main", .src_path = "src/main.zig", .line = 8, .column = 4 },
+            },
+        },
+    }}, "");
+    defer eb1.deinit(std.testing.allocator);
+
+    var eb2 = try createTestingErrorBundle(&.{.{
+        .message = "expected type 'u32', found 'bool'",
+        .source_location = .{
+            .src_path = "src/other.zig",
+            .line = 2,
+            .column = 6,
+            .source_line = null,
+        },
+    }}, "");
+    defer eb2.deinit(std.testing.allocator);
+
+    const main_uri: Uri = try .fromPath(std.testing.allocator, testing_main_path);
+    defer main_uri.deinit(std.testing.allocator);
+    const other_uri: Uri = try .fromPath(std.testing.allocator, testing_other_path);
+    defer other_uri.deinit(std.testing.allocator);
+    const std_fmt_uri: Uri = try .fromPath(std.testing.allocator, testing_std_fmt_path);
+    defer std_fmt_uri.deinit(std.testing.allocator);
+
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb1);
+    // Pushing with the same version merges both bundles which copies the reference trace.
+    try collection.pushErrorBundle(.parse, 1, testing_workspace_path, eb2);
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(main_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(1, diagnostics.items.len);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 8, .character = 4 },
+            .end = .{ .line = 8, .character = 4 },
+        }, diagnostics.items[0].range);
+
+        const related_information = diagnostics.items[0].relatedInformation.?;
+        try std.testing.expectEqual(2, related_information.len);
+        try std.testing.expectEqualStrings("error occurred here", related_information[0].message);
+        try std.testing.expectEqualStrings(std_fmt_uri.raw, related_information[0].location.uri);
+        try std.testing.expectEqualStrings("referenced by 'print'", related_information[1].message);
+    }
+
+    {
+        var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        try collection.collectLspDiagnosticsForDocument(other_uri, .@"utf-8", arena, &diagnostics);
+
+        try std.testing.expectEqual(1, diagnostics.items.len);
+        try std.testing.expectEqual(lsp.types.Range{
+            .start = .{ .line = 2, .character = 6 },
+            .end = .{ .line = 2, .character = 6 },
+        }, diagnostics.items[0].range);
+    }
+}
+
+test isWorkspacePath {
+    try std.testing.expect(isWorkspacePath("src/main.zig", testing_workspace_path));
+    try std.testing.expect(isWorkspacePath(testing_main_path, testing_workspace_path));
+
+    try std.testing.expect(!isWorkspacePath(testing_std_fmt_path, testing_workspace_path));
+    try std.testing.expect(!isWorkspacePath("../dependency/src/main.zig", testing_workspace_path));
+    try std.testing.expect(!isWorkspacePath(".zig-cache/generated.zig", testing_workspace_path));
+    try std.testing.expect(!isWorkspacePath("zig-cache/generated.zig", testing_workspace_path));
+}
+
 const testing_src_path = switch (@import("builtin").os.tag) {
     .windows => "C:\\sample.zig",
     else => "/sample.zig",
 };
 
+const testing_workspace_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\workspace",
+    else => "/workspace",
+};
+
+const testing_main_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\workspace\\src\\main.zig",
+    else => "/workspace/src/main.zig",
+};
+
+const testing_log_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\workspace\\src\\log.zig",
+    else => "/workspace/src/log.zig",
+};
+
+const testing_other_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\workspace\\src\\other.zig",
+    else => "/workspace/src/other.zig",
+};
+
+const testing_std_fmt_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\zig\\lib\\std\\fmt.zig",
+    else => "/zig/lib/std/fmt.zig",
+};
+
+const testing_std_debug_path = switch (@import("builtin").os.tag) {
+    .windows => "C:\\zig\\lib\\std\\debug.zig",
+    else => "/zig/lib/std/debug.zig",
+};
+
+const TestingSourceLocation = struct {
+    src_path: []const u8,
+    line: u32 = 0,
+    column: u32 = 0,
+    span_start: u32 = 0,
+    span_main: u32 = 0,
+    span_end: u32 = 0,
+    source_line: ?[]const u8 = "",
+    reference_trace: []const struct {
+        decl_name: []const u8,
+        src_path: []const u8,
+        line: u32 = 0,
+        column: u32 = 0,
+    } = &.{},
+    /// Appends a sentinel reference trace entry that indicates hidden references.
+    hidden_references: ?u32 = null,
+};
+
+fn createTestingSourceLocation(
+    eb: *std.zig.ErrorBundle.Wip,
+    options: TestingSourceLocation,
+) error{OutOfMemory}!std.zig.ErrorBundle.SourceLocationIndex {
+    var trace_src_locs: std.ArrayList(std.zig.ErrorBundle.SourceLocationIndex) = .empty;
+    defer trace_src_locs.deinit(std.testing.allocator);
+
+    for (options.reference_trace) |ref_trace| {
+        try trace_src_locs.append(std.testing.allocator, try eb.addSourceLocation(.{
+            .src_path = try eb.addString(ref_trace.src_path),
+            .line = ref_trace.line,
+            .column = ref_trace.column,
+            .span_start = 0,
+            .span_main = 0,
+            .span_end = 0,
+        }));
+    }
+
+    const src_loc = try eb.addSourceLocation(.{
+        .src_path = try eb.addString(options.src_path),
+        .line = options.line,
+        .column = options.column,
+        .span_start = options.span_start,
+        .span_main = options.span_main,
+        .span_end = options.span_end,
+        .source_line = if (options.source_line) |source_line| try eb.addString(source_line) else 0,
+        .reference_trace_len = @intCast(options.reference_trace.len + @intFromBool(options.hidden_references != null)),
+    });
+
+    // The reference trace entries must be added directly after their source location.
+    for (options.reference_trace, trace_src_locs.items) |ref_trace, trace_src_loc| {
+        try eb.addReferenceTrace(.{
+            .decl_name = try eb.addString(ref_trace.decl_name),
+            .src_loc = trace_src_loc,
+        });
+    }
+    if (options.hidden_references) |count| {
+        try eb.addReferenceTrace(.{ .decl_name = count, .src_loc = .none });
+    }
+
+    return src_loc;
+}
+
 fn createTestingErrorBundle(
     messages: []const struct {
         message: []const u8,
         count: u32 = 1,
-        source_location: struct {
-            src_path: []const u8,
-            line: u32,
-            column: u32,
-            span_start: u32,
-            span_main: u32,
-            span_end: u32,
-            source_line: ?[]const u8,
-        } = .{ .src_path = testing_src_path, .line = 0, .column = 0, .span_start = 0, .span_main = 0, .span_end = 0, .source_line = "" },
+        source_location: TestingSourceLocation = .{ .src_path = testing_src_path },
+        notes: []const []const u8 = &.{},
     },
     compile_log_text: []const u8,
 ) error{OutOfMemory}!std.zig.ErrorBundle {
@@ -626,19 +1285,21 @@ fn createTestingErrorBundle(
     errdefer eb.deinit();
 
     for (messages) |msg| {
+        const src_loc = try createTestingSourceLocation(&eb, msg.source_location);
         try eb.addRootErrorMessage(.{
             .msg = try eb.addString(msg.message),
             .count = msg.count,
-            .src_loc = try eb.addSourceLocation(.{
-                .src_path = try eb.addString(msg.source_location.src_path),
-                .line = msg.source_location.line,
-                .column = msg.source_location.column,
-                .span_start = msg.source_location.span_start,
-                .span_main = msg.source_location.span_main,
-                .span_end = msg.source_location.span_end,
-                .source_line = if (msg.source_location.source_line) |source_line| try eb.addString(source_line) else 0,
-            }),
+            .src_loc = src_loc,
+            .notes_len = @intCast(msg.notes.len),
         });
+        const notes_start = try eb.reserveNotes(@intCast(msg.notes.len));
+        for (notes_start.., msg.notes) |note_slot, note_message| {
+            const note_index = @intFromEnum(try eb.addErrorMessage(.{
+                .msg = try eb.addString(note_message),
+                .src_loc = try createTestingSourceLocation(&eb, .{ .src_path = msg.source_location.src_path }),
+            }));
+            eb.extra.items[note_slot] = note_index;
+        }
     }
 
     return eb.toOwnedBundle(compile_log_text);

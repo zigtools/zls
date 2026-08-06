@@ -23,6 +23,9 @@ enable_build_on_save: ?bool = null,
 /// If the `build.zig` has declared a 'check' step, it will be preferred over the default 'install' step.
 build_on_save_args: []const []const u8 = &.{},
 
+/// When a compile error is located outside of the workspace (e.g. inside the standard library or a dependency), report the error at the innermost reference trace location that is inside the workspace instead. The original error location is preserved as related information.
+promote_reference_traces: bool = true,
+
 /// Set level of semantic tokens. `partial` only includes information that requires semantic analysis.
 semantic_tokens: enum {
     none,
