@@ -208,6 +208,41 @@ const Builder = struct {
                 const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
                 break :candidate .{ candidate, name_token };
             },
+            .asm_simple,
+            .@"asm",
+            => {
+                // An asm output operand without `->` is a bare identifier token
+                // with no corresponding AST node, so it is invisible to the
+                // child iteration above.
+                const full_asm = ast.fullAsm(tree, node).?;
+                for (full_asm.outputs) |output_node| {
+                    const name_token = tree.nodeMainToken(output_node) + 4;
+                    if (tree.tokenTag(name_token) != .identifier) continue; // `(-> T)` operand
+                    const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                    const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+
+                    if (!is_escaped_identifier) {
+                        if (std.mem.eql(u8, name, "_")) continue;
+                        if (std.zig.isPrimitive(name)) continue;
+                    }
+
+                    if (!std.mem.eql(u8, name, target_symbol_name)) continue;
+
+                    var candidate = try builder.analyser.lookupSymbolGlobal(
+                        handle,
+                        name,
+                        tree.tokenStart(name_token),
+                    ) orelse continue;
+
+                    if (builder.resolve_aliases) {
+                        candidate = try builder.analyser.resolveVarDeclAlias(candidate) orelse candidate;
+                    }
+                    if (builder.target_symbol.eql(candidate)) {
+                        try builder.add(handle, name_token);
+                    }
+                }
+                return;
+            },
             .global_var_decl,
             .local_var_decl,
             .aligned_var_decl,
