@@ -160,7 +160,7 @@ fn collectWarnStyleDiagnostics(
     defer tracy_zone.end();
 
     for (0..tree.nodes.len) |i| {
-        const node: Ast.Node.Index = @enumFromInt(i);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
         if (ast.isBuiltinCall(tree, node)) {
             const builtin_token = tree.nodeMainToken(node);
             const call_name = tree.tokenSlice(builtin_token);

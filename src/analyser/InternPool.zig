@@ -664,7 +664,7 @@ pub const Index = enum(u32) {
             assert(index < slice.len);
             ip.lock.lockSharedUncancelable(ip.io);
             defer ip.lock.unlockShared(ip.io);
-            return @enumFromInt(ip.extra.items[slice.start + index]);
+            return @fromBackingInt(ip.extra.items[slice.start + index]);
         }
 
         pub fn dupe(slice: Slice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]Index {
@@ -703,9 +703,9 @@ pub const Index = enum(u32) {
 
 // comptime {
 //     const Zir = @import("../stage2/Zir.zig");
-//     assert(@intFromEnum(Zir.Inst.Ref.generic_poison_type) == @intFromEnum(Index.generic_poison_type));
-//     assert(@intFromEnum(Zir.Inst.Ref.undef) == @intFromEnum(Index.undefined_value));
-//     assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
+//     assert(@backingInt(Zir.Inst.Ref.generic_poison_type) == @backingInt(Index.generic_poison_type));
+//     assert(@backingInt(Zir.Inst.Ref.undef) == @backingInt(Index.undefined_value));
+//     assert(@backingInt(Zir.Inst.Ref.one_usize) == @backingInt(Index.one_usize));
 // }
 
 pub const StringSlice = struct {
@@ -722,7 +722,7 @@ pub const StringSlice = struct {
         assert(index < slice.len);
         ip.lock.lockSharedUncancelable(ip.io);
         defer ip.lock.unlockShared(ip.io);
-        return @enumFromInt(ip.extra.items[slice.start + index]);
+        return @fromBackingInt(ip.extra.items[slice.start + index]);
     }
 
     pub fn dupe(slice: StringSlice, allocator: Allocator, ip: *InternPool) error{OutOfMemory}![]String {
@@ -961,7 +961,7 @@ pub const Decl = struct {
         _,
 
         pub fn toOptional(i: Decl.Index) OptionalIndex {
-            return @enumFromInt(@intFromEnum(i));
+            return @fromBackingInt(@backingInt(i));
         }
     };
 
@@ -975,7 +975,7 @@ pub const Decl = struct {
 
         pub fn unwrap(oi: OptionalIndex) ?Decl.Index {
             if (oi == .none) return null;
-            return @enumFromInt(@intFromEnum(oi));
+            return @fromBackingInt(@backingInt(oi));
         }
     };
 };
@@ -1152,7 +1152,7 @@ pub fn init(io: std.Io, gpa: Allocator) Allocator.Error!InternPool {
     }
 
     for (items, 0..) |item, i| {
-        assert(@intFromEnum(item.index) == i);
+        assert(@backingInt(item.index) == i);
         assert(item.index == ip.get(item.key) catch unreachable);
     }
 
@@ -1195,27 +1195,27 @@ pub fn indexToKey(ip: *InternPool, index: Index) Key {
 
 fn indexToKeyNoLock(ip: *const InternPool, index: Index) Key {
     assert(index != .none);
-    const item = ip.items.get(@intFromEnum(index));
+    const item = ip.items.get(@backingInt(index));
     const data = item.data;
     return switch (item.tag) {
-        .simple_type => .{ .simple_type = @enumFromInt(data) },
-        .simple_value => .{ .simple_value = @enumFromInt(data) },
+        .simple_type => .{ .simple_type = @fromBackingInt(data) },
+        .simple_value => .{ .simple_value = @fromBackingInt(data) },
 
         .type_int_signed => .{ .int_type = .{ .signedness = .signed, .bits = @intCast(data) } },
         .type_int_unsigned => .{ .int_type = .{ .signedness = .unsigned, .bits = @intCast(data) } },
         .type_pointer => .{ .pointer_type = ip.extraData(Key.Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Key.Array, data) },
-        .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(data) } },
-        .type_anyframe => .{ .anyframe_type = .{ .child = @enumFromInt(data) } },
+        .type_optional => .{ .optional_type = .{ .payload_type = @fromBackingInt(data) } },
+        .type_anyframe => .{ .anyframe_type = .{ .child = @fromBackingInt(data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(Key.ErrorUnion, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(Key.ErrorSet, data) },
         .type_function => .{ .function_type = ip.extraData(Key.Function, data) },
         .type_tuple => .{ .tuple_type = ip.extraData(Key.Tuple, data) },
         .type_vector => .{ .vector_type = ip.extraData(Key.Vector, data) },
 
-        .type_struct => .{ .struct_type = @enumFromInt(data) },
-        .type_enum => .{ .enum_type = @enumFromInt(data) },
-        .type_union => .{ .union_type = @enumFromInt(data) },
+        .type_struct => .{ .struct_type = @fromBackingInt(data) },
+        .type_enum => .{ .enum_type = @fromBackingInt(data) },
+        .type_union => .{ .union_type = @fromBackingInt(data) },
 
         .int_u64 => .{ .int_u64_value = ip.extraData(Key.U64Value, data) },
         .int_i64 => .{ .int_i64_value = ip.extraData(Key.I64Value, data) },
@@ -1245,9 +1245,9 @@ fn indexToKeyNoLock(ip: *const InternPool, index: Index) Key {
         .aggregate_value => .{ .aggregate = ip.extraData(Key.Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(Key.UnionValue, data) },
         .error_value => .{ .error_value = ip.extraData(Key.ErrorValue, data) },
-        .null_value => .{ .null_value = .{ .ty = @enumFromInt(data) } },
-        .undefined_value => .{ .undefined_value = .{ .ty = @enumFromInt(data) } },
-        .unknown_value => .{ .unknown_value = .{ .ty = @enumFromInt(data) } },
+        .null_value => .{ .null_value = .{ .ty = @fromBackingInt(data) } },
+        .undefined_value => .{ .undefined_value = .{ .ty = @fromBackingInt(data) } },
+        .unknown_value => .{ .unknown_value = .{ .ty = @fromBackingInt(data) } },
     };
 }
 
@@ -1262,23 +1262,23 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         defer ip.lock.unlockShared(ip.io);
 
         const index = ip.map.getIndexAdapted(key, adapter) orelse break :not_found;
-        return @enumFromInt(index);
+        return @fromBackingInt(@intCast(index));
     }
 
     ip.lock.lockUncancelable(ip.io);
     defer ip.lock.unlock(ip.io);
 
     const gop = try ip.map.getOrPutAdapted(ip.gpa, key, adapter);
-    if (gop.found_existing) return @enumFromInt(gop.index);
+    if (gop.found_existing) return @fromBackingInt(@intCast(gop.index));
 
     const item: Item = switch (key) {
         .simple_type => |simple| .{
             .tag = .simple_type,
-            .data = @intFromEnum(simple),
+            .data = @backingInt(simple),
         },
         .simple_value => |simple| .{
             .tag = .simple_value,
-            .data = @intFromEnum(simple),
+            .data = @backingInt(simple),
         },
         .int_type => |int_ty| switch (int_ty.signedness) {
             .signed => .{ .tag = .type_int_signed, .data = int_ty.bits },
@@ -1294,11 +1294,11 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         },
         .struct_type => |struct_index| .{
             .tag = .type_struct,
-            .data = @intFromEnum(struct_index),
+            .data = @backingInt(struct_index),
         },
         .optional_type => |optional_ty| .{
             .tag = .type_optional,
-            .data = @intFromEnum(optional_ty.payload_type),
+            .data = @backingInt(optional_ty.payload_type),
         },
         .error_union_type => |error_union_ty| .{
             .tag = .type_error_union,
@@ -1310,7 +1310,7 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         },
         .enum_type => |enum_index| .{
             .tag = .type_enum,
-            .data = @intFromEnum(enum_index),
+            .data = @backingInt(enum_index),
         },
         .function_type => |function_ty| .{
             .tag = .type_function,
@@ -1318,7 +1318,7 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         },
         .union_type => |union_index| .{
             .tag = .type_union,
-            .data = @intFromEnum(union_index),
+            .data = @backingInt(union_index),
         },
         .tuple_type => |tuple_ty| .{
             .tag = .type_tuple,
@@ -1330,7 +1330,7 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         },
         .anyframe_type => |anyframe_ty| .{
             .tag = .type_anyframe,
-            .data = @intFromEnum(anyframe_ty.child),
+            .data = @backingInt(anyframe_ty.child),
         },
 
         .int_u64_value => |int_val| .{
@@ -1398,23 +1398,23 @@ pub fn get(ip: *InternPool, key: Key) Allocator.Error!Index {
         },
         .null_value => |null_val| .{
             .tag = .null_value,
-            .data = @intFromEnum(null_val.ty),
+            .data = @backingInt(null_val.ty),
         },
         .undefined_value => |undefined_val| .{
             .tag = .undefined_value,
-            .data = @intFromEnum(undefined_val.ty),
+            .data = @backingInt(undefined_val.ty),
         },
         .unknown_value => |unknown_val| blk: {
             assert(unknown_val.ty != .type_type); // use .unknown_type instead
             break :blk .{
                 .tag = .unknown_value,
-                .data = @intFromEnum(unknown_val.ty),
+                .data = @backingInt(unknown_val.ty),
             };
         },
     };
 
     try ip.items.append(ip.gpa, item);
-    return @enumFromInt(ip.items.len - 1);
+    return @fromBackingInt(@intCast(ip.items.len - 1));
 }
 
 pub fn contains(ip: *InternPool, key: Key) ?Index {
@@ -1425,7 +1425,7 @@ pub fn contains(ip: *InternPool, key: Key) ?Index {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
-    return @enumFromInt(index);
+    return @fromBackingInt(@intCast(index));
 }
 
 pub fn getIndexSlice(ip: *InternPool, data: []const Index) error{OutOfMemory}!Index.Slice {
@@ -1473,67 +1473,67 @@ fn getLimbSlice(ip: *InternPool, data: []const std.math.big.Limb) error{OutOfMem
 pub fn getDecl(ip: *InternPool, index: InternPool.Decl.Index) *const InternPool.Decl {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.decls.at(@intFromEnum(index));
+    return ip.decls.at(@backingInt(index));
 }
 pub fn getDeclMut(ip: *InternPool, index: InternPool.Decl.Index) *InternPool.Decl {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.decls.at(@intFromEnum(index));
+    return ip.decls.at(@backingInt(index));
 }
 pub fn getStruct(ip: *InternPool, index: Struct.Index) *const Struct {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.structs.at(@intFromEnum(index));
+    return ip.structs.at(@backingInt(index));
 }
 pub fn getStructMut(ip: *InternPool, index: Struct.Index) *Struct {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.structs.at(@intFromEnum(index));
+    return ip.structs.at(@backingInt(index));
 }
 pub fn getEnum(ip: *InternPool, index: Enum.Index) *const Enum {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.enums.at(@intFromEnum(index));
+    return ip.enums.at(@backingInt(index));
 }
 pub fn getEnumMut(ip: *InternPool, index: Enum.Index) *Enum {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.enums.at(@intFromEnum(index));
+    return ip.enums.at(@backingInt(index));
 }
 pub fn getUnion(ip: *InternPool, index: Union.Index) *const Union {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.unions.at(@intFromEnum(index));
+    return ip.unions.at(@backingInt(index));
 }
 pub fn getUnionMut(ip: *InternPool, index: Union.Index) *Union {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return ip.unions.at(@intFromEnum(index));
+    return ip.unions.at(@backingInt(index));
 }
 
 pub fn createDecl(ip: *InternPool, decl: Decl) Allocator.Error!Decl.Index {
     ip.lock.lockUncancelable(ip.io);
     defer ip.lock.unlock(ip.io);
     try ip.decls.append(ip.gpa, decl);
-    return @enumFromInt(ip.decls.count() - 1);
+    return @fromBackingInt(@intCast(ip.decls.count() - 1));
 }
 pub fn createStruct(ip: *InternPool, struct_info: Struct) Allocator.Error!Struct.Index {
     ip.lock.lockUncancelable(ip.io);
     defer ip.lock.unlock(ip.io);
     try ip.structs.append(ip.gpa, struct_info);
-    return @enumFromInt(ip.structs.count() - 1);
+    return @fromBackingInt(@intCast(ip.structs.count() - 1));
 }
 pub fn createEnum(ip: *InternPool, enum_info: Enum) Allocator.Error!Enum.Index {
     ip.lock.lockUncancelable(ip.io);
     defer ip.lock.unlock(ip.io);
     try ip.enums.append(ip.gpa, enum_info);
-    return @enumFromInt(ip.enums.count() - 1);
+    return @fromBackingInt(@intCast(ip.enums.count() - 1));
 }
 pub fn createUnion(ip: *InternPool, union_info: Union) Allocator.Error!Union.Index {
     ip.lock.lockUncancelable(ip.io);
     defer ip.lock.unlock(ip.io);
     try ip.unions.append(ip.gpa, union_info);
-    return @enumFromInt(ip.unions.count() - 1);
+    return @fromBackingInt(@intCast(ip.unions.count() - 1));
 }
 
 fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
@@ -1555,7 +1555,7 @@ fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
             StringPool.String,
             StringPool.OptionalString,
             std.lang.Type.Pointer.Size,
-            => ip.extra.appendAssumeCapacity(@intFromEnum(item)),
+            => ip.extra.appendAssumeCapacity(@backingInt(item)),
 
             u32,
             i32,
@@ -1595,7 +1595,7 @@ fn extraData(ip: *const InternPool, comptime T: type, index: u32) T {
             std.lang.Type.Pointer.Size,
             // std.lang.AddressSpace,
             // std.lang.CallingConvention,
-            => @enumFromInt(item),
+            => @fromBackingInt(item),
 
             u32,
             i32,
@@ -1633,7 +1633,7 @@ const KeyAdapter = struct {
 
     pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
         _ = b_void;
-        return a.eqlNoLock(ctx.ip.indexToKeyNoLock(@enumFromInt(b_map_index)), ctx.ip);
+        return a.eqlNoLock(ctx.ip.indexToKeyNoLock(@fromBackingInt(@intCast(b_map_index))), ctx.ip);
     }
 
     pub fn hash(ctx: @This(), a: Key) u32 {
@@ -2962,8 +2962,8 @@ fn panicOrElse(comptime T: type, message: []const u8, value: T) T {
 pub fn zigTypeTag(ip: *InternPool, index: Index) ?std.lang.TypeId {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
-        .simple_type => switch (@as(SimpleType, @enumFromInt(ip.items.items(.data)[@intFromEnum(index)]))) {
+    return switch (ip.items.items(.tag)[@backingInt(index)]) {
+        .simple_type => switch (@as(SimpleType, @fromBackingInt(ip.items.items(.data)[@backingInt(index)]))) {
             .f16,
             .f32,
             .f64,
@@ -3055,9 +3055,9 @@ pub fn zigTypeTag(ip: *InternPool, index: Index) ?std.lang.TypeId {
 pub fn typeOf(ip: *InternPool, index: Index) Index {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    const data = ip.items.items(.data)[@intFromEnum(index)];
-    return switch (ip.items.items(.tag)[@intFromEnum(index)]) {
-        .simple_value => switch (@as(SimpleValue, @enumFromInt(data))) {
+    const data = ip.items.items(.data)[@backingInt(index)];
+    return switch (ip.items.items(.tag)[@backingInt(index)]) {
+        .simple_value => switch (@as(SimpleValue, @fromBackingInt(data))) {
             .undefined_value => .undefined_type,
             .void_value => .void_type,
             .unreachable_value => .noreturn_type,
@@ -3101,20 +3101,20 @@ pub fn typeOf(ip: *InternPool, index: Index) Index {
         .aggregate_value,
         .union_value,
         .error_value,
-        => @enumFromInt(ip.extra.items[ip.items.items(.data)[@intFromEnum(index)]]),
+        => @fromBackingInt(ip.extra.items[ip.items.items(.data)[@backingInt(index)]]),
 
         // the type is the `data` field
         .null_value,
         .undefined_value,
         .unknown_value,
-        => @enumFromInt(ip.items.items(.data)[@intFromEnum(index)]),
+        => @fromBackingInt(ip.items.items(.data)[@backingInt(index)]),
     };
 }
 
 pub fn isType(ip: *InternPool, ty: Index) bool {
     ip.lock.lockSharedUncancelable(ip.io);
     defer ip.lock.unlockShared(ip.io);
-    return switch (ip.items.items(.tag)[@intFromEnum(ty)]) {
+    return switch (ip.items.items(.tag)[@backingInt(ty)]) {
         .simple_type,
         .type_int_signed,
         .type_int_unsigned,
@@ -3151,7 +3151,7 @@ pub fn isType(ip: *InternPool, ty: Index) bool {
         .null_value,
         .undefined_value,
         => false,
-        .unknown_value => .unknown_type == @as(Index, @enumFromInt(ip.items.items(.data)[@intFromEnum(ty)])),
+        .unknown_value => .unknown_type == @as(Index, @fromBackingInt(ip.items.items(.data)[@backingInt(ty)])),
     };
 }
 
@@ -3161,7 +3161,7 @@ pub fn isUndefined(ip: *InternPool, index: Index) bool {
         else => {
             ip.lock.lockSharedUncancelable(ip.io);
             defer ip.lock.unlockShared(ip.io);
-            return ip.items.items(.tag)[@intFromEnum(index)] == .undefined_value;
+            return ip.items.items(.tag)[@backingInt(index)] == .undefined_value;
         },
     }
 }
@@ -3172,7 +3172,7 @@ pub fn isUnknown(ip: *InternPool, index: Index) bool {
         else => {
             ip.lock.lockSharedUncancelable(ip.io);
             defer ip.lock.unlockShared(ip.io);
-            return ip.items.items(.tag)[@intFromEnum(index)] == .unknown_value;
+            return ip.items.items(.tag)[@backingInt(index)] == .unknown_value;
         },
     }
 }
@@ -4895,10 +4895,10 @@ test "test thread safety of InternPool" {
             // insert float_32_value from 0 to count + random work
             for (0..count) |i| {
                 _ = intern_pool.get(.{ .float_32_value = @floatFromInt(i) }) catch @panic("OOM");
-                _ = intern_pool.indexToKey(@enumFromInt(i));
+                _ = intern_pool.indexToKey(@fromBackingInt(@intCast(i)));
             }
             for (0..count) |i| {
-                _ = intern_pool.indexToKey(@enumFromInt(i));
+                _ = intern_pool.indexToKey(@fromBackingInt(@intCast(i)));
             }
         }
     };
@@ -4923,7 +4923,7 @@ test "test thread safety of InternPool" {
 
     // test that every Index stores a unique float_32_value
     for (0..size) |i| {
-        const index: Index = @enumFromInt(index_start + i);
+        const index: Index = @fromBackingInt(@intCast(index_start + i));
         const key = ip.indexToKey(index);
         const value: usize = @intFromFloat(key.float_32_value);
         try std.testing.expect(value < size);

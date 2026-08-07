@@ -227,7 +227,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, enc
     }
 
     for (0..tree.nodes.len) |i| {
-        const node: Ast.Node.Index = @enumFromInt(i);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
 
         switch (tree.nodeTag(node)) {
             .root => continue,

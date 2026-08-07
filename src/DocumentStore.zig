@@ -480,7 +480,7 @@ pub const Handle = struct {
 
         const node_tags = tree.nodes.items(.tag);
         for (node_tags, 0..) |tag, i| {
-            const node: Ast.Node.Index = @enumFromInt(i);
+            const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
 
             switch (tag) {
                 .builtin_call,

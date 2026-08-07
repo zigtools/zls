@@ -1888,19 +1888,19 @@ fn processMessageReportError(server: *Server, arena_state: std.heap.ArenaAllocat
         switch (message) {
             .request => |request| {
                 const json_message = server.sendToClientResponseError(request.id, .{
-                    .code = @enumFromInt(switch (err) {
+                    .code = @fromBackingInt(switch (err) {
                         error.Canceled => unreachable, // checked above
-                        error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
-                        error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
-                        error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
-                        error.MethodNotFound => @intFromEnum(types.ErrorCodes.MethodNotFound),
-                        error.InvalidParams => @intFromEnum(types.ErrorCodes.InvalidParams),
-                        error.InternalError => @intFromEnum(types.ErrorCodes.InternalError),
-                        error.ServerNotInitialized => @intFromEnum(types.ErrorCodes.ServerNotInitialized),
-                        error.RequestFailed => @intFromEnum(types.LSPErrorCodes.RequestFailed),
-                        error.ServerCancelled => @intFromEnum(types.LSPErrorCodes.ServerCancelled),
-                        error.ContentModified => @intFromEnum(types.LSPErrorCodes.ContentModified),
-                        error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
+                        error.OutOfMemory => @backingInt(types.ErrorCodes.InternalError),
+                        error.ParseError => @backingInt(types.ErrorCodes.ParseError),
+                        error.InvalidRequest => @backingInt(types.ErrorCodes.InvalidRequest),
+                        error.MethodNotFound => @backingInt(types.ErrorCodes.MethodNotFound),
+                        error.InvalidParams => @backingInt(types.ErrorCodes.InvalidParams),
+                        error.InternalError => @backingInt(types.ErrorCodes.InternalError),
+                        error.ServerNotInitialized => @backingInt(types.ErrorCodes.ServerNotInitialized),
+                        error.RequestFailed => @backingInt(types.LSPErrorCodes.RequestFailed),
+                        error.ServerCancelled => @backingInt(types.LSPErrorCodes.ServerCancelled),
+                        error.ContentModified => @backingInt(types.LSPErrorCodes.ContentModified),
+                        error.RequestCancelled => @backingInt(types.LSPErrorCodes.RequestCancelled),
                     }),
                     .message = @errorName(err),
                 }) catch |send_err| switch (send_err) {

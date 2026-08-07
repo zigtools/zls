@@ -201,7 +201,7 @@ const Builder = struct {
             delta.line,
             delta.character,
             @intCast(length),
-            @intFromEnum(token_type),
+            @backingInt(token_type),
             @as(u16, @bitCast(token_modifiers)),
         });
         self.previous_source_index = loc.start;

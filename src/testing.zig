@@ -35,7 +35,7 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
     if (builtin.mode != .Debug) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
-        const scope_index: DocumentScope.Scope.Index = @enumFromInt(index);
+        const scope_index: DocumentScope.Scope.Index = @fromBackingInt(@intCast(index));
         const scope = doc_scope.scopes.get(index);
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
@@ -57,8 +57,8 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
 
         for (doc_scope.getScopeDeclarationsConst(scope_index)) |decl| {
             std.debug.print("    - {s:<8} {}\n", .{
-                doc_scope.declaration_lookup_map.keys()[@intFromEnum(decl)].name,
-                doc_scope.declarations.get(@intFromEnum(decl)),
+                doc_scope.declaration_lookup_map.keys()[@backingInt(decl)].name,
+                doc_scope.declarations.get(@backingInt(decl)),
             });
         }
     }

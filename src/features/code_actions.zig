@@ -736,7 +736,7 @@ pub const ImportDecl = struct {
     pub fn lessThan(context: *const Ast, lhs: ImportDecl, rhs: ImportDecl) bool {
         const lhs_kind = lhs.getKind();
         const rhs_kind = rhs.getKind();
-        if (lhs_kind != rhs_kind) return @intFromEnum(lhs_kind) < @intFromEnum(rhs_kind);
+        if (lhs_kind != rhs_kind) return @backingInt(lhs_kind) < @backingInt(rhs_kind);
 
         if (sort_public_decls_first) {
             const node_tokens = context.nodes.items(.main_token);
@@ -801,9 +801,9 @@ pub const ImportDecl = struct {
     /// returns true if there should be an empty line between these two imports
     /// assumes `lessThan(void, lhs, rhs) == true`
     pub fn addSeperator(lhs: ImportDecl, rhs: ImportDecl) bool {
-        const lhs_kind = @intFromEnum(lhs.getKind());
-        const rhs_kind = @intFromEnum(rhs.getKind());
-        if (rhs_kind <= @intFromEnum(Kind.build_options)) return false;
+        const lhs_kind = @backingInt(lhs.getKind());
+        const rhs_kind = @backingInt(rhs.getKind());
+        if (rhs_kind <= @backingInt(Kind.build_options)) return false;
         return lhs_kind != rhs_kind;
     }
 
@@ -903,7 +903,7 @@ pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{Ou
                             .kind = .other,
                         }).unwrap() orelse continue :next_decl;
 
-                        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+                        const decl = document_scope.declarations.get(@backingInt(decl_index));
 
                         if (decl != .ast_node) continue :next_decl;
                         const decl_found = decl.ast_node;

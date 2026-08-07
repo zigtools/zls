@@ -75,7 +75,7 @@ fn logFn(
         };
     }
 
-    if (@intFromEnum(level) > @intFromEnum(log_level)) return;
+    if (@backingInt(level) > @backingInt(log_level)) return;
     if (!log_stderr and log_file == null) return;
 
     const level_txt: []const u8 = switch (level) {

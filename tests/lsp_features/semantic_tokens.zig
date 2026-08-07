@@ -2135,7 +2135,7 @@ const TokenIterator = struct {
         const delta_line = token_data[0];
         const delta_start = token_data[1];
         const length = token_data[2];
-        const token_type: zls.semantic_tokens.TokenType = @enumFromInt(token_data[3]);
+        const token_type: zls.semantic_tokens.TokenType = @fromBackingInt(token_data[3]);
         const token_modifiers: zls.semantic_tokens.TokenModifiers = @bitCast(@as(u16, @intCast(token_data[4])));
 
         self.position.line += delta_line;

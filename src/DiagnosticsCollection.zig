@@ -551,8 +551,8 @@ test DiagnosticsCollection {
     }
 
     {
-        try collection.pushErrorBundle(@enumFromInt(16), 4, null, eb2);
-        try collection.pushErrorBundle(@enumFromInt(17), 4, null, eb3);
+        try collection.pushErrorBundle(@fromBackingInt(16), 4, null, eb2);
+        try collection.pushErrorBundle(@fromBackingInt(17), 4, null, eb3);
 
         var diagnostics: std.ArrayList(lsp.types.Diagnostic) = .empty;
         try collection.collectLspDiagnosticsForDocument(uri, .@"utf-8", arena, &diagnostics);

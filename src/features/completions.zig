@@ -1490,7 +1490,7 @@ fn collectContainerFields(
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
 
     for (scope_decls) |decl_index| {
-        const decl = document_scope.declarations.get(@intFromEnum(decl_index));
+        const decl = document_scope.declarations.get(@backingInt(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
         const maybe_resolved_ty = type_maybe orelse try decl_handle.resolveType(builder.analyser);
