@@ -15,7 +15,6 @@ const offsets = @import("../offsets.zig");
 const Uri = @import("../Uri.zig");
 const code_actions = @import("code_actions.zig");
 const tracy = @import("tracy");
-const DiagnosticsCollection = @import("../DiagnosticsCollection.zig");
 
 const Zir = std.zig.Zir;
 

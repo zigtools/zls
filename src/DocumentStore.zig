@@ -13,8 +13,7 @@ const tracy = @import("tracy");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const TrigramStore = @import("TrigramStore.zig");
-
-const BuildConfig = @compileError("https://github.com/zigtools/zls/issues/3208");
+const bsp = @import("bsp.zig");
 
 const DocumentStore = @This();
 
@@ -61,11 +60,7 @@ pub const BuildFile = struct {
         mutex: std.Io.Mutex = .init,
         build_runner_state: BuildRunnerState = .idle,
         version: u32 = 0,
-        /// contains information extracted from running build.zig with a custom build runner
-        /// e.g. include paths & packages
-        /// TODO this field should not be nullable, callsites should await the build config to be resolved
-        /// and then continue instead of dealing with missing information.
-        config: ?std.json.Parsed(BuildConfig) = null,
+        config: ?std.json.Parsed(bsp.BuildConfig) = null,
     } = .{},
 
     const BuildRunnerState = enum {
@@ -74,7 +69,7 @@ pub const BuildFile = struct {
         running_but_already_invalidated,
     };
 
-    pub fn tryLockConfig(self: *BuildFile, io: std.Io) ?BuildConfig {
+    pub fn tryLockConfig(self: *BuildFile, io: std.Io) ?bsp.BuildConfig {
         self.impl.mutex.lockUncancelable(io);
         return if (self.impl.config) |cfg| cfg.value else {
             self.impl.mutex.unlock(io);
@@ -1171,11 +1166,19 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
         build_file.impl.version += 1;
         const new_version = build_file.impl.version;
 
-        const loadBuildConfiguration = if (true) @compileError("https://github.com/zigtools/zls/issues/3208");
-        const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| switch (err) {
+        var build_config = bsp.loadBuildConfiguration(
+            self.io,
+            self.allocator,
+            self.config.environ_map,
+            self.config.zig_exe_path.?,
+            self.config.zig_lib_dir.?,
+            self.diagnostics_collection,
+            build_file.uri,
+            new_version,
+        ) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             else => |e| {
-                if (e != error.RunFailed) { // already logged
+                if (e != error.AlreadyReported) {
                     log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri.raw, e });
                 }
                 self.notifyBuildEnd(.failed);
