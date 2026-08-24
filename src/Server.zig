@@ -833,6 +833,15 @@ const Workspace = struct {
         };
         defer args.server.allocator.free(workspace_path);
 
+        const build_file_path = try std.Io.Dir.path.resolve(args.server.allocator, &.{ workspace_path, "build.zig" });
+        defer args.server.allocator.free(build_file_path);
+        const build_file_uri: Uri = try .fromPath(args.server.allocator, build_file_path);
+        defer build_file_uri.deinit(args.server.allocator);
+
+        // Avoid spawning `zig build` for a regular module named `build.zig`.
+        const build_file_handle = try args.server.document_store.getOrLoadHandle(build_file_uri) orelse return;
+        if (!DocumentStore.isBuildScript(&build_file_handle.tree)) return;
+
         std.debug.assert(workspace.build_on_save == null);
         workspace.build_on_save = BuildOnSave.init(.{
             .io = args.server.io,
