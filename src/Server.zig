@@ -833,8 +833,11 @@ const Workspace = struct {
         };
         defer args.server.allocator.free(workspace_path);
 
+        // Build-on-save is scoped to the workspace root, so check its candidate `build.zig`.
         const build_file_path = try std.Io.Dir.path.resolve(args.server.allocator, &.{ workspace_path, "build.zig" });
         defer args.server.allocator.free(build_file_path);
+
+        // DocumentStore works with URIs, so convert the path before reading and classifying it.
         const build_file_uri: Uri = try .fromPath(args.server.allocator, build_file_path);
         defer build_file_uri.deinit(args.server.allocator);
 

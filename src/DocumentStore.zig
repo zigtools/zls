@@ -773,8 +773,10 @@ fn getOrLoadBuildFile(
     // A filename alone is not sufficient because ordinary modules may be named `build.zig`.
     if (source_handle) |handle| std.debug.assert(handle.uri.eql(uri));
 
+    // Reuse a build file that was already classified and loaded.
     if (self.getBuildFile(uri)) |build_file| return build_file;
 
+    // Classify the current source before treating its `build.zig` filename as a build script.
     const handle = source_handle orelse (try self.getOrLoadHandle(uri) orelse return null);
     if (!isBuildScript(&handle.tree)) return null;
 
@@ -1271,6 +1273,7 @@ pub fn isBuildScript(tree: *const Ast) bool {
     return false;
 }
 
+// A module may be named `build.zig` without exposing the `zig build` entry point.
 test isBuildScript {
     var build_script = try Ast.parse(std.testing.allocator,
         \\const std = @import("std");
@@ -1507,6 +1510,7 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, O
         const build_file_uri: Uri = try .fromPath(self.allocator, build_path);
         defer build_file_uri.deinit(self.allocator);
 
+        // A module named `build.zig` cannot provide build configuration without the public entry point.
         const build_file = try self.getOrLoadBuildFile(build_file_uri, null) orelse continue;
         potential_build_files.appendAssumeCapacity(build_file);
     }
@@ -1663,6 +1667,7 @@ fn createAndStoreDocument(
     };
     old_handle.deinit(store.allocator);
 
+    // Only activate build integration after the refreshed document is known to be a build script.
     if (supports_build_system and options.lsp_synced and isBuildFile(uri) and !isInStd(uri) and isBuildScript(&handle_future.handle.tree)) {
         switch (options.load_build_file_behaviour) {
             .load_but_dont_update => {
