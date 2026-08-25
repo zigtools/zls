@@ -302,6 +302,77 @@ pub const Handle = struct {
             }
         }
 
+        log.warn("could not find build config for '{s}', trying path-based fallback", .{self.uri.raw});
+
+        // Find build file that shares most of its path with this file
+        // Is this fool-proof? No, absolutely not.
+        // But it works for my purposes!
+        const best_build_file = build_file: {
+            var best_score: usize = 0;
+            var best_rem: usize = 0;
+            var best_result: ?*BuildFile = null;
+
+            var build_file_iter = document_store.build_files.iterator();
+            while (build_file_iter.next()) |entry| {
+                const build_file = entry.value_ptr.*;
+                const score = std.mem.findDiff(u8, build_file.uri.raw, self.uri.raw) orelse continue;
+                const rem = build_file.uri.raw.len - score;
+                if (score > best_score or (score == best_score and rem < best_rem)) {
+                    best_score = score;
+                    best_rem = rem;
+                    best_result = build_file;
+                }
+            }
+
+            break :build_file best_result;
+        };
+
+        // If we found a build file, try to use that, and find the root source file
+        if (best_build_file) |build_file| {
+            const allocator = document_store.allocator;
+            const io = document_store.io;
+
+            var arena_allocator: std.heap.ArenaAllocator = .init(allocator);
+            const arena = arena_allocator.allocator();
+            defer arena_allocator.deinit();
+
+            const build_config = build_file.tryLockConfig(io) orelse return .unresolved;
+            defer build_file.unlockConfig(io);
+
+            // Find most likely root module, once again based on path similarity
+            const best_root_path = best_path: {
+                var best_score: usize = 0;
+                var best_rem: usize = 0;
+                var best_root_path: ?[]const u8 = null;
+                for (build_config.modules.map.keys()) |root_module_path| {
+                    const root_module_uri = try Uri.fromPath(arena, root_module_path);
+                    defer root_module_uri.deinit(arena);
+
+                    const score = std.mem.findDiff(u8, root_module_uri.raw, self.uri.raw) orelse continue;
+                    const rem = root_module_uri.raw.len - score;
+                    if (score > best_score or (score == best_score and rem < best_rem)) {
+                        best_score = score;
+                        best_rem = rem;
+                        best_root_path = root_module_path;
+                    }
+                }
+
+                break :best_path best_root_path;
+            };
+
+            // Yaaay, we found the most likely (based on path similarity) root file, use that!
+            if (best_root_path) |root_path| {
+                self.impl.associated_build_file.deinit(document_store.allocator);
+                self.impl.associated_build_file = .{
+                    .resolved = .{
+                        .build_file = build_file,
+                        .root_source_file = try document_store.allocator.dupe(u8, root_path),
+                    },
+                };
+                return .{ .resolved = self.impl.associated_build_file.resolved };
+            }
+        }
+
         if (has_missing_build_config) {
             // when build configs are missing we keep the state at .unresolved so that
             // future calls will retry until all build config are resolved.
