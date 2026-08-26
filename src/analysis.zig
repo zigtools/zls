@@ -459,10 +459,14 @@ pub fn firstParamIs(
     if (!resolved_type.is_type_val) return false;
     if (resolved_type.data == .anytype_parameter) return true;
 
-    const deref_type = switch (resolved_type.data) {
+    const deref_type = deref: switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {
             .one => info.elem_ty.*,
             .many, .slice, .c => return false,
+        },
+        .optional => |opt| switch (opt.data) {
+            .pointer => continue :deref opt.data,
+            else => opt.*,
         },
         else => resolved_type,
     };

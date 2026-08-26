@@ -1377,6 +1377,22 @@ test "struct" {
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
         .{ .label = "beta", .kind = .Field, .detail = "[]const u8" },
     });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    fn foo(self: S) void {
+        \\        self.<cursor>
+        \\    }
+        \\    fn optPtr(_: ?*S) void {}
+        \\    fn optValue(_: ?S) void {}
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+        .{ .label = "foo", .kind = .Method, .detail = "fn (self: S) void" },
+        .{ .label = "optPtr", .kind = .Method, .detail = "fn (_: ?*S) void" },
+        .{ .label = "optValue", .kind = .Method, .detail = "fn (_: ?S) void" },
+    });
 }
 
 test "union" {
