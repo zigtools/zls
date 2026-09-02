@@ -387,6 +387,39 @@ test "inferred struct init" {
         \\
         \\Go to [S](untitled:///Untitled-0.zig#L1)
     );
+    try testHover(
+        \\const S = struct { a: u32 };
+        \\var t: ?*const S = &.{ .a<cursor> = 5 };
+    ,
+        \\```zig
+        \\a: u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+    );
+    try testHover(
+        \\var t: ?*const struct { a: u32 } = &.{ .a<cursor> = 5 };
+    ,
+        \\```zig
+        \\a: u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+    );
+    try testHover(
+        \\const S = struct { a: u32 };
+        \\var t: ?*const S = undefined;
+        \\fn f(_: S) void { t = &.{ .a<cursor> = 5 }; }
+    ,
+        \\```zig
+        \\a: u32
+        \\```
+        \\```zig
+        \\(u32)
+        \\```
+    );
 }
 
 test "decl literal" {
