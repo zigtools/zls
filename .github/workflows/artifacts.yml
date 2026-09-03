@@ -11,7 +11,9 @@ on:
 
 jobs:
   deploy:
-    if: github.repository_owner == 'zigtools'
+    # https://github.com/zigtools/zls/issues/3208
+    if: false
+    # if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
