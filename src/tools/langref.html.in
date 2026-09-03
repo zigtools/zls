@@ -315,7 +315,7 @@
           <a href="https://ziglang.org/documentation/0.9.1/">0.9.1</a> |
           <a href="https://ziglang.org/documentation/0.10.1/">0.10.1</a> |
           <a href="https://ziglang.org/documentation/0.11.0/">0.11.0</a> |
-          <a href="https://ziglang.org/documentation/0.12.0/">0.12.0</a> |
+          <a href="https://ziglang.org/documentation/0.12.1/">0.12.1</a> |
           <a href="https://ziglang.org/documentation/0.13.0/">0.13.0</a> |
           <a href="https://ziglang.org/documentation/0.14.1/">0.14.1</a> |
           <a href="https://ziglang.org/documentation/0.15.2/">0.15.2</a> |
@@ -814,7 +814,7 @@
       <p>
         A destructuring expression may only appear within a block (i.e. not at {#link|Namespace#} scope).
         The left hand side of the assignment must consist of a comma separated list,
-        each element of which may be either an lvalue (for instance, an existing `var`) or a variable declaration:
+        each element of which may be either an lvalue (for instance, an existing {#syntax#}var{#endsyntax#}) or a variable declaration:
       </p>
       {#code|destructuring_mixed.zig#}
 
@@ -1119,6 +1119,10 @@
       otherwise the optimizer figures out all the values at compile-time,
       which operates in strict mode.</p>
       {#code|float_mode_exe.zig#}
+      {#shell_samp#}$ zig build-exe float_mode_exe.zig float_mode_obj.o -O fast
+$ ./float_mode_exe
+optimized = 0.001
+strict = 0.0009765625{#end_shell_samp#}
 
       {#see_also|@setFloatMode|Division by Zero#}
       {#header_close#}
@@ -1370,7 +1374,8 @@ a /= b{#endsyntax#}</pre></td>
               <li>Can cause {#link|Division by Zero#} for floats in {#link|FloatMode.optimized Mode|Floating Point Operations#}.</li>
               <li>Signed integer operands must be comptime-known and positive. In other cases, use
                 {#link|@divTrunc#},
-                {#link|@divFloor#}, or
+                {#link|@divFloor#},
+                {#link|@divCeil#}, or
                 {#link|@divExact#} instead.
               </li>
               <li>Invokes {#link|Peer Type Resolution#} for the operands.</li>
@@ -1917,7 +1922,7 @@ or
       </p>
       <p>
       Vectors generally support the same builtin operators as their underlying base types.
-      The only exception to this is the keywords `and` and `or` on vectors of bools, since
+      The only exception to this is the keywords {#syntax#}and{#endsyntax#} and {#syntax#}or{#endsyntax#} on vectors of bools, since
       these operators affect control flow, which is not allowed for vectors.
       All other operations are performed element-wise, and return a vector of the same length
       as the input vectors. This includes:
@@ -1955,7 +1960,7 @@ or
       TODO talk about C ABI interop<br>
       TODO consider suggesting std.MultiArrayList
       </p>
-      {#see_also|@splat|@shuffle|@select|@reduce#}
+      {#see_also|@splat|@shuffle|@select|@reduce|Slicing by Length#}
 
       {#header_open|Relationship with Arrays#}
       <p>Vectors and {#link|Arrays#} each have a well-defined <strong>bit layout</strong>
@@ -2150,6 +2155,24 @@ or
 
       {#see_also|Pointers|for|Arrays#}
 
+      {#header_open|Slicing by Length#}
+      <p>Even though Zig only has syntax for slicing based on start and end indices, by slicing twice,
+      one can express a <strong>slice by length</strong> operation.</p>
+      <p>The pattern {#syntax#}[a .. a + b]{#endsyntax#} is always better expressed
+      {#syntax#}[a..][0..b]{#endsyntax#} because:</p>
+      <ul>
+        <li>Slices are represented in memory as a pointer and length. Despite
+        syntactically appearing as twice the work, it is actually one less
+        subtraction in machine code.</li>
+        <li>If {#syntax#}a{#endsyntax#} is known at runtime and
+        {#syntax#}b{#endsyntax#} is known at {#link|comptime#}, the former
+        results in a slice but the latter results in a single-item
+        {#link|pointer|Pointers#} to an {#link|array|Arrays#}, a generally more
+        safe type because the length is compile-time known.</li>
+      </ul>
+      {#code|slicing_by_length.zig#}
+      {#header_close#}
+
       {#header_open|Sentinel-Terminated Slices#}
       <p>
       The syntax {#syntax#}[:x]T{#endsyntax#} is a slice which has a runtime-known length
@@ -2252,6 +2275,7 @@ or
       This even works at {#link|comptime#}:
       </p>
       {#code|test_packed_structs.zig#}
+
       <p>
       The backing integer can be inferred or explicitly provided. When
       inferred, it will be unsigned. When explicitly provided, its bit width
@@ -2259,6 +2283,12 @@ or
       the fields:
       </p>
       {#code|test_missized_packed_struct.zig#}
+
+      <p>
+      A {#syntax#}packed struct{#endsyntax#} can be converted to and from its backing
+      integer using {#link|@backingInt#} and {#link|@fromBackingInt#}:
+      </p>
+      {#code|test_packed_struct_backing_int.zig#}
 
       <p>
       Zig allows the address to be taken of a non-byte-aligned field:
@@ -2382,7 +2412,7 @@ or
       {#header_open|enum#}
       {#code|test_enums.zig#}
 
-      {#see_also|@typeInfo|@tagName|@sizeOf#}
+      {#see_also|@backingInt|@fromBackingInt|@typeInfo|@tagName|@sizeOf|noreturn#}
 
       {#header_open|extern enum#}
       <p>
@@ -2412,9 +2442,7 @@ or
       The enum must specify a tag type and cannot consume every enumeration value.
       </p>
       <p>
-      {#link|@enumFromInt#} on a non-exhaustive enum involves the safety semantics
-      of {#link|@intCast#} to the integer tag type, but beyond that always results in
-      a well-defined enum value.
+      {#link|@fromBackingInt#} on a non-exhaustive enum always results in a valid enum value.
       </p>
       <p>
       A switch on a non-exhaustive enum can include a {#syntax#}_{#endsyntax#} prong as an alternative to an {#syntax#}else{#endsyntax#} prong.
@@ -2442,7 +2470,8 @@ or
       {#code|test_simple_union.zig#}
 
       <p>
-      In order to use {#link|switch#} with a union, it must be a {#link|Tagged union#}.
+      In order to use {#link|switch#} with a union, it must be a {#link|tagged union|Tagged union#}
+      or a {#link|packed union#}.
       </p>
       <p>
       To initialize a union when the tag is a {#link|comptime#}-known name, see {#link|@unionInit#}.
@@ -2471,7 +2500,7 @@ or
       <p>
       Unions with inferred enum tag types can also assign ordinal values to their inferred tag.
       This requires the tag to specify an explicit integer type.
-      {#link|@intFromEnum#} can be used to access the ordinal value corresponding to the active field.
+      {#link|@backingInt#} can be used to access the ordinal value corresponding to the active field.
       </p>
       {#code|test_tagged_union_with_tag_values.zig#}
 
@@ -2502,6 +2531,7 @@ or
       </p>
       {#code|test_packed_union_equality.zig#}
 
+      {#see_also|@backingInt|@fromBackingInt#}
       {#header_close#}
 
       {#header_open|Anonymous Union Literals#}
@@ -2904,8 +2934,8 @@ or
       {#header_open|inline fn#}
       <p>
       Adding the {#syntax#}inline{#endsyntax#} keyword to a function definition makes that
-      function become <em>semantically inlined</em> at the callsite. This is
-      not a hint to be possibly observed by optimization passes, but has
+      function become <em>semantically inlined</em> at the callsite. {#link|Inline Is Not A Hint#}
+      to be possibly observed by optimization passes, but has
       implications on the types and values involved in the function call.
       </p>
       <p>
@@ -2917,16 +2947,22 @@ or
 
       <p>If {#syntax#}inline{#endsyntax#} is removed, the test fails with the compile error
       instead of passing.</p>
-      <p>It is generally better to let the compiler decide when to inline a
-      function, except for these scenarios:</p>
+
+      {#header_open|Inline Is Not A Hint#}
+      <p>Use of {#syntax#}inline{#endsyntax#} <em>restricts</em> what the
+      compiler is allowed to do. <strong>This can harm binary size, compilation speed,
+      and even runtime performance.</strong> In exchange, these use cases are addressed:</p>
       <ul>
-        <li>To change how many stack frames are in the call stack, for debugging purposes.</li>
-        <li>To force comptime-ness of the arguments to propagate to the return value of the function, as in the above example.</li>
-        <li>Real world performance measurements demand it.</li>
+        <li>Ability to ensure certain stack frames are in the call stack, for
+        debugging purposes, or for integrating with {#link|Assembly#}.</li>
+        <li>Forcing arguments from the callsite that happen to be
+        {#link|comptime#} to propagate to the return value of the function, as
+        in the above example.</li>
+        <li>Working around limitations of compiler backend implementations.</li>
       </ul>
-      <p>Note that {#syntax#}inline{#endsyntax#} actually <em>restricts</em>
-      what the compiler is allowed to do. This can harm binary size,
-      compilation speed, and even runtime performance.</p>
+      <p>For an alternative to {#syntax#}inline{#endsyntax#} that merely hints to the compiler
+      that inlining a function may be valuable, use {#link|@branchHint#}.</p>
+      {#header_close#}
       {#header_close#}
 
       {#header_open|Function Reflection#}
@@ -3567,14 +3603,14 @@ void do_a_thing(struct Foo *foo) {
       <ul>
           <li>{#link|@bitCast#} - change type but maintain bit representation</li>
           <li>{#link|@alignCast#} - make a pointer have more alignment</li>
-          <li>{#link|@enumFromInt#} - obtain an enum value based on its integer tag value</li>
+          <li>{#link|@fromBackingInt#} - obtain an enum or a packed struct/union value based on its backing integer</li>
           <li>{#link|@errorFromInt#} - obtain an error code based on its integer value</li>
           <li>{#link|@errorCast#} - convert to a smaller error set</li>
           <li>{#link|@floatCast#} - convert a larger float to a smaller float</li>
           <li>{#link|@floatFromInt#} - convert an integer to a float value</li>
           <li>{#link|@intCast#} - convert between integer types</li>
           <li>{#link|@intFromBool#} - convert true to 1 and false to 0</li>
-          <li>{#link|@intFromEnum#} - obtain the integer tag value of an enum or tagged union</li>
+          <li>{#link|@backingInt#} - obtain the backing integer value of an enum or a packed struct/union</li>
           <li>{#link|@intFromError#} - obtain the integer value of an error code</li>
           <li>{#link|@round#}, {#link|@floor#}, {#link|@ceil#}, {#link|@trunc#} - float to integer conversion</li>
           <li>{#link|@intFromPtr#} - obtain the address of a pointer</li>
@@ -4413,6 +4449,18 @@ comptime {
       {#see_also|@atomicLoad|@atomicRmw|@cmpxchgWeak|@cmpxchgStrong#}
       {#header_close#}
 
+      {#header_open|@backingInt#}
+      <pre>{#syntax#}@backingInt(enum_or_bitpack: T) BackingInt(T){#endsyntax#}</pre>
+      <p>
+      Converts an {#link|enum#}, a {#link|packed struct#} or a {#link|packed union#} value
+      to its backing integer.
+      </p>
+      <p>
+      Also works with {#link|tagged unions|Tagged union#}, acting on the active enum tag value.
+      </p>
+      {#see_also|@fromBackingInt|@bitCast#}
+      {#header_close#}
+
       {#header_open|@bitCast#}
       <pre>{#syntax#}@bitCast(value: anytype) anytype{#endsyntax#}</pre>
       <p>
@@ -4433,8 +4481,18 @@ comptime {
           <li>Convert {#syntax#}i32{#endsyntax#} to {#syntax#}u32{#endsyntax#} preserving twos complement</li>
       </ul>
       <p>
-      Works at compile-time if {#syntax#}value{#endsyntax#} is known at compile time. It's a compile error to bitcast a value of undefined layout; this means that, besides the restriction from types which possess dedicated casting builtins (enums, pointers, error sets), bare structs, error unions, slices, optionals, and any other type without a well-defined memory layout, also cannot be used in this operation.
+      Works at compile-time if {#syntax#}value{#endsyntax#} is known at compile time.
+      It's a compile error to bitcast a value of undefined layout; this means that,
+      besides the restriction from types which possess dedicated casting builtins
+      (pointers, error sets), bare structs, error unions, slices, optionals, and any
+      other type without a well-defined memory layout, also cannot be used in this
+      operation.
       </p>
+      <p>
+      Attempting to convert an integer with no corresponding tag value to an
+      {#syntax#}enum{#endsyntax#} invokes safety-checked {#link|Illegal Behavior#}.
+      </p>
+      {#see_also|@ptrCast|@intFromPtr|@ptrFromInt|@errorCast|@intFromError|@errorFromInt|@backingInt|@fromBackingInt#}
       {#header_close#}
 
       {#header_open|@bitOffsetOf#}
@@ -4717,7 +4775,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           <li>{#syntax#}@divExact(a, b) * b == a{#endsyntax#}</li>
       </ul>
       <p>For a function that returns a possible error code, use {#syntax#}@import("std").math.divExact{#endsyntax#}.</p>
-      {#see_also|@divTrunc|@divFloor#}
+      {#see_also|@divTrunc|@divFloor|@divCeil#}
       {#header_close#}
       {#header_open|@divFloor#}
       <pre>{#syntax#}@divFloor(numerator: T, denominator: T) T{#endsyntax#}</pre>
@@ -4731,7 +4789,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           <li>{#syntax#}(@divFloor(a, b) * b) + @mod(a, b) == a{#endsyntax#}</li>
       </ul>
       <p>For a function that returns a possible error code, use {#syntax#}@import("std").math.divFloor{#endsyntax#}.</p>
-      {#see_also|@divTrunc|@divExact#}
+      {#see_also|@divTrunc|@divCeil|@divExact#}
       {#header_close#}
       {#header_open|@divTrunc#}
       <pre>{#syntax#}@divTrunc(numerator: T, denominator: T) T{#endsyntax#}</pre>
@@ -4745,7 +4803,20 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           <li>{#syntax#}(@divTrunc(a, b) * b) + @rem(a, b) == a{#endsyntax#}</li>
       </ul>
       <p>For a function that returns a possible error code, use {#syntax#}@import("std").math.divTrunc{#endsyntax#}.</p>
-      {#see_also|@divFloor|@divExact#}
+      {#see_also|@divFloor|@divCeil|@divExact#}
+      {#header_close#}
+      {#header_open|@divCeil#}
+      <pre>{#syntax#}@divCeil(numerator: T, denominator: T) T{#endsyntax#}</pre>
+      <p>
+      Ceiled division. Rounds toward positive infinity. Caller guarantees {#syntax#}denominator != 0{#endsyntax#} and
+              {#syntax#}!(@typeInfo(T) == .int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1){#endsyntax#}.
+      </p>
+      <ul>
+          <li>{#syntax#}@divCeil(5, 3) == 2{#endsyntax#}</li>
+          <li>{#syntax#}@divCeil(-5, 3) == -1{#endsyntax#}</li>
+      </ul>
+      <p>For a function that returns a possible error code, use {#syntax#}@import("std").math.divCeil{#endsyntax#}.</p>
+      {#see_also|@divFloor|@divTrunc|@divExact#}
       {#header_close#}
 
       {#header_open|@embedFile#}
@@ -4765,6 +4836,9 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
 
       {#header_open|@enumFromInt#}
       <pre>{#syntax#}@enumFromInt(integer: anytype) anytype{#endsyntax#}</pre>
+      <p>
+      Deprecated. Use {#link|@fromBackingInt#} or {#link|@bitCast#} instead.
+      </p>
       <p>
       Converts an integer into an {#link|enum#} value. The return type is the inferred result type.
       </p>
@@ -4921,10 +4995,40 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       </p>
       {#header_close#}
 
+      {#header_open|@fromBackingInt#}
+      <pre>{#syntax#}@fromBackingInt(backing_int: BackingInt(T)) T{#endsyntax#}</pre>
+      <p>
+      Converts an integer into a {#link|enum#}, a {#link|packed struct#} or a
+      {#link|packed union#} value. The return type is the inferred result type.
+      </p>
+      <p>
+      Attempting to convert an integer with no corresponding tag value to an
+      {#syntax#}enum{#endsyntax#} invokes safety-checked {#link|Illegal Behavior#}.
+      Note that a {#link|non-exhaustive enum|Non-exhaustive enum#} has corresponding values for
+      all integers in the enum's integer tag type: the {#syntax#}_{#endsyntax#} value represents
+      all the remaining unnamed integers in the enum's tag type.
+      </p>
+      {#see_also|@backingInt|@bitCast#}
+      {#header_close#}
+
       {#header_open|@hasDecl#}
       <pre>{#syntax#}@hasDecl(comptime Namespace: type, comptime name: []const u8) bool{#endsyntax#}</pre>
-      <p>Returns whether or not a {#link|Namespace#} has a declaration matching {#syntax#}name{#endsyntax#}.</p>
+      <p>Returns whether or not a {#link|Namespace#} has a public declaration matching {#syntax#}name{#endsyntax#}.</p>
       {#code|test_hasDecl_builtin.zig#}
+
+      <p>Caution: using {#syntax#}@hasDecl{#endsyntax#} to implement
+      conditional compilation based on the presence or absence of declarations
+      in an API runs the risk of introducing dead code into the codebase,
+      unnoticed. For example, if the field is ever renamed, code which uses
+      {#syntax#}@hasDecl{#endsyntax#} will compile successfully while failing
+      to enable or disable an intended block of code. Even a simple typo in
+      the field name passed to {#syntax#}@hasDecl{#endsyntax#} would go
+      unnoticed by the compiler. Thus, it is safer to use alternative methods
+      to check for the presence or absence of a particular declaration where
+      possible. For example, if the target operating system would indicate whether a particular
+      function is available, it is more maintainable to check
+      {#syntax#}@import("builtin").target.os.tag{#endsyntax#} rather than
+      {#syntax#}@hasDecl{#endsyntax#}.</p>
 
       {#see_also|@hasField#}
       {#header_close#}
@@ -5003,12 +5107,11 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@intFromEnum#}
       <pre>{#syntax#}@intFromEnum(enum_or_tagged_union: anytype) anytype{#endsyntax#}</pre>
       <p>
-      Converts an enumeration value into its integer tag type. When a tagged union is passed,
-      the tag value is used as the enumeration value.
+      Deprecated. Use {#link|@backingInt#} or {#link|@bitCast#} instead.
       </p>
       <p>
-      If there is only one possible enum value, the result is a {#syntax#}comptime_int{#endsyntax#}
-      known at {#link|comptime#}.
+      Converts an enumeration value into its integer tag type. When a tagged union is passed,
+      the tag value is used as the enumeration value.
       </p>
       {#see_also|@enumFromInt#}
       {#header_close#}
@@ -5045,7 +5148,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       Converts {#syntax#}value{#endsyntax#} to a {#syntax#}usize{#endsyntax#} which is the address of the pointer.
       {#syntax#}value{#endsyntax#} can be {#syntax#}*T{#endsyntax#} or {#syntax#}?*T{#endsyntax#}.
       </p>
-      <p>To convert the other way, use {#link|@ptrFromInt#}</p>
+      {#see_also|@ptrFromInt#}
       {#header_close#}
 
       {#header_open|@max#}
@@ -5249,6 +5352,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       If the destination pointer type does not allow address zero and {#syntax#}address{#endsyntax#}
       is zero, this invokes safety-checked {#link|Illegal Behavior#}.
       </p>
+      {#see_also|@intFromPtr#}
       {#header_close#}
 
       {#header_open|@rem#}
@@ -5456,19 +5560,14 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_close#}
 
       {#header_open|@splat#}
-      <pre>{#syntax#}@splat(scalar: anytype) anytype{#endsyntax#}</pre>
+      <pre>{#syntax#}@splat(element: anytype) anytype{#endsyntax#}</pre>
       <p>
       Produces an array or vector where each element is the value
-      {#syntax#}scalar{#endsyntax#}. The return type and thus the length of the
-      vector is inferred.
+      {#syntax#}element{#endsyntax#}. The return type, including the number of
+      elements, is inferred.
       </p>
       {#code|test_splat_builtin.zig#}
-
-      <p>
-      {#syntax#}scalar{#endsyntax#} must be an {#link|integer|Integers#}, {#link|bool|Primitive Types#},
-      {#link|float|Floats#}, or {#link|pointer|Pointers#}.
-      </p>
-      {#see_also|Vectors|@shuffle#}
+      {#see_also|Vectors|Arrays|@shuffle#}
       {#header_close#}
 
       {#header_open|@reduce#}
@@ -5752,7 +5851,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@Fn#}
       <pre>{#syntax#}@Fn(
     comptime param_types: []const type,
-    comptime param_attrs: *const [param_types.len]std.lang.Type.Fn.Param.Attributes,
+    comptime param_attrs: *const [param_types.len]std.lang.Type.Fn.ParamAttributes,
     comptime ReturnType: type,
     comptime attrs: std.lang.Type.Fn.Attributes,
 ) type{#endsyntax#}</pre>
@@ -5765,7 +5864,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
     comptime BackingInt: ?type,
     comptime field_names: []const []const u8,
     comptime field_types: *const [field_names.len]type,
-    comptime field_attrs: *const [field_names.len]std.lang.Type.StructField.Attributes,
+    comptime field_attrs: *const [field_names.len]std.lang.Type.Struct.FieldAttributes,
 ) type{#endsyntax#}</pre>
       <p>Returns a {#link|struct#} type with the properties specified by the arguments.</p>
       {#header_close#}
@@ -5773,11 +5872,11 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@Union#}
       <pre>{#syntax#}@Union(
     comptime layout: std.lang.Type.ContainerLayout,
-    /// Either the integer tag type, or the integer backing type, depending on `layout`.
+    /// Either the enum tag type, or the integer backing type, depending on `layout`.
     comptime ArgType: ?type,
     comptime field_names: []const []const u8,
     comptime field_types: *const [field_names.len]type,
-    comptime field_attrs: *const [field_names.len]std.lang.Type.UnionField.Attributes,
+    comptime field_attrs: *const [field_names.len]std.lang.Type.Union.FieldAttributes,
 ) type{#endsyntax#}</pre>
       <p>Returns a {#link|union#} type with the properties specified by the arguments.</p>
       {#header_close#}
@@ -5790,6 +5889,50 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
     comptime field_values: *const [field_names.len]TagInt,
 ) type{#endsyntax#}</pre>
       <p>Returns an {#link|enum#} type with the properties specified by the arguments.</p>
+      {#header_close#}
+
+      {#header_open|@SpirvType#}
+      <pre>{#syntax#}@SpirvType(comptime options: std.lang.Type.Spirv) type{#endsyntax#}</pre>
+      <p>
+      Returns a SPIR-V type with the properties specified by the arguments.
+      </p>
+      <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Tag</th>
+            <th scope="col">SPIR-V Equivalent</th>
+            <th scope="col">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row"><code>.sampler</code></th>
+            <td><code>OpTypeSampler</code></td>
+            <td>An opaque sampler</td>
+          </tr>
+          <tr>
+            <th scope="row"><code>.image</code></th>
+            <td><code>OpTypeImage</code></td>
+            <td>An opaque image</td>
+          </tr>
+          <tr>
+            <th scope="row"><code>.sampled_image</code></th>
+            <td><code>OpTypeSampledImage</code></td>
+            <td>An opaque image combined with a sampler</td>
+          </tr>
+          <tr>
+            <th scope="row"><code>.runtime_array</code></th>
+            <td><code>OpTypeRuntimeArray</code></td>
+            <td>
+                An array whose length is determined at runtime.
+                The resulting type supports indexing and exposes a {#syntax#}.len{#endsyntax#} field.
+                It may only appear as the last field of an {#link|extern struct#}.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
       {#header_close#}
 
       {#header_open|@typeInfo#}
@@ -6038,6 +6181,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           <li>{#syntax#}/{#endsyntax#} (division)</li>
         <li>{#link|@divTrunc#} (division)</li>
         <li>{#link|@divFloor#} (division)</li>
+        <li>{#link|@divCeil#} (division)</li>
         <li>{#link|@divExact#} (division)</li>
       </ul>
       <p>Example with addition at compile-time:</p>
@@ -6055,6 +6199,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           <li>{#syntax#}@import("std").math.mul{#endsyntax#}</li>
           <li>{#syntax#}@import("std").math.divTrunc{#endsyntax#}</li>
           <li>{#syntax#}@import("std").math.divFloor{#endsyntax#}</li>
+          <li>{#syntax#}@import("std").math.divCeil{#endsyntax#}</li>
           <li>{#syntax#}@import("std").math.divExact{#endsyntax#}</li>
           <li>{#syntax#}@import("std").math.shl{#endsyntax#}</li>
       </ul>
@@ -7135,46 +7280,27 @@ fn readU32Be() u32 {}
       </ul>
       {#header_close#}
       {#header_close#}
+
       {#header_open|Source Encoding#}
-      <p>Zig source code is encoded in UTF-8. An invalid UTF-8 byte sequence results in a compile error.</p>
-      <p>Throughout all zig source code (including in comments), some code points are never allowed:</p>
+      <p>Zig source code is UTF-8 encoded. Invalid UTF-8 byte sequences are not allowed anywhere.</p>
+      <p>Some code points are never allowed, even in {#link|Comments#}:</p>
       <ul>
-        <li>Ascii control characters, except for U+000a (LF), U+000d (CR), and U+0009 (HT): U+0000 - U+0008, U+000b - U+000c, U+000e - U+0001f, U+007f.</li>
-        <li>Non-Ascii Unicode line endings: U+0085 (NEL), U+2028 (LS), U+2029 (PS).</li>
+        <li>ASCII control characters, except for U+000a (LF): U+0000...U+0009, U+000b...U+0001f, U+007f.</li>
+        <li>Non-ASCII Unicode line endings: U+0085 (NEL), U+2028 (LS), U+2029 (PS).</li>
+        <li>Byte order marks: U+FEFF (BOM).</li>
       </ul>
       <p>
-      LF (byte value 0x0a, code point U+000a, {#syntax#}'\n'{#endsyntax#}) is the line terminator in Zig source code.
-      This byte value terminates every line of zig source code except the last line of the file.
-      It is recommended that non-empty source files end with an empty line, which means the last byte would be 0x0a (LF).
+      LF (byte value 0x0a, code point U+000a, {#syntax#}'\n'{#endsyntax#}) is
+      the line terminator in Zig source code. This byte value terminates every
+      line of Zig source code, including last line of the file.
       </p>
-      <p>
-      Each LF may be immediately preceded by a single CR (byte value 0x0d, code point U+000d, {#syntax#}'\r'{#endsyntax#})
-      to form a Windows style line ending, but this is discouraged. Note that in multiline strings, CRLF sequences will
-      be encoded as LF when compiled into a zig program.
-      A CR in any other context is not allowed.
-      </p>
-      <p>
-      HT hard tabs (byte value 0x09, code point U+0009, {#syntax#}'\t'{#endsyntax#}) are interchangeable with
-      SP spaces (byte value 0x20, code point U+0020, {#syntax#}' '{#endsyntax#}) as a token separator,
-      but use of hard tabs is discouraged. See {#link|Grammar#}.
-      </p>
-      <p>
-      For compatibility with other tools, the compiler ignores a UTF-8-encoded byte order mark (U+FEFF)
-      if it is the first Unicode code point in the source text. A byte order mark is not allowed anywhere else in the source.
-      </p>
-      <p>
-      Note that running <kbd>zig fmt</kbd> on a source file will implement all recommendations mentioned here.
-      </p>
-      <p>
-      Note that a tool reading Zig source code can make assumptions if the source code is assumed to be correct Zig code.
-      For example, when identifying the ends of lines, a tool can use a naive search such as <code>/\n/</code>,
-      or an <a href="https://msdn.microsoft.com/en-us/library/dd409797.aspx">advanced</a>
-      search such as <code>/\r\n?|[\n\u0085\u2028\u2029]/</code>, and in either case line endings will be correctly identified.
-      For another example, when identifying the whitespace before the first token on a line,
-      a tool can either use a naive search such as <code>/[ \t]/</code>,
-      or an <a href="https://tc39.es/ecma262/#sec-characterclassescape">advanced</a> search such as <code>/\s/</code>,
-      and in either case whitespace will be correctly identified.
-      </p>
+      <p>These conservative rules mean that third party tools reading
+      already-validated Zig source code may make simplifying assumptions, such
+      as naively separating lines based on {#syntax#}'\n'{#endsyntax#}.
+      However, tooling such as <kbd>zig fmt</kbd> provides convenience
+      functionality to convert invalid source encodings to valid source
+      encodings, for instance by stripping byte order marks and carriage
+      returns.</p>
       {#header_close#}
 
       {#header_open|Keyword Reference#}
@@ -7378,7 +7504,7 @@ fn readU32Be() u32 {}
             <pre>{#syntax#}errdefer{#endsyntax#}</pre>
           </th>
           <td>
-            {#syntax#}errdefer{#endsyntax#} will execute an expression when control flow leaves the current block if the function returns an error, the errdefer expression can capture the unwrapped value.
+            {#syntax#}errdefer{#endsyntax#} will execute an expression when control flow leaves the current block if the function returns an error.
             <ul>
               <li>See also {#link|errdefer#}</li>
             </ul>
@@ -7725,614 +7851,24 @@ fn readU32Be() u32 {}
 
       {#header_open|Appendix#}
       {#header_open|Grammar#}
-      {#syntax_block|peg|grammar.peg#}
-Root <- skip ContainerMembers eof
-
-# *** Top level ***
-ContainerMembers <- container_doc_comment? ContainerDeclaration* (ContainerField COMMA)* (ContainerField / ContainerDeclaration*)
-
-ContainerDeclaration <- TestDecl / ComptimeDecl / doc_comment? KEYWORD_pub? Decl
-
-TestDecl <- KEYWORD_test (STRINGLITERALSINGLE / IDENTIFIER)? Block
-
-ComptimeDecl <- KEYWORD_comptime Block
-
-Decl
-    <- (KEYWORD_export / KEYWORD_inline / KEYWORD_noinline)? FnProto (SEMICOLON / Block)
-     / KEYWORD_extern STRINGLITERALSINGLE? FnProto SEMICOLON
-     / (KEYWORD_export / KEYWORD_extern STRINGLITERALSINGLE?)? KEYWORD_threadlocal? GlobalVarDecl
-
-FnProto <- KEYWORD_fn IDENTIFIER? LPAREN ParamDeclList RPAREN ByteAlign? AddrSpace? LinkSection? CallConv? EXCLAMATIONMARK? TypeExpr !ExprSuffix
-
-VarDeclProto <- (KEYWORD_const / KEYWORD_var) IDENTIFIER (COLON TypeExpr)? ByteAlign? AddrSpace? LinkSection?
-
-GlobalVarDecl <- VarDeclProto (EQUAL Expr)? SEMICOLON
-
-ContainerField <- doc_comment? (KEYWORD_comptime / !KEYWORD_comptime) !KEYWORD_fn (IDENTIFIER COLON / !(IDENTIFIER COLON))? TypeExpr ByteAlign? (EQUAL Expr)?
-
-# *** Block Level ***
-BlockStatement
-    <- Statement
-     / KEYWORD_defer BlockExprStatement
-     / KEYWORD_errdefer BlockExprStatement
-     / !ExprStatement (KEYWORD_comptime !BlockExpr)? VarAssignStatement
-
-Statement
-    <- ExprStatement
-     / KEYWORD_suspend BlockExprStatement
-     / !ExprStatement (KEYWORD_comptime !BlockExpr)? AssignExpr SEMICOLON
-
-ExprStatement
-    <- IfStatement
-     / LabeledStatement
-     / KEYWORD_nosuspend BlockExprStatement
-     / KEYWORD_comptime BlockExpr
-
-IfStatement
-    <- IfPrefix BlockExpr ( KEYWORD_else Payload? Statement )?
-     / IfPrefix !BlockExpr AssignExpr ( SEMICOLON / KEYWORD_else Payload? Statement )
-
-LabeledStatement <- BlockLabel? (Block / LoopStatement / SwitchExpr)
-
-LoopStatement <- KEYWORD_inline? (ForStatement / WhileStatement)
-
-ForStatement
-    <- ForPrefix BlockExpr ( KEYWORD_else Statement / !KEYWORD_else )
-     / ForPrefix !BlockExpr AssignExpr ( SEMICOLON / KEYWORD_else Statement )
-
-WhileStatement
-    <- WhilePrefix BlockExpr ( KEYWORD_else Payload? Statement )?
-     / WhilePrefix !BlockExpr AssignExpr ( SEMICOLON / KEYWORD_else Payload? Statement )
-
-BlockExprStatement
-    <- BlockExpr
-     / !BlockExpr AssignExpr SEMICOLON
-
-BlockExpr <- BlockLabel? Block
-
-# An assignment or a destructure whose LHS are all lvalue expressions or variable declarations.
-VarAssignStatement <- (VarDeclProto / Expr) (COMMA (VarDeclProto / Expr))* EQUAL Expr SEMICOLON
-
-# *** Expression Level ***
-
-# An assignment or a destructure whose LHS are all lvalue expressions.
-AssignExpr <- Expr (AssignOp Expr / (COMMA Expr)+ EQUAL Expr)?
-
-SingleAssignExpr <- Expr (AssignOp Expr)?
-
-Expr <- BoolOrExpr
-
-BoolOrExpr <- BoolAndExpr (KEYWORD_or BoolAndExpr)*
-
-BoolAndExpr <- CompareExpr (KEYWORD_and CompareExpr)*
-
-CompareExpr <- BitwiseExpr (CompareOp BitwiseExpr)?
-
-BitwiseExpr <- BitShiftExpr (BitwiseOp BitShiftExpr)*
-
-BitShiftExpr <- AdditionExpr (BitShiftOp AdditionExpr)*
-
-AdditionExpr <- MultiplyExpr (AdditionOp MultiplyExpr)*
-
-MultiplyExpr <- PrefixExpr (MultiplyOp PrefixExpr)*
-
-PrefixExpr <- PrefixOp* PrimaryExpr
-
-PrimaryExpr
-    <- AsmExpr
-     / IfExpr
-     / KEYWORD_break (BreakLabel / !BreakLabel) (Expr !ExprSuffix / !SinglePtrTypeStart)
-     / KEYWORD_comptime Expr !ExprSuffix
-     / KEYWORD_nosuspend Expr !ExprSuffix
-     / KEYWORD_continue (BreakLabel / !BreakLabel) (Expr !ExprSuffix / !SinglePtrTypeStart)
-     / KEYWORD_resume Expr !ExprSuffix
-     / KEYWORD_return (Expr !ExprSuffix / !SinglePtrTypeStart)
-     / BlockLabel? LoopExpr
-     / Block
-     / CurlySuffixExpr
-
-IfExpr <- IfPrefix Expr (KEYWORD_else Payload? Expr)? !ExprSuffix
-
-Block <- LBRACE BlockStatement* RBRACE
-
-LoopExpr <- KEYWORD_inline? (ForExpr / WhileExpr)
-
-ForExpr <- ForPrefix Expr (KEYWORD_else Expr / !KEYWORD_else) !ExprSuffix
-
-WhileExpr <- WhilePrefix Expr (KEYWORD_else Payload? Expr)? !ExprSuffix
-
-CurlySuffixExpr <- TypeExpr InitList?
-
-InitList
-    <- LBRACE FieldInit (COMMA FieldInit)* COMMA? RBRACE
-     / LBRACE Expr (COMMA Expr)* COMMA? RBRACE
-     / LBRACE RBRACE
-
-TypeExpr <- PrefixTypeOp* ErrorUnionExpr
-
-ErrorUnionExpr <- SuffixExpr (EXCLAMATIONMARK TypeExpr)?
-
-SuffixExpr
-    <- PrimaryTypeExpr (SuffixOp / FnCallArguments)*
-
-PrimaryTypeExpr
-    <- BUILTINIDENTIFIER FnCallArguments
-     / CHAR_LITERAL
-     / ContainerDecl
-     / DOT IDENTIFIER
-     / DOT InitList
-     / ErrorSetDecl
-     / FLOAT
-     / FnProto
-     / GroupedExpr
-     / LabeledTypeExpr
-     / IDENTIFIER !(COLON LabelableExpr)
-     / IfTypeExpr
-     / INTEGER
-     / KEYWORD_comptime TypeExpr !ExprSuffix
-     / KEYWORD_error DOT IDENTIFIER
-     / KEYWORD_anyframe
-     / KEYWORD_unreachable
-     / STRINGLITERAL
-
-ContainerDecl <- (KEYWORD_extern / KEYWORD_packed)? ContainerDeclAuto
-
-ErrorSetDecl <- KEYWORD_error LBRACE IdentifierList RBRACE
-
-GroupedExpr <- LPAREN Expr RPAREN
-
-IfTypeExpr <- IfPrefix TypeExpr (KEYWORD_else Payload? TypeExpr)? !ExprSuffix
-
-LabeledTypeExpr
-    <- BlockLabel Block
-     / BlockLabel? LoopTypeExpr
-     / BlockLabel? SwitchExpr
-
-LoopTypeExpr <- KEYWORD_inline? (ForTypeExpr / WhileTypeExpr)
-
-ForTypeExpr <- ForPrefix TypeExpr (KEYWORD_else TypeExpr / !KEYWORD_else) !ExprSuffix
-
-WhileTypeExpr <- WhilePrefix TypeExpr (KEYWORD_else Payload? TypeExpr)? !ExprSuffix
-
-SwitchExpr <- KEYWORD_switch LPAREN Expr RPAREN LBRACE SwitchProngList RBRACE
-
-# *** Assembly ***
-AsmExpr <- KEYWORD_asm KEYWORD_volatile? LPAREN Expr AsmOutput? RPAREN
-
-AsmOutput <- COLON AsmOutputList AsmInput?
-
-AsmOutputItem <- LBRACKET IDENTIFIER RBRACKET STRINGLITERALSINGLE LPAREN (MINUSRARROW TypeExpr / IDENTIFIER) RPAREN
-
-AsmInput <- COLON AsmInputList AsmClobbers?
-
-AsmInputItem <- LBRACKET IDENTIFIER RBRACKET STRINGLITERALSINGLE LPAREN Expr RPAREN
-
-AsmClobbers <- COLON Expr
-
-# *** Helper grammar ***
-BreakLabel <- COLON IDENTIFIER
-
-BlockLabel <- IDENTIFIER COLON
-
-FieldInit <- DOT IDENTIFIER EQUAL Expr
-
-WhileContinueExpr <- COLON LPAREN AssignExpr RPAREN
-
-LinkSection <- KEYWORD_linksection LPAREN Expr RPAREN
-
-AddrSpace <- KEYWORD_addrspace LPAREN Expr RPAREN
-
-# Fn specific
-CallConv <- KEYWORD_callconv LPAREN Expr RPAREN
-
-ParamDecl <- doc_comment? (KEYWORD_noalias / KEYWORD_comptime / !KEYWORD_comptime) (IDENTIFIER COLON / !(IDENTIFIER_COLON)) ParamType
-
-ParamType
-    <- KEYWORD_anytype
-     / TypeExpr
-
-# Control flow prefixes
-IfPrefix <- KEYWORD_if LPAREN Expr RPAREN PtrPayload?
-
-WhilePrefix <- KEYWORD_while LPAREN Expr RPAREN PtrPayload? WhileContinueExpr?
-
-ForPrefix <- KEYWORD_for LPAREN ForArgumentsList RPAREN PtrListPayload
-
-# Payloads
-Payload <- PIPE IDENTIFIER PIPE
-
-PtrPayload <- PIPE ASTERISK? IDENTIFIER PIPE
-
-PtrIndexPayload <- PIPE ASTERISK? IDENTIFIER (COMMA IDENTIFIER)? PIPE
-
-PtrListPayload <- PIPE ASTERISK? IDENTIFIER (COMMA ASTERISK? IDENTIFIER)* COMMA? PIPE
-
-# Switch specific
-SwitchProng <- KEYWORD_inline? SwitchCase EQUALRARROW PtrIndexPayload? SingleAssignExpr
-
-SwitchCase
-    <- SwitchItem (COMMA SwitchItem)* COMMA?
-     / KEYWORD_else
-
-SwitchItem <- Expr (DOT3 Expr)?
-
-# For specific
-ForArgumentsList <- ForItem (COMMA ForItem)* COMMA?
-
-ForItem <- Expr (DOT2 Expr?)?
-
-# Operators
-AssignOp
-    <- ASTERISKEQUAL
-     / ASTERISKPIPEEQUAL
-     / SLASHEQUAL
-     / PERCENTEQUAL
-     / PLUSEQUAL
-     / PLUSPIPEEQUAL
-     / MINUSEQUAL
-     / MINUSPIPEEQUAL
-     / LARROW2EQUAL
-     / LARROW2PIPEEQUAL
-     / RARROW2EQUAL
-     / AMPERSANDEQUAL
-     / CARETEQUAL
-     / PIPEEQUAL
-     / ASTERISKPERCENTEQUAL
-     / PLUSPERCENTEQUAL
-     / MINUSPERCENTEQUAL
-     / EQUAL
-
-CompareOp
-    <- EQUALEQUAL
-     / EXCLAMATIONMARKEQUAL
-     / LARROW
-     / RARROW
-     / LARROWEQUAL
-     / RARROWEQUAL
-
-BitwiseOp
-    <- AMPERSAND
-     / CARET
-     / PIPE
-     / KEYWORD_orelse
-     / KEYWORD_catch Payload?
-
-BitShiftOp
-    <- LARROW2
-     / RARROW2
-     / LARROW2PIPE
-
-AdditionOp
-    <- PLUS
-     / MINUS
-     / PLUS2
-     / PLUSPERCENT
-     / MINUSPERCENT
-     / PLUSPIPE
-     / MINUSPIPE
-
-MultiplyOp
-    <- PIPE2
-     / ASTERISK
-     / SLASH
-     / PERCENT
-     / ASTERISKPERCENT
-     / ASTERISKPIPE
-
-PrefixOp
-    <- EXCLAMATIONMARK
-     / MINUS
-     / TILDE
-     / MINUSPERCENT
-     / AMPERSAND
-     / KEYWORD_try
-
-PrefixTypeOp
-    <- QUESTIONMARK
-     / KEYWORD_anyframe MINUSRARROW
-     / (ManyPtrTypeStart / SliceTypeStart) KEYWORD_allowzero? ByteAlign? AddrSpace? KEYWORD_const? KEYWORD_volatile?
-     / SinglePtrTypeStart KEYWORD_allowzero? BitAlign? AddrSpace? KEYWORD_const? KEYWORD_volatile?
-     / ArrayTypeStart
-
-SuffixOp
-    <- LBRACKET Expr (DOT2 (Expr? (COLON Expr)?)?)? RBRACKET
-     / DOT IDENTIFIER
-     / DOTASTERISK
-     / DOTQUESTIONMARK
-
-FnCallArguments <- LPAREN ExprList RPAREN
-
-ExprSuffix
-    <- KEYWORD_or
-     / KEYWORD_and
-     / CompareOp
-     / BitwiseOp
-     / BitShiftOp
-     / AdditionOp
-     / MultiplyOp
-     / EXCLAMATIONMARK
-     / SuffixOp
-     / FnCallArguments
-
-LabelableExpr
-    <- Block
-     / SwitchExpr
-     / LoopExpr
-
-# Ptr specific
-SliceTypeStart <- LBRACKET (COLON Expr)? RBRACKET
-
-SinglePtrTypeStart <- ASTERISK
-
-ManyPtrTypeStart <- LBRACKET ASTERISK (LETTERC / COLON Expr)? RBRACKET
-
-ArrayTypeStart <- LBRACKET Expr !ASTERISK (COLON Expr)? RBRACKET
-
-# ContainerDecl specific
-ContainerDeclAuto <- ContainerDeclType LBRACE ContainerMembers RBRACE
-
-ContainerDeclType
-    <- KEYWORD_struct (LPAREN Expr RPAREN)?
-     / KEYWORD_opaque
-     / KEYWORD_enum (LPAREN Expr RPAREN)?
-     / KEYWORD_union (LPAREN (KEYWORD_enum (LPAREN Expr RPAREN)? / !KEYWORD_enum Expr) RPAREN)?
-
-# Alignment
-ByteAlign <- KEYWORD_align LPAREN Expr RPAREN
-
-BitAlign <- KEYWORD_align LPAREN Expr (COLON Expr COLON Expr)? RPAREN
-
-# Lists
-IdentifierList <- (doc_comment? IDENTIFIER COMMA)* (doc_comment? IDENTIFIER)?
-
-SwitchProngList <- (SwitchProng COMMA)* SwitchProng?
-
-AsmOutputList <- (AsmOutputItem COMMA)* AsmOutputItem?
-
-AsmInputList <- (AsmInputItem COMMA)* AsmInputItem?
-
-ParamDeclList <- (ParamDecl COMMA)* (ParamDecl / DOT3 COMMA?)?
-
-ExprList <- (Expr COMMA)* Expr?
-
-# *** Tokens ***
-eof <- !.
-bin <- [01]
-bin_ <- '_'? bin
-oct <- [0-7]
-oct_ <- '_'? oct
-hex <- [0-9a-fA-F]
-hex_ <- '_'? hex
-dec <- [0-9]
-dec_ <- '_'? dec
-
-bin_int <- bin bin_*
-oct_int <- oct oct_*
-dec_int <- dec dec_*
-hex_int <- hex hex_*
-
-ox80_oxBF <- [\200-\277]
-oxF4 <- '\364'
-ox80_ox8F <- [\200-\217]
-oxF1_oxF3 <- [\361-\363]
-oxF0 <- '\360'
-ox90_0xBF <- [\220-\277]
-oxEE_oxEF <- [\356-\357]
-oxED <- '\355'
-ox80_ox9F <- [\200-\237]
-oxE1_oxEC <- [\341-\354]
-oxE0 <- '\340'
-oxA0_oxBF <- [\240-\277]
-oxC2_oxDF <- [\302-\337]
-
-# From https://lemire.me/blog/2018/05/09/how-quickly-can-you-check-that-a-string-is-valid-unicode-utf-8/
-# First Byte      Second Byte     Third Byte      Fourth Byte
-# [0x00,0x7F]
-# [0xC2,0xDF]     [0x80,0xBF]
-#    0xE0         [0xA0,0xBF]     [0x80,0xBF]
-# [0xE1,0xEC]     [0x80,0xBF]     [0x80,0xBF]
-#    0xED         [0x80,0x9F]     [0x80,0xBF]
-# [0xEE,0xEF]     [0x80,0xBF]     [0x80,0xBF]
-#    0xF0         [0x90,0xBF]     [0x80,0xBF]     [0x80,0xBF]
-# [0xF1,0xF3]     [0x80,0xBF]     [0x80,0xBF]     [0x80,0xBF]
-#    0xF4         [0x80,0x8F]     [0x80,0xBF]     [0x80,0xBF]
-
-multibyte_utf8 <-
-       oxF4      ox80_ox8F ox80_oxBF ox80_oxBF
-     / oxF1_oxF3 ox80_oxBF ox80_oxBF ox80_oxBF
-     / oxF0      ox90_0xBF ox80_oxBF ox80_oxBF
-     / oxEE_oxEF ox80_oxBF ox80_oxBF
-     / oxED      ox80_ox9F ox80_oxBF
-     / oxE1_oxEC ox80_oxBF ox80_oxBF
-     / oxE0      oxA0_oxBF ox80_oxBF
-     / oxC2_oxDF ox80_oxBF
-
-non_control_ascii <- [\040-\176]
-non_control_utf8 <- [\040-\377]
-
-char_escape
-    <- "\\x" hex hex
-     / "\\u{" hex+ "}"
-     / "\\" [nr\\t'"]
-char_char
-    <- multibyte_utf8
-     / char_escape
-     / ![\\'\n] non_control_ascii
-
-string_char
-    <- multibyte_utf8
-     / char_escape
-     / ![\\"\n] non_control_ascii
-
-container_doc_comment <- ('//!' non_control_utf8* [ \n]* skip)+
-doc_comment <- ('///' non_control_utf8* [ \n]* skip)+
-line_comment <- '//' ![!/] non_control_utf8* / '////' non_control_utf8*
-line_string <- '\\\\' non_control_utf8* [ \n]*
-skip <- ([ \n] / line_comment)*
-
-CHAR_LITERAL <- ['] char_char ['] skip
-FLOAT
-    <- '0x' hex_int '.' hex_int ([pP] [-+]? dec_int)? skip
-     /      dec_int '.' dec_int ([eE] [-+]? dec_int)? skip
-     / '0x' hex_int [pP] [-+]? dec_int skip
-     /      dec_int [eE] [-+]? dec_int skip
-INTEGER
-    <- '0b' bin_int skip
-     / '0o' oct_int skip
-     / '0x' hex_int skip
-     /      dec_int   skip
-STRINGLITERALSINGLE <- ["] string_char* ["] skip
-STRINGLITERAL
-    <- STRINGLITERALSINGLE
-     / (line_string                 skip)+
-IDENTIFIER
-    <- !keyword [A-Za-z_] [A-Za-z0-9_]* skip
-     / '@' STRINGLITERALSINGLE
-BUILTINIDENTIFIER <- '@'[A-Za-z_][A-Za-z0-9_]* skip
-
-
-AMPERSAND            <- '&'      ![=]      skip
-AMPERSANDEQUAL       <- '&='               skip
-ASTERISK             <- '*'      ![*%=|]   skip
-ASTERISKEQUAL        <- '*='               skip
-ASTERISKPERCENT      <- '*%'     ![=]      skip
-ASTERISKPERCENTEQUAL <- '*%='              skip
-ASTERISKPIPE         <- '*|'     ![=]      skip
-ASTERISKPIPEEQUAL    <- '*|='              skip
-CARET                <- '^'      ![=]      skip
-CARETEQUAL           <- '^='               skip
-COLON                <- ':'                skip
-COMMA                <- ','                skip
-DOT                  <- '.'      ![*.?]    skip
-DOT2                 <- '..'     ![.]      skip
-DOT3                 <- '...'              skip
-DOTASTERISK          <- '.*'               skip
-DOTQUESTIONMARK      <- '.?'               skip
-EQUAL                <- '='      ![>=]     skip
-EQUALEQUAL           <- '=='               skip
-EQUALRARROW          <- '=>'               skip
-EXCLAMATIONMARK      <- '!'      ![=]      skip
-EXCLAMATIONMARKEQUAL <- '!='               skip
-LARROW               <- '<'      ![<=]     skip
-LARROW2              <- '<<'     ![=|]     skip
-LARROW2EQUAL         <- '<<='              skip
-LARROW2PIPE          <- '<<|'    ![=]      skip
-LARROW2PIPEEQUAL     <- '<<|='             skip
-LARROWEQUAL          <- '<='               skip
-LBRACE               <- '{'                skip
-LBRACKET             <- '['                skip
-LPAREN               <- '('                skip
-MINUS                <- '-'      ![%=>|]   skip
-MINUSEQUAL           <- '-='               skip
-MINUSPERCENT         <- '-%'     ![=]      skip
-MINUSPERCENTEQUAL    <- '-%='              skip
-MINUSPIPE            <- '-|'     ![=]      skip
-MINUSPIPEEQUAL       <- '-|='              skip
-MINUSRARROW          <- '->'               skip
-PERCENT              <- '%'      ![=]      skip
-PERCENTEQUAL         <- '%='               skip
-PIPE                 <- '|'      ![|=]     skip
-PIPE2                <- '||'               skip
-PIPEEQUAL            <- '|='               skip
-PLUS                 <- '+'      ![%+=|]   skip
-PLUS2                <- '++'               skip
-PLUSEQUAL            <- '+='               skip
-PLUSPERCENT          <- '+%'     ![=]      skip
-PLUSPERCENTEQUAL     <- '+%='              skip
-PLUSPIPE             <- '+|'     ![=]      skip
-PLUSPIPEEQUAL        <- '+|='              skip
-LETTERC              <- 'c'                skip
-QUESTIONMARK         <- '?'                skip
-RARROW               <- '>'      ![>=]     skip
-RARROW2              <- '>>'     ![=]      skip
-RARROW2EQUAL         <- '>>='              skip
-RARROWEQUAL          <- '>='               skip
-RBRACE               <- '}'                skip
-RBRACKET             <- ']'                skip
-RPAREN               <- ')'                skip
-SEMICOLON            <- ';'                skip
-SLASH                <- '/'      ![=]      skip
-SLASHEQUAL           <- '/='               skip
-TILDE                <- '~'                skip
-
-end_of_word <- ![a-zA-Z0-9_] skip
-KEYWORD_addrspace   <- 'addrspace'   end_of_word
-KEYWORD_align       <- 'align'       end_of_word
-KEYWORD_allowzero   <- 'allowzero'   end_of_word
-KEYWORD_and         <- 'and'         end_of_word
-KEYWORD_anyframe    <- 'anyframe'    end_of_word
-KEYWORD_anytype     <- 'anytype'     end_of_word
-KEYWORD_asm         <- 'asm'         end_of_word
-KEYWORD_break       <- 'break'       end_of_word
-KEYWORD_callconv    <- 'callconv'    end_of_word
-KEYWORD_catch       <- 'catch'       end_of_word
-KEYWORD_comptime    <- 'comptime'    end_of_word
-KEYWORD_const       <- 'const'       end_of_word
-KEYWORD_continue    <- 'continue'    end_of_word
-KEYWORD_defer       <- 'defer'       end_of_word
-KEYWORD_else        <- 'else'        end_of_word
-KEYWORD_enum        <- 'enum'        end_of_word
-KEYWORD_errdefer    <- 'errdefer'    end_of_word
-KEYWORD_error       <- 'error'       end_of_word
-KEYWORD_export      <- 'export'      end_of_word
-KEYWORD_extern      <- 'extern'      end_of_word
-KEYWORD_fn          <- 'fn'          end_of_word
-KEYWORD_for         <- 'for'         end_of_word
-KEYWORD_if          <- 'if'          end_of_word
-KEYWORD_inline      <- 'inline'      end_of_word
-KEYWORD_noalias     <- 'noalias'     end_of_word
-KEYWORD_nosuspend   <- 'nosuspend'   end_of_word
-KEYWORD_noinline    <- 'noinline'    end_of_word
-KEYWORD_opaque      <- 'opaque'      end_of_word
-KEYWORD_or          <- 'or'          end_of_word
-KEYWORD_orelse      <- 'orelse'      end_of_word
-KEYWORD_packed      <- 'packed'      end_of_word
-KEYWORD_pub         <- 'pub'         end_of_word
-KEYWORD_resume      <- 'resume'      end_of_word
-KEYWORD_return      <- 'return'      end_of_word
-KEYWORD_linksection <- 'linksection' end_of_word
-KEYWORD_struct      <- 'struct'      end_of_word
-KEYWORD_suspend     <- 'suspend'     end_of_word
-KEYWORD_switch      <- 'switch'      end_of_word
-KEYWORD_test        <- 'test'        end_of_word
-KEYWORD_threadlocal <- 'threadlocal' end_of_word
-KEYWORD_try         <- 'try'         end_of_word
-KEYWORD_union       <- 'union'       end_of_word
-KEYWORD_unreachable <- 'unreachable' end_of_word
-KEYWORD_var         <- 'var'         end_of_word
-KEYWORD_volatile    <- 'volatile'    end_of_word
-KEYWORD_while       <- 'while'       end_of_word
-
-keyword <- KEYWORD_addrspace / KEYWORD_align / KEYWORD_allowzero / KEYWORD_and
-         / KEYWORD_anyframe / KEYWORD_anytype / KEYWORD_asm
-         / KEYWORD_break / KEYWORD_callconv / KEYWORD_catch
-         / KEYWORD_comptime / KEYWORD_const / KEYWORD_continue / KEYWORD_defer
-         / KEYWORD_else / KEYWORD_enum / KEYWORD_errdefer / KEYWORD_error / KEYWORD_export
-         / KEYWORD_extern / KEYWORD_fn / KEYWORD_for / KEYWORD_if
-         / KEYWORD_inline / KEYWORD_noalias / KEYWORD_nosuspend / KEYWORD_noinline
-         / KEYWORD_opaque / KEYWORD_or / KEYWORD_orelse / KEYWORD_packed
-         / KEYWORD_pub / KEYWORD_resume / KEYWORD_return / KEYWORD_linksection
-         / KEYWORD_struct / KEYWORD_suspend / KEYWORD_switch / KEYWORD_test
-         / KEYWORD_threadlocal / KEYWORD_try / KEYWORD_union / KEYWORD_unreachable
-         / KEYWORD_var / KEYWORD_volatile / KEYWORD_while
-      {#end_syntax_block#}
+      {#grammar#}
       {#header_close#}
       {#header_open|Zen#}
       <ul>
         <li>Communicate intent precisely.</li>
         <li>Edge cases matter.</li>
         <li>Favor reading code over writing code.</li>
-        <li>Only one obvious way to do things.</li>
+        <li>There is an idiomatic way to do it.</li>
         <li>Runtime crashes are better than bugs.</li>
         <li>Compile errors are better than runtime crashes.</li>
         <li>Incremental improvements.</li>
         <li>Avoid local maximums.</li>
         <li>Reduce the amount one must remember.</li>
-        <li>Focus on code rather than style.</li>
-        <li>Resource allocation may fail; resource deallocation must succeed.</li>
-        <li>Memory is a resource.</li>
-        <li>Together we serve the users.</li>
+        <li>Focus on logic, not style.</li>
+        <li>Resource allocation may fail.</li>
+        <li>Resource deallocation must succeed.</li>
       </ul>
+      <p>Together, we serve the users!</p>
       {#header_close#}
       {#header_close#}
       </main></div>
