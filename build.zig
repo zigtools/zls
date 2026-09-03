@@ -5,11 +5,8 @@ const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) 
 
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
-/// Specify the minimum Zig version that is usable with ZLS:
-/// `std.builtin` -> `std.lang` migration progress
-///
-/// A breaking change to the Zig Build System should be handled by updating ZLS's build runner (see src\build_runner)
-const minimum_runtime_zig_version = "0.17.0-dev.274+7eb79daff";
+/// Specifies the minimum Zig version that is runtime compatible with ZLS
+const minimum_runtime_zig_version = "0.17.0-dev.1936+5a625d5f3";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
