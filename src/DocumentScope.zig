@@ -98,8 +98,8 @@ pub const Declaration = union(enum) {
     error_token: Ast.TokenIndex,
 
     comptime {
-        for (std.meta.fields(Declaration)) |field| {
-            std.debug.assert(@sizeOf(field.type) <= 8); // a Declaration without the union tag must be less than 8 bytes
+        for (std.meta.fieldTypes(Declaration)) |T| {
+            std.debug.assert(@sizeOf(T) <= 8); // a Declaration without the union tag must be less than 8 bytes
         }
     }
 
@@ -340,7 +340,7 @@ const ScopeContext = struct {
             if (std.mem.eql(u8, name, "_")) return;
             defer std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
 
-            if (@import("builtin").mode == .Debug) {
+            if (@import("builtin").mode == .debug) {
                 // Check that nameToken works
                 std.debug.assert(identifier_token == declaration.nameToken(pushed.context.tree));
             }

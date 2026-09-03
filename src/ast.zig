@@ -22,31 +22,50 @@ fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.P
         .allowzero_token = null,
         .const_token = null,
         .volatile_token = null,
+        .duplicate_token = null,
         .ast = info,
     };
     // We need to be careful that we don't iterate over any sub-expressions
     // here while looking for modifiers as that could result in false
     // positives. Therefore, start after a sentinel if there is one and
     // skip over any align node and bit range nodes.
-    var i = if (info.sentinel.unwrap()) |sentinel| lastToken(tree, sentinel) + 1 else switch (size) {
-        .many, .c => info.main_token + 1,
-        else => info.main_token,
-    };
+    var i = (if (info.sentinel.unwrap()) |sentinel| tree.lastToken(sentinel) + 1 else switch (size) {
+        .one => info.main_token,
+        .slice => info.main_token + 1,
+        .many => info.main_token + 2,
+        .c => info.main_token + 3,
+    }) + 1;
     const end = tree.firstToken(info.child_type);
     while (i < end) : (i += 1) {
         switch (tree.tokenTag(i)) {
-            .keyword_allowzero => result.allowzero_token = i,
-            .keyword_const => result.const_token = i,
-            .keyword_volatile => result.volatile_token = i,
-            .keyword_align => {
-                const align_node = info.align_node.unwrap().?;
-                if (info.bit_range_end.unwrap()) |bit_range_end| {
-                    i = lastToken(tree, bit_range_end) + 1;
-                } else {
-                    i = lastToken(tree, align_node) + 1;
+            .keyword_allowzero => {
+                if (result.allowzero_token != null) {
+                    result.duplicate_token = i;
                 }
+                result.allowzero_token = i;
             },
-            else => {},
+            .keyword_const => {
+                if (result.const_token != null) {
+                    result.duplicate_token = i;
+                }
+                result.const_token = i;
+            },
+            .keyword_volatile => {
+                if (result.volatile_token != null) {
+                    result.duplicate_token = i;
+                }
+                result.volatile_token = i;
+            },
+            .keyword_align => {
+                if (info.bit_range_end.unwrap()) |bit_range_end| {
+                    std.debug.assert(info.bit_range_start != .none);
+                    i = lastToken(tree, bit_range_end) + 1;
+                } else if (info.align_node.unwrap()) |align_node| {
+                    i = lastToken(tree, align_node) + 1;
+                } else unreachable;
+            },
+            .keyword_addrspace => i = lastToken(tree, info.addrspace_node.unwrap().?) + 1,
+            else => unreachable,
         }
     }
     return result;

@@ -181,21 +181,21 @@ const Struct = @Struct(.auto, undefined, &.{"foo"}, &.{i32}, &.{.{}});
 //    ^^^^^^ (type)()
 //                     ^^^^^ (ContainerLayout)()
 //                                        ^ ([1][]const u8)()
-//                                                            ^ ([?]Attributes)()
-//                                                              ^ (Attributes)()
+//                                                            ^ ([?]FieldAttributes)()
+//                                                              ^ (FieldAttributes)()
 const Union = @Union(.auto, undefined, &.{"foo"}, &.{i32}, &.{.{}});
 //    ^^^^^ (type)()
 //                   ^^^^^ (ContainerLayout)()
 //                                      ^ ([1][]const u8)()
-//                                                          ^ ([?]Attributes)()
-//                                                            ^ (Attributes)()
+//                                                          ^ ([?]FieldAttributes)()
+//                                                            ^ (FieldAttributes)()
 const Enum = @Enum(undefined, .exhaustive, undefined, undefined);
 //    ^^^^ (type)()
 //                            ^^^^^^^^^^^ (Mode)()
 const Fn = @Fn(&.{i32}, &.{.{}}, undefined, .{});
 //    ^^ (type)()
-//                       ^ ([?]Attributes)()
-//                         ^ (Attributes)()
+//                       ^ ([?]ParamAttributes)()
+//                         ^ (ParamAttributes)()
 //                                          ^ (Attributes)()
 
 const type_enum_literal: @EnumLiteral() = .foo;

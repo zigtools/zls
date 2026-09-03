@@ -181,7 +181,7 @@ fn collectWarnStyleDiagnostics(
                     .severity = .Hint,
                     .code = .{ .string = "dot_slash_import" },
                     .source = "zls",
-                    .message = "A ./ is not needed in imports",
+                    .message = .{ .string = "A ./ is not needed in imports" },
                 });
             }
         }
@@ -212,7 +212,7 @@ fn collectWarnStyleDiagnostics(
                                 .severity = .Hint,
                                 .code = .{ .string = "bad_style" },
                                 .source = "zls",
-                                .message = "Functions should be camelCase",
+                                .message = .{ .string = "Functions should be camelCase" },
                             });
                         } else if (is_type_function and !isPascalCase(func_name)) {
                             try diagnostics.append(arena, .{
@@ -220,7 +220,7 @@ fn collectWarnStyleDiagnostics(
                                 .severity = .Hint,
                                 .code = .{ .string = "bad_style" },
                                 .source = "zls",
-                                .message = "Type functions should be PascalCase",
+                                .message = .{ .string = "Type functions should be PascalCase" },
                             });
                         }
                     }
@@ -270,7 +270,7 @@ fn collectGlobalVarDiagnostics(
                     .severity = .Hint,
                     .code = .{ .string = "highlight_global_var_declarations" },
                     .source = "zls",
-                    .message = "Global var declaration",
+                    .message = .{ .string = "Global var declaration" },
                 });
             },
             else => {},

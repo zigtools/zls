@@ -296,7 +296,7 @@ pub fn collectAutoDiscardDiagnostics(
             .severity = .Information,
             .code = null,
             .source = "zls",
-            .message = "auto discard for unused variable",
+            .message = .{ .string = "auto discard for unused variable" },
             .relatedInformation = related_info,
         });
     }
@@ -1133,10 +1133,9 @@ const DiagnosticKind = union(enum) {
     }
 
     fn parseEnum(comptime T: type, message: []const u8) ?T {
-        inline for (std.meta.fields(T)) |field| {
-            if (std.mem.startsWith(u8, message, field.name)) {
-                // is there a better way to achieve this?
-                return @as(T, @enumFromInt(field.value));
+        inline for (comptime std.meta.fieldNames(T)) |field_name| {
+            if (std.mem.startsWith(u8, message, field_name)) {
+                return @field(T, field_name);
             }
         }
 

@@ -449,7 +449,9 @@ pub const Handle = struct {
         const tracy_zone = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone.end();
 
-        var tree = try Ast.parse(allocator, new_text, mode);
+        var tree = try Ast.parse(allocator, new_text, .{
+            .mode = mode,
+        });
         errdefer tree.deinit(allocator);
 
         // remove unused capacity

@@ -107,7 +107,7 @@ pub fn removeUnusedFiles(builder: *ErrorBuilder) void {
 //
 
 fn assertFmt(ok: bool, comptime fmt_str: []const u8, args: anytype) void {
-    if (builtin.mode == .Debug or builtin.is_test) {
+    if (builtin.mode == .debug or builtin.is_test) {
         if (!ok) std.debug.panic(fmt_str, args);
     } else {
         std.debug.assert(ok);

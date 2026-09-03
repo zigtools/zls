@@ -983,11 +983,11 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         server.showMessage(.Error, "{s}", .{msg});
     }
 
-    inline for (std.meta.fields(Config)) |field| {
-        if (@field(result.did_change, field.name)) {
+    inline for (comptime std.meta.fieldNames(Config)) |field_name| {
+        if (@field(result.did_change, field_name)) {
             var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
-            runtime_known_field_name = field.name;
-            const new_value = @field(server.config_manager.config, field.name);
+            runtime_known_field_name = field_name;
+            const new_value = @field(server.config_manager.config, field_name);
             log.info("Set config option '{s}' to {f}", .{ runtime_known_field_name, std.json.fmt(new_value, .{}) });
         }
     }
