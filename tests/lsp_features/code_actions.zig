@@ -976,6 +976,34 @@ test "convert string literal to multiline - invalid" {
     );
 }
 
+test "simplify @as variable initialization" {
+    try testSimplifyVarInit(
+        \\const <cursor>foo = @as(u32, 42);
+    ,
+        \\const foo: u32 = 42;
+    );
+}
+
+test "simplify struct init variable initialization" {
+    try testSimplifyVarInit(
+        \\const Point = struct { x: u32, y: u32 };
+        \\const <cursor>bar = Point{ .x = 1, .y = 2 };
+    ,
+        \\const Point = struct { x: u32, y: u32 };
+        \\const bar: Point = .{ .x = 1, .y = 2 };
+    );
+}
+
+test "simplify struct init - empty" {
+    try testSimplifyVarInit(
+        \\const Point = struct { x: u32 = 0 };
+        \\const <cursor>bar = Point{};
+    ,
+        \\const Point = struct { x: u32 = 0 };
+        \\const bar: Point = .{};
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
@@ -1016,6 +1044,10 @@ fn testOrganizeImportsNoAction(source: []const u8) !void {
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .refactor });
+}
+
+fn testSimplifyVarInit(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .refactor, .filter_title = "simplify variable initialization" });
 }
 
 fn testDiagnostic(
