@@ -7,18 +7,27 @@ const DocumentStore = @import("../DocumentStore.zig");
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
 
-pub fn generateSelectionRanges(
+pub const Error = error{ OutOfMemory, Canceled, InvalidParams };
+
+pub fn @"textDocument/selectionRange"(
+    server: *Server,
     arena: std.mem.Allocator,
-    handle: *DocumentStore.Handle,
-    positions: []const types.Position,
-    offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]types.SelectionRange {
+    request: types.SelectionRange.Params,
+) Error!?[]types.SelectionRange {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+
     const tree = &handle.tree;
     var mappings: std.ArrayList(offsets.multiple.IndexToPositionMapping) = .empty;
-    const result = try arena.alloc(types.SelectionRange, positions.len);
-    for (positions, result) |position, *root_selection_range| {
-        const source_index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
+    const result = try arena.alloc(types.SelectionRange, request.positions.len);
+    for (request.positions, result) |position, *root_selection_range| {
+        const source_index = offsets.positionToIndex(handle.tree.source, position, server.offset_encoding);
 
         var stack: std.ArrayList(struct { Ast.Node.Index, offsets.Loc }) = .empty;
         var walker: ast.Walker = try .init(arena, tree, .root);
@@ -66,7 +75,7 @@ pub fn generateSelectionRanges(
             try builder.add(arena, loc);
         }
     }
-    offsets.multiple.indexToPositionWithMappings(tree.source, mappings.items, offset_encoding);
+    offsets.multiple.indexToPositionWithMappings(tree.source, mappings.items, server.offset_encoding);
     return result;
 }
 

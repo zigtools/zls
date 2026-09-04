@@ -10,8 +10,12 @@ const tracy = @import("tracy");
 
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
 
 const data = @import("version_data");
+
+pub const Error = Analyser.Error || error{InvalidParams};
 
 fn hoverSymbol(
     analyser: *Analyser,
@@ -488,6 +492,33 @@ fn hoverDefinitionNumberLiteral(
         } },
         .range = offsets.locToRange(handle.tree.source, num_loc, offset_encoding),
     };
+}
+
+pub fn @"textDocument/hover"(
+    server: *Server,
+    arena: std.mem.Allocator,
+    request: types.Hover.Params,
+) Error!?types.Hover {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    return try hover(
+        &analyser,
+        arena,
+        handle,
+        source_index,
+        markup_kind,
+        server.offset_encoding,
+    );
 }
 
 pub fn hover(

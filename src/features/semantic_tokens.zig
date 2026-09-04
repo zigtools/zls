@@ -8,6 +8,8 @@ const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
 
 pub const TokenType = enum(u32) {
     namespace,
@@ -78,6 +80,26 @@ pub const TokenModifiers = packed struct(u16) {
         try writer.writeAll(" }");
     }
 };
+
+pub const Error = Analyser.Error || error{InvalidParams};
+
+pub fn @"textDocument/semanticTokens/full"(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params) Error!?types.semantic_tokens.Result {
+    return try semanticTokens(
+        server,
+        arena,
+        request.textDocument.uri,
+        null,
+    );
+}
+
+pub fn @"textDocument/semanticTokens/range"(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params.Range) Error!?types.semantic_tokens.Result {
+    return try semanticTokens(
+        server,
+        arena,
+        request.textDocument.uri,
+        request.range,
+    );
+}
 
 const Builder = struct {
     arena: std.mem.Allocator,
@@ -1159,31 +1181,47 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void
     );
 }
 
-/// If `loc` is `null`, semantic tokens will be computed for the entire source range
-/// Otherwise only tokens in the give source range will be returned
-pub fn writeSemanticTokens(
+fn semanticTokens(
+    server: *Server,
     arena: std.mem.Allocator,
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    loc: ?offsets.Loc,
-    encoding: offsets.Encoding,
-    limited: bool,
-    overlappingTokenSupport: bool,
-) Analyser.Error!types.semantic_tokens.Result {
-    const tree = &handle.tree;
+    request_uri: types.DocumentUri,
+    /// If `null`, semantic tokens will be computed for the entire source range.
+    /// Otherwise only tokens in the give source range will be returned.
+    range: ?types.Range,
+) Error!?types.semantic_tokens.Result {
+    const limited = switch (server.config_manager.config.semantic_tokens) {
+        .full => false,
+        .partial => true,
+        .none => return null,
+    };
+
+    const document_uri = Uri.parse(arena, request_uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+
+    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
+    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+    // semantic tokens can be quite expensive to compute on large files
+    // and disabling callsite references can help with bringing the cost down.
+    analyser.collect_callsite_references = false;
 
     var builder: Builder = .{
         .arena = arena,
-        .analyser = analyser,
+        .analyser = &analyser,
         .handle = handle,
-        .encoding = encoding,
+        .encoding = server.offset_encoding,
         .limited = limited,
-        .overlappingTokenSupport = overlappingTokenSupport,
-        .loc = loc,
+        .overlappingTokenSupport = server.client_capabilities.supports_semantic_tokens_overlapping,
+        .loc = if (range) |r| offsets.rangeToLoc(handle.tree.source, r, server.offset_encoding) else null,
     };
 
     // reverse the ast from the root declarations
-    for (tree.rootDecls()) |child| {
+    for (handle.tree.rootDecls()) |child| {
         try writeNodeTokens(&builder, child);
     }
 

@@ -16,7 +16,29 @@ const tracy = @import("tracy");
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 
-pub const GotoKind = enum {
+pub const Error = Analyser.Error || error{InvalidParams};
+
+pub fn @"textDocument/definition"(server: *Server, arena: std.mem.Allocator, request: types.Definition.Params) Error!?types.Definition.Result {
+    return try gotoHandler(server, arena, .definition, request);
+}
+pub fn @"textDocument/declaration"(server: *Server, arena: std.mem.Allocator, request: types.declaration.Params) Error!?types.Definition.Result {
+    return try gotoHandler(server, arena, .declaration, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    });
+}
+pub fn @"textDocument/typeDefinition"(server: *Server, arena: std.mem.Allocator, request: types.type_definition.Params) Error!?types.Definition.Result {
+    return try gotoHandler(server, arena, .type_definition, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    });
+}
+
+const GotoKind = enum {
     declaration,
     definition,
     type_definition,
@@ -257,12 +279,12 @@ fn gotoDefinitionString(
     }
 }
 
-pub fn gotoHandler(
+fn gotoHandler(
     server: *Server,
     arena: std.mem.Allocator,
     kind: GotoKind,
     request: types.Definition.Params,
-) Server.Error!?types.Definition.Result {
+) Error!?types.Definition.Result {
     const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidParams,

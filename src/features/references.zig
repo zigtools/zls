@@ -13,6 +13,40 @@ const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
 const tracy = @import("tracy");
 
+pub const Error = error{ OutOfMemory, Canceled, InvalidParams };
+
+pub fn @"textDocument/rename"(server: *Server, arena: std.mem.Allocator, request: types.rename.Params) Error!?types.WorkspaceEdit {
+    const response = try referencesHandler(server, arena, .{ .rename = request });
+    return if (response) |rep| rep.rename else null;
+}
+
+pub fn @"textDocument/references"(server: *Server, arena: std.mem.Allocator, request: types.reference.Params) Error!?[]types.Location {
+    const response = try referencesHandler(server, arena, .{ .references = request });
+    return if (response) |rep| rep.references else null;
+}
+
+pub fn @"textDocument/documentHighlight"(server: *Server, arena: std.mem.Allocator, request: types.DocumentHighlight.Params) Error!?[]types.DocumentHighlight {
+    const response = try referencesHandler(server, arena, .{ .highlight = request });
+    return if (response) |rep| rep.highlight else null;
+}
+
+pub fn @"textDocument/prepareRename"(server: *Server, arena: std.mem.Allocator, request: types.prepare_rename.Params) Error!?types.prepare_rename.Result {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+    const name_loc = offsets.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    return .{
+        .prepare_rename_placeholder = .{
+            .range = offsets.locToRange(handle.tree.source, name_loc, server.offset_encoding),
+            .placeholder = name,
+        },
+    };
+}
+
 fn labelReferences(
     allocator: std.mem.Allocator,
     handle: *DocumentStore.Handle,
@@ -663,7 +697,7 @@ pub fn callsiteReferences(
     return builder.callsites;
 }
 
-pub const GeneralReferencesRequest = union(enum) {
+const GeneralReferencesRequest = union(enum) {
     rename: types.rename.Params,
     references: types.reference.Params,
     highlight: types.DocumentHighlight.Params,
@@ -685,13 +719,17 @@ pub const GeneralReferencesRequest = union(enum) {
     }
 };
 
-pub const GeneralReferencesResponse = union {
+const GeneralReferencesResponse = union {
     rename: types.WorkspaceEdit,
     references: []types.Location,
     highlight: []types.DocumentHighlight,
 };
 
-pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Server.Error!?GeneralReferencesResponse {
+fn referencesHandler(
+    server: *Server,
+    arena: std.mem.Allocator,
+    request: GeneralReferencesRequest,
+) Error!?GeneralReferencesResponse {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

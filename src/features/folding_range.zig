@@ -6,7 +6,24 @@ const Ast = std.zig.Ast;
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
 const tracy = @import("tracy");
+
+pub const Error = error{ OutOfMemory, Canceled, InvalidParams };
+
+pub fn @"textDocument/foldingRange"(
+    server: *Server,
+    arena: std.mem.Allocator,
+    request: types.FoldingRange.Params,
+) Error!?[]types.FoldingRange {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    return try generateFoldingRanges(arena, &handle.tree, server.offset_encoding);
+}
 
 const FoldingRange = struct {
     loc: offsets.Loc,
@@ -147,7 +164,7 @@ const Builder = struct {
     }
 };
 
-pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
+fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
     var builder: Builder = .{
         .allocator = allocator,
         .locations = .empty,

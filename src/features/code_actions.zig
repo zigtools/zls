@@ -11,7 +11,65 @@ const ast = @import("../ast.zig");
 const diff = @import("../diff.zig");
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
+const diagnostics_gen = @import("diagnostics.zig");
 const tracy = @import("tracy");
+
+/// To report server capabilities
+pub const supported_code_actions: []const types.CodeAction.Kind = &.{
+    .quickfix,
+    .refactor,
+    .source,
+    .@"source.organizeImports",
+    .@"source.fixAll",
+};
+
+pub const Error = Analyser.Error || error{InvalidParams};
+
+pub fn @"textDocument/codeAction"(server: *Server, arena: std.mem.Allocator, request: types.CodeAction.Params) Error!?[]const types.CodeAction.Result {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+
+    // as of right now, only ast-check errors may get a code action
+    if (handle.tree.errors.len != 0) return null;
+    if (handle.tree.mode == .zon) return null;
+
+    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
+    defer error_bundle.deinit(server.allocator);
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    const only_kinds = if (request.context.only) |kinds| blk: {
+        var set: std.EnumSet(std.meta.Tag(types.CodeAction.Kind)) = .empty;
+        for (kinds) |kind| {
+            set.setPresent(kind, true);
+        }
+        break :blk set;
+    } else null;
+
+    var builder: Builder = .{
+        .arena = arena,
+        .analyser = &analyser,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+        .only_kinds = only_kinds,
+    };
+
+    try builder.generateCodeAction(error_bundle);
+    try builder.generateCodeActionsInRange(request.range);
+
+    const result = try arena.alloc(types.CodeAction.Result, builder.actions.items.len);
+    for (builder.actions.items, result) |action, *out| {
+        out.* = .{ .code_action = action };
+    }
+
+    return result;
+}
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
@@ -129,7 +187,7 @@ pub const Builder = struct {
     }
 };
 
-pub fn generateStringLiteralCodeActions(
+fn generateStringLiteralCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
@@ -172,7 +230,7 @@ pub fn generateStringLiteralCodeActions(
     });
 }
 
-pub fn generateMultilineStringCodeActions(
+fn generateMultilineStringCodeActions(
     builder: *Builder,
     token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
@@ -229,15 +287,6 @@ pub fn generateMultilineStringCodeActions(
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(remove_loc, str_escaped.items)}),
     });
 }
-
-/// To report server capabilities
-pub const supported_code_actions: []const types.CodeAction.Kind = &.{
-    .quickfix,
-    .refactor,
-    .source,
-    .@"source.organizeImports",
-    .@"source.fixAll",
-};
 
 pub fn collectAutoDiscardDiagnostics(
     analyser: *Analyser,
@@ -697,7 +746,7 @@ fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
 }
 
 /// const name_slice = @import(value_slice);
-pub const ImportDecl = struct {
+const ImportDecl = struct {
     var_decl: Ast.Node.Index,
     first_comment_token: ?Ast.TokenIndex,
     name: []const u8,
@@ -831,7 +880,7 @@ pub const ImportDecl = struct {
     }
 };
 
-pub fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
+fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
     const tree = &builder.handle.tree;
 
     const root_decls = tree.rootDecls();

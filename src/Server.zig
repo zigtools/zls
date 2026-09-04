@@ -21,17 +21,8 @@ const Uri = @import("Uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 
-const signature_help = @import("features/signature_help.zig");
-const references = @import("features/references.zig");
 const semantic_tokens = @import("features/semantic_tokens.zig");
-const inlay_hints = @import("features/inlay_hints.zig");
 const code_actions = @import("features/code_actions.zig");
-const folding_range = @import("features/folding_range.zig");
-const document_symbol = @import("features/document_symbol.zig");
-const completions = @import("features/completions.zig");
-const goto = @import("features/goto.zig");
-const hover_handler = @import("features/hover.zig");
-const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
 const BuildOnSave = @compileError("https://github.com/zigtools/zls/issues/3208");
@@ -1247,179 +1238,6 @@ fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: 
     return try text_edits.toOwnedSlice(arena);
 }
 
-fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params) Error!?types.semantic_tokens.Result {
-    if (server.config_manager.config.semantic_tokens == .none) return null;
-
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-
-    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
-    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-    // semantic tokens can be quite expensive to compute on large files
-    // and disabling callsite references can help with bringing the cost down.
-    analyser.collect_callsite_references = false;
-
-    return try semantic_tokens.writeSemanticTokens(
-        arena,
-        &analyser,
-        handle,
-        null,
-        server.offset_encoding,
-        server.config_manager.config.semantic_tokens == .partial,
-        server.client_capabilities.supports_semantic_tokens_overlapping,
-    );
-}
-
-fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params.Range) Error!?types.semantic_tokens.Result {
-    if (server.config_manager.config.semantic_tokens == .none) return null;
-
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-
-    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
-    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
-
-    const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-    // semantic tokens can be quite expensive to compute on large files
-    // and disabling callsite references can help with bringing the cost down.
-    analyser.collect_callsite_references = false;
-
-    return try semantic_tokens.writeSemanticTokens(
-        arena,
-        &analyser,
-        handle,
-        loc,
-        server.offset_encoding,
-        server.config_manager.config.semantic_tokens == .partial,
-        server.client_capabilities.supports_semantic_tokens_overlapping,
-    );
-}
-
-fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.completion.Params) Error!?types.completion.Result {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    if (handle.tree.mode == .zon) return null;
-
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-
-    return .{
-        .completion_list = try completions.completionAtIndex(server, &analyser, arena, handle, source_index) orelse return null,
-    };
-}
-
-fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelp.Params) Error!?types.SignatureHelp {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    if (handle.tree.mode == .zon) return null;
-
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-
-    const signature_info = (try signature_help.getSignatureInfo(
-        &analyser,
-        arena,
-        handle,
-        source_index,
-        markup_kind,
-    )) orelse return null;
-
-    var signatures = try arena.alloc(types.SignatureHelp.Signature, 1);
-    signatures[0] = signature_info;
-
-    return .{
-        .signatures = signatures,
-        .activeSignature = 0,
-        .activeParameter = signature_info.activeParameter,
-    };
-}
-
-fn gotoDefinitionHandler(
-    server: *Server,
-    arena: std.mem.Allocator,
-    request: types.Definition.Params,
-) Error!?types.Definition.Result {
-    return goto.gotoHandler(server, arena, .definition, request);
-}
-
-fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.type_definition.Params) Error!?types.Definition.Result {
-    return try goto.gotoHandler(server, arena, .type_definition, .{
-        .textDocument = request.textDocument,
-        .position = request.position,
-        .workDoneToken = request.workDoneToken,
-        .partialResultToken = request.partialResultToken,
-    });
-}
-
-fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.declaration.Params) Error!?types.Definition.Result {
-    return try goto.gotoHandler(server, arena, .declaration, .{
-        .textDocument = request.textDocument,
-        .position = request.position,
-        .workDoneToken = request.workDoneToken,
-        .partialResultToken = request.partialResultToken,
-    });
-}
-
-fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Hover.Params) Error!?types.Hover {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    if (handle.tree.mode == .zon) return null;
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-
-    return hover_handler.hover(
-        &analyser,
-        arena,
-        handle,
-        source_index,
-        markup_kind,
-        server.offset_encoding,
-    );
-}
-
-fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbol.Params) Error!lsp.ResultType("textDocument/documentSymbol") {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    if (handle.tree.mode == .zon) return null;
-    return .{
-        .document_symbols = try document_symbol.getDocumentSymbols(arena, &handle.tree, server.offset_encoding),
-    };
-}
-
 fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.document_formatting.Params) Error!?[]types.TextEdit {
     const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1435,132 +1253,6 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.d
 
     const text_edits = try diff.edits(server.io, arena, handle.tree.source, formatted, server.offset_encoding);
     return text_edits.items;
-}
-
-fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.rename.Params) Error!?types.WorkspaceEdit {
-    const response = try references.referencesHandler(server, arena, .{ .rename = request });
-    return if (response) |rep| rep.rename else null;
-}
-
-fn prepareRenameHandler(server: *Server, arena: std.mem.Allocator, request: types.prepare_rename.Params) Error!?types.prepare_rename.Result {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
-    const name_loc = offsets.identifierLocFromIndex(&handle.tree, source_index) orelse return null;
-    const name = offsets.locToSlice(handle.tree.source, name_loc);
-    return .{
-        .prepare_rename_placeholder = .{
-            .range = offsets.locToRange(handle.tree.source, name_loc, server.offset_encoding),
-            .placeholder = name,
-        },
-    };
-}
-
-fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: types.reference.Params) Error!?[]types.Location {
-    const response = try references.referencesHandler(server, arena, .{ .references = request });
-    return if (response) |rep| rep.references else null;
-}
-
-fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentHighlight.Params) Error!?[]types.DocumentHighlight {
-    const response = try references.referencesHandler(server, arena, .{ .highlight = request });
-    return if (response) |rep| rep.highlight else null;
-}
-
-fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.InlayHint.Params) Error!?[]types.InlayHint {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-    if (handle.tree.mode == .zon) return null;
-
-    // The Language Server Specification does not provide a client capabilities that allows the client to specify the MarkupKind of inlay hints.
-    const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-
-    return try inlay_hints.writeRangeInlayHint(
-        arena,
-        &server.config_manager.config,
-        &analyser,
-        handle,
-        loc,
-        hover_kind,
-        server.offset_encoding,
-    );
-}
-
-fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeAction.Params) Error!?[]const lsp.types.CodeAction.Result {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-
-    // as of right now, only ast-check errors may get a code action
-    if (handle.tree.errors.len != 0) return null;
-    if (handle.tree.mode == .zon) return null;
-
-    var error_bundle = try diagnostics_gen.getAstCheckDiagnostics(server, handle);
-    defer error_bundle.deinit(server.allocator);
-
-    var analyser = server.initAnalyser(arena, handle);
-    defer analyser.deinit();
-
-    const only_kinds = if (request.context.only) |kinds| blk: {
-        var set: std.EnumSet(std.meta.Tag(types.CodeAction.Kind)) = .empty;
-        for (kinds) |kind| {
-            set.setPresent(kind, true);
-        }
-        break :blk set;
-    } else null;
-
-    var builder: code_actions.Builder = .{
-        .arena = arena,
-        .analyser = &analyser,
-        .handle = handle,
-        .offset_encoding = server.offset_encoding,
-        .only_kinds = only_kinds,
-    };
-
-    try builder.generateCodeAction(error_bundle);
-    try builder.generateCodeActionsInRange(request.range);
-
-    const result = try arena.alloc(types.CodeAction.Result, builder.actions.items.len);
-    for (builder.actions.items, result) |action, *out| {
-        out.* = .{ .code_action = action };
-    }
-
-    return result;
-}
-
-fn foldingRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.FoldingRange.Params) Error!?[]types.FoldingRange {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-
-    return try folding_range.generateFoldingRanges(arena, &handle.tree, server.offset_encoding);
-}
-
-fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.SelectionRange.Params) Error!?[]types.SelectionRange {
-    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidParams,
-    };
-    const handle = server.document_store.getHandle(document_uri) orelse return null;
-
-    return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
-}
-
-fn workspaceSymbolHandler(server: *Server, arena: std.mem.Allocator, request: types.workspace.Symbol.Params) Error!?types.workspace.Symbol.Result {
-    return try @import("features/workspace_symbols.zig").handler(server, arena, request);
 }
 
 const HandledRequestParams = union(enum) {
@@ -1780,25 +1472,25 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .initialize => try server.initializeHandler(arena, params),
         .shutdown => try server.shutdownHandler(arena, params),
         .@"textDocument/willSaveWaitUntil" => try server.willSaveWaitUntilHandler(arena, params),
-        .@"textDocument/semanticTokens/full" => try server.semanticTokensFullHandler(arena, params),
-        .@"textDocument/semanticTokens/range" => try server.semanticTokensRangeHandler(arena, params),
-        .@"textDocument/inlayHint" => try server.inlayHintHandler(arena, params),
-        .@"textDocument/completion" => try server.completionHandler(arena, params),
-        .@"textDocument/signatureHelp" => try server.signatureHelpHandler(arena, params),
-        .@"textDocument/definition" => try server.gotoDefinitionHandler(arena, params),
-        .@"textDocument/typeDefinition" => try server.gotoTypeDefinitionHandler(arena, params),
-        .@"textDocument/declaration" => try server.gotoDeclarationHandler(arena, params),
-        .@"textDocument/hover" => try server.hoverHandler(arena, params),
-        .@"textDocument/documentSymbol" => try server.documentSymbolsHandler(arena, params),
+        .@"textDocument/semanticTokens/full" => try @import("features/semantic_tokens.zig").@"textDocument/semanticTokens/full"(server, arena, params),
+        .@"textDocument/semanticTokens/range" => try @import("features/semantic_tokens.zig").@"textDocument/semanticTokens/range"(server, arena, params),
+        .@"textDocument/inlayHint" => try @import("features/inlay_hints.zig").@"textDocument/inlayHint"(server, arena, params),
+        .@"textDocument/completion" => try @import("features/completions.zig").@"textDocument/completion"(server, arena, params),
+        .@"textDocument/signatureHelp" => try @import("features/signature_help.zig").@"textDocument/signatureHelp"(server, arena, params),
+        .@"textDocument/definition" => try @import("features/goto.zig").@"textDocument/definition"(server, arena, params),
+        .@"textDocument/typeDefinition" => try @import("features/goto.zig").@"textDocument/typeDefinition"(server, arena, params),
+        .@"textDocument/declaration" => try @import("features/goto.zig").@"textDocument/declaration"(server, arena, params),
+        .@"textDocument/hover" => try @import("features/hover.zig").@"textDocument/hover"(server, arena, params),
+        .@"textDocument/documentSymbol" => try @import("features/document_symbol.zig").@"textDocument/documentSymbol"(server, arena, params),
         .@"textDocument/formatting" => try server.formattingHandler(arena, params),
-        .@"textDocument/rename" => try server.renameHandler(arena, params),
-        .@"textDocument/prepareRename" => try server.prepareRenameHandler(arena, params),
-        .@"textDocument/references" => try server.referencesHandler(arena, params),
-        .@"textDocument/documentHighlight" => try server.documentHighlightHandler(arena, params),
-        .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
-        .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
-        .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
-        .@"workspace/symbol" => try server.workspaceSymbolHandler(arena, params),
+        .@"textDocument/rename" => try @import("features/references.zig").@"textDocument/rename"(server, arena, params),
+        .@"textDocument/prepareRename" => try @import("features/references.zig").@"textDocument/prepareRename"(server, arena, params),
+        .@"textDocument/references" => try @import("features/references.zig").@"textDocument/references"(server, arena, params),
+        .@"textDocument/documentHighlight" => try @import("features/references.zig").@"textDocument/documentHighlight"(server, arena, params),
+        .@"textDocument/codeAction" => try @import("features/code_actions.zig").@"textDocument/codeAction"(server, arena, params),
+        .@"textDocument/foldingRange" => try @import("features/folding_range.zig").@"textDocument/foldingRange"(server, arena, params),
+        .@"textDocument/selectionRange" => try @import("features/selection_range.zig").@"textDocument/selectionRange"(server, arena, params),
+        .@"workspace/symbol" => try @import("features/workspace_symbols.zig").@"workspace/symbol"(server, arena, params),
         .other => return null,
     };
 }

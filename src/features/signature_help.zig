@@ -9,8 +9,49 @@ const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("lsp").types;
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
+const Server = @import("../Server.zig");
+const Uri = @import("../Uri.zig");
 
 const data = @import("version_data");
+
+pub const Error = Analyser.Error || error{InvalidParams};
+
+pub fn @"textDocument/signatureHelp"(
+    server: *Server,
+    arena: std.mem.Allocator,
+    request: types.SignatureHelp.Params,
+) Error!?types.SignatureHelp {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
+
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    const signature_info = try getSignatureInfo(
+        &analyser,
+        arena,
+        handle,
+        source_index,
+        markup_kind,
+    ) orelse return null;
+
+    var signatures = try arena.alloc(types.SignatureHelp.Signature, 1);
+    signatures[0] = signature_info;
+
+    return .{
+        .signatures = signatures,
+        .activeSignature = 0,
+        .activeParameter = signature_info.activeParameter,
+    };
+}
 
 fn fnProtoToSignatureInfo(
     analyser: *Analyser,
@@ -68,7 +109,7 @@ fn fnProtoToSignatureInfo(
     };
 }
 
-pub fn getSignatureInfo(
+fn getSignatureInfo(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *DocumentStore.Handle,
