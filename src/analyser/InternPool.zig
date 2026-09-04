@@ -3846,6 +3846,15 @@ pub fn toInt(ip: *InternPool, val: Index, comptime T: type) ?T {
     };
 }
 
+pub fn toBigInt(ip: *InternPool, gpa: Allocator, val: Index) !?std.math.big.int.Managed {
+    return switch (ip.indexToKey(val)) {
+        .int_u64_value => |int_value| try .initSet(gpa, int_value.int),
+        .int_i64_value => |int_value| try .initSet(gpa, int_value.int),
+        .int_big_value => |int_value| try int_value.getConst(ip).toManaged(gpa),
+        else => try .initSet(gpa, ip.toInt(val, i64) orelse return null),
+    };
+}
+
 pub fn getBigInt(ip: *InternPool, ty: Index, int: std.math.big.int.Const) Allocator.Error!Index {
     assert(ip.isType(ty));
     return try ip.get(.{
