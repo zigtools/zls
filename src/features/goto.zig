@@ -53,9 +53,9 @@ fn gotoDefinitionSymbol(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const token_handle = switch (kind) {
-        .declaration => try decl_handle.definitionToken(analyser, false),
-        .definition => try decl_handle.definitionToken(analyser, true),
+    const token_handle: Analyser.TokenWithHandle = switch (kind) {
+        .declaration => .{ .token = decl_handle.nameToken(), .handle = decl_handle.handle },
+        .definition => try decl_handle.definitionToken(analyser),
         .type_definition => blk: {
             if (try decl_handle.resolveType(analyser)) |ty| {
                 var resolved_ty = ty;

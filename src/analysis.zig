@@ -5667,20 +5667,16 @@ pub const DeclWithHandle = struct {
         return self.decl.nameToken(&self.handle.tree);
     }
 
-    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) Error!TokenWithHandle {
-        if (resolve_alias) {
-            if (try analyser.resolveVarDeclAlias(self)) |result| {
-                return result.definitionToken(analyser, resolve_alias);
-            }
-            if (try self.resolveType(analyser)) |resolved_type| {
-                if (resolved_type.is_type_val) {
-                    if (resolved_type.typeDefinitionToken()) |token| {
-                        return token;
-                    }
+    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser) Error!TokenWithHandle {
+        var decl = try analyser.resolveVarDeclAlias(self) orelse self;
+        if (try decl.resolveType(analyser)) |resolved_type| {
+            if (resolved_type.is_type_val) {
+                if (resolved_type.typeDefinitionToken()) |token| {
+                    return token;
                 }
             }
         }
-        return .{ .token = self.nameToken(), .handle = self.handle };
+        return .{ .token = decl.nameToken(), .handle = decl.handle };
     }
 
     pub fn typeDeclarationNode(self: DeclWithHandle) error{OutOfMemory}!?NodeWithHandle {

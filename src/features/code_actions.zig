@@ -329,8 +329,7 @@ pub fn collectAutoDiscardDiagnostics(
                 offsets.tokenToSlice(tree, identifier_token),
                 tree.tokenStart(identifier_token),
             )) orelse break :blk &.{};
-            const def = try decl.definitionToken(analyser, false);
-            const range = offsets.tokenToRange(tree, def.token, offset_encoding);
+            const range = offsets.tokenToRange(tree, decl.nameToken(), offset_encoding);
             break :blk try arena.dupe(types.Diagnostic.RelatedInformation, &.{.{
                 .location = .{
                     .uri = handle.uri.raw,
