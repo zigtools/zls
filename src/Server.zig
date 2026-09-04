@@ -555,7 +555,6 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
             .declarationProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
             .typeDefinitionProvider = .{ .bool = true },
-            .implementationProvider = .{ .bool = false },
             .referencesProvider = .{ .bool = true },
             .documentSymbolProvider = .{ .bool = true },
             .colorProvider = .{ .bool = false },
@@ -1376,15 +1375,6 @@ fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request:
     });
 }
 
-fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.implementation.Params) Error!?types.Definition.Result {
-    return try goto.gotoHandler(server, arena, .definition, .{
-        .textDocument = request.textDocument,
-        .position = request.position,
-        .workDoneToken = request.workDoneToken,
-        .partialResultToken = request.partialResultToken,
-    });
-}
-
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.declaration.Params) Error!?types.Definition.Result {
     return try goto.gotoHandler(server, arena, .declaration, .{
         .textDocument = request.textDocument,
@@ -1584,7 +1574,6 @@ const HandledRequestParams = union(enum) {
     @"textDocument/signatureHelp": types.SignatureHelp.Params,
     @"textDocument/definition": types.Definition.Params,
     @"textDocument/typeDefinition": types.type_definition.Params,
-    @"textDocument/implementation": types.implementation.Params,
     @"textDocument/declaration": types.declaration.Params,
     @"textDocument/hover": types.Hover.Params,
     @"textDocument/documentSymbol": types.DocumentSymbol.Params,
@@ -1629,7 +1618,6 @@ fn isBlockingMessage(msg: Message) bool {
             .@"textDocument/signatureHelp",
             .@"textDocument/definition",
             .@"textDocument/typeDefinition",
-            .@"textDocument/implementation",
             .@"textDocument/declaration",
             .@"textDocument/hover",
             .@"textDocument/documentSymbol",
@@ -1799,7 +1787,6 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/signatureHelp" => try server.signatureHelpHandler(arena, params),
         .@"textDocument/definition" => try server.gotoDefinitionHandler(arena, params),
         .@"textDocument/typeDefinition" => try server.gotoTypeDefinitionHandler(arena, params),
-        .@"textDocument/implementation" => try server.gotoImplementationHandler(arena, params),
         .@"textDocument/declaration" => try server.gotoDeclarationHandler(arena, params),
         .@"textDocument/hover" => try server.hoverHandler(arena, params),
         .@"textDocument/documentSymbol" => try server.documentSymbolsHandler(arena, params),
