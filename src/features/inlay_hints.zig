@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const Ast = std.zig.Ast;
-const log = std.log.scoped(.inlay_hint);
 
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
@@ -448,9 +447,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) Analyser.Error!void
 
     switch (tree.nodeTag(call.ast.fn_expr)) {
         .identifier, .field_access, .enum_literal => try writeCallHint(builder, call),
-        else => {
-            log.debug("cannot deduce fn expression with tag '{}'", .{tree.nodeTag(call.ast.fn_expr)});
-        },
+        else => {},
     }
 }
 

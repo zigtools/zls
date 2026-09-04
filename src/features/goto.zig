@@ -4,7 +4,6 @@
 //! - [`textDocument/typeDefinition`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_typeDefinition)
 
 const std = @import("std");
-const log = std.log.scoped(.goto);
 
 const Server = @import("../Server.zig");
 const lsp = @import("lsp");
