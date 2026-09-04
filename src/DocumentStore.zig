@@ -766,10 +766,22 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile {
 /// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
 /// This function does not protect against data races from modifying the BuildFile
-fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory }!*BuildFile {
+fn getOrLoadBuildFile(
+    self: *DocumentStore,
+    uri: Uri,
+    source_handle: ?*const Handle,
+) error{ Canceled, OutOfMemory }!?*BuildFile {
     comptime std.debug.assert(supports_build_system);
 
+    // A filename alone is not sufficient because ordinary modules may be named `build.zig`.
+    if (source_handle) |handle| std.debug.assert(handle.uri.eql(uri));
+
+    // Reuse a build file that was already classified and loaded.
     if (self.getBuildFile(uri)) |build_file| return build_file;
+
+    // Classify the current source before treating its `build.zig` filename as a build script.
+    const handle = source_handle orelse (try self.getOrLoadHandle(uri) orelse return null);
+    if (!isBuildScript(&handle.tree)) return null;
 
     const new_build_file: *BuildFile = blk: {
         try self.mutex.lock(self.io);
@@ -1247,6 +1259,44 @@ pub fn isBuildFile(uri: Uri) bool {
     return std.mem.endsWith(u8, uri.raw, "/build.zig");
 }
 
+/// Returns whether the parsed source exposes the entry point required by `zig build`.
+pub fn isBuildScript(tree: *const Ast) bool {
+    std.debug.assert(tree.mode == .zig);
+
+    for (tree.rootDecls()) |decl| {
+        var buffer: [1]Ast.Node.Index = undefined;
+        const fn_proto = tree.fullFnProto(&buffer, decl) orelse continue;
+        const visibility_token = fn_proto.visib_token orelse continue;
+        const name_token = fn_proto.name_token orelse continue;
+
+        std.debug.assert(tree.tokenTag(visibility_token) == .keyword_pub);
+        std.debug.assert(tree.tokenTag(name_token) == .identifier);
+        if (std.mem.eql(u8, tree.tokenSlice(name_token), "build")) return true;
+    }
+    return false;
+}
+
+// A module may be named `build.zig` without exposing the `zig build` entry point.
+test isBuildScript {
+    var build_script = try Ast.parse(std.testing.allocator,
+        \\const std = @import("std");
+        \\pub fn build(b: *std.Build) void {
+        \\    _ = b;
+        \\}
+    , .zig);
+    defer build_script.deinit(std.testing.allocator);
+    try std.testing.expect(isBuildScript(&build_script));
+
+    var module = try Ast.parse(std.testing.allocator,
+        \\const ParseOptions = @import("../error_handling.zig").ParseOptions;
+        \\pub fn parse(options: ParseOptions) void {
+        \\    _ = options;
+        \\}
+    , .zig);
+    defer module.deinit(std.testing.allocator);
+    try std.testing.expect(!isBuildScript(&module));
+}
+
 pub fn isBuiltinFile(uri: Uri) bool {
     return std.mem.endsWith(u8, uri.raw, "/builtin.zig");
 }
@@ -1336,7 +1386,8 @@ fn collectPotentialBuildFiles(self: *DocumentStore, uri: Uri) error{ Canceled, O
         const build_file_uri: Uri = try .fromPath(self.allocator, build_path);
         defer build_file_uri.deinit(self.allocator);
 
-        const build_file = try self.getOrLoadBuildFile(build_file_uri);
+        // A module named `build.zig` cannot provide build configuration without the public entry point.
+        const build_file = try self.getOrLoadBuildFile(build_file_uri, null) orelse continue;
         potential_build_files.appendAssumeCapacity(build_file);
     }
     // The potential build files that come first should have higher priority.
@@ -1417,18 +1468,6 @@ fn createAndStoreDocument(
         .uri => {},
     };
 
-    if (supports_build_system and options.lsp_synced and isBuildFile(uri) and !isInStd(uri)) {
-        switch (options.load_build_file_behaviour) {
-            .load_but_dont_update => {
-                _ = try store.getOrLoadBuildFile(uri);
-            },
-            .only_update => {
-                store.invalidateBuildFile(uri);
-            },
-            .never => {},
-        }
-    }
-
     const handle_future: *Handle.Future = handle_future: {
         try store.mutex.lock(store.io);
         defer store.mutex.unlock(store.io);
@@ -1503,6 +1542,23 @@ fn createAndStoreDocument(
         },
     };
     old_handle.deinit(store.allocator);
+
+    // Only activate build integration after the refreshed document is known to be a build script.
+    if (supports_build_system and options.lsp_synced and isBuildFile(uri) and !isInStd(uri) and isBuildScript(&handle_future.handle.tree)) {
+        switch (options.load_build_file_behaviour) {
+            .load_but_dont_update => {
+                _ = try store.getOrLoadBuildFile(uri, &handle_future.handle);
+            },
+            .only_update => {
+                if (store.getBuildFile(uri)) |build_file| {
+                    store.invalidateBuildFile(build_file.uri);
+                } else {
+                    _ = try store.getOrLoadBuildFile(uri, &handle_future.handle);
+                }
+            },
+            .never => {},
+        }
+    }
 
     handle_future.err = null;
     return &handle_future.handle;
