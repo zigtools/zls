@@ -643,7 +643,7 @@ fn testInlayHints(source: []const u8, options: Options) !void {
         return error.InvalidResponse;
     };
 
-    var visited: std.DynamicBitSetUnmanaged = try .initEmpty(allocator, hints.len);
+    var visited: std.bit_set.Dynamic = try .initEmpty(allocator, hints.len);
     defer visited.deinit(allocator);
 
     var error_builder: ErrorBuilder = .init(allocator);

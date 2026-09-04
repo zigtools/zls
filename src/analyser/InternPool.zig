@@ -4688,9 +4688,9 @@ test "function type" {
         .return_type = .bool_type,
     } });
 
-    var args_is_comptime: std.StaticBitSet(32) = .empty;
+    var args_is_comptime: std.bit_set.Static(32) = .empty;
     args_is_comptime.set(0);
-    var args_is_noalias: std.StaticBitSet(32) = .empty;
+    var args_is_noalias: std.bit_set.Static(32) = .empty;
     args_is_noalias.set(1);
 
     const @"fn(comptime type, noalias i32) type" = try ip.get(.{ .function_type = .{
@@ -4913,7 +4913,7 @@ test "test thread safety of InternPool" {
 
     try std.testing.expectEqual(index_start + size, ip.map.count());
 
-    var found: std.DynamicBitSetUnmanaged = try .initEmpty(gpa, size);
+    var found: std.bit_set.Dynamic = try .initEmpty(gpa, size);
     defer found.deinit(gpa);
 
     // test that every value is in the InternPool
