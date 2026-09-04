@@ -13,6 +13,10 @@ The complete installation guide is available on the [Zigtools website](https://z
 
 ### Build From Source
 
+> [!WARNING]
+> ZLS currently lacks critical build system integration with Zig nightly/master. See [#3208](https://github.com/zigtools/zls/issues/3208) for more information.
+> It is recommended to use Zig and ZLS 0.16.0 in the meantime.
+
 The default branch of ZLS targets [Zig master](https://ziglang.org/download/).
 
 ```bash
