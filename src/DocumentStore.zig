@@ -1051,22 +1051,6 @@ pub fn loadTrigramStores(
 
 const progress_token = "buildProgressToken";
 
-fn sendMessageToClient(
-    io: std.Io,
-    allocator: std.mem.Allocator,
-    transport: *lsp.Transport,
-    message: anytype,
-) !void {
-    const json_message = try std.json.Stringify.valueAlloc(
-        allocator,
-        message,
-        .{ .emit_null_optional_fields = false },
-    );
-    defer allocator.free(json_message);
-
-    try transport.writeJsonMessageUncancelable(io, json_message);
-}
-
 fn notifyBuildStart(self: *DocumentStore) void {
     if (!self.lsp_capabilities.supports_work_done_progress) return;
 
@@ -1078,32 +1062,38 @@ fn notifyBuildStart(self: *DocumentStore) void {
     const prev = self.builds_in_progress.fetchAdd(1, .monotonic);
     if (prev != 0) return;
 
-    sendMessageToClient(self.io, self.allocator, transport, .{
-        .jsonrpc = "2.0",
-        .id = "progress",
-        .method = "window/workDoneProgress/create",
-        .params = lsp.types.window.work_done_progress.CreateParams{
+    const old_cancel_protect = self.io.swapCancelProtection(.blocked);
+    defer _ = self.io.swapCancelProtection(old_cancel_protect);
+
+    transport.writeRequest(
+        self.io,
+        self.allocator,
+        .{ .string = "progress" },
+        "window/workDoneProgress/create",
+        lsp.types.window.work_done_progress.CreateParams,
+        .{
             .token = .{ .string = progress_token },
         },
-    }) catch |err| switch (err) {
-        error.Canceled => comptime unreachable,
+        .{ .emit_null_optional_fields = false },
+    ) catch |err| switch (err) {
+        error.Canceled => unreachable,
         else => |e| {
             log.err("Failed to send create work message: {}", .{e});
             return;
         },
     };
 
-    sendMessageToClient(self.io, self.allocator, transport, .{
-        .jsonrpc = "2.0",
-        .method = "$/progress",
-        .params = .{
-            .token = progress_token,
-            .value = lsp.types.window.work_done_progress.Begin{
-                .title = "Loading build configuration",
-            },
+    transport.writeNotification(
+        self.io,
+        self.allocator,
+        "$/progress",
+        lsp.types.window.work_done_progress.Begin,
+        .{
+            .title = "Loading build configuration",
         },
-    }) catch |err| switch (err) {
-        error.Canceled => comptime unreachable,
+        .{ .emit_null_optional_fields = false },
+    ) catch |err| switch (err) {
+        error.Canceled => unreachable,
         else => |e| {
             log.err("Failed to send progress start message: {}", .{e});
             return;
@@ -1124,22 +1114,23 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
     const prev = self.builds_in_progress.fetchSub(1, .monotonic);
     if (prev != 1) return;
 
-    const message = switch (status) {
-        .failed => "Failed",
-        .success => "Success",
-    };
+    const old_cancel_protect = self.io.swapCancelProtection(.blocked);
+    defer _ = self.io.swapCancelProtection(old_cancel_protect);
 
-    sendMessageToClient(self.io, self.allocator, transport, .{
-        .jsonrpc = "2.0",
-        .method = "$/progress",
-        .params = .{
-            .token = progress_token,
-            .value = lsp.types.window.work_done_progress.End{
-                .message = message,
+    transport.writeNotification(
+        self.io,
+        self.allocator,
+        "$/progress",
+        lsp.types.window.work_done_progress.End,
+        .{
+            .message = switch (status) {
+                .failed => "Failed",
+                .success => "Success",
             },
         },
-    }) catch |err| switch (err) {
-        error.Canceled => comptime unreachable,
+        .{ .emit_null_optional_fields = false },
+    ) catch |err| switch (err) {
+        error.Canceled => unreachable,
         else => |e| {
             log.err("Failed to send progress end message: {}", .{e});
             return;
@@ -1210,33 +1201,34 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
     }
 
     if (self.transport) |transport| {
+        const old_cancel_protect = self.io.swapCancelProtection(.blocked);
+        defer _ = self.io.swapCancelProtection(old_cancel_protect);
+
         if (self.lsp_capabilities.supports_semantic_tokens_refresh) {
-            sendMessageToClient(
+            transport.writeRequest(
                 self.io,
                 self.allocator,
-                transport,
-                lsp.TypedJsonRPCRequest(?void){
-                    .id = .{ .string = "semantic_tokens_refresh" },
-                    .method = "workspace/semanticTokens/refresh",
-                    .params = @as(?void, null),
-                },
+                .{ .string = "semantic_tokens_refresh" },
+                "workspace/semanticTokens/refresh",
+                ?void,
+                null,
+                .{ .emit_null_optional_fields = false },
             ) catch |err| switch (err) {
-                error.Canceled => comptime unreachable,
+                error.Canceled => unreachable,
                 else => {},
             };
         }
         if (self.lsp_capabilities.supports_inlay_hints_refresh) {
-            sendMessageToClient(
+            transport.writeRequest(
                 self.io,
                 self.allocator,
-                transport,
-                lsp.TypedJsonRPCRequest(?void){
-                    .id = .{ .string = "inlay_hints_refresh" },
-                    .method = "workspace/inlayHint/refresh",
-                    .params = @as(?void, null),
-                },
+                .{ .string = "inlay_hints_refresh" },
+                "workspace/inlayHint/refresh",
+                ?void,
+                null,
+                .{ .emit_null_optional_fields = false },
             ) catch |err| switch (err) {
-                error.Canceled => comptime unreachable,
+                error.Canceled => unreachable,
                 else => {},
             };
         }
