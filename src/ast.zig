@@ -22,31 +22,50 @@ fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.P
         .allowzero_token = null,
         .const_token = null,
         .volatile_token = null,
+        .duplicate_token = null,
         .ast = info,
     };
     // We need to be careful that we don't iterate over any sub-expressions
     // here while looking for modifiers as that could result in false
     // positives. Therefore, start after a sentinel if there is one and
     // skip over any align node and bit range nodes.
-    var i = if (info.sentinel.unwrap()) |sentinel| lastToken(tree, sentinel) + 1 else switch (size) {
-        .many, .c => info.main_token + 1,
-        else => info.main_token,
-    };
+    var i = (if (info.sentinel.unwrap()) |sentinel| tree.lastToken(sentinel) + 1 else switch (size) {
+        .one => info.main_token,
+        .slice => info.main_token + 1,
+        .many => info.main_token + 2,
+        .c => info.main_token + 3,
+    }) + 1;
     const end = tree.firstToken(info.child_type);
     while (i < end) : (i += 1) {
         switch (tree.tokenTag(i)) {
-            .keyword_allowzero => result.allowzero_token = i,
-            .keyword_const => result.const_token = i,
-            .keyword_volatile => result.volatile_token = i,
-            .keyword_align => {
-                const align_node = info.align_node.unwrap().?;
-                if (info.bit_range_end.unwrap()) |bit_range_end| {
-                    i = lastToken(tree, bit_range_end) + 1;
-                } else {
-                    i = lastToken(tree, align_node) + 1;
+            .keyword_allowzero => {
+                if (result.allowzero_token != null) {
+                    result.duplicate_token = i;
                 }
+                result.allowzero_token = i;
             },
-            else => {},
+            .keyword_const => {
+                if (result.const_token != null) {
+                    result.duplicate_token = i;
+                }
+                result.const_token = i;
+            },
+            .keyword_volatile => {
+                if (result.volatile_token != null) {
+                    result.duplicate_token = i;
+                }
+                result.volatile_token = i;
+            },
+            .keyword_align => {
+                if (info.bit_range_end.unwrap()) |bit_range_end| {
+                    std.debug.assert(info.bit_range_start != .none);
+                    i = lastToken(tree, bit_range_end) + 1;
+                } else if (info.align_node.unwrap()) |align_node| {
+                    i = lastToken(tree, align_node) + 1;
+                } else unreachable;
+            },
+            .keyword_addrspace => i = lastToken(tree, info.addrspace_node.unwrap().?) + 1,
+            else => unreachable,
         }
     }
     return result;
@@ -325,7 +344,7 @@ pub fn whileFull(tree: *const Ast, node: Node.Index) full.While {
 }
 
 pub fn forSimple(tree: *const Ast, node: Node.Index) full.For {
-    const data = &tree.nodes.items(.data)[@intFromEnum(node)].node_and_node;
+    const data = &tree.nodes.items(.data)[@backingInt(node)].node_and_node;
     return fullForComponents(tree, .{
         .for_token = tree.nodeMainToken(node),
         .inputs = (&data[0])[0..1],
@@ -337,8 +356,8 @@ pub fn forSimple(tree: *const Ast, node: Node.Index) full.For {
 pub fn forFull(tree: *const Ast, node: Node.Index) full.For {
     const extra_index, const extra = tree.nodeData(node).@"for";
     const inputs = tree.extraDataSliceWithLen(extra_index, extra.inputs, Node.Index);
-    const then_expr: Node.Index = @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs]);
-    const else_expr: Node.OptionalIndex = if (extra.has_else) @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs + 1]) else .none;
+    const then_expr: Node.Index = @fromBackingInt(tree.extra_data[@backingInt(extra_index) + extra.inputs]);
+    const else_expr: Node.OptionalIndex = if (extra.has_else) @fromBackingInt(tree.extra_data[@backingInt(extra_index) + extra.inputs + 1]) else .none;
     return fullForComponents(tree, .{
         .for_token = tree.nodeMainToken(node),
         .inputs = inputs,
@@ -396,13 +415,13 @@ fn findMatchingRBrace(tree: *const Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
 
 pub fn isKeyword(tag: std.zig.Token.Tag) bool {
     const tags = std.zig.Token.keywords.values();
-    var first_keyword: std.meta.Tag(std.zig.Token.Tag) = @intFromEnum(tags[0]);
-    var last_keyword: std.meta.Tag(std.zig.Token.Tag) = @intFromEnum(tags[tags.len - 1]);
+    var first_keyword: std.meta.Tag(std.zig.Token.Tag) = @backingInt(tags[0]);
+    var last_keyword: std.meta.Tag(std.zig.Token.Tag) = @backingInt(tags[tags.len - 1]);
     for (std.zig.Token.keywords.values()) |token_tag| {
-        first_keyword = @min(@intFromEnum(token_tag), first_keyword);
-        last_keyword = @max(@intFromEnum(token_tag), last_keyword);
+        first_keyword = @min(@backingInt(token_tag), first_keyword);
+        last_keyword = @max(@backingInt(token_tag), last_keyword);
     }
-    return first_keyword <= @intFromEnum(tag) and @intFromEnum(tag) <= last_keyword;
+    return first_keyword <= @backingInt(tag) and @backingInt(tag) <= last_keyword;
 }
 
 test isKeyword {
@@ -624,8 +643,8 @@ pub fn lastToken(tree: *const Ast, node: Node.Index) Ast.TokenIndex {
         },
         .@"for" => {
             const extra_index, const extra = tree.nodeData(n).@"for";
-            const index = @intFromEnum(extra_index) + extra.inputs + @intFromBool(extra.has_else);
-            n = @enumFromInt(tree.extra_data[index]);
+            const index = @backingInt(extra_index) + extra.inputs + @intFromBool(extra.has_else);
+            n = @fromBackingInt(tree.extra_data[index]);
         },
         .@"asm" => {
             _, const extra_index = tree.nodeData(n).node_and_extra;
@@ -1230,9 +1249,9 @@ pub const Iterator = union(enum) {
 
             .assign_destructure => {
                 const extra_index, const value_expr = tree.nodeData(node).extra_and_node;
-                const variable_count = tree.extra_data[@intFromEnum(extra_index)];
-                const sub_range_start: Ast.ExtraIndex = @enumFromInt(@intFromEnum(extra_index) + 1);
-                const sub_range_end: Ast.ExtraIndex = @enumFromInt(@intFromEnum(sub_range_start) + variable_count);
+                const variable_count = tree.extra_data[@backingInt(extra_index)];
+                const sub_range_start: Ast.ExtraIndex = @fromBackingInt(@backingInt(extra_index) + 1);
+                const sub_range_end: Ast.ExtraIndex = @fromBackingInt(@backingInt(sub_range_start) + variable_count);
                 return .{ .sub_range = .{
                     .items = .{ .start = sub_range_start, .end = sub_range_end },
                     .suffix = .{ value_expr.toOptional(), .none },
@@ -1343,10 +1362,10 @@ pub const Iterator = union(enum) {
             .@"for",
             => {
                 const extra_index, const extra = tree.nodeData(node).@"for";
-                const then_expr: Node.Index = @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs]);
-                const else_expr: Node.OptionalIndex = if (extra.has_else) @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + extra.inputs + 1]) else .none;
+                const then_expr: Node.Index = @fromBackingInt(tree.extra_data[@backingInt(extra_index) + extra.inputs]);
+                const else_expr: Node.OptionalIndex = if (extra.has_else) @fromBackingInt(tree.extra_data[@backingInt(extra_index) + extra.inputs + 1]) else .none;
                 return .{ .sub_range = .{
-                    .items = .{ .start = extra_index, .end = @enumFromInt(@intFromEnum(extra_index) + extra.inputs) },
+                    .items = .{ .start = extra_index, .end = @fromBackingInt(@backingInt(extra_index) + extra.inputs) },
                     .suffix = .{ then_expr.toOptional(), else_expr },
                 } };
             },
@@ -1424,7 +1443,7 @@ pub const Iterator = union(enum) {
                 }
                 const items = tree.extraDataSlice(sub_range.items, Ast.Node.Index);
                 if (items.len > 0) {
-                    defer sub_range.items.start = @enumFromInt(@intFromEnum(sub_range.items.start) + 1);
+                    defer sub_range.items.start = @fromBackingInt(@backingInt(sub_range.items.start) + 1);
                     return items[0];
                 }
                 const first = sub_range.suffix[0].unwrap() orelse return null;
@@ -1467,8 +1486,8 @@ pub const Iterator = union(enum) {
                 }
                 const items = tree.extraDataSlice(asm_state.items, Ast.Node.Index);
 
-                var i: usize = 0;
-                defer asm_state.items.start = @enumFromInt(@intFromEnum(asm_state.items.start) + i);
+                var i: u32 = 0;
+                defer asm_state.items.start = @fromBackingInt(@backingInt(asm_state.items.start) + i);
                 while (i < items.len) {
                     defer i += 1;
                     switch (tree.nodeTag(items[i])) {
@@ -1628,7 +1647,7 @@ pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, t
     var node_locs: std.ArrayList(NodeLoc) = .empty;
     defer node_locs.deinit(allocator);
     for (0..tree.nodes.len) |i| {
-        const node: Ast.Node.Index = @enumFromInt(i);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
         const loc = offsets.nodeToLoc(tree, node);
         if (loc.start <= source_index and source_index <= loc.end) {
             try node_locs.append(allocator, .{ .node = node, .loc = loc });

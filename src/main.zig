@@ -46,7 +46,7 @@ var log_transport: ?*zls.lsp.Transport = null;
 var log_stderr: bool = true;
 /// Log messages to the given file.
 var log_file: ?std.Io.File = null;
-var log_level: std.log.Level = if (zig_builtin.mode == .Debug) .debug else .info;
+var log_level: std.log.Level = if (zig_builtin.mode == .debug) .debug else .info;
 
 fn logFn(
     comptime level: std.log.Level,
@@ -75,7 +75,7 @@ fn logFn(
         };
     }
 
-    if (@intFromEnum(level) > @intFromEnum(log_level)) return;
+    if (@backingInt(level) > @backingInt(log_level)) return;
     if (!log_stderr and log_file == null) return;
 
     const level_txt: []const u8 = switch (level) {

@@ -98,8 +98,8 @@ pub const Declaration = union(enum) {
     error_token: Ast.TokenIndex,
 
     comptime {
-        for (std.meta.fields(Declaration)) |field| {
-            std.debug.assert(@sizeOf(field.type) <= 8); // a Declaration without the union tag must be less than 8 bytes
+        for (std.meta.fieldTypes(Declaration)) |T| {
+            std.debug.assert(@sizeOf(T) <= 8); // a Declaration without the union tag must be less than 8 bytes
         }
     }
 
@@ -126,7 +126,7 @@ pub const Declaration = union(enum) {
 
         pub fn getVarDeclNode(self: AssignDestructure, tree: *const Ast) Ast.Node.Index {
             const extra_index = tree.nodeData(self.node).extra_and_node[0];
-            return @enumFromInt(tree.extra_data[@intFromEnum(extra_index) + 1 ..][self.index]);
+            return @fromBackingInt(tree.extra_data[@backingInt(extra_index) + 1 ..][self.index]);
         }
 
         pub fn getFullVarDecl(self: AssignDestructure, tree: *const Ast) Ast.full.VarDecl {
@@ -151,7 +151,7 @@ pub const Declaration = union(enum) {
         _,
 
         pub fn toOptional(index: Index) OptionalIndex {
-            return @enumFromInt(@intFromEnum(index));
+            return @fromBackingInt(@backingInt(index));
         }
     };
 
@@ -161,7 +161,7 @@ pub const Declaration = union(enum) {
 
         pub fn unwrap(index: OptionalIndex) ?Index {
             if (index == .none) return null;
-            return @enumFromInt(@intFromEnum(index));
+            return @fromBackingInt(@backingInt(index));
         }
     };
 
@@ -291,7 +291,7 @@ pub const Scope = struct {
         _,
 
         pub fn toOptional(index: Index) OptionalIndex {
-            return @enumFromInt(@intFromEnum(index));
+            return @fromBackingInt(@backingInt(index));
         }
     };
 
@@ -302,7 +302,7 @@ pub const Scope = struct {
 
         pub fn unwrap(index: OptionalIndex) ?Index {
             if (index == .none) return null;
-            return @enumFromInt(@intFromEnum(index));
+            return @fromBackingInt(@backingInt(index));
         }
     };
 };
@@ -340,7 +340,7 @@ const ScopeContext = struct {
             if (std.mem.eql(u8, name, "_")) return;
             defer std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
 
-            if (@import("builtin").mode == .Debug) {
+            if (@import("builtin").mode == .debug) {
                 // Check that nameToken works
                 std.debug.assert(identifier_token == declaration.nameToken(pushed.context.tree));
             }
@@ -357,10 +357,10 @@ const ScopeContext = struct {
             if (gop.found_existing) return;
 
             try doc_scope.declarations.append(allocator, declaration);
-            const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
+            const declaration_index: Declaration.Index = @fromBackingInt(@intCast(doc_scope.declarations.len - 1));
 
-            const data = &doc_scope.scopes.items(.data)[@intFromEnum(pushed.scope)];
-            const child_declarations = &doc_scope.scopes.items(.child_declarations)[@intFromEnum(pushed.scope)];
+            const data = &doc_scope.scopes.items(.data)[@backingInt(pushed.scope)];
+            const child_declarations = &doc_scope.scopes.items(.child_declarations)[@backingInt(pushed.scope)];
 
             if (!data.is_child_decls_small) {
                 try context.child_declarations_scratch.append(allocator, declaration_index);
@@ -386,7 +386,7 @@ const ScopeContext = struct {
             const allocator = context.allocator;
 
             const slice = context.doc_scope.scopes.slice();
-            const data = slice.items(.data)[@intFromEnum(pushed.scope)];
+            const data = slice.items(.data)[@backingInt(pushed.scope)];
 
             if (!data.is_child_decls_small) {
                 const declaration_start = context.doc_scope.extra.items.len;
@@ -394,7 +394,7 @@ const ScopeContext = struct {
                 const declaration_end = context.doc_scope.extra.items.len;
                 context.child_declarations_scratch.items.len = pushed.declarations_start;
 
-                slice.items(.child_declarations)[@intFromEnum(pushed.scope)] = .{
+                slice.items(.child_declarations)[@backingInt(pushed.scope)] = .{
                     .other = .{
                         .start = @intCast(declaration_start),
                         .end = @intCast(declaration_end),
@@ -408,7 +408,7 @@ const ScopeContext = struct {
                 const scope_end = context.doc_scope.extra.items.len;
                 context.child_scopes_scratch.items.len = pushed.scopes_start;
 
-                slice.items(.child_scopes)[@intFromEnum(pushed.scope)] = .{
+                slice.items(.child_scopes)[@backingInt(pushed.scope)] = .{
                     .other = .{
                         .start = @intCast(scope_start),
                         .end = @intCast(scope_end),
@@ -440,7 +440,7 @@ const ScopeContext = struct {
                 .small = @splat(.none),
             },
         });
-        const new_scope_index: Scope.Index = @enumFromInt(context.doc_scope.scopes.len - 1);
+        const new_scope_index: Scope.Index = @fromBackingInt(@intCast(context.doc_scope.scopes.len - 1));
         if (context.current_scope.unwrap()) |parent_scope| {
             try context.pushChildScope(parent_scope, new_scope_index);
         }
@@ -462,8 +462,8 @@ const ScopeContext = struct {
         const doc_scope = context.doc_scope;
         const allocator = context.allocator;
 
-        const data = &doc_scope.scopes.items(.data)[@intFromEnum(scope_index)];
-        const child_scopes = &doc_scope.scopes.items(.child_scopes)[@intFromEnum(scope_index)];
+        const data = &doc_scope.scopes.items(.data)[@backingInt(scope_index)];
+        const child_scopes = &doc_scope.scopes.items(.child_scopes)[@backingInt(scope_index)];
 
         if (!data.is_child_scopes_small) {
             try context.child_scopes_scratch.append(allocator, child_scope_index);
@@ -1245,14 +1245,14 @@ pub fn getScopeTag(
     doc_scope: DocumentScope,
     scope: Scope.Index,
 ) Scope.Tag {
-    return doc_scope.scopes.items(.data)[@intFromEnum(scope)].tag;
+    return doc_scope.scopes.items(.data)[@backingInt(scope)].tag;
 }
 
 pub fn getScopeParent(
     doc_scope: DocumentScope,
     scope: Scope.Index,
 ) Scope.OptionalIndex {
-    return doc_scope.scopes.items(.parent_scope)[@intFromEnum(scope)];
+    return doc_scope.scopes.items(.parent_scope)[@backingInt(scope)];
 }
 
 pub fn getScopeAstNode(
@@ -1261,7 +1261,7 @@ pub fn getScopeAstNode(
 ) ?Ast.Node.Index {
     const slice = doc_scope.scopes.slice();
 
-    const data = slice.items(.data)[@intFromEnum(scope)];
+    const data = slice.items(.data)[@backingInt(scope)];
 
     return switch (data.tag) {
         .container, .function, .block => data.data.ast_node,
@@ -1274,7 +1274,7 @@ pub fn getScopeDeclaration(
     lookup: DeclarationLookup,
 ) Declaration.OptionalIndex {
     return if (doc_scope.declaration_lookup_map.getIndex(lookup)) |idx|
-        @enumFromInt(idx)
+        @fromBackingInt(@intCast(idx))
     else
         .none;
 }
@@ -1285,8 +1285,8 @@ pub fn getScopeDeclarationsConst(
 ) []const Declaration.Index {
     const slice = doc_scope.scopes.slice();
 
-    if (slice.items(.data)[@intFromEnum(scope)].is_child_decls_small) {
-        const small = &slice.items(.child_declarations)[@intFromEnum(scope)].small;
+    if (slice.items(.data)[@backingInt(scope)].is_child_decls_small) {
+        const small = &slice.items(.child_declarations)[@backingInt(scope)].small;
 
         for (0..Scope.ChildDeclarations.small_size) |idx| {
             if (small[idx] == .none) {
@@ -1296,7 +1296,7 @@ pub fn getScopeDeclarationsConst(
 
         return @ptrCast(small[0..Scope.ChildDeclarations.small_size]);
     } else {
-        const other = slice.items(.child_declarations)[@intFromEnum(scope)].other;
+        const other = slice.items(.child_declarations)[@backingInt(scope)].other;
         return @ptrCast(doc_scope.extra.items[other.start..other.end]);
     }
 }
@@ -1307,8 +1307,8 @@ pub fn getScopeChildScopesConst(
 ) []const Scope.Index {
     const slice = doc_scope.scopes.slice();
 
-    if (slice.items(.data)[@intFromEnum(scope)].is_child_scopes_small) {
-        const small = &slice.items(.child_scopes)[@intFromEnum(scope)].small;
+    if (slice.items(.data)[@backingInt(scope)].is_child_scopes_small) {
+        const small = &slice.items(.child_scopes)[@backingInt(scope)].small;
 
         for (0..Scope.ChildScopes.small_size) |idx| {
             if (small[idx] == .none) {
@@ -1318,7 +1318,7 @@ pub fn getScopeChildScopesConst(
 
         return @ptrCast(small[0..Scope.ChildScopes.small_size]);
     } else {
-        const other = slice.items(.child_scopes)[@intFromEnum(scope)].other;
+        const other = slice.items(.child_scopes)[@backingInt(scope)].other;
         return @ptrCast(doc_scope.extra.items[other.start..other.end]);
     }
 }

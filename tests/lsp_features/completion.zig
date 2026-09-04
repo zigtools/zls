@@ -3173,7 +3173,7 @@ test "builtin fns return type" {
         .{ .label = "null", .kind = .Field, .detail = "void" },
         .{ .label = "optional", .kind = .Field, .detail = "Optional" },
         .{ .label = "error_union", .kind = .Field, .detail = "ErrorUnion" },
-        .{ .label = "error_set", .kind = .Field, .detail = "?[]const Error" },
+        .{ .label = "error_set", .kind = .Field, .detail = "ErrorSet" },
         .{ .label = "@\"enum\"", .kind = .Field, .detail = "Enum" },
         .{ .label = "@\"union\"", .kind = .Field, .detail = "Union" },
         .{ .label = "@\"fn\"", .kind = .Field, .detail = "Fn" },
@@ -3182,6 +3182,7 @@ test "builtin fns return type" {
         .{ .label = "@\"anyframe\"", .kind = .Field, .detail = "AnyFrame" },
         .{ .label = "vector", .kind = .Field, .detail = "Vector" },
         .{ .label = "enum_literal", .kind = .Field, .detail = "void" },
+        .{ .label = "spirv", .kind = .Struct, .detail = "Spirv" }, // why is only this .Struct?
     });
 }
 
@@ -3684,6 +3685,9 @@ test "empty doc comment" {
 test "filesystem" {
     if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
 
+    // https://codeberg.org/ziglang/zig/issues/35766
+    if (true) return error.SkipZigTest;
+
     try testCompletion(
         \\const foo = @import("<cursor>");
     , &.{
@@ -3700,6 +3704,9 @@ test "filesystem" {
 
 test "filesystem string literal ends with non ASCII symbol" {
     if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
+
+    // https://codeberg.org/ziglang/zig/issues/35766
+    if (true) return error.SkipZigTest;
 
     try testCompletion(
         \\const foo = @import("<cursor> 🠁

@@ -63,14 +63,14 @@ pub const TokenModifiers = packed struct(u16) {
     pub fn format(modifiers: TokenModifiers, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(".{");
         var i: usize = 0;
-        inline for (std.meta.fields(TokenModifiers)) |field| {
-            if ((comptime !std.mem.eql(u8, field.name, "_")) and @field(modifiers, field.name)) {
+        inline for (comptime std.meta.fieldNames(TokenModifiers)) |field_name| {
+            if ((comptime !std.mem.eql(u8, field_name, "_")) and @field(modifiers, field_name)) {
                 if (i == 0) {
                     try writer.writeAll(" .");
                 } else {
                     try writer.writeAll(", .");
                 }
-                try writer.writeAll(field.name);
+                try writer.writeAll(field_name);
                 try writer.writeAll(" = true");
                 i += 1;
             }
@@ -201,7 +201,7 @@ const Builder = struct {
             delta.line,
             delta.character,
             @intCast(length),
-            @intFromEnum(token_type),
+            @backingInt(token_type),
             @as(u16, @bitCast(token_modifiers)),
         });
         self.previous_source_index = loc.start;

@@ -34,7 +34,7 @@ pub fn StringPool(comptime config: Config) type {
             _,
 
             pub fn toOptional(self: String) OptionalString {
-                return @enumFromInt(@intFromEnum(self));
+                return @fromBackingInt(@backingInt(self));
             }
 
             pub fn fmt(self: String, io: std.Io, pool: *Pool) std.fmt.Alt(FormatContext, print) {
@@ -48,7 +48,7 @@ pub fn StringPool(comptime config: Config) type {
 
             pub fn unwrap(self: OptionalString) ?String {
                 if (self == .none) return null;
-                return @enumFromInt(@intFromEnum(self));
+                return @fromBackingInt(@backingInt(self));
             }
         };
 
@@ -69,7 +69,7 @@ pub fn StringPool(comptime config: Config) type {
             };
 
             const index = pool.map.getKeyAdapted(str, adapter) orelse return null;
-            return @enumFromInt(index);
+            return @fromBackingInt(index);
         }
 
         /// Asserts that `str` contains no null bytes.
@@ -94,7 +94,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.bytes.ensureUnusedCapacity(allocator, str.len + 1) catch {
                 // If allocation fails, try to do the lookup anyway.
                 const index = pool.map.getKeyAdapted(str, adapter) orelse return error.OutOfMemory;
-                return @enumFromInt(index);
+                return @fromBackingInt(index);
             };
 
             const gop = try pool.map.getOrPutContextAdapted(
@@ -109,7 +109,7 @@ pub fn StringPool(comptime config: Config) type {
                 pool.bytes.appendAssumeCapacity(0);
                 gop.key_ptr.* = start_index;
             }
-            return @enumFromInt(gop.key_ptr.*);
+            return @fromBackingInt(gop.key_ptr.*);
         }
 
         /// Caller owns the memory.
@@ -117,7 +117,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.mutex.lockUncancelable(io);
             defer pool.mutex.unlock(io);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
-            const start = @intFromEnum(index);
+            const start = @backingInt(index);
             return try allocator.dupe(u8, std.mem.sliceTo(string_bytes + start, 0));
         }
 
@@ -126,7 +126,7 @@ pub fn StringPool(comptime config: Config) type {
             pool.mutex.lockUncancelable(io);
             defer pool.mutex.unlock(io);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
-            const start = @intFromEnum(index);
+            const start = @backingInt(index);
             return try allocator.dupeSentinel(u8, std.mem.sliceTo(string_bytes + start, 0), 0);
         }
 
@@ -161,9 +161,9 @@ pub fn StringPool(comptime config: Config) type {
         /// returns the underlying slice from an interned string
         /// equal strings are guaranteed to share the same storage
         pub fn stringToSliceUnsafe(pool: *Pool, index: String) [:0]const u8 {
-            assert(@intFromEnum(index) < pool.bytes.items.len);
+            assert(@backingInt(index) < pool.bytes.items.len);
             const string_bytes: [*:0]u8 = @ptrCast(pool.bytes.items.ptr);
-            const start = @intFromEnum(index);
+            const start = @backingInt(index);
             return std.mem.sliceTo(string_bytes + start, 0);
         }
 

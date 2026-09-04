@@ -96,7 +96,7 @@ pub fn init(
                 .simple_var_decl,
                 .aligned_var_decl,
                 => {
-                    const in_function = in_function_stack.getLast() orelse false;
+                    const in_function = in_function_stack.last() orelse false;
                     if (in_function) continue;
 
                     const main_token = tree.nodeMainToken(node);
@@ -293,11 +293,11 @@ fn appendOneTrigram(
     allocator: std.mem.Allocator,
     trigram: Trigram,
 ) error{OutOfMemory}!void {
-    const declaration_index: Declaration.Index = @enumFromInt(store.declarations.len);
+    const declaration_index: Declaration.Index = @fromBackingInt(@intCast(store.declarations.len));
 
     const gop = try store.trigram_to_declarations.getOrPutValue(allocator, trigram, .empty);
 
-    if (gop.value_ptr.getLast() != declaration_index) {
+    if (gop.value_ptr.last() != declaration_index) {
         try gop.value_ptr.append(allocator, declaration_index);
     }
 }
@@ -455,7 +455,7 @@ fn mergeIntersection(
             out_idx += 1;
             a_idx += 1;
             b_idx += 1;
-        } else if (@intFromEnum(a_val) < @intFromEnum(b_val)) {
+        } else if (@backingInt(a_val) < @backingInt(b_val)) {
             a_idx += 1;
         } else {
             b_idx += 1;
@@ -484,7 +484,7 @@ const CuckooFilter = struct {
 
         pub fn oddHash(fingerprint: Fingerprint) u32 {
             assert(fingerprint != .none);
-            return precomputed_odd_hashes[@intFromEnum(fingerprint)];
+            return precomputed_odd_hashes[@backingInt(fingerprint)];
         }
     };
 
@@ -493,10 +493,10 @@ const CuckooFilter = struct {
         _,
 
         pub fn alternate(index: BucketIndex, fingerprint: Fingerprint, len: u32) BucketIndex {
-            assert(@intFromEnum(index) < len);
+            assert(@backingInt(index) < len);
             assert(fingerprint != .none);
 
-            const signed_index: i64 = @intFromEnum(index);
+            const signed_index: i64 = @backingInt(index);
             const odd_hash: i64 = fingerprint.oddHash();
 
             const unbounded = switch (parity(signed_index)) {
@@ -507,7 +507,7 @@ const CuckooFilter = struct {
 
             assert(parity(signed_index) != parity(bounded));
 
-            return @enumFromInt(bounded);
+            return @fromBackingInt(bounded);
         }
     };
 
@@ -523,10 +523,10 @@ const CuckooFilter = struct {
                 index_1: u32,
             } = @bitCast(std.hash.Murmur2_64.hash(&trigram));
 
-            const index_1: BucketIndex = @enumFromInt(split.index_1 % len);
+            const index_1: BucketIndex = @fromBackingInt(split.index_1 % len);
 
             const fingerprint: Fingerprint = if (split.fingerprint == .none)
-                @enumFromInt(1)
+                @fromBackingInt(1)
             else
                 split.fingerprint;
 
@@ -582,7 +582,7 @@ const CuckooFilter = struct {
     }
 
     fn bucketAt(filter: CuckooFilter, index: BucketIndex) *Bucket {
-        return &filter.buckets[@intFromEnum(index)];
+        return &filter.buckets[@backingInt(index)];
     }
 
     fn appendToBucket(filter: CuckooFilter, index: BucketIndex, fingerprint: Fingerprint) bool {
@@ -639,7 +639,7 @@ const CuckooFilter = struct {
     }
 
     fn parity(integer: anytype) enum(u1) { even, odd } {
-        return @enumFromInt(integer & 1);
+        return @fromBackingInt(@intCast(integer & 1));
     }
 };
 

@@ -69,8 +69,8 @@ pub fn getDocumentSymbols(
             },
         };
 
-        try stack.append(arena, stack.getLast().?);
-        const stack_entry: *StackEntry = &stack.items[stack.items.len - 1];
+        try stack.append(arena, stack.last().?);
+        const stack_entry = stack.lastPtr().?;
 
         const symbol: Symbol = switch (tree.nodeTag(node)) {
             .global_var_decl,

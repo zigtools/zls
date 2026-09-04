@@ -858,7 +858,9 @@ pub fn main(init: std.process.Init) !u8 {
     defer gpa.free(source);
 
     const mode: Ast.Mode = if (std.mem.endsWith(u8, file_path, ".zon")) .zon else .zig;
-    var tree: Ast = try .parse(gpa, source, mode);
+    var tree: Ast = try .parse(gpa, source, .{
+        .mode = mode,
+    });
     defer tree.deinit(gpa);
 
     try renderToFile(
@@ -879,7 +881,7 @@ test PrintAst {
         \\}
     ;
 
-    var tree: Ast = try .parse(std.testing.allocator, source, .zig);
+    var tree: Ast = try .parse(std.testing.allocator, source, .{});
     defer tree.deinit(std.testing.allocator);
 
     var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
@@ -936,7 +938,7 @@ test PrintAst {
     const printed_source = try aw.toOwnedSliceSentinel(0);
     defer std.testing.allocator.free(printed_source);
 
-    var printed_tree: Ast = try .parse(std.testing.allocator, printed_source, .zig);
+    var printed_tree: Ast = try .parse(std.testing.allocator, printed_source, .{});
     defer printed_tree.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(0, printed_tree.errors.len);

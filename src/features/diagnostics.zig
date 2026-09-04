@@ -160,7 +160,7 @@ fn collectWarnStyleDiagnostics(
     defer tracy_zone.end();
 
     for (0..tree.nodes.len) |i| {
-        const node: Ast.Node.Index = @enumFromInt(i);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
         if (ast.isBuiltinCall(tree, node)) {
             const builtin_token = tree.nodeMainToken(node);
             const call_name = tree.tokenSlice(builtin_token);
@@ -181,7 +181,7 @@ fn collectWarnStyleDiagnostics(
                     .severity = .Hint,
                     .code = .{ .string = "dot_slash_import" },
                     .source = "zls",
-                    .message = "A ./ is not needed in imports",
+                    .message = .{ .string = "A ./ is not needed in imports" },
                 });
             }
         }
@@ -212,7 +212,7 @@ fn collectWarnStyleDiagnostics(
                                 .severity = .Hint,
                                 .code = .{ .string = "bad_style" },
                                 .source = "zls",
-                                .message = "Functions should be camelCase",
+                                .message = .{ .string = "Functions should be camelCase" },
                             });
                         } else if (is_type_function and !isPascalCase(func_name)) {
                             try diagnostics.append(arena, .{
@@ -220,7 +220,7 @@ fn collectWarnStyleDiagnostics(
                                 .severity = .Hint,
                                 .code = .{ .string = "bad_style" },
                                 .source = "zls",
-                                .message = "Type functions should be PascalCase",
+                                .message = .{ .string = "Type functions should be PascalCase" },
                             });
                         }
                     }
@@ -270,7 +270,7 @@ fn collectGlobalVarDiagnostics(
                     .severity = .Hint,
                     .code = .{ .string = "highlight_global_var_declarations" },
                     .source = "zls",
-                    .message = "Global var declaration",
+                    .message = .{ .string = "Global var declaration" },
                 });
             },
             else => {},
@@ -495,255 +495,3 @@ pub fn getErrorBundleFromStderr(
 
     return try error_bundle.toOwnedBundle("");
 }
-
-pub const BuildOnSave = struct {
-    io: std.Io,
-    allocator: std.mem.Allocator,
-    worker: std.Io.Future(void),
-    worker_state: *WorkerState,
-
-    const shared = @import("../build_runner/shared.zig");
-    const ServerToClient = shared.ServerToClient;
-
-    const WorkerState = struct {
-        mutex: std.Io.Mutex,
-        child_process: std.process.Child,
-    };
-
-    pub const InitOptions = struct {
-        io: std.Io,
-        allocator: std.mem.Allocator,
-        workspace_path: []const u8,
-        build_on_save_args: []const []const u8,
-        check_step_only: bool,
-        zig_exe_path: []const u8,
-        zig_lib_path: []const u8,
-        build_runner_path: []const u8,
-
-        collection: *DiagnosticsCollection,
-    };
-
-    pub fn init(options: InitOptions) error{ Canceled, ConcurrencyUnavailable, OutOfMemory }!?BuildOnSave {
-        const base_args: []const []const u8 = &.{
-            options.zig_exe_path,
-            "build",
-            "--build-runner",
-            options.build_runner_path,
-            "--zig-lib-dir",
-            options.zig_lib_path,
-            "--watch",
-        };
-        var argv: std.ArrayList([]const u8) = try .initCapacity(
-            options.allocator,
-            base_args.len + options.build_on_save_args.len + @intFromBool(options.check_step_only),
-        );
-        defer argv.deinit(options.allocator);
-
-        argv.appendSliceAssumeCapacity(base_args);
-        if (options.check_step_only) argv.appendAssumeCapacity("--check-only");
-        argv.appendSliceAssumeCapacity(options.build_on_save_args);
-
-        var child_process = std.process.spawn(options.io, .{
-            .argv = argv.items,
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .cwd = .{ .path = options.workspace_path },
-        }) catch |err| switch (err) {
-            error.Canceled => return error.Canceled,
-            else => {
-                log.err("failed to spawn zig build-on-save process: {}", .{err});
-                return null;
-            },
-        };
-        errdefer child_process.kill(options.io);
-
-        const duped_workspace_path = try options.allocator.dupe(u8, options.workspace_path);
-        errdefer options.allocator.free(duped_workspace_path);
-
-        const worker_state = try options.allocator.create(WorkerState);
-        errdefer options.allocator.destroy(worker_state);
-
-        worker_state.* = .{
-            .mutex = .init,
-            .child_process = child_process,
-        };
-
-        const worker = try options.io.concurrent(loop, .{
-            options.io,
-            options.allocator,
-            worker_state,
-            options.collection,
-            duped_workspace_path,
-        });
-        errdefer comptime unreachable;
-
-        return .{
-            .io = options.io,
-            .allocator = options.allocator,
-            .worker = worker,
-            .worker_state = worker_state,
-        };
-    }
-
-    pub fn deinit(self: *BuildOnSave) void {
-        self.worker.cancel(self.io);
-        self.allocator.destroy(self.worker_state);
-        self.* = undefined;
-    }
-
-    pub fn sendManualWatchUpdate(build_on_save: *BuildOnSave) void {
-        const io = build_on_save.io;
-
-        build_on_save.worker_state.mutex.lockUncancelable(io);
-        defer build_on_save.worker_state.mutex.unlock(io);
-        if (build_on_save.worker_state.child_process.stdin) |stdin| {
-            const old_cancel_protect = io.swapCancelProtection(.blocked);
-            defer _ = io.swapCancelProtection(old_cancel_protect);
-            stdin.writeStreamingAll(io, "\x00") catch {};
-        }
-    }
-
-    fn loop(
-        io: std.Io,
-        allocator: std.mem.Allocator,
-        state: *WorkerState,
-        collection: *DiagnosticsCollection,
-        workspace_path: []const u8,
-    ) void {
-        defer allocator.free(workspace_path);
-
-        var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
-        var multi_reader: std.Io.File.MultiReader = undefined;
-        defer multi_reader.deinit();
-        multi_reader.init(
-            allocator,
-            io,
-            multi_reader_buffer.toStreams(),
-            &.{ state.child_process.stdout.?, state.child_process.stderr.? },
-        );
-
-        const stdout = multi_reader.reader(0);
-        const stderr = multi_reader.reader(1);
-
-        var diagnostic_tags: std.array_hash_map.Auto(DiagnosticsCollection.Tag, void) = .empty;
-        defer diagnostic_tags.deinit(allocator);
-
-        defer {
-            for (diagnostic_tags.keys()) |tag| collection.clearErrorBundle(tag);
-            collection.publishDiagnostics() catch {
-                // cancellation should be fine since we are returning anyway
-            };
-        }
-
-        var did_print_status = false;
-        outer: while (true) {
-            while (stdout.bufferedLen() < @sizeOf(ServerToClient.Header)) {
-                multi_reader.fill(64, .none) catch |err| switch (err) {
-                    error.Canceled, error.EndOfStream => break :outer,
-                    else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
-                };
-            }
-            const header = stdout.takeStruct(ServerToClient.Header, .little) catch unreachable;
-            while (stdout.bufferedLen() < header.bytes_len) {
-                multi_reader.fill(64, .none) catch |err| switch (err) {
-                    error.Canceled => break :outer,
-                    else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
-                };
-            }
-            multi_reader.checkAnyError() catch |err| switch (err) {
-                error.Canceled => break :outer,
-                else => break :outer log.err("failed to receive message from zig build-on-save runner: {}", .{err}),
-            };
-            const body = stdout.take(header.bytes_len) catch unreachable;
-
-            if (!did_print_status) {
-                log.info("Build-On-Save is running for '{s}'", .{workspace_path});
-                did_print_status = true;
-            }
-
-            switch (header.tag) {
-                .watch_error_bundle => {
-                    handleWatchErrorBundle(
-                        allocator,
-                        body,
-                        collection,
-                        workspace_path,
-                        &diagnostic_tags,
-                    ) catch |err| switch (err) {
-                        error.Canceled => break :outer,
-                        else => |e| log.err("failed to handle error bundle message from zig build-on-save runner: {}", .{e}),
-                    };
-                },
-                else => |tag| {
-                    log.warn("received unexpected message from zig build-on-save runner: {}", .{tag});
-                    break :outer;
-                },
-            }
-        }
-
-        const old_cancel_protect = io.swapCancelProtection(.blocked);
-        defer _ = io.swapCancelProtection(old_cancel_protect);
-
-        state.mutex.lockUncancelable(io);
-        defer state.mutex.unlock(io);
-
-        state.child_process.stdin.?.close(io);
-        state.child_process.stdin = null;
-
-        const term = state.child_process.wait(io) catch |err| {
-            log.warn("Failed to await zig build-on-save runner: {}", .{err});
-            return;
-        };
-
-        const stderr_msg_prefix = if (stderr.bufferedLen() > 0) " and stderr:\n" else "";
-
-        switch (term) {
-            .exited => |code| if (code != 0) log.warn("zig build-on-save runner exited with with code: {d}{s}{s}", .{ code, stderr_msg_prefix, stderr.buffered() }),
-            .signal => |sig| std.log.err("zig build-on-save runner failed with signal {t}{s}{s}", .{ sig, stderr_msg_prefix, stderr.buffered() }),
-            .stopped => |sig| std.log.err("zig build-on-save runner stopped with signal {d}{s}{s}", .{ sig, stderr_msg_prefix, stderr.buffered() }),
-            .unknown => |code| std.log.err("zig build-on-save runner failed for unknown reason with code {d}{s}{s}", .{ code, stderr_msg_prefix, stderr.buffered() }),
-        }
-    }
-
-    fn handleWatchErrorBundle(
-        allocator: std.mem.Allocator,
-        body: []u8,
-        collection: *DiagnosticsCollection,
-        workspace_path: []const u8,
-        diagnostic_tags: *std.array_hash_map.Auto(DiagnosticsCollection.Tag, void),
-    ) (error{ OutOfMemory, InvalidMessage } || std.Io.File.Writer.Error)!void {
-        var reader: std.Io.Reader = .fixed(body);
-
-        const header = reader.takeStruct(ServerToClient.ErrorBundle, .little) catch return error.InvalidMessage;
-
-        const extra = reader.readSliceEndianAlloc(allocator, u32, header.extra_len, .little) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.EndOfStream => return error.InvalidMessage,
-            error.ReadFailed => unreachable,
-        };
-        defer allocator.free(extra);
-
-        const string_bytes = reader.readAlloc(allocator, header.string_bytes_len) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.EndOfStream => return error.InvalidMessage,
-            error.ReadFailed => unreachable,
-        };
-        defer allocator.free(string_bytes);
-
-        if (reader.bufferedLen() != 0) return error.InvalidMessage; // ensure that we read the entire body
-
-        const error_bundle: std.zig.ErrorBundle = .{ .string_bytes = string_bytes, .extra = extra };
-
-        var hasher: std.hash.Wyhash = .init(0);
-        hasher.update(workspace_path);
-        std.hash.autoHash(&hasher, header.step_id);
-
-        const diagnostic_tag: DiagnosticsCollection.Tag = @enumFromInt(@as(u32, @truncate(hasher.final())));
-
-        try diagnostic_tags.put(allocator, diagnostic_tag, {});
-
-        try collection.pushErrorBundle(diagnostic_tag, header.cycle, workspace_path, error_bundle);
-        try collection.publishDiagnostics();
-    }
-};

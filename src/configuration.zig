@@ -17,20 +17,14 @@ pub const Manager = struct {
         path: []const u8,
         version: std.SemanticVersion,
         env: Env,
+        /// Whether the `version` satifies the minimum runtime zig version.
+        supported: bool,
     },
     zig_lib_dir: ?std.Build.Cache.Directory,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
         .wasi => std.process.Preopens,
         else => void,
-    },
-    build_runner_supported: union(enum) {
-        /// If returned, guarantees `zig_exe != null`.
-        yes,
-        /// no suitable build runner could be resolved based on the `zig_exe`
-        /// If returned, guarantees `zig_exe != null`.
-        no,
-        no_dont_error,
     },
     impl: struct {
         is_dirty: bool,
@@ -52,7 +46,6 @@ pub const Manager = struct {
             .zig_exe = null,
             .zig_lib_dir = null,
             .global_cache_dir = null,
-            .build_runner_supported = .no_dont_error,
             .wasi_preopens = switch (builtin.os.tag) {
                 .wasi => try std.process.Preopens.init(arena_allocator.allocator()),
                 else => {},
@@ -97,8 +90,8 @@ pub const Manager = struct {
         defer manager.impl.arena = arena_allocator.state;
 
         var duped: UnresolvedConfig = .{};
-        inline for (std.meta.fields(UnresolvedConfig)) |field| {
-            @field(duped, field.name) = try option.dupe(field.type, @field(config, field.name), arena_allocator.allocator());
+        inline for (comptime std.meta.fieldNames(UnresolvedConfig), comptime std.meta.fieldTypes(UnresolvedConfig)) |field_name, FieldType| {
+            @field(duped, field_name) = try option.dupe(FieldType, @field(config, field_name), arena_allocator.allocator());
         }
         manager.impl.configs.set(tag, duped);
         manager.impl.is_dirty = true;
@@ -111,8 +104,8 @@ pub const Manager = struct {
         config: *const Config,
     ) error{OutOfMemory}!void {
         var cfg: UnresolvedConfig = .{};
-        inline for (std.meta.fields(Config)) |field| {
-            @field(cfg, field.name) = @field(config, field.name);
+        inline for (comptime std.meta.fieldNames(Config)) |field_name| {
+            @field(cfg, field_name) = @field(config, field_name);
         }
         try manager.setConfiguration(tag, &cfg);
     }
@@ -150,9 +143,9 @@ pub const Manager = struct {
             .global_cache_path = if (builtin.os.tag == .wasi) "/cache" else null,
         };
         for (manager.impl.configs.values) |unresolved_config| {
-            inline for (std.meta.fields(UnresolvedConfig)) |field| {
-                if (@field(unresolved_config, field.name)) |new_value| {
-                    @field(config, field.name) = new_value;
+            inline for (comptime std.meta.fieldNames(UnresolvedConfig)) |field_name| {
+                if (@field(unresolved_config, field_name)) |new_value| {
+                    @field(config, field_name) = new_value;
                 }
             }
         }
@@ -182,10 +175,15 @@ pub const Manager = struct {
                 break :unresolved_zig;
             };
 
+            const build_options = @import("build_options");
+            const is_zls_version_tagged = build_options.version.pre == null;
+            const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
+
             manager.zig_exe = .{
                 .path = zig_env.zig_exe,
                 .version = zig_version,
                 .env = zig_env,
+                .supported = zigVersionCheck(min_runtime_zig_version, zig_version, is_zls_version_tagged),
             };
         }
         config.zig_exe_path = if (manager.zig_exe) |exe| exe.path else null;
@@ -253,71 +251,6 @@ pub const Manager = struct {
             comptime unreachable;
         }
 
-        if (config.build_runner_path == null) blk: {
-            if (!std.process.can_spawn) break :blk;
-            const zig_exe = manager.zig_exe orelse break :blk;
-            const global_cache_dir = manager.global_cache_dir orelse break :blk;
-
-            if (!@import("build_runner/check.zig").isBuildRunnerSupported(zig_exe.version)) {
-                manager.build_runner_supported = .no;
-                break :blk;
-            }
-
-            const build_runner_source = @embedFile("build_runner/build_runner.zig");
-            const build_runner_config_source = @embedFile("build_runner/shared.zig");
-
-            const build_runner_hash = get_hash: {
-                const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
-
-                var hasher: Hasher = .init(&@splat(0));
-                hasher.update(build_runner_source);
-                hasher.update(build_runner_config_source);
-                break :get_hash hasher.finalResult();
-            };
-
-            const cache_path = try global_cache_dir.join(manager.allocator, &.{ "build_runner", &std.fmt.bytesToHex(build_runner_hash, .lower) });
-            defer manager.allocator.free(cache_path);
-
-            std.debug.assert(std.Io.Dir.path.isAbsolute(cache_path));
-            var cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, cache_path, .{}) catch |err| switch (err) {
-                error.Canceled => return error.Canceled,
-                else => {
-                    log.err("failed to open directory '{s}': {}", .{ cache_path, err });
-                    break :blk;
-                },
-            };
-            defer cache_dir.close(io);
-
-            cache_dir.writeFile(io, .{
-                .sub_path = "shared.zig",
-                .data = build_runner_config_source,
-                .flags = .{ .exclusive = true },
-            }) catch |err| switch (err) {
-                error.Canceled => return error.Canceled,
-                error.PathAlreadyExists => {},
-                else => {
-                    log.err("failed to write file '{s}/shared.zig': {}", .{ cache_path, err });
-                    break :blk;
-                },
-            };
-
-            cache_dir.writeFile(io, .{
-                .sub_path = "build_runner.zig",
-                .data = build_runner_source,
-                .flags = .{ .exclusive = true },
-            }) catch |err| switch (err) {
-                error.Canceled => return error.Canceled,
-                error.PathAlreadyExists => {},
-                else => {
-                    log.err("failed to write file '{s}/build_runner.zig': {}", .{ cache_path, err });
-                    break :blk;
-                },
-            };
-
-            config.build_runner_path = try std.Io.Dir.path.join(arena, &.{ cache_path, "build_runner.zig" });
-            manager.build_runner_supported = .yes;
-        }
-
         if (config.builtin_path == null) blk: {
             if (!std.process.can_spawn) break :blk;
             const zig_exe = manager.zig_exe orelse break :blk;
@@ -364,15 +297,15 @@ pub const Manager = struct {
 
         var did_change: DidConfigChange = .{};
 
-        inline for (std.meta.fields(Config)) |field| {
-            const old_value = &@field(manager.config, field.name);
-            const new_value = @field(config, field.name);
+        inline for (comptime std.meta.fieldNames(Config), comptime std.meta.fieldTypes(Config)) |field_name, FieldType| {
+            const old_value = &@field(manager.config, field_name);
+            const new_value = @field(config, field_name);
 
-            const is_eql = option.eql(field.type, old_value.*, new_value);
-            @field(did_change, field.name) = !is_eql;
+            const is_eql = option.eql(FieldType, old_value.*, new_value);
+            @field(did_change, field_name) = !is_eql;
 
             if (!is_eql) {
-                old_value.* = try option.dupe(field.type, new_value, arena_allocator.allocator());
+                old_value.* = try option.dupe(FieldType, new_value, arena_allocator.allocator());
             }
         }
 
@@ -672,7 +605,6 @@ pub const FileConfigInfo = struct {
 pub const file_system_config_options: []const FileConfigInfo = &.{
     .{ .name = "zig_exe_path", .kind = .file, .is_accessible = true },
     .{ .name = "builtin_path", .kind = .file, .is_accessible = true },
-    .{ .name = "build_runner_path", .kind = .file, .is_accessible = true },
     .{ .name = "zig_lib_path", .kind = .directory, .is_accessible = true },
     .{ .name = "global_cache_path", .kind = .directory, .is_accessible = false },
 };
@@ -698,11 +630,11 @@ comptime {
 /// The same struct as `Config` but every field is optional.
 pub const UnresolvedConfig = blk: {
     const struct_info: std.lang.Type.Struct = @typeInfo(Config).@"struct";
-    var field_types: [struct_info.fields.len]type = undefined;
-    var field_attrs: [struct_info.fields.len]std.lang.Type.StructField.Attributes = undefined;
-    for (&field_types, &field_attrs, struct_info.fields) |*ty, *attr, field| {
-        ty.* = if (@typeInfo(field.type) != .optional) ?field.type else field.type;
-        attr.* = .{ .default_value_ptr = &@as(ty.*, null) };
+    var field_types = struct_info.field_types[0..].*;
+    var field_attrs: [field_types.len]std.lang.Type.Struct.FieldAttributes = undefined;
+    for (&field_types, &field_attrs) |*field_type, *attr| {
+        field_type.* = if (@typeInfo(field_type.*) != .optional) ?field_type.* else field_type.*;
+        attr.* = .{ .default_value_ptr = &@as(field_type.*, null) };
     }
     break :blk @Struct(.auto, null, std.meta.fieldNames(Config), &field_types, &field_attrs);
 };
@@ -775,3 +707,285 @@ pub fn findZig(
     }
     return null;
 }
+
+fn zigVersionCheck(
+    minimum_zig_version: std.SemanticVersion,
+    param_zig_version: std.SemanticVersion,
+    /// If set, a non-tagged zig version cannot be used when `minimum_runtime_zig_version` is a tagged version.
+    /// Example: Zig `0.13.0-dev` cannot be used when the minimum Zig version is `0.12.0`.
+    ///
+    /// Will be set iff ZLS is a tagged release.
+    strict: bool,
+) bool {
+    const minimum_version_is_tagged = minimum_zig_version.pre == null;
+
+    var zig_version = param_zig_version;
+    var version_is_tagged = zig_version.pre == null;
+
+    if (!version_is_tagged and zig_version.patch != 0) {
+        // A zig version like `0.12.2-dev` has the same compatibility as `0.12.1`
+        zig_version.patch -= 1;
+        zig_version.pre = null;
+        version_is_tagged = true;
+    }
+
+    if (strict and !version_is_tagged) {
+        std.debug.assert(minimum_version_is_tagged);
+        // A tagged release of ZLS must be used with a tagged release of Zig.
+        return false;
+    }
+
+    if (zig_version.major != minimum_zig_version.major) return false;
+
+    if (minimum_version_is_tagged) {
+        if (version_is_tagged) {
+            if (zig_version.order(minimum_zig_version) == .lt) return false;
+            const next_minor_release: std.SemanticVersion = .{
+                .major = minimum_zig_version.major,
+                .minor = minimum_zig_version.minor + 1,
+                .patch = 0,
+            };
+            return zig_version.order(next_minor_release) == .lt;
+        } else {
+            std.debug.assert(zig_version.patch == 0);
+            return zig_version.minor == 1 + minimum_zig_version.minor;
+        }
+    } else {
+        if (version_is_tagged) return false;
+        if (zig_version.minor != minimum_zig_version.minor) return false;
+        return zig_version.order(minimum_zig_version) != .lt;
+    }
+}
+
+test {
+    const build_options = @import("build_options");
+    const current_zig_version = @import("builtin").zig_version;
+    const is_zls_version_tagged = build_options.version.pre == null;
+    const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
+
+    // The build runner must support the Zig version that ZLS is being built with
+    try std.testing.expect(zigVersionCheck(
+        min_runtime_zig_version,
+        current_zig_version,
+        is_zls_version_tagged,
+    ));
+
+    if (is_zls_version_tagged) {
+        // A tagged release of ZLS should support the same tagged release of Zig
+        // Example: ZLS 0.12.0 should support Zig 0.12.x -- It is possible that ZLS requires a minimum patch version
+        try std.testing.expect(zigVersionCheck(
+            .{ .major = current_zig_version.major, .minor = current_zig_version.minor, .patch = 999 },
+            min_runtime_zig_version,
+            is_zls_version_tagged,
+        ));
+    }
+}
+
+// Version order for reference:
+// 0.11.0-dev < 0.11.0 < 0.12.0-dev < 0.12.0 < 0.13.0-dev < 0.13.0
+
+test zigVersionCheck {
+    var did_fail = false;
+    for (test_cases) |test_case| {
+        const minimum_runtime_zig_version: std.SemanticVersion = try .parse(test_case.minimum_runtime_zig_version);
+        const runtime_zig_version: std.SemanticVersion = try .parse(test_case.runtime_zig_version);
+        const minimum_runtime_version_is_tagged = minimum_runtime_zig_version.pre == null;
+        const expected_if_strict, const expected_if_not_strict = switch (test_case.is_supported) {
+            .yes => .{ true, true },
+            .no => .{ false, false },
+            .if_not_strict => .{ false, true },
+        };
+
+        const actual_if_not_strict = zigVersionCheck(minimum_runtime_zig_version, runtime_zig_version, false);
+        if (expected_if_not_strict != actual_if_not_strict) {
+            std.debug.print("minimum={f}, actual={f}, strict={} -> expected {} but got {}\n", .{
+                minimum_runtime_zig_version,
+                runtime_zig_version,
+                false,
+                expected_if_not_strict,
+                actual_if_not_strict,
+            });
+            did_fail = true;
+        }
+
+        if (minimum_runtime_version_is_tagged) {
+            const actual_if_strict = zigVersionCheck(minimum_runtime_zig_version, runtime_zig_version, true);
+            if (expected_if_strict != actual_if_strict) {
+                std.debug.print("minimum={f}, actual={f}, strict={} -> expected {} but got {}\n", .{
+                    minimum_runtime_zig_version,
+                    runtime_zig_version,
+                    true,
+                    expected_if_strict,
+                    actual_if_strict,
+                });
+                did_fail = true;
+            }
+        }
+    }
+    if (did_fail) return error.Unexpected;
+}
+
+const test_cases: []const struct {
+    minimum_runtime_zig_version: []const u8,
+    runtime_zig_version: []const u8,
+    is_supported: enum { yes, no, if_not_strict },
+} = &.{
+    // Minimum Zig Version: 0.12.0
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.11.0-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.11.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.12.0-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.12.0",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.12.1-dev",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.12.1",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.13.0-dev",
+        .is_supported = .if_not_strict,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.13.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0",
+        .runtime_zig_version = "0.13.1-dev",
+        .is_supported = .no,
+    },
+    // Minimum Zig Version: 0.12.1
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.11.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.11.1",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.0-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.1-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.1",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.2-dev",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.12.2",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.13.0-dev",
+        .is_supported = .if_not_strict,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.13.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.13.1-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.1",
+        .runtime_zig_version = "0.13.1",
+        .is_supported = .no,
+    },
+    // Minimum Zig Version: 0.12.0-dev.5
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.11.0-dev",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.11.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.0-dev.1",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.0-dev.4",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.0-dev.5",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.0-dev.10",
+        .is_supported = .yes,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.0",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.12.1",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.13.0-dev.10",
+        .is_supported = .no,
+    },
+    .{
+        .minimum_runtime_zig_version = "0.12.0-dev.5",
+        .runtime_zig_version = "0.13.0",
+        .is_supported = .no,
+    },
+};

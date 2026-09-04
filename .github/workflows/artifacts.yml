@@ -11,7 +11,9 @@ on:
 
 jobs:
   deploy:
-    if: github.repository_owner == 'zigtools'
+    # https://github.com/zigtools/zls/issues/3208
+    if: false
+    # if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -39,7 +41,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         if: env.SKIP_DEPLOY != 'true'
         with:
-          version: "0.17.0-dev.387+31f157d80" # https://github.com/zigtools/zls/issues/3208
+          version: master
 
       - name: Install APT packages
         if: env.SKIP_DEPLOY != 'true'

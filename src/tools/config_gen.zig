@@ -167,7 +167,7 @@ fn generateConfigFile(
     const source_unformatted = try aw.toOwnedSliceSentinel(0);
     defer allocator.free(source_unformatted);
 
-    var tree: std.zig.Ast = try .parse(allocator, source_unformatted, .zig);
+    var tree: std.zig.Ast = try .parse(allocator, source_unformatted, .{});
     defer tree.deinit(allocator);
     std.debug.assert(tree.errors.len == 0);
 

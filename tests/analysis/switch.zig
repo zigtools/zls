@@ -29,7 +29,7 @@ const NonExhaustiveEnum = enum(u8) {
 const some_u8: u8 = 'e';
 const some_enum: Enum = .baz;
 const some_tagged_union: TaggedUnion = .{ .baz = 3.14 };
-const some_non_exhaustive_enum: NonExhaustiveEnum = @enumFromInt(42);
+const some_non_exhaustive_enum: NonExhaustiveEnum = @fromBackingInt(42);
 
 const switch_u8 = switch (some_u8) {
     'x' => |a| a,

@@ -10,8 +10,7 @@ pub fn addCases(
     test_step: *std.Build.Step,
     test_filters: []const []const u8,
 ) void {
-    const cases_dir = b.path("tests/analysis");
-    const cases_path_from_root = b.pathFromRoot("tests/analysis");
+    const cases_path = "tests/analysis";
 
     const check_exe = b.addExecutable(.{
         .name = "analysis_check",
@@ -25,16 +24,17 @@ pub fn addCases(
         }),
     });
 
-    // https://github.com/ziglang/zig/issues/20605
-    var dir = std.Io.Dir.cwd().openDir(b.graph.io, cases_path_from_root, .{ .iterate = true }) catch |err|
-        std.debug.panic("failed to open '{s}': {}", .{ cases_path_from_root, err });
+    b.dependOnDirectory(b.path(cases_path));
+
+    var dir = b.root.openDir(b.graph.io, cases_path, .{ .iterate = true }) catch |err|
+        std.debug.panic("failed to open '{f}': {}", .{ b.path(cases_path), err });
     defer dir.close(b.graph.io);
 
     var it = dir.iterate();
 
     while (true) {
         const entry = it.next(b.graph.io) catch |err|
-            std.debug.panic("failed to walk directory '{s}': {}", .{ cases_path_from_root, err }) orelse break;
+            std.debug.panic("failed to walk directory '{f}': {}", .{ b.path(cases_path), err }) orelse break;
 
         if (entry.kind != .file) continue;
         if (!std.mem.eql(u8, std.Io.Dir.path.extension(entry.name), ".zig")) continue;
@@ -46,32 +46,23 @@ pub fn addCases(
         const run_check = std.Build.Step.Run.create(b, b.fmt("run analysis on {s}", .{entry.name}));
         run_check.producer = check_exe;
 
-        if (target.result.cpu.arch.isWasm() and b.enable_wasmtime) {
-            run_check.skip_foreign_checks = true;
-            run_check.addArgs(&.{
-                "wasmtime",
-                "--dir=.",
-                b.fmt("--dir={f}::/lib", .{b.graph.zig_lib_directory}),
-                "--",
-            });
-        }
-
         run_check.addArtifactArg(check_exe);
         if (target.query.eql(b.graph.host.query)) {
             run_check.addArg("--zig-exe-path");
-            run_check.addFileArg(.{ .cwd_relative = b.graph.zig_exe });
+            run_check.addFileArg(.zig_exe);
         }
+        run_check.setPreopen("/lib", .zig_lib);
         if (!target.result.cpu.arch.isWasm()) {
             run_check.addArg("--zig-lib-path");
-            run_check.addDirectoryArg(.{ .cwd_relative = b.fmt("{f}", .{b.graph.zig_lib_directory}) });
+            run_check.addDirectoryArg(.zig_lib);
         }
 
-        const input_file = cases_dir.path(b, entry.name);
+        const input_file = b.path(cases_path).path(b, entry.name);
         if (!target.result.cpu.arch.isWasm()) {
             run_check.addFileArg(input_file);
         } else {
             // pass a relative file path when running with wasmtime
-            run_check.setCwd(cases_dir);
+            run_check.setCwd(b.path(cases_path));
             run_check.addArg(entry.name);
             run_check.addFileInput(input_file);
         }
