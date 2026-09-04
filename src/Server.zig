@@ -20,7 +20,6 @@ const diff = @import("diff.zig");
 const Uri = @import("Uri.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
-const build_runner_shared = @import("build_runner/shared.zig");
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -35,8 +34,12 @@ const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
-const BuildOnSave = diagnostics_gen.BuildOnSave;
-const BuildOnSaveSupport = build_runner_shared.BuildOnSaveSupport;
+const BuildOnSave = @compileError("https://github.com/zigtools/zls/issues/3208");
+const BuildOnSaveSupport = struct {
+    pub inline fn isSupportedComptime() bool {
+        return false;
+    }
+};
 
 const log = std.log.scoped(.server);
 
@@ -825,7 +828,6 @@ const Workspace = struct {
 
         const zig_exe_path = config.zig_exe_path orelse return;
         const zig_lib_path = config.zig_lib_path orelse return;
-        const build_runner_path = config.build_runner_path orelse return;
 
         const workspace_path = workspace.uri.toFsPath(args.server.allocator) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -842,7 +844,6 @@ const Workspace = struct {
             .check_step_only = config.enable_build_on_save == null,
             .zig_exe_path = zig_exe_path,
             .zig_lib_path = zig_lib_path,
-            .build_runner_path = build_runner_path,
             .collection = &args.server.diagnostics_collection,
         }) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
@@ -994,7 +995,6 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
 
     const new_zig_exe_path: bool = result.did_change.zig_exe_path;
     const new_zig_lib_path: bool = result.did_change.zig_lib_path;
-    const new_build_runner_path: bool = result.did_change.build_runner_path;
     const new_enable_build_on_save: bool = result.did_change.enable_build_on_save;
     const new_build_on_save_args: bool = result.did_change.build_on_save_args;
     const new_force_autofix: bool = result.did_change.force_autofix;
@@ -1010,7 +1010,6 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         const should_restart =
             new_zig_exe_path or
             new_zig_lib_path or
-            new_build_runner_path or
             new_enable_build_on_save or
             new_build_on_save_args;
 
@@ -1023,7 +1022,7 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
     }
 
     if (DocumentStore.supports_build_system) {
-        if (new_zig_exe_path or new_zig_lib_path or new_build_runner_path) {
+        if (new_zig_exe_path or new_zig_lib_path) {
             for (server.document_store.build_files.keys()) |build_file_uri| {
                 server.document_store.invalidateBuildFile(build_file_uri);
             }
@@ -1060,12 +1059,11 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
     check: {
         if (server.status != .initialized) break :check;
 
-        switch (server.config_manager.build_runner_supported) {
-            .yes, .no_dont_error => break :check,
-            .no => {},
-        }
+        const zig_exe = server.config_manager.zig_exe orelse break :check;
 
-        const zig_version = server.config_manager.zig_exe.?.version;
+        if (zig_exe.supported) break :check;
+
+        const zig_version = zig_exe.version;
         const zls_version = build_options.version;
 
         const zig_version_is_tagged = zig_version.pre == null;
@@ -1100,8 +1098,6 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
             log.warn("'enable_build_on_save' is ignored because Zig could not be found", .{});
         } else if (!server.client_capabilities.supports_publish_diagnostics) {
             log.warn("'enable_build_on_save' is ignored because it is not supported by {s}", .{server.client_capabilities.client_name orelse "your editor"});
-        } else if (server.status == .initialized and server.config_manager.build_runner_supported == .no and server.config_manager.config.build_runner_path == null) {
-            log.warn("'enable_build_on_save' is ignored because no build runner is available", .{});
         } else if (server.status == .initialized and server.config_manager.zig_exe != null) {
             switch (BuildOnSaveSupport.isSupportedRuntime(server.config_manager.zig_exe.?.version)) {
                 .supported => {},
@@ -1131,7 +1127,6 @@ fn createDocumentStoreConfig(config_manager: *const configuration.Manager) Docum
         .environ_map = config_manager.environ_map,
         .zig_exe_path = config_manager.config.zig_exe_path,
         .zig_lib_dir = config_manager.zig_lib_dir,
-        .build_runner_path = config_manager.config.build_runner_path,
         .builtin_path = config_manager.config.builtin_path,
         .global_cache_dir = config_manager.global_cache_dir,
         .wasi_preopens = config_manager.wasi_preopens,

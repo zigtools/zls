@@ -9,11 +9,12 @@ const log = std.log.scoped(.store);
 const lsp = @import("lsp");
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
-pub const BuildConfig = @import("build_runner/shared.zig").BuildConfig;
 const tracy = @import("tracy");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const TrigramStore = @import("TrigramStore.zig");
+
+const BuildConfig = @compileError("https://github.com/zigtools/zls/issues/3208");
 
 const DocumentStore = @This();
 
@@ -34,13 +35,13 @@ lsp_capabilities: struct {
     supports_inlay_hints_refresh: bool = false,
 } = .{},
 
-pub const supports_build_system = std.process.can_spawn;
+/// https://github.com/zigtools/zls/issues/3208
+pub const supports_build_system = false and std.process.can_spawn;
 
 pub const Config = struct {
     environ_map: *const std.process.Environ.Map,
     zig_exe_path: ?[]const u8,
     zig_lib_dir: ?std.Build.Cache.Directory,
-    build_runner_path: ?[]const u8,
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
@@ -918,7 +919,6 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     comptime std.debug.assert(supports_build_system);
 
     if (self.config.zig_exe_path == null) return;
-    if (self.config.build_runner_path == null) return;
     if (self.config.global_cache_dir == null) return;
     if (self.config.zig_lib_dir == null) return;
 
@@ -1171,6 +1171,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
         build_file.impl.version += 1;
         const new_version = build_file.impl.version;
 
+        const loadBuildConfiguration = if (true) @compileError("https://github.com/zigtools/zls/issues/3208");
         const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             else => |e| {
@@ -1280,133 +1281,6 @@ fn loadBuildAssociatedConfiguration(io: std.Io, allocator: std.mem.Allocator, bu
         file_buf,
         .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
     );
-}
-
-fn prepareBuildRunnerArgs(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}![][]const u8 {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const base_args = &[_][]const u8{
-        self.config.zig_exe_path.?,
-        "build",
-        "--build-runner",
-        self.config.build_runner_path.?,
-        "--zig-lib-dir",
-        self.config.zig_lib_dir.?.path orelse ".",
-    };
-
-    var args: std.ArrayList([]const u8) = try .initCapacity(self.allocator, base_args.len);
-    errdefer {
-        for (args.items) |arg| self.allocator.free(arg);
-        args.deinit(self.allocator);
-    }
-
-    for (base_args) |arg| {
-        args.appendAssumeCapacity(try self.allocator.dupe(u8, arg));
-    }
-
-    if (self.getBuildFile(build_file_uri)) |build_file| blk: {
-        const build_config = build_file.build_associated_config orelse break :blk;
-        const build_options = build_config.value.build_options orelse break :blk;
-
-        try args.ensureUnusedCapacity(self.allocator, build_options.len);
-        for (build_options) |option| {
-            args.appendAssumeCapacity(try option.formatParam(self.allocator));
-        }
-    }
-
-    return try args.toOwnedSlice(self.allocator);
-}
-
-/// Runs the build.zig and extracts include directories and packages
-fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri, build_file_version: u32) !std.json.Parsed(BuildConfig) {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    std.debug.assert(self.config.zig_exe_path != null);
-    std.debug.assert(self.config.build_runner_path != null);
-    std.debug.assert(self.config.global_cache_dir != null);
-    std.debug.assert(self.config.zig_lib_dir != null);
-
-    const build_file_path = try build_file_uri.toFsPath(self.allocator);
-    defer self.allocator.free(build_file_path);
-
-    const cwd = std.Io.Dir.path.dirname(build_file_path).?;
-
-    const args = try self.prepareBuildRunnerArgs(build_file_uri);
-    defer {
-        for (args) |arg| self.allocator.free(arg);
-        self.allocator.free(args);
-    }
-
-    const zig_run_result = blk: {
-        const tracy_zone2 = tracy.trace(@src());
-        defer tracy_zone2.end();
-        break :blk try std.process.run(
-            self.allocator,
-            self.io,
-            .{
-                .argv = args,
-                .cwd = .{ .path = cwd },
-                .stderr_limit = .limited(16 * 1024 * 1024),
-                .stdout_limit = .limited(16 * 1024 * 1024),
-            },
-        );
-    };
-    defer self.allocator.free(zig_run_result.stdout);
-    defer self.allocator.free(zig_run_result.stderr);
-
-    const is_ok = switch (zig_run_result.term) {
-        .exited => |exit_code| exit_code == 0,
-        else => false,
-    };
-
-    const diagnostic_tag: DiagnosticsCollection.Tag = tag: {
-        var hasher: std.hash.Wyhash = .init(47); // Chosen by the following prompt: Pwease give a wandom nyumbew
-        hasher.update(build_file_uri.raw);
-        break :tag @enumFromInt(@as(u32, @truncate(hasher.final())));
-    };
-
-    if (!is_ok) {
-        const joined = try std.mem.join(self.allocator, " ", args);
-        defer self.allocator.free(joined);
-
-        log.err(
-            "Failed to execute build runner to collect build configuration, command:\ncd {s};{s}\nError: {s}",
-            .{ cwd, joined, zig_run_result.stderr },
-        );
-
-        var error_bundle = try @import("features/diagnostics.zig").getErrorBundleFromStderr(
-            self.allocator,
-            zig_run_result.stderr,
-            false,
-            .{ .dynamic = .{ .document_store = self, .base_path = cwd } },
-        );
-        defer error_bundle.deinit(self.allocator);
-
-        try self.diagnostics_collection.pushErrorBundle(diagnostic_tag, build_file_version, cwd, error_bundle);
-        try self.diagnostics_collection.publishDiagnostics();
-        return error.RunFailed;
-    } else {
-        try self.diagnostics_collection.pushErrorBundle(diagnostic_tag, build_file_version, null, .empty);
-        try self.diagnostics_collection.publishDiagnostics();
-    }
-
-    const parse_options: std.json.ParseOptions = .{
-        // We ignore unknown fields so people can roll
-        // their own build runners in libraries with
-        // the only requirement being general adherence
-        // to the BuildConfig type
-        .ignore_unknown_fields = true,
-        .allocate = .alloc_always,
-    };
-
-    return std.json.parseFromSlice(
-        BuildConfig,
-        self.allocator,
-        zig_run_result.stdout,
-        parse_options,
-    ) catch return error.InvalidBuildConfig;
 }
 
 /// Checks if the build.zig file is accessible in dir.

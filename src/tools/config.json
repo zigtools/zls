@@ -132,12 +132,6 @@
             "default": null
         },
         {
-            "name": "build_runner_path",
-            "description": "Specify a custom build runner to resolve build system information.",
-            "type": "?[]const u8",
-            "default": null
-        },
-        {
             "name": "global_cache_path",
             "description": "Path to a directory that will be used as zig's cache. Will default to `${KnownFolders.Cache}/zls`.",
             "type": "?[]const u8",
