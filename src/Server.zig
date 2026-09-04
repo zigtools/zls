@@ -39,13 +39,13 @@ io: std.Io,
 allocator: std.mem.Allocator,
 config_manager: *configuration.Manager,
 document_store: DocumentStore,
-transport: ?*lsp.Transport = null,
+transport: ?*lsp.Transport,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: Status = .uninitialized,
 
 // private fields
 wait_group: std.Io.Group = .init,
-ip: InternPool = undefined,
+ip: InternPool,
 /// Stores messages that should be displayed with `window/showMessage` once the server has been initialized.
 pending_show_messages: std.ArrayList(types.window.ShowMessageParams) = .empty,
 client_capabilities: ClientCapabilities = .{},
@@ -1372,7 +1372,13 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
             .config = undefined, // set below
             .diagnostics_collection = &server.diagnostics_collection,
         },
-        .diagnostics_collection = .{ .io = io, .allocator = allocator },
+        .transport = null, // set below
+        .diagnostics_collection = .{
+            .io = io,
+            .allocator = allocator,
+            .transport = null, // set below
+        },
+        .ip = undefined, // set below
     };
     server.document_store.config = createDocumentStoreConfig(server.config_manager);
 
