@@ -259,6 +259,49 @@ test "asm" {
         \\    );
         \\}
     );
+    try testSymbolReferences(
+        \\fn foo() void {
+        \\    var <0>: u32 = 0;
+        \\    asm volatile ("bogus"
+        \\        : [ret] "={rax}" (<0>),
+        \\    );
+        \\}
+    );
+    try testSymbolReferences(
+        \\fn foo() void {
+        \\    var <0>: u32 = 0;
+        \\    asm volatile ("bogus"
+        \\        : [a] "={rax}" (<0>),
+        \\          [b] "={rdx}" (<0>),
+        \\    );
+        \\}
+    );
+    try testSymbolReferences(
+        \\fn foo() void {
+        \\    var <0>: u32 = 0;
+        \\    asm volatile ("bogus"
+        \\        : [ret] "={rax}" (-> u32),
+        \\          [out] "={rdx}" (<0>),
+        \\    );
+        \\}
+    );
+    try testSymbolReferences(
+        \\var <0>: u32 = 0;
+        \\fn foo() void {
+        \\    var <1>: u32 = 0;
+        \\    asm volatile ("bogus"
+        \\        : [ret] "={rax}" (<1>),
+        \\    );
+        \\}
+    );
+    try testSimpleReferences(
+        \\const <loc>@"i32"<cursor></loc> = undefined;
+        \\fn foo() void {
+        \\    asm volatile ("bogus"
+        \\        : [ret] "={rax}" (i32),
+        \\    );
+        \\}
+    );
 }
 
 test "function header" {
