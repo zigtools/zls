@@ -6767,6 +6767,11 @@ pub fn resolveExpressionTypeFromAncestors(
             if (try analyser.resolveDerefType(expr_ty)) |ty| {
                 return ty;
             }
+            if (try analyser.resolveOptionalUnwrap(expr_ty)) |ty| {
+                if (try analyser.resolveDerefType(ty)) |typ| {
+                    return typ;
+                }
+            }
 
             switch (expr_ty.data) {
                 .pointer => |info| switch (info.size) {

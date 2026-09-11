@@ -1751,6 +1751,67 @@ test "decl literal function call" {
     });
 }
 
+test "function call struct parameter completion" {
+    try testCompletion(
+        \\fn foo(s: struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.{.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: ?struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: ?struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.{.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: *const struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.<cursor>);
+        \\}
+    , &.{
+        // While the completion won't actually result in code that will compile due to creating not a pointer
+        // This will still assist user in actually writing code - the compiler will do the rest.
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: *const struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(.{.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\fn foo(s: *const struct {field: u32}) void {}
+        \\fn bar() void {
+        \\    foo(&.<cursor>);
+        \\}
+    , &.{
+        .{ .label = "field", .kind = .Field, .detail = "u32" },
+    });
+}
+
 test "enum literal" {
     try testCompletion(
         \\const literal = .foo;
@@ -2556,6 +2617,67 @@ test "structinit - fields with and without default value" {
     }, .{
         .check_order = true,
     });
+}
+
+test "structinit - anonymous" {
+    try testCompletion(
+        \\fn foo() E {
+        \\    const foo2: struct { alpha: u32 } = .a<cursor>
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\var foo: struct { alpha: u32 } = undefined;
+        \\foo = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+    // try testCompletion(
+    //     \\fn foo() E {
+    //     \\    const foo2: struct { alpha: u32 } = .{.<cursor>
+    //     \\}
+    // , &.{
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    // });
+    // try testCompletion(
+    //     \\fn foo() E {
+    //     \\    const foo2: struct { alpha: u32 } = .<cursor>
+    //     \\}
+    // , &.{
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    // });
+    // try testCompletion(
+    //     \\const foo2: struct { alpha: u32 } = .a<cursor>
+    // , &.{
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    // });
+}
+
+test "structinit - address of" {
+    try testCompletion(
+        \\const T = struct { a: u32 };
+        \\var t: ?*const T = &.<cursor>
+    , &.{
+        .{ .label = "a", .kind = .Field, .detail = "u32" },
+    });
+    try testCompletion(
+        \\const T = struct { a: u32 };
+        \\var t: ?*const T = undefined;
+        \\t = &.<cursor>
+    , &.{
+        .{ .label = "a", .kind = .Field, .detail = "u32" },
+    });
+    // try testCompletion(
+    //     \\var t: *const struct { a: u32 } = &.<cursor>
+    // , &.{
+    //     .{ .label = "a", .kind = .Field, .detail = "u32" },
+    // });
+    // try testCompletion(
+    //     \\var t: ?*const struct { a: u32 } = &.<cursor>
+    // , &.{
+    //     .{ .label = "a", .kind = .Field, .detail = "u32" },
+    // });
 }
 
 test "return - enum" {
