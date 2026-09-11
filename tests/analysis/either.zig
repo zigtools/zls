@@ -2,15 +2,20 @@ const UnknownType: type = undefined;
 const unknown_value: UnknownType = undefined;
 
 const non_type_and_type: if (true) undefined else i32 = unknown_value;
-//    ^^^^^^^^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^^^^^^^^ (i32)()
 
 const type_and_non_type: if (true) i32 else undefined = unknown_value;
-//    ^^^^^^^^^^^^^^^^^ (unknown)()
+//    ^^^^^^^^^^^^^^^^^ (i32)()
 
 const compile_error_and_type: if (true) @compileError("Foo") else i32 = 1;
-//    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
+//    ^^^^^^^^^^^^^^^^^^^^^^ (i32)()
 
 const type_and_compile_error: if (true) i32 else @compileError("Foo") = 1;
+//    ^^^^^^^^^^^^^^^^^^^^^^ (i32)()
+
+// The literal type values `noreturn`/`undefined` are valid peers and must
+// not be mistaken for value-level branches that never produce a value.
+const type_and_noreturn_type: if (true) u8 else noreturn = unknown_value;
 //    ^^^^^^^^^^^^^^^^^^^^^^ (either type)()
 
 const StructU32 = struct {
