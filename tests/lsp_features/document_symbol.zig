@@ -13,7 +13,7 @@ test "container decl" {
         \\    fn f() void {}
         \\};
     ,
-        \\Constant S
+        \\Struct S
         \\  Function f (fn f() void)
     );
     try testDocumentSymbol(
@@ -22,7 +22,7 @@ test "container decl" {
         \\    fn f() void {}
         \\};
     ,
-        \\Constant S
+        \\Struct S
         \\  Field alpha (S)
         \\  Function f (fn f() void)
     );
@@ -35,7 +35,7 @@ test "tuple" {
         \\    u32,
         \\};
     ,
-        \\Constant S
+        \\Struct S
     );
 }
 
@@ -46,7 +46,7 @@ test "union" {
         \\    beta,
         \\};
     ,
-        \\Constant U
+        \\Struct U
         \\  Field alpha (U)
         \\  Field beta (U)
     );
@@ -59,9 +59,108 @@ test "enum" {
         \\    beta,
         \\};
     ,
-        \\Constant E
+        \\Enum E
         \\  EnumMember alpha (E)
         \\  EnumMember beta (E)
+    );
+}
+
+test "non-exhaustive enum" {
+    try testDocumentSymbol(
+        \\const E = enum(u8) {
+        \\    alpha,
+        \\    _,
+        \\};
+        \\const F = enum {
+        \\    @"_",
+        \\};
+    ,
+        \\Enum E
+        \\  EnumMember alpha (E)
+        \\Enum F
+        \\  EnumMember @"_" (F)
+    );
+}
+
+test "kind inference from initializer" {
+    try testDocumentSymbol(
+        \\const std = @import("std");
+        \\const c = @cImport(@cInclude("foo.h"));
+        \\const Error = error{ A, B };
+        \\const Combined = Error || error{C};
+        \\const Opaque = opaque {};
+        \\const Sized = enum(u8) {
+        \\    alpha,
+        \\};
+        \\const Tagged = union(enum) {
+        \\    alpha: u32,
+        \\};
+        \\var Mutable = struct {};
+        \\const alias = std.ArrayList;
+        \\const value = 42;
+        \\var counter: u32 = 0;
+    ,
+        \\Module std
+        \\Module c
+        \\Enum Error
+        \\Enum Combined
+        \\Class Opaque
+        \\Enum Sized
+        \\  EnumMember alpha (Sized)
+        \\Struct Tagged
+        \\  Field alpha (Tagged)
+        \\Struct Mutable
+        \\Constant alias
+        \\Constant value
+        \\Variable counter
+    );
+}
+
+test "method detection" {
+    try testDocumentSymbol(
+        \\const Foo = struct {
+        \\    const Self = @This();
+        \\    fn init() Foo {}
+        \\    fn deinit(self: Foo) void {}
+        \\    fn reset(self: *Foo) void {}
+        \\    fn get(self: Self) u32 {}
+        \\    fn set(self: *const @This(), v: u32) void {}
+        \\    fn helper(x: u32) u32 {}
+        \\    fn deinitAll(items: []Foo) void {}
+        \\    fn firstOf(p: [*]Foo) u32 {}
+        \\    fn fromC(p: [*c]Foo) void {}
+        \\    fn make() void {
+        \\        const Bar = struct {
+        \\            fn m(self: Foo) void {}
+        \\            fn n(self: Bar) void {}
+        \\        };
+        \\        _ = Bar;
+        \\    }
+        \\    const Inner = struct {
+        \\        fn innerMethod(i: Inner) void {}
+        \\        fn outerParam(f: Foo) void {}
+        \\    };
+        \\};
+        \\fn free(foo: Foo) void {}
+    ,
+        \\Struct Foo
+        \\  Constant Self
+        \\  Function init (fn init() Foo)
+        \\  Method deinit (fn deinit(self: Foo) void)
+        \\  Method reset (fn reset(self: *Foo) void)
+        \\  Method get (fn get(self: Self) u32)
+        \\  Method set (fn set(self: *const @This(), v: u32) void)
+        \\  Function helper (fn helper(x: u32) u32)
+        \\  Function deinitAll (fn deinitAll(items: []Foo) void)
+        \\  Function firstOf (fn firstOf(p: [*]Foo) u32)
+        \\  Method fromC (fn fromC(p: [*c]Foo) void)
+        \\  Function make (fn make() void)
+        \\    Function m (fn m(self: Foo) void)
+        \\    Method n (fn n(self: Bar) void)
+        \\  Struct Inner
+        \\    Method innerMethod (fn innerMethod(i: Inner) void)
+        \\    Function outerParam (fn outerParam(f: Foo) void)
+        \\Function free (fn free(foo: Foo) void)
     );
 }
 
@@ -71,28 +170,28 @@ test "invalid tuple-like container" {
         \\    '=',
         \\};
     ,
-        \\Constant E
+        \\Enum E
     );
     try testDocumentSymbol(
         \\const E = enum {
         \\    @src
         \\};
     ,
-        \\Constant E
+        \\Enum E
     );
     try testDocumentSymbol(
         \\const U = union {
         \\    '=',
         \\};
     ,
-        \\Constant U
+        \\Struct U
     );
     try testDocumentSymbol(
         \\const U = union(enum) {
         \\    '=',
         \\};
     ,
-        \\Constant U
+        \\Struct U
     );
 }
 
@@ -110,8 +209,8 @@ test "test decl" {
         \\test "bar" {}
         \\test {}
     ,
-        \\Method foo
-        \\Method bar
+        \\Function foo
+        \\Function bar
     );
 }
 
@@ -146,10 +245,10 @@ test "nested struct with self" {
         \\    const Bar = union {};
         \\};
     ,
-        \\Constant Foo
+        \\Struct Foo
         \\  Constant Self
         \\  Function foo (fn foo() !Self)
-        \\  Constant Bar
+        \\  Struct Bar
     );
 }
 
@@ -170,9 +269,9 @@ test "decl names that are empty or contain whitespace return non-empty document 
         \\const @"   " = 0;
         \\const @" a " = 0;
     ,
-        \\Method ""
-        \\Method "          "
-        \\Method " a "
+        \\Function ""
+        \\Function "          "
+        \\Function " a "
         \\Constant @""
         \\Constant @"   "
         \\Constant @" a "
@@ -199,11 +298,93 @@ test "nested function declarations" {
     );
 }
 
+test "zon" {
+    try testZonDocumentSymbol(
+        \\.{
+        \\    .name = .zls,
+        \\    .version = "0.15.0",
+        \\    .fingerprint = 0xd80840b2c3f0c8f3,
+        \\    .dependencies = .{
+        \\        .known_folders = .{
+        \\            .url = "https://example.com/archive.tar.gz",
+        \\            .hash = "N-V-__AAAJC9AgCq",
+        \\            .lazy = true,
+        \\        },
+        \\    },
+        \\    .paths = .{
+        \\        "build.zig",
+        \\        "src",
+        \\    },
+        \\}
+    ,
+        \\EnumMember name
+        \\String version
+        \\Number fingerprint
+        \\Module dependencies
+        \\  Module known_folders
+        \\    String url
+        \\    String hash
+        \\    Boolean lazy
+        \\Array paths
+        \\  String 0
+        \\  String 1
+    );
+}
+
+test "zon scalar values" {
+    try testZonDocumentSymbol(
+        \\.{
+        \\    .enabled = true,
+        \\    .disabled = false,
+        \\    .nothing = null,
+        \\    .offset = -42,
+        \\    .not_a_number = nan,
+        \\    .tag = .zls,
+        \\    .empty = .{},
+        \\}
+    ,
+        \\Boolean enabled
+        \\Boolean disabled
+        \\Null nothing
+        \\Number offset
+        \\Number not_a_number
+        \\EnumMember tag
+        \\Module empty
+    );
+}
+
+test "zon root array" {
+    try testZonDocumentSymbol(
+        \\.{ 1, "two", .{ .three = 3 } }
+    ,
+        \\Number 0
+        \\String 1
+        \\Module 2
+        \\  Number three
+    );
+}
+
+test "zon with parse errors" {
+    try testZonDocumentSymbol(
+        \\.{ .a = }
+    ,
+        \\
+    );
+}
+
 fn testDocumentSymbol(source: []const u8, expected: []const u8) !void {
+    try testDocumentSymbolWithMode(source, expected, .zig);
+}
+
+fn testZonDocumentSymbol(source: []const u8, expected: []const u8) !void {
+    try testDocumentSymbolWithMode(source, expected, .zon);
+}
+
+fn testDocumentSymbolWithMode(source: []const u8, expected: []const u8, mode: std.zig.Ast.Mode) !void {
     var ctx: Context = try .init();
     defer ctx.deinit();
 
-    const test_uri = try ctx.addDocument(.{ .source = source });
+    const test_uri = try ctx.addDocument(.{ .source = source, .mode = mode });
 
     const params: types.DocumentSymbol.Params = .{
         .textDocument = .{ .uri = test_uri.raw },

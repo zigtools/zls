@@ -1238,6 +1238,187 @@ fn willSaveWaitUntilHandler(server: *Server, arena: std.mem.Allocator, request: 
     return try text_edits.toOwnedSlice(arena);
 }
 
+fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params) Error!?types.semantic_tokens.Result {
+    if (server.config_manager.config.semantic_tokens == .none) return null;
+
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+
+    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
+    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+    // semantic tokens can be quite expensive to compute on large files
+    // and disabling callsite references can help with bringing the cost down.
+    analyser.collect_callsite_references = false;
+
+    return try semantic_tokens.writeSemanticTokens(
+        arena,
+        &analyser,
+        handle,
+        null,
+        server.offset_encoding,
+        server.config_manager.config.semantic_tokens == .partial,
+        server.client_capabilities.supports_semantic_tokens_overlapping,
+    );
+}
+
+fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.semantic_tokens.Params.Range) Error!?types.semantic_tokens.Result {
+    if (server.config_manager.config.semantic_tokens == .none) return null;
+
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+
+    // Workaround: The Ast on .zon files is unusable when an error occured on the root expr
+    if (handle.tree.mode == .zon and handle.tree.errors.len > 0) return null;
+
+    const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+    // semantic tokens can be quite expensive to compute on large files
+    // and disabling callsite references can help with bringing the cost down.
+    analyser.collect_callsite_references = false;
+
+    return try semantic_tokens.writeSemanticTokens(
+        arena,
+        &analyser,
+        handle,
+        loc,
+        server.offset_encoding,
+        server.config_manager.config.semantic_tokens == .partial,
+        server.client_capabilities.supports_semantic_tokens_overlapping,
+    );
+}
+
+fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.completion.Params) Error!?types.completion.Result {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
+
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    return .{
+        .completion_list = try completions.completionAtIndex(server, &analyser, arena, handle, source_index) orelse return null,
+    };
+}
+
+fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelp.Params) Error!?types.SignatureHelp {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
+
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.signature_help_supports_md) .markdown else .plaintext;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    const signature_info = (try signature_help.getSignatureInfo(
+        &analyser,
+        arena,
+        handle,
+        source_index,
+        markup_kind,
+    )) orelse return null;
+
+    var signatures = try arena.alloc(types.SignatureHelp.Signature, 1);
+    signatures[0] = signature_info;
+
+    return .{
+        .signatures = signatures,
+        .activeSignature = 0,
+        .activeParameter = signature_info.activeParameter,
+    };
+}
+
+fn gotoDefinitionHandler(
+    server: *Server,
+    arena: std.mem.Allocator,
+    request: types.Definition.Params,
+) Error!?types.Definition.Result {
+    return goto.gotoHandler(server, arena, .definition, request);
+}
+
+fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.type_definition.Params) Error!?types.Definition.Result {
+    return try goto.gotoHandler(server, arena, .type_definition, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    });
+}
+
+fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.implementation.Params) Error!?types.Definition.Result {
+    return try goto.gotoHandler(server, arena, .definition, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    });
+}
+
+fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.declaration.Params) Error!?types.Definition.Result {
+    return try goto.gotoHandler(server, arena, .declaration, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    });
+}
+
+fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Hover.Params) Error!?types.Hover {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    if (handle.tree.mode == .zon) return null;
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
+
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+
+    var analyser = server.initAnalyser(arena, handle);
+    defer analyser.deinit();
+
+    return hover_handler.hover(
+        &analyser,
+        arena,
+        handle,
+        source_index,
+        markup_kind,
+        server.offset_encoding,
+    );
+}
+
+fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbol.Params) Error!lsp.ResultType("textDocument/documentSymbol") {
+    const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    const handle = server.document_store.getHandle(document_uri) orelse return null;
+    return .{
+        .document_symbols = try document_symbol.getDocumentSymbols(arena, &handle.tree, server.offset_encoding),
+    };
+}
+
 fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.document_formatting.Params) Error!?[]types.TextEdit {
     const document_uri = Uri.parse(arena, request.textDocument.uri) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
