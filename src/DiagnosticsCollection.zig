@@ -127,8 +127,7 @@ pub fn pushErrorBundle(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var new_error_bundle: std.zig.ErrorBundle.Wip = undefined;
-    try new_error_bundle.init(collection.allocator);
+    var new_error_bundle: std.zig.ErrorBundle.Wip = try .init(collection.allocator);
     defer new_error_bundle.deinit();
 
     collection.mutex.lockUncancelable(collection.io);
@@ -623,8 +622,7 @@ fn createTestingErrorBundle(
     },
     compile_log_text: []const u8,
 ) error{OutOfMemory}!std.zig.ErrorBundle {
-    var eb: std.zig.ErrorBundle.Wip = undefined;
-    try eb.init(std.testing.allocator);
+    var eb: std.zig.ErrorBundle.Wip = try .init(std.testing.allocator);
     errdefer eb.deinit();
 
     for (messages) |msg| {

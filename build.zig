@@ -66,9 +66,8 @@ pub fn build(b: *Build) !void {
         test_options.step.name = "ZLS test options";
 
         test_options.addOptionPath("zig_exe_path", .zig_exe);
-        // https://codeberg.org/ziglang/zig/issues/35766
-        // test_options.addOptionPath("zig_lib_path", .zig_lib);
-        // test_options.addOptionPath("global_cache_path", std.Build.LazyPath.cache_root.join(b.allocator, "zls") catch @panic("OOM"));
+        test_options.addOptionPathUntracked("zig_lib_path", .zig_lib);
+        test_options.addOptionPathUntracked("global_cache_path", std.Build.LazyPath.cache_root.join(b.allocator, "zls") catch @panic("OOM"));
 
         break :blk test_options.createModule();
     };
@@ -335,7 +334,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
         const io = b.graph.io;
         const git_file = b.root.openFile(io, ".git", .{ .allow_directory = false }) catch |err| switch (err) {
             error.IsDir => {
-                b.dependOnFileContents(b.path(".git/logs/HEAD"));
+                b.dependOnFileMetadata(b.path(".git/logs/HEAD"));
                 break :git;
             },
             error.FileNotFound => {

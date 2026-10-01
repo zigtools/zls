@@ -315,8 +315,7 @@ fn loadConfigFromFile(io: std.Io, allocator: std.mem.Allocator, file_path: []con
         &scanner,
         parse_options,
     ) catch |err| {
-        var eb: std.zig.ErrorBundle.Wip = undefined;
-        try eb.init(allocator);
+        var eb: std.zig.ErrorBundle.Wip = try .init(allocator);
         errdefer eb.deinit();
 
         const src_path = try eb.addString(file_path);
