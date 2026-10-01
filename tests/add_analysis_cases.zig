@@ -24,7 +24,7 @@ pub fn addCases(
         }),
     });
 
-    b.dependOnDirectory(b.path(cases_path));
+    b.dependOnDirectoryContents(b.path(cases_path));
 
     var dir = b.root.openDir(b.graph.io, cases_path, .{ .iterate = true }) catch |err|
         std.debug.panic("failed to open '{f}': {}", .{ b.path(cases_path), err });
