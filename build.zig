@@ -216,6 +216,7 @@ pub fn build(b: *Build) !void {
             .root_module = exe_module,
             .use_llvm = use_llvm,
         });
+        exe.pie = pie;
         b.installArtifact(exe);
     }
 
