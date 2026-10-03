@@ -29,11 +29,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790897538,
-        "narHash": "sha256-/XT4Pd5Xm2P2VGraHxeIToqCOPBlc1mxWn7cwKvY4mU=",
+        "lastModified": 1790985140,
+        "narHash": "sha256-2soIfrlRmeSvZuHRNFojArInqEZRkPrzqiA3VEMla04=",
         "owner": "silversquirl",
         "repo": "zig-flake",
-        "rev": "5e37e1224afe9fce4ac4b9b2e0d0ce6903749f8f",
+        "rev": "392d312ade846f29ba8cf3fe3e82cc56cb40d11e",
         "type": "github"
       },
       "original": {
