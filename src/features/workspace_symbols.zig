@@ -79,7 +79,7 @@ pub fn @"workspace/symbol"(
                     .constant => .Constant,
                     .field => .Field,
                     .function => .Function,
-                    .test_function => .Method, // there is no SymbolKind that represents a tests,
+                    .test_function => .Function, // there is no SymbolKind that represents a test
                 },
                 .location = .{
                     .location = .{
