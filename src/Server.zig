@@ -1342,6 +1342,23 @@ fn isBlockingMessage(msg: Message) bool {
     }
 }
 
+fn invalidatesPendingRequests(msg: Message) bool {
+    return switch (msg) {
+        .notification => |notification| switch (notification.params) {
+            .@"textDocument/didOpen",
+            .@"textDocument/didChange",
+            .@"textDocument/didSave",
+            .@"textDocument/didClose",
+            .@"workspace/didChangeWatchedFiles",
+            .@"workspace/didChangeWorkspaceFolders",
+            .@"workspace/didChangeConfiguration",
+            => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
 pub const CreateOptions = struct {
     /// An implementation that doesn't support `concurrent` is permitted but will not be able to provide some features like build on save.
     io: std.Io,
@@ -1446,6 +1463,7 @@ pub fn loop(server: *Server) LoopError!void {
         };
 
         if (isBlockingMessage(message)) {
+            if (invalidatesPendingRequests(message)) server.wait_group.cancel(server.io);
             try server.wait_group.await(server.io);
             server.wait_group = .init;
             try server.processMessageReportError(arena_allocator.state, message);

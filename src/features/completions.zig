@@ -186,6 +186,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
             try builder.analyser.collectDeclarationsOfContainer(ty, builder.orig_handle, !ty.is_type_val, &decls);
 
             for (decls.items) |decl_with_handle| {
+                try builder.server.io.checkCancel();
                 try declToCompletion(builder, decl_with_handle);
             }
         },
@@ -686,6 +687,7 @@ fn completeGlobal(builder: *Builder) Analyser.Error!void {
     var decls: std.ArrayList(Analyser.DeclWithHandle) = .empty;
     try builder.analyser.collectAllSymbolsAtSourceIndex(builder.orig_handle, builder.source_index, &decls);
     for (decls.items) |decl_with_handle| {
+        try builder.server.io.checkCancel();
         try declToCompletion(builder, decl_with_handle);
     }
     try populateSnippedCompletions(builder, .generic);
@@ -1497,6 +1499,7 @@ fn collectContainerFields(
     const scope_decls = document_scope.getScopeDeclarationsConst(scope_handle.scope);
 
     for (scope_decls) |decl_index| {
+        try builder.server.io.checkCancel();
         const decl = document_scope.declarations.get(@backingInt(decl_index));
         if (decl != .ast_node) continue;
         const decl_handle: Analyser.DeclWithHandle = .{ .decl = decl, .handle = scope_handle.handle, .container_type = container };
