@@ -21,6 +21,10 @@ pub const Manager = struct {
         supported: bool,
     },
     zig_lib_dir: ?std.Build.Cache.Directory,
+    zig_cache_dir: switch (builtin.os.tag) {
+        .wasi => void,
+        else => ?std.Build.Cache.Directory,
+    },
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
         .wasi => std.process.Preopens,
@@ -45,6 +49,10 @@ pub const Manager = struct {
             .environ_map = environ_map,
             .zig_exe = null,
             .zig_lib_dir = null,
+            .zig_cache_dir = switch (builtin.os.tag) {
+                .wasi => {},
+                else => null,
+            },
             .global_cache_dir = null,
             .wasi_preopens = switch (builtin.os.tag) {
                 .wasi => try std.process.Preopens.init(arena_allocator.allocator()),
@@ -64,6 +72,7 @@ pub const Manager = struct {
         const allocator = manager.allocator;
         if (builtin.os.tag != .wasi) {
             if (manager.zig_lib_dir) |*zig_lib_dir| zig_lib_dir.handle.close(io);
+            if (manager.zig_cache_dir) |*zig_cache_dir| zig_cache_dir.handle.close(io);
             if (manager.global_cache_dir) |*global_cache_dir| global_cache_dir.handle.close(io);
         }
         manager.impl.arena.promote(allocator).deinit();
@@ -185,6 +194,15 @@ pub const Manager = struct {
                 .env = zig_env,
                 .supported = zigVersionCheck(min_runtime_zig_version, zig_version, is_zls_version_tagged),
             };
+
+            const zig_cache_dir = std.Io.Dir.cwd().createDirPathOpen(io, zig_env.global_cache_dir, .{}) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                else => {
+                    log.err("failed to open zig global cache directory '{s}': {}", .{ zig_env.global_cache_dir, err });
+                    break :unresolved_zig;
+                },
+            };
+            manager.zig_cache_dir = .{ .handle = zig_cache_dir, .path = zig_env.global_cache_dir };
         }
         config.zig_exe_path = if (manager.zig_exe) |exe| exe.path else null;
 
@@ -768,7 +786,7 @@ test {
     const is_zls_version_tagged = build_options.version.pre == null;
     const min_runtime_zig_version = comptime std.SemanticVersion.parse(build_options.minimum_runtime_zig_version_string) catch unreachable;
 
-    // The build runner must support the Zig version that ZLS is being built with
+    // Must support the Zig version that ZLS is being built with
     try std.testing.expect(zigVersionCheck(
         min_runtime_zig_version,
         current_zig_version,
