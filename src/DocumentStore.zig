@@ -13,8 +13,7 @@ const tracy = @import("tracy");
 const DocumentScope = @import("DocumentScope.zig");
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const TrigramStore = @import("TrigramStore.zig");
-
-const BuildConfig = @compileError("https://github.com/zigtools/zls/issues/3208");
+const bsp = @import("bsp.zig");
 
 const DocumentStore = @This();
 
@@ -35,13 +34,16 @@ lsp_capabilities: struct {
     supports_inlay_hints_refresh: bool = false,
 } = .{},
 
-/// https://github.com/zigtools/zls/issues/3208
-pub const supports_build_system = false and std.process.can_spawn;
+pub const supports_build_system = std.process.can_spawn;
 
 pub const Config = struct {
     environ_map: *const std.process.Environ.Map,
     zig_exe_path: ?[]const u8,
     zig_lib_dir: ?std.Build.Cache.Directory,
+    zig_cache_dir: switch (builtin.os.tag) {
+        .wasi => void,
+        else => ?std.Build.Cache.Directory,
+    },
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
     wasi_preopens: switch (builtin.os.tag) {
@@ -61,11 +63,7 @@ pub const BuildFile = struct {
         mutex: std.Io.Mutex = .init,
         build_runner_state: BuildRunnerState = .idle,
         version: u32 = 0,
-        /// contains information extracted from running build.zig with a custom build runner
-        /// e.g. include paths & packages
-        /// TODO this field should not be nullable, callsites should await the build config to be resolved
-        /// and then continue instead of dealing with missing information.
-        config: ?std.json.Parsed(BuildConfig) = null,
+        config: ?bsp.BuildConfig = null,
     } = .{},
 
     const BuildRunnerState = enum {
@@ -74,9 +72,9 @@ pub const BuildFile = struct {
         running_but_already_invalidated,
     };
 
-    pub fn tryLockConfig(self: *BuildFile, io: std.Io) ?BuildConfig {
+    pub fn tryLockConfig(self: *BuildFile, io: std.Io) ?bsp.BuildConfig {
         self.impl.mutex.lockUncancelable(io);
-        return if (self.impl.config) |cfg| cfg.value else {
+        return self.impl.config orelse {
             self.impl.mutex.unlock(io);
             return null;
         };
@@ -152,7 +150,7 @@ pub const BuildFile = struct {
 
     fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         self.uri.deinit(allocator);
-        if (self.impl.config) |cfg| cfg.deinit();
+        if (self.impl.config) |*cfg| cfg.deinit(allocator);
         if (self.builtin_uri) |builtin_uri| builtin_uri.deinit(allocator);
         if (self.build_associated_config) |cfg| cfg.deinit();
     }
@@ -921,6 +919,7 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) void {
     if (self.config.zig_exe_path == null) return;
     if (self.config.global_cache_dir == null) return;
     if (self.config.zig_lib_dir == null) return;
+    if (self.config.zig_cache_dir == null) return;
 
     const build_file = self.getBuildFile(build_file_uri) orelse return;
 
@@ -1083,14 +1082,19 @@ fn notifyBuildStart(self: *DocumentStore) void {
         },
     };
 
+    const params = .{
+        .token = progress_token,
+        .value = lsp.types.window.work_done_progress.Begin{
+            .title = "Loading build configuration",
+        },
+    };
+
     transport.writeNotification(
         self.io,
         self.allocator,
         "$/progress",
-        lsp.types.window.work_done_progress.Begin,
-        .{
-            .title = "Loading build configuration",
-        },
+        @TypeOf(params),
+        params,
         .{ .emit_null_optional_fields = false },
     ) catch |err| switch (err) {
         error.Canceled => unreachable,
@@ -1117,17 +1121,22 @@ fn notifyBuildEnd(self: *DocumentStore, status: EndStatus) void {
     const old_cancel_protect = self.io.swapCancelProtection(.blocked);
     defer _ = self.io.swapCancelProtection(old_cancel_protect);
 
-    transport.writeNotification(
-        self.io,
-        self.allocator,
-        "$/progress",
-        lsp.types.window.work_done_progress.End,
-        .{
+    const params = .{
+        .token = progress_token,
+        .value = lsp.types.window.work_done_progress.End{
             .message = switch (status) {
                 .failed => "Failed",
                 .success => "Success",
             },
         },
+    };
+
+    transport.writeNotification(
+        self.io,
+        self.allocator,
+        "$/progress",
+        @TypeOf(params),
+        params,
         .{ .emit_null_optional_fields = false },
     ) catch |err| switch (err) {
         error.Canceled => unreachable,
@@ -1162,11 +1171,24 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
         build_file.impl.version += 1;
         const new_version = build_file.impl.version;
 
-        const loadBuildConfiguration = if (true) @compileError("https://github.com/zigtools/zls/issues/3208");
-        const build_config = loadBuildConfiguration(self, build_file.uri, new_version) catch |err| switch (err) {
+        const options: bsp.LoadBuildConfigOptions = .{
+            .zig_exe_path = self.config.zig_exe_path.?,
+            .zig_lib_dir = self.config.zig_lib_dir.?,
+            .zig_global_cache_dir = self.config.zig_cache_dir.?,
+            .diagnostics = self.diagnostics_collection,
+            .build_file_uri = build_file.uri,
+            .build_file_version = new_version,
+        };
+
+        var build_config = bsp.loadBuildConfiguration(
+            self.io,
+            self.allocator,
+            self.config.environ_map,
+            &options,
+        ) catch |err| switch (err) {
             error.Canceled => return error.Canceled,
             else => |e| {
-                if (e != error.RunFailed) { // already logged
+                if (e != error.AlreadyReported) {
                     log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri.raw, e });
                 }
                 self.notifyBuildEnd(.failed);
@@ -1186,7 +1208,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
                 build_file.impl.build_runner_state = .idle;
                 build_file.impl.mutex.unlock(self.io);
 
-                if (old_config) |*config| config.deinit();
+                if (old_config) |*config| config.deinit(self.allocator);
                 self.notifyBuildEnd(.success);
                 break;
             },
@@ -1194,7 +1216,7 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
                 build_file.impl.build_runner_state = .running;
                 build_file.impl.mutex.unlock(self.io);
 
-                build_config.deinit();
+                build_config.deinit(self.allocator);
                 continue;
             },
         }
@@ -1345,6 +1367,8 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    std.debug.assert(uri.isFileScheme());
+
     var build_file: BuildFile = .{
         .uri = try uri.dupe(self.allocator),
     };
@@ -1354,8 +1378,11 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory 
     if (loadBuildAssociatedConfiguration(self.io, self.allocator, build_file)) |cfg| {
         build_file.build_associated_config = cfg;
 
-        if (cfg.value.relative_builtin_path) |relative_builtin_path| blk: {
-            const build_file_path = build_file.uri.toFsPath(self.allocator) catch break :blk;
+        if (cfg.value.relative_builtin_path) |relative_builtin_path| {
+            const build_file_path = build_file.uri.toFsPath(self.allocator) catch |err| switch (err) {
+                error.UnsupportedScheme => unreachable,
+                error.OutOfMemory => |e| return e,
+            };
             const absolute_builtin_path = try std.Io.Dir.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try .fromPath(self.allocator, absolute_builtin_path);
