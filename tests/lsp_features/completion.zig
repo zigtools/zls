@@ -3701,9 +3701,6 @@ test "empty doc comment" {
 test "filesystem" {
     if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
 
-    // https://codeberg.org/ziglang/zig/issues/35766
-    if (true) return error.SkipZigTest;
-
     try testCompletion(
         \\const foo = @import("<cursor>");
     , &.{
@@ -3720,9 +3717,6 @@ test "filesystem" {
 
 test "filesystem string literal ends with non ASCII symbol" {
     if (@import("builtin").target.cpu.arch.isWasm()) return error.SkipZigTest;
-
-    // https://codeberg.org/ziglang/zig/issues/35766
-    if (true) return error.SkipZigTest;
 
     try testCompletion(
         \\const foo = @import("<cursor> 🠁
