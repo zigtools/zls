@@ -320,6 +320,7 @@
           <a href="https://ziglang.org/documentation/0.14.1/">0.14.1</a> |
           <a href="https://ziglang.org/documentation/0.15.2/">0.15.2</a> |
           <a href="https://ziglang.org/documentation/0.16.0/">0.16.0</a> |
+          <a href="https://ziglang.org/documentation/0.17.0/">0.17.0</a> |
           master
         </nav>
         <nav aria-labelledby="table-of-contents">
@@ -798,7 +799,7 @@
       value. Using this value would be a bug. The value will be unused, or overwritten before being used."
       </p>
       <p>
-      In {#link|Debug#} and {#link|ReleaseSafe#} mode, Zig writes {#syntax#}0xaa{#endsyntax#} bytes to undefined memory. This is to catch
+      In {#link|debug#} and {#link|safe#} mode, Zig writes {#syntax#}0xaa{#endsyntax#} bytes to undefined memory. This is to catch
       bugs early, and to help detect use of undefined memory in a debugger. However, this behavior is only an
       implementation feature, not a language semantic, so it is not guaranteed to be observable to code.
       </p>
@@ -1608,6 +1609,23 @@ unwrapped == 1234{#endsyntax#}</pre>
           </td>
         </tr>
         <tr>
+          <td>Forwarding Error Unwrap</td>
+          <td><pre>{#syntax#}try a{#endsyntax#}</pre></td>
+          <td>
+            <ul>
+              <li>{#link|Error Unions|Errors#}</li>
+            </ul>
+          </td>
+          <td>
+            Equivalent to:
+            <pre>{#syntax#}a catch |err| return err{#endsyntax#}</pre>
+          </td>
+          <td>
+            <pre>{#syntax#}const value: anyerror!u32 = 5678;
+try value == 5678{#endsyntax#}</pre>
+          </td>
+        </tr>
+        <tr>
           <td>Logical And</td>
           <td><pre>{#syntax#}a and b{#endsyntax#}</pre></td>
           <td>
@@ -1870,7 +1888,7 @@ const B = error{Two};
       <pre>{#syntax#}x() x[] x.y x.* x.?
 a!b
 x{}
-!x -x -%x ~x &x ?x
+!x -x -%x ~x &x ?x try
 * / % *% *| ||
 + - ++ +% -% +| -|
 << >> <<|
@@ -2854,11 +2872,11 @@ or
       {#header_close#}
       {#header_open|unreachable#}
       <p>
-      In {#link|Debug#} and {#link|ReleaseSafe#} mode
+      In {#link|debug#} and {#link|safe#} mode
       {#syntax#}unreachable{#endsyntax#} emits a call to {#syntax#}panic{#endsyntax#} with the message <code>reached unreachable code</code>.
       </p>
       <p>
-      In {#link|ReleaseFast#} and {#link|ReleaseSmall#} mode, the optimizer uses the assumption that {#syntax#}unreachable{#endsyntax#} code
+      In {#link|fast#} and {#link|small#} mode, the optimizer uses the assumption that {#syntax#}unreachable{#endsyntax#} code
       will never be hit to perform optimizations.
       </p>
       {#header_open|Basics#}
@@ -2871,7 +2889,7 @@ or
       {#header_open|At Compile-Time#}
       {#code|test_comptime_unreachable.zig#}
 
-      {#see_also|Zig Test|Build Mode|comptime#}
+      {#see_also|Zig Test|Optimization Mode|comptime#}
       {#header_close#}
       {#header_close#}
       {#header_open|noreturn#}
@@ -3094,7 +3112,7 @@ or
       Here we know for sure that "1234" will parse successfully. So we put the
       {#syntax#}unreachable{#endsyntax#} value on the right hand side.
       {#syntax#}unreachable{#endsyntax#} invokes safety-checked {#link|Illegal Behavior#}, so
-      in {#link|Debug#} and {#link|ReleaseSafe#}, triggers a safety panic by default. So, while
+      in {#link|debug#} and {#link|safe#}, triggers a safety panic by default. So, while
       we're debugging the application, if there <em>was</em> a surprise error here, the application
       would crash appropriately.
       </p>
@@ -3187,7 +3205,7 @@ fn createFoo(param: i32) !Foo {
         <li>These primitives give enough expressiveness that it's completely practical
             to have failing to check for an error be a compile error. If you really want
             to ignore the error, you can add {#syntax#}catch unreachable{#endsyntax#} and
-            get the added benefit of crashing in Debug and ReleaseSafe modes if your assumption was wrong.
+            get the added benefit of crashing in {#link|debug#} and {#link|safe#} modes if your assumption was wrong.
         </li>
         <li>
           Since Zig understands error types, it can pre-weight branches in favor of
@@ -3269,7 +3287,7 @@ fn createFoo(param: i32) !Foo {
       to increase their development pace.
       </p>
       <p>
-      Error Return Traces are enabled by default in {#link|Debug#} builds and disabled by default in {#link|ReleaseFast#}, {#link|ReleaseSafe#} and {#link|ReleaseSmall#} builds.
+      Error Return Traces are enabled by default in {#link|debug#} builds and disabled by default in {#link|fast#}, {#link|safe#} and {#link|small#} builds.
       </p>
       <p>
       There are a few ways to activate this error return tracing feature:
@@ -3657,7 +3675,7 @@ void do_a_thing(struct Foo *foo) {
       {#code|zero_bit_types.zig#}
 
       <p>When this turns into machine code, there is no code generated in the
-      body of {#syntax#}entry{#endsyntax#}, even in {#link|Debug#} mode. For example, on x86_64:</p>
+      body of {#syntax#}entry{#endsyntax#}, even in {#link|debug#} mode. For example, on x86_64:</p>
       <pre><code>0000000000000010 &lt;entry&gt;:
   10:	55                   	push   %rbp
   11:	48 89 e5             	mov    %rsp,%rbp
@@ -6022,15 +6040,15 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
 
       {#header_close#}
 
-      {#header_open|Build Mode#}
+      {#header_open|Optimization Mode#}
       <p>
-      Zig has four build modes:
+      Zig has four optimization modes:
       </p>
       <ul>
-        <li>{#link|Debug#} (default)</li>
-        <li>{#link|ReleaseFast#}</li>
-        <li>{#link|ReleaseSafe#}</li>
-        <li>{#link|ReleaseSmall#}</li>
+        <li>{#link|debug#} (default)</li>
+        <li>{#link|fast#}</li>
+        <li>{#link|safe#}</li>
+        <li>{#link|small#}</li>
       </ul>
       <p>
       To add standard build options to a <code class="file">build.zig</code> file:
@@ -6041,12 +6059,12 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       This causes these options to be available:
       </p>
       <dl>
-        <dt><kbd>-Doptimize=Debug</kbd></dt><dd>Optimizations off and safety on (default)</dd>
-        <dt><kbd>-Doptimize=ReleaseSafe</kbd></dt><dd>Optimizations on and safety on</dd>
-        <dt><kbd>-Doptimize=ReleaseFast</kbd></dt><dd>Optimizations on and safety off</dd>
-        <dt><kbd>-Doptimize=ReleaseSmall</kbd></dt><dd>Size optimizations on and safety off</dd>
+        <dt><kbd>-Doptimize=debug</kbd></dt><dd>Optimizations off and safety on (default)</dd>
+        <dt><kbd>-Doptimize=safe</kbd></dt><dd>Optimizations on and safety on</dd>
+        <dt><kbd>-Doptimize=fast</kbd></dt><dd>Optimizations on and safety off</dd>
+        <dt><kbd>-Doptimize=small</kbd></dt><dd>Size optimizations on and safety off</dd>
       </dl>
-      {#header_open|Debug#}
+      {#header_open|debug#}
       {#shell_samp#}$ zig build-exe example.zig{#end_shell_samp#}
       <ul>
         <li>Fast compilation speed</li>
@@ -6056,8 +6074,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
         <li>No reproducible build requirement</li>
       </ul>
       {#header_close#}
-      {#header_open|ReleaseFast#}
-      {#shell_samp#}$ zig build-exe example.zig -O ReleaseFast{#end_shell_samp#}
+      {#header_open|fast#}
+      {#shell_samp#}$ zig build-exe example.zig -Ofast{#end_shell_samp#}
       <ul>
         <li>Fast runtime performance</li>
         <li>Safety checks disabled</li>
@@ -6066,8 +6084,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
         <li>Reproducible build</li>
       </ul>
       {#header_close#}
-      {#header_open|ReleaseSafe#}
-      {#shell_samp#}$ zig build-exe example.zig -O ReleaseSafe{#end_shell_samp#}
+      {#header_open|safe#}
+      {#shell_samp#}$ zig build-exe example.zig -Osafe{#end_shell_samp#}
       <ul>
         <li>Medium runtime performance</li>
         <li>Safety checks enabled</li>
@@ -6076,8 +6094,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
         <li>Reproducible build</li>
       </ul>
       {#header_close#}
-      {#header_open|ReleaseSmall#}
-      {#shell_samp#}$ zig build-exe example.zig -O ReleaseSmall{#end_shell_samp#}
+      {#header_open|small#}
+      {#shell_samp#}$ zig build-exe example.zig -Osmall{#end_shell_samp#}
       <ul>
         <li>Medium runtime performance</li>
         <li>Safety checks disabled</li>
@@ -6122,7 +6140,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       </p>
       <p>
       Most Illegal Behavior is safety-checked. However, to facilitate optimizations, safety checks are disabled by default
-      in the {#link|ReleaseFast#} and {#link|ReleaseSmall#} optimization modes. Safety checks can also be enabled or disabled
+      in the {#link|fast#} and {#link|small#} optimization modes. Safety checks can also be enabled or disabled
       on a per-block basis, overriding the default for the current optimization mode, using {#link|@setRuntimeSafety#}. When
       safety checks are disabled, Safety-Checked Illegal Behavior behaves like Unchecked Illegal Behavior; that is, any behavior
       may result from invoking it.
@@ -6464,14 +6482,14 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
           </li>
           <li>
               Finally, if none of the above apply, you need a general purpose allocator.
-              If you are in Debug mode, {#syntax#}std.heap.DebugAllocator{#endsyntax#} is available as a
+              If you are in {#link|debug#} mode, {#syntax#}std.heap.DebugAllocator{#endsyntax#} is available as a
               function that takes a {#link|comptime#} {#link|struct#} of configuration options and returns a type.
               Generally, you will set up exactly one in your main function, and
               then pass it or sub-allocators around to various parts of your
               application.
           </li>
           <li>
-              If you are compiling in ReleaseFast mode, {#syntax#}std.heap.smp_allocator{#endsyntax#} is
+              If you are compiling in {#link|fast#} mode, {#syntax#}std.heap.smp_allocator{#endsyntax#} is
               a solid choice for a general purpose allocator.
           </li>
           <li>
@@ -6611,7 +6629,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       Example of what is imported with {#syntax#}@import("builtin"){#endsyntax#}:
       </p>
       {#builtin#}
-      {#see_also|Build Mode#}
+      {#see_also|Optimization Mode#}
       {#header_close#}
       {#header_open|Compilation Model#}
       <p>
@@ -7803,8 +7821,8 @@ fn readU32Be() u32 {}
             {#syntax#}unreachable{#endsyntax#} can be used to assert that control flow will never happen upon a particular location.
             Depending on the build mode, {#syntax#}unreachable{#endsyntax#} may emit a panic.
             <ul>
-              <li>Emits a panic in {#syntax#}Debug{#endsyntax#} and {#syntax#}ReleaseSafe{#endsyntax#} mode, or when using <kbd>zig test</kbd>.</li>
-              <li>Does not emit a panic in {#syntax#}ReleaseFast{#endsyntax#} and {#syntax#}ReleaseSmall{#endsyntax#} mode.</li>
+              <li>Emits a panic in {#link|debug#} and {#link|safe#} mode, or when using <kbd>zig test</kbd>.</li>
+              <li>Does not emit a panic in {#link|fast#} and {#link|small#} mode.</li>
               <li>See also {#link|unreachable#}</li>
             </ul>
           </td>
