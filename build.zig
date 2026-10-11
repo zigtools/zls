@@ -6,7 +6,7 @@ const zls_version = std.SemanticVersion.parse(@import("build.zig.zon").version) 
 const minimum_build_zig_version = @import("build.zig.zon").minimum_zig_version;
 
 /// Specifies the minimum Zig version that is runtime compatible with ZLS
-const minimum_runtime_zig_version = "0.17.0-dev.1936+5a625d5f3";
+const minimum_runtime_zig_version = "0.17.0";
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
@@ -66,9 +66,8 @@ pub fn build(b: *Build) !void {
         test_options.step.name = "ZLS test options";
 
         test_options.addOptionPath("zig_exe_path", .zig_exe);
-        // https://codeberg.org/ziglang/zig/issues/35766
-        // test_options.addOptionPath("zig_lib_path", .zig_lib);
-        // test_options.addOptionPath("global_cache_path", std.Build.LazyPath.cache_root.join(b.allocator, "zls") catch @panic("OOM"));
+        test_options.addOptionPathUntracked("zig_lib_path", .zig_lib);
+        test_options.addOptionPathUntracked("global_cache_path", std.Build.LazyPath.cache_root.join(b.allocator, "zls") catch @panic("OOM"));
 
         break :blk test_options.createModule();
     };
@@ -217,6 +216,7 @@ pub fn build(b: *Build) !void {
             .root_module = exe_module,
             .use_llvm = use_llvm,
         });
+        exe.pie = pie;
         b.installArtifact(exe);
     }
 
@@ -335,7 +335,7 @@ fn getVersion(b: *Build) std.SemanticVersion {
         const io = b.graph.io;
         const git_file = b.root.openFile(io, ".git", .{ .allow_directory = false }) catch |err| switch (err) {
             error.IsDir => {
-                b.dependOnFileContents(b.path(".git/logs/HEAD"));
+                b.dependOnFileMetadata(b.path(".git/logs/HEAD"));
                 break :git;
             },
             error.FileNotFound => {

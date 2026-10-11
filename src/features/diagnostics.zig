@@ -41,8 +41,7 @@ pub fn generateDiagnostics(
             .{ .error_bundle = error_bundle },
         );
     } else {
-        var wip: std.zig.ErrorBundle.Wip = undefined;
-        try wip.init(server.allocator);
+        var wip: std.zig.ErrorBundle.Wip = try .init(server.allocator);
         defer wip.deinit();
 
         try collectParseDiagnostics(&handle.tree, &wip);
@@ -310,8 +309,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
 
             if (!zir.hasCompileErrors()) return .empty;
 
-            var eb: std.zig.ErrorBundle.Wip = undefined;
-            try eb.init(server.allocator);
+            var eb: std.zig.ErrorBundle.Wip = try .init(server.allocator);
             defer eb.deinit();
             try eb.addZirErrorMessages(zir, handle.tree, handle.tree.source, "");
             return try eb.toOwnedBundle("");
@@ -322,8 +320,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
 
             if (!zoir.hasCompileErrors()) return .empty;
 
-            var eb: std.zig.ErrorBundle.Wip = undefined;
-            try eb.init(server.allocator);
+            var eb: std.zig.ErrorBundle.Wip = try .init(server.allocator);
             defer eb.deinit();
             try eb.addZoirErrorMessages(zoir, handle.tree, handle.tree.source, "");
             return try eb.toOwnedBundle("");
@@ -396,8 +393,7 @@ pub fn getErrorBundleFromStderr(
     var notes: std.ArrayList(std.zig.ErrorBundle.MessageIndex) = .empty;
     defer notes.deinit(allocator);
 
-    var error_bundle: std.zig.ErrorBundle.Wip = undefined;
-    try error_bundle.init(allocator);
+    var error_bundle: std.zig.ErrorBundle.Wip = try .init(allocator);
     defer error_bundle.deinit();
 
     const eb_empty_string = try error_bundle.addString("");
