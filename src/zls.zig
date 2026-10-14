@@ -37,4 +37,8 @@ pub const workspace_symbols = @import("features/workspace_symbols.zig");
 comptime {
     const std = @import("std");
     std.testing.refAllDecls(@This());
+
+    if (@import("builtin").is_test) {
+        _ = &@import("bsp.zig").BuildOnSave;
+    }
 }
