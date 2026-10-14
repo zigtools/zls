@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     zig-flake.url = "github:silversquirl/zig-flake";
     zig-flake.inputs.nixpkgs.follows = "nixpkgs";
