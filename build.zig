@@ -170,7 +170,7 @@ pub fn build(b: *Build) !void {
             artifact.* = b.addExecutable(.{
                 .name = "zls",
                 .root_module = exe_module,
-                .max_rss = if (optimize == .debug and target_query.os_tag == .wasi) 2_600_000_000 else 2_000_000_000,
+                .max_rss = if (optimize == .debug and target_query.os_tag == .wasi) 2_600_000_000 else 2_750_000_000,
                 .use_llvm = use_llvm,
             });
         }
