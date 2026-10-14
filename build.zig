@@ -75,14 +75,12 @@ pub fn build(b: *Build) !void {
         const tracy_options = b.addOptions();
         tracy_options.step.name = "tracy options";
 
-        const enable = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
-        const enable_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable;
-        const enable_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable;
-        if (!enable) std.debug.assert(!enable_allocation and !enable_callstack);
-
+        const enable = b.option(bool, "enable-tracy", "Enable Tracy integration") orelse false;
+        const enable_allocation = b.option(bool, "tracy-allocation", "Include allocation information with Tracy data") orelse enable;
+        const callstack_depth: u32 = b.option(u32, "tracy-callstack", "Declare callstack depth for Tracy data") orelse 6;
         tracy_options.addOption(bool, "enable", enable);
         tracy_options.addOption(bool, "enable_allocation", enable and enable_allocation);
-        tracy_options.addOption(bool, "enable_callstack", enable and enable_callstack);
+        tracy_options.addOption(u32, "callstack_depth", if (enable) callstack_depth else 0);
 
         break :blk .{ tracy_options.createModule(), enable };
     };
