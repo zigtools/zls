@@ -511,10 +511,10 @@ fn createTracyModule(
     return tracy_module;
 }
 
-/// - compile amdZLS binaries with different targets
-/// - compress them (.tar.xz or .zip)
-/// - optionally sign them with minisign (https://github.com/jedisct1/minisign)
-/// - install artifacts and a `release.json` metadata file to `./zig-out`
+/// 1. compile ZLS binaries to different targets
+/// 2. compress them (`.tar.xz`, `.tar.xz`, and `.zip`)
+/// 3. optionally sign them with minisign (https://github.com/jedisct1/minisign)
+/// 4. install artifacts and a `release.json` metadata file to `./zig-out`
 fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_zls_version: std.SemanticVersion) void {
     std.debug.assert(release_artifacts.len > 0);
 
