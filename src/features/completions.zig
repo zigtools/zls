@@ -1745,8 +1745,7 @@ fn collectVarAccessContainerNodes(
 
     const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.tree.source[loc.start..loc.end], loc.end) orelse return;
     const result = try symbol_decl.resolveType(analyser) orelse return;
-    var type_expr = try analyser.resolveDerefType(result) orelse result;
-    if (type_expr.is_type_val) type_expr = type_expr.resolveDeclLiteralResultType();
+    const type_expr = try analyser.resolveDerefType(result) orelse result;
 
     if (!type_expr.isFunc()) {
         _ = try type_expr.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
@@ -1797,7 +1796,7 @@ fn collectFieldAccessTypes(
     const params = info.parameters;
     const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
     if (param_index >= params.len) return;
-    const param_type = params[param_index].type.resolveDeclLiteralResultType();
+    const param_type = params[param_index].type;
     _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
 }
 
