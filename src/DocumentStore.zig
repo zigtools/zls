@@ -46,10 +46,7 @@ pub const Config = struct {
     },
     builtin_path: ?[]const u8,
     global_cache_dir: ?std.Build.Cache.Directory,
-    wasi_preopens: switch (builtin.os.tag) {
-        .wasi => std.process.Preopens,
-        else => void,
-    },
+    preopens: std.process.Preopens,
 };
 
 /// Represents a `build.zig`
@@ -691,6 +688,22 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
     return future.await(self.io) catch return null;
 }
 
+/// On WASI, tries to resolve the file path relative to a preopen directory.
+fn resolvePath(path: []const u8, preopens: std.process.Preopens) struct { std.Io.Dir, []const u8 } {
+    if (builtin.target.os.tag != .wasi) {
+        return .{ .cwd(), path };
+    }
+
+    for (preopens.map.keys()[3..], 3..) |name, i| {
+        const preopen_dir: std.Io.Dir = .{ .handle = @intCast(i) };
+        const preopen_path = std.mem.trimEnd(u8, name, "/");
+        const sub_path = std.mem.cutPrefix(u8, path, preopen_path) orelse continue;
+        if (!std.mem.startsWith(u8, sub_path, "/")) continue;
+        return .{ preopen_dir, std.mem.trimStart(u8, sub_path, "/") };
+    }
+    return .{ .cwd(), path };
+}
+
 const ReadFileError = std.mem.Allocator.Error || std.Io.Cancelable || std.Io.File.OpenError || std.Io.File.Reader.Error || error{StreamTooLong};
 
 /// Must satisfy `uri.isFileScheme()`.
@@ -704,21 +717,7 @@ fn readFile(self: *DocumentStore, uri: Uri) ReadFileError![:0]u8 {
     };
     defer self.allocator.free(file_path);
 
-    const dir, const sub_path = blk: {
-        if (builtin.target.cpu.arch.isWasm() and !builtin.link_libc) {
-            for (self.config.wasi_preopens.map.keys()[3..], 3..) |name, i| {
-                const preopen_dir: std.Io.Dir = .{ .handle = @intCast(i) };
-                const preopen_path = std.mem.trimEnd(u8, name, "/");
-
-                if (!std.mem.startsWith(u8, file_path, preopen_path)) continue;
-                if (!std.mem.startsWith(u8, file_path[preopen_path.len..], "/")) continue;
-
-                break :blk .{ preopen_dir, std.mem.trimStart(u8, file_path[preopen_path.len..], "/") };
-            }
-        }
-        break :blk .{ std.Io.Dir.cwd(), file_path };
-    };
-
+    const dir, const sub_path = resolvePath(file_path, self.config.preopens);
     return try dir.readFileAllocOptions(
         self.io,
         sub_path,
@@ -935,7 +934,8 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) LoadDir
     const workspace_path = try directory_uri.toFsPath(store.allocator);
     defer store.allocator.free(workspace_path);
 
-    var workspace_dir = try std.Io.Dir.cwd().openDir(store.io, workspace_path, .{ .iterate = true });
+    const base_dir, const sub_path = resolvePath(workspace_path, store.config.preopens);
+    var workspace_dir = try base_dir.openDir(store.io, sub_path, .{ .iterate = true });
     defer workspace_dir.close(store.io);
 
     var walker = try workspace_dir.walk(store.allocator);
