@@ -26,10 +26,7 @@ pub const Manager = struct {
         else => ?std.Build.Cache.Directory,
     },
     global_cache_dir: ?std.Build.Cache.Directory,
-    wasi_preopens: switch (builtin.os.tag) {
-        .wasi => std.process.Preopens,
-        else => void,
-    },
+    preopens: std.process.Preopens,
     impl: struct {
         is_dirty: bool,
         configs: std.EnumArray(Tag, UnresolvedConfig),
@@ -54,10 +51,7 @@ pub const Manager = struct {
                 else => null,
             },
             .global_cache_dir = null,
-            .wasi_preopens = switch (builtin.os.tag) {
-                .wasi => try std.process.Preopens.init(arena_allocator.allocator()),
-                else => {},
-            },
+            .preopens = try .init(arena_allocator.allocator()),
             .config = .{},
             .impl = .{
                 .is_dirty = true,
@@ -235,7 +229,7 @@ pub const Manager = struct {
             const path = opt_path.* orelse continue;
             if (builtin.target.os.tag == .wasi) {
                 // TODO The path could be a subdirectory of a preopen directory
-                const resource = manager.wasi_preopens.get(path) orelse {
+                const resource = manager.preopens.get(path) orelse {
                     log.warn("failed to resolve '{s}' WASI preopen", .{path});
                     opt_path.* = null;
                     continue;
