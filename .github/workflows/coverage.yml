@@ -20,8 +20,11 @@ jobs:
 
       - name: Install kcov
         run: |
+          sudo apt-get update
+          sudo apt-get install patchelf
           wget https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
           sudo tar xf kcov-amd64.tar.gz -C /
+          sudo patchelf --replace-needed libopcodes-2.38-system.so libopcodes-2.42-system.so --replace-needed libbfd-2.38-system.so libbfd-2.42-system.so $(which kcov)
 
       - name: Run Tests with kcov
         run: |
