@@ -110,7 +110,7 @@ pub fn build(b: *Build) !void {
         break :blk b.createModule(.{ .root_source_file = version_data_path });
     };
 
-    { // zig build gen
+    if (b.isRoot()) { // zig build gen
         const gen_step = b.step("gen", "Regenerate config files");
 
         const update_source = b.addUpdateSourceFiles();
@@ -124,14 +124,14 @@ pub fn build(b: *Build) !void {
         gen_cmd.addPassthruArgs();
     }
 
-    { // zig build config-gen
+    if (b.isRoot()) { // zig build config-gen
         const gen_step = b.step("config-gen", "Run src/tools/config_gen.zig");
         const gen_cmd = b.addRunArtifact(gen_exe);
         gen_cmd.addPassthruArgs();
         gen_step.dependOn(&gen_cmd.step);
     }
 
-    { // zig build release
+    if (b.isRoot()) { // zig build release
         const targets = comptime if (zls_version.pre == null) release_targets ++ additional_tagged_release_targets else release_targets;
 
         var release_artifacts: [targets.len]*Build.Step.Compile = undefined;
@@ -227,6 +227,8 @@ pub fn build(b: *Build) !void {
         const check = b.step("check", "Check if ZLS compiles");
         check.dependOn(&exe_check.step);
     }
+
+    if (!b.isRoot()) return;
 
     const tests = b.addTest(.{
         .root_module = b.createModule(.{

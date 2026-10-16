@@ -32,6 +32,13 @@
             .lazy = true,
         },
     },
-    .paths = .{""},
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "README.md",
+        "schema.json",
+    },
     .fingerprint = 0xa66330b97eb969ae, // Changing this has security and trust implications.
 }
