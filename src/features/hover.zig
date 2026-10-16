@@ -79,14 +79,108 @@ fn hoverSymbolWithType(
             else => unreachable,
         },
         .function_parameter => |payload| ast.paramSlice(tree, payload.get(tree).?, false),
-        .optional_payload,
-        .error_union_payload,
-        .error_union_error,
-        .for_loop_payload,
+        .optional_payload => |opt_payload| def: {
+            const name = tree.tokenSlice(opt_payload.identifier);
+            const condition = tree.getNodeSource(opt_payload.condition);
+
+            var doc: []u8 = undefined;
+            if (decl_handle.isCaptureByRef()) {
+                doc = try arena.print(
+                    "`{s}` captures a pointer to the unwrapped value of `{s}` when it is not null.",
+                    .{ name, condition },
+                );
+            } else {
+                doc = try arena.print(
+                    "`{s}` captures the unwrapped value of `{s}` when it is not null.",
+                    .{ name, condition },
+                );
+            }
+            try doc_strings.append(arena, doc);
+            break :def tree.tokenSlice(decl_handle.nameToken());
+        },
+        .error_union_payload => |payload| def: {
+            const name = tree.tokenSlice(payload.identifier);
+            const condition = tree.getNodeSource(payload.condition);
+
+            var doc: []u8 = undefined;
+            if (decl_handle.isCaptureByRef()) {
+                doc = try arena.print(
+                    "`{s}` captures a pointer to the successful value of `{s}` when it is not an error.",
+                    .{ name, condition },
+                );
+            } else {
+                doc = try arena.print(
+                    "`{s}` captures the successful value of `{s}` when it is not an error.",
+                    .{ name, condition },
+                );
+            }
+            try doc_strings.append(arena, doc);
+            break :def tree.tokenSlice(decl_handle.nameToken());
+        },
+        .error_union_error => |payload| def: {
+            const name = tree.tokenSlice(payload.identifier);
+            const doc = try arena.print(
+                "`{s}` captures the error handled by this construct.",
+                .{name},
+            );
+            try doc_strings.append(arena, doc);
+            break :def tree.tokenSlice(decl_handle.nameToken());
+        },
+        .for_loop_payload => |payload| def: {
+            const name = tree.tokenSlice(payload.identifier);
+
+            var doc: []u8 = undefined;
+            if (decl_handle.isCaptureByRef()) {
+                doc = try arena.print(
+                    "`{s}` captures a pointer to the current element for this iteration.",
+                    .{name},
+                );
+            } else {
+                doc = try arena.print(
+                    "`{s}` captures the current element or range value for this iteration.",
+                    .{name},
+                );
+            }
+            try doc_strings.append(arena, doc);
+            break :def tree.tokenSlice(decl_handle.nameToken());
+        },
+        .switch_payload => def: {
+            const name = tree.tokenSlice(decl_handle.nameToken());
+
+            var doc: []u8 = undefined;
+            if (decl_handle.isCaptureByRef()) {
+                doc = try arena.print(
+                    "`{s}` captures a pointer to the value associated with the matching switch case.",
+                    .{name},
+                );
+            } else {
+                doc = try arena.print(
+                    "`{s}` captures the value associated with the matching switch case.",
+                    .{name},
+                );
+            }
+            try doc_strings.append(arena, doc);
+            break :def name;
+        },
+        .switch_inline_tag_payload => def: {
+            const name = tree.tokenSlice(decl_handle.nameToken());
+            const doc = try arena.print(
+                "`{s}` captures the matched tag for this inline switch case.",
+                .{name},
+            );
+            try doc_strings.append(arena, doc);
+            break :def name;
+        },
+        .label => |label| def: {
+            const name = tree.tokenSlice(label.identifier);
+            const doc = try arena.print(
+                "`{s}` labels this block or loop so control-flow statements can target it.",
+                .{name},
+            );
+            try doc_strings.append(arena, doc);
+            break :def name;
+        },
         .assign_destructure,
-        .switch_payload,
-        .switch_inline_tag_payload,
-        .label,
         .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
     };
