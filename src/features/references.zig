@@ -100,9 +100,10 @@ const Builder = struct {
     target_symbol: Analyser.DeclWithHandle,
     /// the decl is local to a function, block, etc
     local_only_decl: bool,
-    /// Whether the `target_symbol` has been added
+    /// Whether the target declaration has been added.
     did_add_target_symbol: bool = false,
     resolve_aliases: bool,
+    include_decl: bool,
     analyser: *Analyser,
     encoding: offsets.Encoding,
 
@@ -123,6 +124,7 @@ const Builder = struct {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
+        if (handle.tree.mode == .zon) return;
         const arena = self.analyser.arena;
         try referenceNode(self, handle, node);
         var walker: ast.Walker = try .init(arena, &handle.tree, node);
@@ -142,11 +144,13 @@ const Builder = struct {
             &builder.target_symbol.handle.tree,
             builder.target_symbol.nameToken(),
         );
+        const is_error = builder.target_symbol.decl == .error_token;
 
         var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
             => |tag| {
+                if (is_error) return;
                 const name_token = switch (tag) {
                     .identifier => ast.identifierTokenFromIdentifierNode(tree, node) orelse return,
                     .test_decl => blk: {
@@ -180,10 +184,32 @@ const Builder = struct {
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
 
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
+                if (is_error) {
+                    if (lhs.isErrorSetType(builder.analyser)) try builder.add(handle, field_token);
+                    return;
+                }
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                 const candidate = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
                 break :candidate .{ candidate, field_token };
+            },
+            .error_value => {
+                if (!is_error) return;
+                const name_token = tree.nodeMainToken(node) + 2;
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                if (std.mem.eql(u8, name, target_symbol_name)) try builder.add(handle, name_token);
+                return;
+            },
+            .error_set_decl => {
+                if (!is_error or !builder.include_decl) return;
+                const lbrace, const rbrace = tree.nodeData(node).token_and_token;
+                for (lbrace + 1..rbrace) |token_index| {
+                    const name_token: Ast.TokenIndex = @intCast(token_index);
+                    if (tree.tokenTag(name_token) != .identifier) continue;
+                    const name = offsets.identifierTokenToNameSlice(tree, name_token);
+                    if (std.mem.eql(u8, name, target_symbol_name)) try builder.add(handle, name_token);
+                }
+                return;
             },
             .struct_init_one,
             .struct_init_one_comma,
@@ -194,6 +220,7 @@ const Builder = struct {
             .struct_init_dot_two,
             .struct_init_dot_two_comma,
             => {
+                if (is_error) return;
                 if (builder.local_only_decl) return;
                 var buffer: [2]Ast.Node.Index = undefined;
                 const struct_init = tree.fullStructInit(&buffer, node).?;
@@ -235,6 +262,7 @@ const Builder = struct {
                 return;
             },
             .enum_literal => {
+                if (is_error) return;
                 if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
@@ -247,6 +275,7 @@ const Builder = struct {
             .aligned_var_decl,
             .simple_var_decl,
             => {
+                if (is_error) return;
                 if (builder.local_only_decl) return;
                 const var_decl = tree.fullVarDecl(node).?;
 
@@ -332,7 +361,7 @@ fn symbolReferences(
         => |payload| payload.node,
         .function_parameter => |payload| payload.func,
         .label => unreachable, // handled separately by labelReferences
-        .error_token => return .empty,
+        .error_token => null,
     };
 
     var builder: Builder = .{
@@ -340,10 +369,13 @@ fn symbolReferences(
         .target_symbol = target_symbol,
         .local_only_decl = local_node != null,
         .resolve_aliases = resolve_aliases,
+        .include_decl = include_decl,
         .encoding = encoding,
     };
 
     blk: {
+        // An error token may represent a use; declarations are collected by the walker.
+        if (target_symbol.decl == .error_token) break :blk;
         if (!include_decl) break :blk;
         if (request == .highlight and !target_symbol.handle.uri.eql(current_handle.uri)) break :blk;
         try builder.add(target_symbol.handle, target_symbol.nameToken());
@@ -359,9 +391,17 @@ fn symbolReferences(
             current_handle,
             target_symbol.handle,
         );
-        for (uris.keys()) |uri| {
-            if (uri.eql(current_handle.uri)) continue;
+        const is_error = target_symbol.decl == .error_token;
+        if (is_error) try uris.put(analyser.arena, current_handle.uri, {});
+        var i: usize = 0;
+        while (i < uris.count()) : (i += 1) {
+            const uri = uris.keys()[i];
             const dependency_handle = try analyser.store.getOrLoadHandle(uri) orelse continue;
+            // Error identity also spans dependencies without an imported declaration.
+            if (is_error) {
+                for (dependency_handle.file_imports) |import_uri| try uris.put(analyser.arena, import_uri, {});
+            }
+            if (uri.eql(current_handle.uri)) continue;
             try builder.collectReferences(dependency_handle, .root);
         }
     }
@@ -766,9 +806,21 @@ fn referencesHandler(
         const name = offsets.locToSlice(handle.tree.source, name_loc);
 
         const target_decl = switch (pos_context) {
+            .error_access => Analyser.DeclWithHandle{
+                .decl = .{ .error_token = offsets.sourceIndexToTokenIndex(&handle.tree, name_loc.start).preferRight(&handle.tree) },
+                .handle = handle,
+            },
             .var_access, .test_doctest_name => try analyser.lookupSymbolGlobal(handle, name, source_index),
             .field_access => |loc| z: {
                 const held_loc = offsets.locMerge(loc, name_loc);
+                if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |lhs| {
+                    if (lhs.isErrorSetType(&analyser)) {
+                        break :z Analyser.DeclWithHandle{
+                            .decl = .{ .error_token = offsets.sourceIndexToTokenIndex(&handle.tree, name_loc.start).preferRight(&handle.tree) },
+                            .handle = handle,
+                        };
+                    }
+                }
                 const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
                 if (a) |b| {
                     if (b.len != 0) break :z b[0];
