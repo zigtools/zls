@@ -9,7 +9,7 @@ on:
 jobs:
   coverage:
     if: github.repository_owner == 'zigtools'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
