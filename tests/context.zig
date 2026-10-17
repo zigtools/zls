@@ -34,9 +34,9 @@ pub const Context = struct {
             if (builtin.target.os.tag != .wasi) {
                 const cwd = try std.process.currentPathAlloc(io, allocator);
                 defer allocator.free(cwd);
-                config.zig_exe_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.zig_exe_path });
-                config.zig_lib_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.zig_lib_path });
-                config.global_cache_path = try std.Io.Dir.path.resolve(allocator, &.{ cwd, test_options.global_cache_path });
+                config.zig_exe_path = try std.Io.Dir.path.resolveAlloc(allocator, &.{ cwd, test_options.zig_exe_path });
+                config.zig_lib_path = try std.Io.Dir.path.resolveAlloc(allocator, &.{ cwd, test_options.zig_lib_path });
+                config.global_cache_path = try std.Io.Dir.path.resolveAlloc(allocator, &.{ cwd, test_options.global_cache_path });
             }
 
             const environ_map = try cached_config_arena.allocator().create(std.process.Environ.Map);
@@ -90,7 +90,7 @@ pub const Context = struct {
         std.debug.assert(std.mem.endsWith(u8, options.base_directory, "/"));
 
         const arena = self.arena.allocator();
-        const path = try std.fmt.allocPrint(arena, "untitled://{s}Untitled-{d}.{t}", .{ options.base_directory, self.file_id, options.mode });
+        const path = try arena.print("untitled://{s}Untitled-{d}.{t}", .{ options.base_directory, self.file_id, options.mode });
         const uri: zls.Uri = try .parse(arena, path);
 
         const params: types.TextDocument.DidOpenParams = .{
@@ -119,7 +119,7 @@ pub const Context = struct {
                 .event = .{
                     .added = &.{
                         .{
-                            .uri = try std.fmt.allocPrint(self.arena.allocator(), "untitled:{s}", .{base_directory}),
+                            .uri = try self.arena.allocator().print("untitled:{s}", .{base_directory}),
                             .name = name,
                         },
                     },

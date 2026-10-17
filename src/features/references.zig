@@ -806,7 +806,7 @@ fn referencesHandler(
 
     switch (request) {
         .rename => |rename| {
-            const escaped_rename = try std.fmt.allocPrint(arena, "{f}", .{std.zig.fmtId(rename.newName)});
+            const escaped_rename = try arena.print("{f}", .{std.zig.fmtId(rename.newName)});
             var changes: std.array_hash_map.String(std.ArrayList(types.TextEdit)) = .empty;
 
             for (locations.items) |loc| {

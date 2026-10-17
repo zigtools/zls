@@ -1180,10 +1180,10 @@ const DiagnosticKind = union(enum) {
         return null;
     }
 
-    fn parseEnum(comptime T: type, message: []const u8) ?T {
-        inline for (comptime std.meta.fieldNames(T)) |field_name| {
+    fn parseEnum(comptime E: type, message: []const u8) ?E {
+        inline for (@typeInfo(E).@"enum".field_names) |field_name| {
             if (std.mem.startsWith(u8, message, field_name)) {
-                return @field(T, field_name);
+                return @field(E, field_name);
             }
         }
 

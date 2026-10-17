@@ -1546,7 +1546,8 @@ fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
     const size = @divExact(@sizeOf(T), 4);
 
     try ip.extra.ensureUnusedCapacity(ip.gpa, size);
-    inline for (comptime std.meta.fieldNames(T), comptime std.meta.fieldTypes(T)) |field_name, FieldType| {
+    const type_info = @typeInfo(T).@"struct";
+    inline for (type_info.field_names, type_info.field_types) |field_name, FieldType| {
         const item = @field(extra, field_name);
         switch (FieldType) {
             Index,
@@ -1583,7 +1584,8 @@ fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
 fn extraData(ip: *const InternPool, comptime T: type, index: u32) T {
     var result: T = undefined;
     var i: u32 = 0;
-    inline for (comptime std.meta.fieldNames(T), comptime std.meta.fieldTypes(T)) |field_name, FieldType| {
+    const type_info = @typeInfo(T).@"struct";
+    inline for (type_info.field_names, type_info.field_types) |field_name, FieldType| {
         const item = ip.extra.items[index + i];
         i += 1;
         @field(result, field_name) = switch (FieldType) {

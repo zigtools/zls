@@ -93,7 +93,8 @@ pub const Manager = struct {
         defer manager.impl.arena = arena_allocator.state;
 
         var duped: UnresolvedConfig = .{};
-        inline for (comptime std.meta.fieldNames(UnresolvedConfig), comptime std.meta.fieldTypes(UnresolvedConfig)) |field_name, FieldType| {
+        const type_info = @typeInfo(UnresolvedConfig).@"struct";
+        inline for (type_info.field_names, type_info.field_types) |field_name, FieldType| {
             @field(duped, field_name) = try option.dupe(FieldType, @field(config, field_name), arena_allocator.allocator());
         }
         manager.impl.configs.set(tag, duped);
@@ -146,7 +147,7 @@ pub const Manager = struct {
             .global_cache_path = if (builtin.os.tag == .wasi) "/cache" else null,
         };
         for (manager.impl.configs.values) |unresolved_config| {
-            inline for (comptime std.meta.fieldNames(UnresolvedConfig)) |field_name| {
+            inline for (@typeInfo(UnresolvedConfig).@"struct".field_names) |field_name| {
                 if (@field(unresolved_config, field_name)) |new_value| {
                     @field(config, field_name) = new_value;
                 }
@@ -309,7 +310,8 @@ pub const Manager = struct {
 
         var did_change: DidConfigChange = .{};
 
-        inline for (comptime std.meta.fieldNames(Config), comptime std.meta.fieldTypes(Config)) |field_name, FieldType| {
+        const type_info = @typeInfo(Config).@"struct";
+        inline for (type_info.field_names, type_info.field_types) |field_name, FieldType| {
             const old_value = &@field(manager.config, field_name);
             const new_value = @field(config, field_name);
 
@@ -352,8 +354,7 @@ pub const Manager = struct {
 
                 if (!std.Io.Dir.path.isAbsolute(path)) {
                     try messages.ensureUnusedCapacity(allocator, 1);
-                    messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                        allocator,
+                    messages.appendAssumeCapacity(try allocator.print(
                         "config option '{s}': expected absolute path but got '{s}'",
                         .{ file_config.name, path },
                     ));
@@ -367,8 +368,7 @@ pub const Manager = struct {
                             else => {
                                 if (file_config.is_accessible) {
                                     try messages.ensureUnusedCapacity(allocator, 1);
-                                    messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                        allocator,
+                                    messages.appendAssumeCapacity(try allocator.print(
                                         "config option '{s}': invalid file path '{s}': {}",
                                         .{ file_config.name, path, err },
                                     ));
@@ -383,8 +383,7 @@ pub const Manager = struct {
                             error.Canceled => return error.Canceled,
                             else => {
                                 try messages.ensureUnusedCapacity(allocator, 1);
-                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                    allocator,
+                                messages.appendAssumeCapacity(try allocator.print(
                                     "config option '{s}': failed to access '{s}': {}",
                                     .{ file_config.name, path, err },
                                 ));
@@ -394,8 +393,7 @@ pub const Manager = struct {
                         switch (stat.kind) {
                             .directory => {
                                 try messages.ensureUnusedCapacity(allocator, 1);
-                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                    allocator,
+                                messages.appendAssumeCapacity(try allocator.print(
                                     "config option '{s}': expected file path but '{s}' is a directory",
                                     .{ file_config.name, path },
                                 ));
@@ -414,8 +412,7 @@ pub const Manager = struct {
                             else => {
                                 if (file_config.is_accessible) {
                                     try messages.ensureUnusedCapacity(allocator, 1);
-                                    messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                        allocator,
+                                    messages.appendAssumeCapacity(try allocator.print(
                                         "config option '{s}': invalid directory path '{s}': {}",
                                         .{ file_config.name, path, err },
                                     ));
@@ -435,8 +432,7 @@ pub const Manager = struct {
                         switch (stat.kind) {
                             .file => {
                                 try messages.ensureUnusedCapacity(allocator, 1);
-                                messages.appendAssumeCapacity(try std.fmt.allocPrint(
-                                    allocator,
+                                messages.appendAssumeCapacity(try allocator.print(
                                     "config option '{s}': expected directory path but '{s}' is a file",
                                     .{ file_config.name, path },
                                 ));
@@ -627,7 +623,7 @@ pub const file_system_config_options: []const FileConfigInfo = &.{
 };
 
 comptime {
-    skip: for (std.meta.fieldNames(Config)) |field_name| {
+    skip: for (@typeInfo(Config).@"struct".field_names) |field_name| {
         @setEvalBranchQuota(2_000);
         if (std.mem.find(u8, field_name, "path") == null) continue;
 
@@ -653,14 +649,14 @@ pub const UnresolvedConfig = blk: {
         field_type.* = if (@typeInfo(field_type.*) != .optional) ?field_type.* else field_type.*;
         attr.* = .{ .default_value_ptr = &@as(field_type.*, null) };
     }
-    break :blk @Struct(.auto, null, std.meta.fieldNames(Config), &field_types, &field_attrs);
+    break :blk @Struct(.auto, null, struct_info.field_names, &field_types, &field_attrs);
 };
 
 /// A packed struct where every field name is copied from `Config` but the field type is `bool`.
 pub const DidConfigChange = @Struct(
     .@"packed",
     null,
-    std.meta.fieldNames(Config),
+    @typeInfo(Config).@"struct".field_names,
     &@splat(bool),
     &@splat(.{ .default_value_ptr = &false }),
 );

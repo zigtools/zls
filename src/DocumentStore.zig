@@ -1278,7 +1278,7 @@ fn loadBuildAssociatedConfiguration(io: std.Io, allocator: std.mem.Allocator, bu
 
     const build_file_path = try build_file.uri.toFsPath(allocator);
     defer allocator.free(build_file_path);
-    const config_file_path = try std.Io.Dir.path.resolve(allocator, &.{ build_file_path, "..", "zls.build.json" });
+    const config_file_path = try std.Io.Dir.path.resolveAlloc(allocator, &.{ build_file_path, "..", "zls.build.json" });
     defer allocator.free(config_file_path);
 
     const file_buf = try std.Io.Dir.cwd().readFileAlloc(
@@ -1383,7 +1383,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{ Canceled, OutOfMemory 
                 error.UnsupportedScheme => unreachable,
                 error.OutOfMemory => |e| return e,
             };
-            const absolute_builtin_path = try std.Io.Dir.path.resolve(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
+            const absolute_builtin_path = try std.Io.Dir.path.resolveAlloc(self.allocator, &.{ build_file_path, "..", relative_builtin_path });
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try .fromPath(self.allocator, absolute_builtin_path);
         }

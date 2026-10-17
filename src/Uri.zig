@@ -451,7 +451,7 @@ pub fn resolveImport(
     std.Uri.Component.percentEncode(&aw.writer, sub_path, isPathChar) catch unreachable;
 
     const percent_encoded_path = parsed_uri.path.percent_encoded;
-    const joined_path = try std.Io.Dir.path.resolvePosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
+    const joined_path = try std.Io.Dir.path.resolveAllocPosix(allocator, &.{ percent_encoded_path, "..", aw.written() });
     defer allocator.free(joined_path);
 
     var buffer = aw.toArrayList();
