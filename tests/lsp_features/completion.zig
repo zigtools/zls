@@ -3672,6 +3672,11 @@ test "filesystem unterminated string literal with newline" {
         \\const foo = @import("
         \\  <cursor>
     , &.{});
+    try testCompletion(
+        \\@import("
+        \\A'",
+        \\ <cursor>
+    , &.{});
 }
 
 test "label details disabled" {
