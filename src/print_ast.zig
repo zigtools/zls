@@ -868,6 +868,14 @@ pub fn main(init: std.process.Init) !u8 {
     });
     defer tree.deinit(gpa);
 
+    if (tree.errors.len > 0) {
+        const format_error: FormatAstError = .{
+            .parse_error = tree.errors[0],
+            .tree = &tree,
+        };
+        std.log.err("{f}", .{format_error});
+    }
+
     try renderToFile(
         &tree,
         io,
@@ -948,3 +956,15 @@ test PrintAst {
 
     try std.testing.expectEqual(0, printed_tree.errors.len);
 }
+
+const FormatAstError = struct {
+    parse_error: Ast.Error,
+    tree: *const Ast,
+
+    pub fn format(
+        ctx: FormatAstError,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try ctx.tree.renderError(ctx.parse_error, writer);
+    }
+};
