@@ -266,8 +266,22 @@ fn generateFoldingRanges(allocator: std.mem.Allocator, tree: *const Ast, encodin
                 }
 
                 const list_start_tok = fn_proto.lparen;
-                const last_param_tok = ast.paramLastToken(tree, last_param orelse continue);
+                var last_param_tok = ast.paramLastToken(tree, last_param orelse continue);
                 const param_has_comma = last_param_tok + 1 < tree.tokens.len and tree.tokenTag(last_param_tok + 1) == .comma;
+
+                // If the last parameter has an inline container type (`a: struct { ... }`), its
+                // closing brace is the parameter list's last token. Ending the range there makes
+                // it reach the line that holds the function's opening brace, which stops clients
+                // from producing a separate folding range for the function body. Stop right
+                // before that closing brace instead, mirroring how other ranges exclude it.
+                if (last_param) |param| {
+                    if (param.type_expr) |type_expr| {
+                        if (ast.isContainer(tree, type_expr)) {
+                            last_param_tok -|= 1;
+                        }
+                    }
+                }
+
                 const list_end_tok = last_param_tok + @intFromBool(param_has_comma);
 
                 try builder.add(null, list_start_tok, list_end_tok, .exclusive, .inclusive);
