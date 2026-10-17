@@ -103,16 +103,17 @@ pub fn main(init: std.process.Init) Error!void {
         .environ_map = &environ_map,
         .zig_exe_path = zig_exe_path,
         .zig_lib_dir = zig_lib_dir,
+        .zig_cache_dir = switch (builtin.os.tag) {
+            .wasi => {},
+            else => null,
+        },
         .builtin_path = null,
         .global_cache_dir = null,
-        .wasi_preopens = switch (builtin.target.os.tag) {
-            .wasi => try std.process.Preopens.init(arena),
-            else => {},
-        },
+        .preopens = try .init(arena),
     };
 
     if (builtin.target.os.tag == .wasi) {
-        const zig_lib_dir_fd = config.wasi_preopens.get("/lib") orelse {
+        const zig_lib_dir_fd = config.preopens.get("/lib") orelse {
             std.log.err("failed to resolve '/lib' WASI preopen", .{});
             std.process.exit(1);
         };

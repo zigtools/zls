@@ -35,8 +35,7 @@ pub const Tag = enum(u32) {
     /// - ast-check
     /// - warn_style
     parse,
-    /// - Build On Save
-    /// - Build Runner
+    /// - build system
     _,
 };
 
