@@ -11,13 +11,11 @@ on:
 
 jobs:
   deploy:
-    # https://github.com/zigtools/zls/issues/3208
-    if: false
-    # if: github.repository_owner == 'zigtools'
-    runs-on: ubuntu-22.04
+    if: github.repository_owner == 'zigtools'
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # required to resolve the version string
 
@@ -38,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         if: env.SKIP_DEPLOY != 'true'
         with:
           version: 0.17.0

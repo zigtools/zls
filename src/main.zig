@@ -529,8 +529,8 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
         _ = debug_allocator.deinit();
     };
 
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(base_allocator) else {};
-    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else base_allocator;
+    var tracy_state = if (tracy.enable_allocation) tracy.Allocator{ .parent_allocator = base_allocator } else {};
+    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.interface() else base_allocator;
 
     var failing_allocator_state = if (exe_options.enable_failing_allocator) zls.testing.FailingAllocator.init(inner_allocator, exe_options.enable_failing_allocator_likelihood) else {};
     const allocator: std.mem.Allocator = if (exe_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;

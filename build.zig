@@ -75,14 +75,12 @@ pub fn build(b: *Build) !void {
         const tracy_options = b.addOptions();
         tracy_options.step.name = "tracy options";
 
-        const enable = b.option(bool, "enable-tracy", "Whether tracy should be enabled.") orelse false;
-        const enable_allocation = b.option(bool, "enable-tracy-allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable;
-        const enable_callstack = b.option(bool, "enable-tracy-callstack", "Enable callstack graphs.") orelse enable;
-        if (!enable) std.debug.assert(!enable_allocation and !enable_callstack);
-
+        const enable = b.option(bool, "enable-tracy", "Enable Tracy integration") orelse false;
+        const enable_allocation = b.option(bool, "tracy-allocation", "Include allocation information with Tracy data") orelse enable;
+        const callstack_depth: u32 = b.option(u32, "tracy-callstack", "Declare callstack depth for Tracy data") orelse 6;
         tracy_options.addOption(bool, "enable", enable);
         tracy_options.addOption(bool, "enable_allocation", enable and enable_allocation);
-        tracy_options.addOption(bool, "enable_callstack", enable and enable_callstack);
+        tracy_options.addOption(u32, "callstack_depth", if (enable) callstack_depth else 0);
 
         break :blk .{ tracy_options.createModule(), enable };
     };
@@ -112,7 +110,7 @@ pub fn build(b: *Build) !void {
         break :blk b.createModule(.{ .root_source_file = version_data_path });
     };
 
-    { // zig build gen
+    if (b.isRoot()) { // zig build gen
         const gen_step = b.step("gen", "Regenerate config files");
 
         const update_source = b.addUpdateSourceFiles();
@@ -126,14 +124,14 @@ pub fn build(b: *Build) !void {
         gen_cmd.addPassthruArgs();
     }
 
-    { // zig build config-gen
+    if (b.isRoot()) { // zig build config-gen
         const gen_step = b.step("config-gen", "Run src/tools/config_gen.zig");
         const gen_cmd = b.addRunArtifact(gen_exe);
         gen_cmd.addPassthruArgs();
         gen_step.dependOn(&gen_cmd.step);
     }
 
-    { // zig build release
+    if (b.isRoot()) { // zig build release
         const targets = comptime if (zls_version.pre == null) release_targets ++ additional_tagged_release_targets else release_targets;
 
         var release_artifacts: [targets.len]*Build.Step.Compile = undefined;
@@ -172,7 +170,7 @@ pub fn build(b: *Build) !void {
             artifact.* = b.addExecutable(.{
                 .name = "zls",
                 .root_module = exe_module,
-                .max_rss = if (optimize == .debug and target_query.os_tag == .wasi) 2_600_000_000 else 2_000_000_000,
+                .max_rss = if (optimize == .debug and target_query.os_tag == .wasi) 2_600_000_000 else 2_750_000_000,
                 .use_llvm = use_llvm,
             });
         }
@@ -229,6 +227,8 @@ pub fn build(b: *Build) !void {
         const check = b.step("check", "Check if ZLS compiles");
         check.dependOn(&exe_check.step);
     }
+
+    if (!b.isRoot()) return;
 
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -513,10 +513,10 @@ fn createTracyModule(
     return tracy_module;
 }
 
-/// - compile amdZLS binaries with different targets
-/// - compress them (.tar.xz or .zip)
-/// - optionally sign them with minisign (https://github.com/jedisct1/minisign)
-/// - install artifacts and a `release.json` metadata file to `./zig-out`
+/// 1. compile ZLS binaries to different targets
+/// 2. compress them (`.tar.xz`, `.tar.xz`, and `.zip`)
+/// 3. optionally sign them with minisign (https://github.com/jedisct1/minisign)
+/// 4. install artifacts and a `release.json` metadata file to `./zig-out`
 fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_zls_version: std.SemanticVersion) void {
     std.debug.assert(release_artifacts.len > 0);
 

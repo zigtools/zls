@@ -33,17 +33,20 @@ const some_error_union: error{}!StructType = .{ .foo = 1 };
 //                                           ^ (StructType)()
 //                                              ^^^^ (u32)()
 
-const some_error_union_optional: error{}!?StructType = .{ .foo = 1 };
-//                                                     ^ (StructType)()
-//                                                        ^^^^ (u32)()
+const error_union_of_optional_struct: error{}!?StructType = .{ .foo = 1 };
+//                                                          ^ (StructType)()
+//                                                             ^^^^ (u32)()
 
-const some_optional_error_union: ?error{}!StructType = .{ .foo = 1 };
-//                                                     ^ (StructType)()
-//                                                        ^^^^ (u32)()
+const optional_error_union_of_struct: ?error{}!StructType = .{ .foo = 1 };
+//                                                          ^ (StructType)()
+//                                                             ^^^^ (u32)()
 
-const some_optional_optional: ??StructType = .{ .foo = 1 };
-//                                           ^ (StructType)()
-//                                              ^^^^ (u32)()
+const optional_optional_struct: ??StructType = .{ .foo = 1 };
+//                                             ^ (StructType)()
+//                                                ^^^^ (u32)()
+
+const optional_address_of_struct: ?*const StructType = &.{ .foo = 5 };
+//                                                         ^^^^ (u32)()
 
 //
 // var_decl
