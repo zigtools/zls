@@ -27,11 +27,18 @@
             .hash = "lsp_kit-0.1.0-bi_PLwc2DACoR7VTz_qKFXUvtx7veHvWcTQvP9pDFLpk",
         },
         .tracy = .{
-            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",
-            .hash = "N-V-__8AAOncKwEm1F9c5LrT7HMNmRMYX8-fAoqpc6YyTu9X",
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz",
+            .hash = "N-V-__8AAAZPdAGoNF3-tqKYHjTOa5QQ02rEWNvkDr-Vpl0C",
             .lazy = true,
         },
     },
-    .paths = .{""},
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "README.md",
+        "schema.json",
+    },
     .fingerprint = 0xa66330b97eb969ae, // Changing this has security and trust implications.
 }
