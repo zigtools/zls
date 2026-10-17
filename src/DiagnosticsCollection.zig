@@ -16,7 +16,7 @@ tag_set: std.array_hash_map.Auto(Tag, struct {
     error_bundle: std.zig.ErrorBundle = .empty,
     /// Used to store diagnostics from `pushSingleDocumentDiagnostics`
     diagnostics_set: Uri.ArrayHashMap(struct {
-        arena: std.heap.ArenaAllocator.State = .{},
+        arena: std.heap.ArenaAllocator.State = .init,
         diagnostics: []lsp.types.Diagnostic = &.{},
         error_bundle: std.zig.ErrorBundle = .empty,
     }) = .empty,
@@ -397,7 +397,7 @@ fn convertErrorBundleToLSPDiangostics(
             try tags.append(arena, .Unnecessary);
         }
         if (std.mem.eql(u8, message, "found compile log statement")) {
-            message = try std.fmt.allocPrint(arena, "{s}\n\nCompile Log Output:\n{s}", .{ message, eb.getCompileLogOutput() });
+            message = try arena.print("{s}\n\nCompile Log Output:\n{s}", .{ message, eb.getCompileLogOutput() });
         }
 
         try diagnostics.append(arena, .{

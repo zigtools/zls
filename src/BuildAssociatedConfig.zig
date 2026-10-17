@@ -25,9 +25,9 @@ pub const BuildOption = struct {
     /// `-Dname=value` or `-Dname`. Caller owns returned slice allocated using `allocator`.
     pub fn formatParam(self: BuildOption, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
         if (self.value) |val| {
-            return try std.fmt.allocPrint(allocator, "-D{s}={s}", .{ self.name, val });
+            return try allocator.print("-D{s}={s}", .{ self.name, val });
         } else {
-            return try std.fmt.allocPrint(allocator, "-D{s}", .{self.name});
+            return try allocator.print("-D{s}", .{self.name});
         }
     }
 };

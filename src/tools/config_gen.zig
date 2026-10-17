@@ -266,7 +266,7 @@ fn generateVSCodeConfigFile(
         if (std.mem.eql(u8, option.name, "zig_exe_path")) continue; // vscode-zig has its own option for this
         if (std.mem.eql(u8, option.name, "force_autofix")) continue; // VS Code supports code actions on save without a workaround
 
-        const snake_case_name = try std.fmt.allocPrint(allocator, "zig.zls.{s}", .{option.name});
+        const snake_case_name = try allocator.print("zig.zls.{s}", .{option.name});
         defer allocator.free(snake_case_name);
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
         errdefer allocator.free(name);

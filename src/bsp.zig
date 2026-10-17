@@ -298,9 +298,9 @@ fn loadBuildConfigurationInner(
                 },
             };
             defer gpa.free(cwd);
-            break :path try Dir.path.resolve(gpa, &.{ cwd, p });
+            break :path try Dir.path.resolveAlloc(gpa, &.{ cwd, p });
         }
-        break :path try Dir.path.resolve(arena, &.{ build_root.path.?, std.zig.default_local_zig_cache_basename });
+        break :path try Dir.path.resolveAlloc(arena, &.{ build_root.path.?, std.zig.default_local_zig_cache_basename });
     };
 
     const base_paths: BasePaths = .init(.{
@@ -632,7 +632,7 @@ fn loadBuildConfigurationInner(
     // for (root_package_dependencies) |dependency| {
     //     const package_name = dependency.name.slice(c);
     //     const package_path = dependency.package.ptr(c).path.slice(c) orelse continue;
-    //     const resolved_package_path = try Dir.path.resolve(arena, &.{ maker.base_paths.get(.build_root), package_path, "build.zig" });
+    //     const resolved_package_path = try Dir.path.resolveAlloc(arena, &.{ maker.base_paths.get(.build_root), package_path, "build.zig" });
     //     dependencies.putAssumeCapacityNoClobber(package_name, resolved_package_path);
     // }
 

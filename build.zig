@@ -430,7 +430,7 @@ fn createZLSModule(
     b: *Build,
     options: struct {
         target: Build.ResolvedTarget,
-        optimize: std.lang.OptimizeMode,
+        optimize: std.lang.Optimize,
         tracy_enable: bool,
         tracy_options: *std.Build.Module,
         build_options: *std.Build.Module,
@@ -476,7 +476,7 @@ fn createTracyModule(
     b: *Build,
     options: struct {
         target: Build.ResolvedTarget,
-        optimize: std.lang.OptimizeMode,
+        optimize: std.lang.Optimize,
         enable: bool,
         tracy_options: *std.Build.Module,
     },

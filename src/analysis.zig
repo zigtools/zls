@@ -1824,7 +1824,7 @@ fn resolveCallsiteReferences(analyser: *Analyser, decl_handle: DeclWithHandle) E
         const loc = offsets.tokenToPosition(tree, tree.nodeMainToken(call.ast.params[real_param_idx]), .@"utf-8");
         try possible.append(analyser.arena, .{
             .type = ty,
-            .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ ref.handle.uri.raw, loc.line + 1, loc.character + 1 }),
+            .descriptor = try analyser.arena.print("{s}:{d}:{d}", .{ ref.handle.uri.raw, loc.line + 1, loc.character + 1 }),
         });
     }
 
@@ -2587,7 +2587,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             }
             if (if_node.ast.else_expr.unwrap()) |else_expr| {
                 if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |t| {
-                    either.appendAssumeCapacity(.{ .type = t, .descriptor = try std.fmt.allocPrint(analyser.arena, "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
+                    either.appendAssumeCapacity(.{ .type = t, .descriptor = try analyser.arena.print("!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
                 }
             }
             return Type.fromEither(analyser, either.items);

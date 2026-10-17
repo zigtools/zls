@@ -156,7 +156,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
             builder.completions.appendAssumeCapacity(.{
                 .label = "len",
                 .detail = if (info.elem_count) |count|
-                    try std.fmt.allocPrint(builder.arena, "usize = {}", .{count})
+                    try builder.arena.print("usize = {}", .{count})
                 else
                     "usize",
                 .kind = .Field,
@@ -167,7 +167,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
             try builder.completions.ensureUnusedCapacity(builder.arena, elem_ty_slice.len);
             for (elem_ty_slice, 0..) |elem_ty, i| {
                 builder.completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(builder.arena, "@\"{}\"", .{i}),
+                    .label = try builder.arena.print("@\"{}\"", .{i}),
                     .kind = .Field,
                     .detail = try elem_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
                 });
@@ -354,7 +354,7 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
                 .label = name,
                 .kind = .Constant,
                 .documentation = documentation,
-                .detail = try std.fmt.allocPrint(builder.arena, "error.{s}", .{name}),
+                .detail = try builder.arena.print("error.{s}", .{name}),
             });
         },
     }
@@ -402,9 +402,9 @@ fn functionTypeCompletion(
             }
 
             if (info.parameters.len -| @intFromBool(has_self_param) == 0) {
-                break :snippet try std.fmt.allocPrint(builder.arena, "{f}()", .{Analyser.fmtEscapedSnippet(func_name)});
+                break :snippet try builder.arena.print("{f}()", .{Analyser.fmtEscapedSnippet(func_name)});
             } else {
-                break :snippet try std.fmt.allocPrint(builder.arena, "{f}(${{1:}})", .{Analyser.fmtEscapedSnippet(func_name)});
+                break :snippet try builder.arena.print("{f}(${{1:}})", .{Analyser.fmtEscapedSnippet(func_name)});
             }
         },
     };
@@ -636,7 +636,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
                 std.debug.assert(builder.use_snippets);
                 // The generated snippet is not being escaped here because we can
                 // assume that the builtin name has no characters that need to be escaped.
-                if (builtin.parameters.len == 0) break :snippet try std.fmt.allocPrint(builder.arena, "{s}()", .{name});
+                if (builtin.parameters.len == 0) break :snippet try builder.arena.print("{s}()", .{name});
                 if (use_placeholders) {
                     var snippet: std.ArrayList(u8) = .empty;
                     try snippet.print(builder.arena, "{s}(", .{name});
@@ -647,7 +647,7 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
                     try snippet.append(builder.arena, ')');
                     break :snippet snippet.items;
                 }
-                break :snippet try std.fmt.allocPrint(builder.arena, "{s}(${{1:}})", .{name});
+                break :snippet try builder.arena.print("{s}(${{1:}})", .{name});
             },
         };
         const insert_text_format: types.InsertTextFormat = switch (new_text_format) {
@@ -739,7 +739,7 @@ fn itemSortScore(item: types.completion.Item) u4 {
 }
 
 fn generateSortText(allocator: std.mem.Allocator, score: u4, label: []const u8) ![]const u8 {
-    return try std.fmt.allocPrint(allocator, "{}_{s}", .{ score, label });
+    return try allocator.print("{}_{s}", .{ score, label });
 }
 
 fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.TokenIndex) error{OutOfMemory}!std.BufSet {
@@ -850,10 +850,10 @@ fn collectErrorSetNames(
     const names = key.error_set_type.names;
     for (0..names.len) |idx| {
         const str = names.at(@intCast(idx), ip);
-        const name = try std.fmt.allocPrint(builder.arena, "{f}", .{str.fmt(ip.io, &ip.string_pool)});
+        const name = try builder.arena.print("{f}", .{str.fmt(ip.io, &ip.string_pool)});
         if (omit_members.contains(name)) continue;
         try builder.completions.append(builder.arena, .{
-            .label = try std.fmt.allocPrint(builder.arena, "error.{s}", .{name}),
+            .label = try builder.arena.print("error.{s}", .{name}),
             .filterText = name,
             .insertText = name,
             .kind = .Constant,
@@ -1012,7 +1012,7 @@ fn completeFileSystemStringLiteral(builder: *Builder, pos_context: Analyser.Posi
             const label = try builder.arena.dupe(u8, entry.name);
             const insert_text = if (entry.kind == .directory)
                 if (next_separator_index == null)
-                    try std.fmt.allocPrint(builder.arena, "{s}/", .{entry.name})
+                    try builder.arena.print("{s}/", .{entry.name})
                 else
                     label
             else
@@ -1536,13 +1536,13 @@ fn collectContainerFields(
 
                         if (!builder.use_snippets) {
                             break :insert_text .{
-                                try std.fmt.allocPrint(builder.arena, "{{ .{s} = ", .{name}),
+                                try builder.arena.print("{{ .{s} = ", .{name}),
                                 .PlainText,
                             };
                         }
 
                         break :insert_text .{
-                            try std.fmt.allocPrint(builder.arena, "{{ .{f} = $1 \\}}$0", .{Analyser.fmtEscapedSnippet(name)}),
+                            try builder.arena.print("{{ .{f} = $1 \\}}$0", .{Analyser.fmtEscapedSnippet(name)}),
                             .Snippet,
                         };
                     }
@@ -1562,7 +1562,7 @@ fn collectContainerFields(
                         break :insert_text .{ name, .PlainText };
 
                     break :insert_text .{
-                        try std.fmt.allocPrint(builder.arena, "{f} = ", .{Analyser.fmtEscapedSnippet(name)}),
+                        try builder.arena.print("{f} = ", .{Analyser.fmtEscapedSnippet(name)}),
                         .Snippet,
                     };
                 };
@@ -1580,9 +1580,9 @@ fn collectContainerFields(
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         if (kind == .Field) score += 1;
                         const value_str = offsets.nodeToSlice(tree, value_expr);
-                        break :detail try std.fmt.allocPrint(builder.arena, "{s} = {s}", .{ type_str, value_str });
+                        break :detail try builder.arena.print("{s} = {s}", .{ type_str, value_str });
                     } else {
-                        break :detail try std.fmt.allocPrint(builder.arena, "{s}", .{type_str});
+                        break :detail try builder.arena.print("{s}", .{type_str});
                     }
                 };
 

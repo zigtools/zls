@@ -25,7 +25,7 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = "*",
                     .kind = .Operator,
-                    .detail = try std.fmt.allocPrint(arena, "{f}", .{pointer_info.elem_type.fmt(ip)}),
+                    .detail = try arena.print("{f}", .{pointer_info.elem_type.fmt(ip)}),
                 });
                 break :blk .{ pointer_info.elem_type, true };
             },
@@ -50,9 +50,9 @@ pub fn dotCompletions(
                         try completions.ensureUnusedCapacity(arena, names.len);
                         for (names) |name| {
                             completions.appendAssumeCapacity(.{
-                                .label = try std.fmt.allocPrint(arena, "{f}", .{ip.fmtId(name)}),
+                                .label = try arena.print("{f}", .{ip.fmtId(name)}),
                                 .kind = .Constant,
-                                .detail = try std.fmt.allocPrint(arena, "error.{f}", .{ip.fmtId(name)}),
+                                .detail = try arena.print("error.{f}", .{ip.fmtId(name)}),
                             });
                         }
                     },
@@ -62,7 +62,7 @@ pub fn dotCompletions(
                         try completions.ensureUnusedCapacity(arena, enum_info.fields.count());
                         for (enum_info.fields.keys()) |name| {
                             completions.appendAssumeCapacity(.{
-                                .label = try std.fmt.allocPrint(arena, "{f}", .{name.fmt(ip.io, &ip.string_pool)}),
+                                .label = try arena.print("{f}", .{name.fmt(ip.io, &ip.string_pool)}),
                                 .kind = .EnumMember,
                                 // include field.val?
                             });
@@ -81,12 +81,12 @@ pub fn dotCompletions(
                         .{
                             .label = "*",
                             .kind = .Operator,
-                            .detail = try std.fmt.allocPrint(arena, "{f}", .{pointer_info.elem_type.fmt(ip)}),
+                            .detail = try arena.print("{f}", .{pointer_info.elem_type.fmt(ip)}),
                         },
                         .{
                             .label = "?",
                             .kind = .Operator,
-                            .detail = try std.fmt.allocPrint(arena, "{f}", .{inner_ty.fmt(ip)}),
+                            .detail = try arena.print("{f}", .{inner_ty.fmt(ip)}),
                         },
                     });
                 }
@@ -100,7 +100,7 @@ pub fn dotCompletions(
                     .{
                         .label = "ptr",
                         .kind = .Field,
-                        .detail = try std.fmt.allocPrint(arena, "{f}", .{slice_ptr_ty.fmt(ip)}),
+                        .detail = try arena.print("{f}", .{slice_ptr_ty.fmt(ip)}),
                     },
                     .{
                         .label = "len",
@@ -114,7 +114,7 @@ pub fn dotCompletions(
             try completions.append(arena, .{
                 .label = "len",
                 .kind = .Field,
-                .detail = try std.fmt.allocPrint(arena, "usize = {d}", .{array_info.len}),
+                .detail = try arena.print("usize = {d}", .{array_info.len}),
             });
         },
         .struct_type => |struct_index| {
@@ -122,9 +122,9 @@ pub fn dotCompletions(
             try completions.ensureUnusedCapacity(arena, struct_info.fields.count());
             for (struct_info.fields.keys(), struct_info.fields.values()) |name, field| {
                 completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(arena, "{f}", .{ip.fmtId(name)}),
+                    .label = try arena.print("{f}", .{ip.fmtId(name)}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{f}: {f}", .{
+                    .detail = try arena.print("{f}: {f}", .{
                         name.fmt(ip.io, &ip.string_pool),
                         fmtFieldDetail(ip, field),
                     }),
@@ -135,7 +135,7 @@ pub fn dotCompletions(
             try completions.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
-                .detail = try std.fmt.allocPrint(arena, "{f}", .{optional_info.payload_type.fmt(ip)}),
+                .detail = try arena.print("{f}", .{optional_info.payload_type.fmt(ip)}),
             });
         },
         .enum_type => |enum_index| {
@@ -143,9 +143,9 @@ pub fn dotCompletions(
             try completions.ensureUnusedCapacity(arena, enum_info.fields.count());
             for (enum_info.fields.keys(), enum_info.values.keys()) |name, field_value| {
                 completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(arena, "{f}", .{ip.fmtId(name)}),
+                    .label = try arena.print("{f}", .{ip.fmtId(name)}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{f}", .{field_value.fmt(ip)}),
+                    .detail = try arena.print("{f}", .{field_value.fmt(ip)}),
                 });
             }
         },
@@ -154,12 +154,12 @@ pub fn dotCompletions(
             try completions.ensureUnusedCapacity(arena, union_info.fields.count());
             for (union_info.fields.keys(), union_info.fields.values()) |name, field| {
                 completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(arena, "{f}", .{ip.fmtId(name)}),
+                    .label = try arena.print("{f}", .{ip.fmtId(name)}),
                     .kind = .Field,
                     .detail = if (field.alignment != 0)
-                        try std.fmt.allocPrint(arena, "{f}: align({d}) {f}", .{ ip.fmtId(name), field.alignment, field.ty.fmt(ip) })
+                        try arena.print("{f}: align({d}) {f}", .{ ip.fmtId(name), field.alignment, field.ty.fmt(ip) })
                     else
-                        try std.fmt.allocPrint(arena, "{f}: {f}", .{ ip.fmtId(name), field.ty.fmt(ip) }),
+                        try arena.print("{f}: {f}", .{ ip.fmtId(name), field.ty.fmt(ip) }),
                 });
             }
         },
@@ -170,9 +170,9 @@ pub fn dotCompletions(
             try completions.ensureUnusedCapacity(arena, tuple_info.types.len);
             for (tuple_types, 0..) |tuple_ty, i| {
                 completions.appendAssumeCapacity(.{
-                    .label = try std.fmt.allocPrint(arena, "@\"{d}\"", .{i}),
+                    .label = try arena.print("@\"{d}\"", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{f}", .{tuple_ty.fmt(ip)}),
+                    .detail = try arena.print("{f}", .{tuple_ty.fmt(ip)}),
                 });
             }
         },

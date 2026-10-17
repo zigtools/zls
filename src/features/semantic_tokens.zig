@@ -65,7 +65,7 @@ pub const TokenModifiers = packed struct(u16) {
     pub fn format(modifiers: TokenModifiers, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(".{");
         var i: usize = 0;
-        inline for (comptime std.meta.fieldNames(TokenModifiers)) |field_name| {
+        inline for (@typeInfo(TokenModifiers).@"struct".field_names) |field_name| {
             if ((comptime !std.mem.eql(u8, field_name, "_")) and @field(modifiers, field_name)) {
                 if (i == 0) {
                     try writer.writeAll(" .");

@@ -219,7 +219,7 @@ pub fn showMessage(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
-    var message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
+    var message = server.allocator.print(fmt, args) catch return;
     defer server.allocator.free(message);
     switch (message_type) {
         .Error => log.err("{s}", .{message}),
@@ -561,8 +561,8 @@ fn initializeHandler(server: *Server, arena: std.mem.Allocator, request: types.I
                     .full = .{ .bool = support_full_semantic_tokens },
                     .range = .{ .bool = true },
                     .legend = .{
-                        .tokenTypes = std.meta.fieldNames(semantic_tokens.TokenType),
-                        .tokenModifiers = std.meta.fieldNames(semantic_tokens.TokenModifiers),
+                        .tokenTypes = @typeInfo(semantic_tokens.TokenType).@"enum".field_names,
+                        .tokenModifiers = @typeInfo(semantic_tokens.TokenModifiers).@"struct".field_names,
                     },
                 },
             },
@@ -631,7 +631,7 @@ fn exitHandler(server: *Server, _: std.mem.Allocator, _: void) Error!void {
 }
 
 fn registerCapability(server: *Server, method: []const u8, registersOptions: ?types.LSPAny) Error!void {
-    const id = try std.fmt.allocPrint(server.allocator, "register-{s}", .{method});
+    const id = try server.allocator.print("register-{s}", .{method});
     defer server.allocator.free(id);
 
     log.debug("Dynamically registering method '{s}'", .{method});
@@ -735,7 +735,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{ Canceled, O
                 break;
             };
 
-            const absolute = try std.Io.Dir.path.resolve(arena, &.{
+            const absolute = try std.Io.Dir.path.resolveAlloc(arena, &.{
                 root_dir, maybe_relative,
             });
 
@@ -965,7 +965,7 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
         server.showMessage(.Error, "{s}", .{msg});
     }
 
-    inline for (comptime std.meta.fieldNames(Config)) |field_name| {
+    inline for (@typeInfo(Config).@"struct".field_names) |field_name| {
         if (@field(result.did_change, field_name)) {
             var runtime_known_field_name: []const u8 = ""; // avoid unnecessary function instantiations of `std.Io.Writer.print`
             runtime_known_field_name = field_name;

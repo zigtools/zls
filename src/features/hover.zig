@@ -129,7 +129,7 @@ fn hoverSymbolResolvedType(
 
             if (ty.ipIndex() != null) {
                 const val_str = try ty.stringifyTypeVal(analyser, options);
-                const combined = try std.fmt.allocPrint(arena, "{s} = {s}", .{ type_str, val_str });
+                const combined = try arena.print("{s} = {s}", .{ type_str, val_str });
                 try resolved_type_strings.append(arena, combined);
             } else {
                 try resolved_type_strings.append(arena, type_str);
@@ -293,7 +293,7 @@ fn hoverDefinitionGlobal(
         if (!is_escaped_identifier) {
             if (std.mem.eql(u8, name, "_")) return null;
             if (try analyser.resolvePrimitive(name)) |ip_index| {
-                const resolved_type_str = try std.fmt.allocPrint(arena, "{f}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
+                const resolved_type_str = try arena.print("{f}", .{analyser.ip.typeOf(ip_index).fmt(analyser.ip)});
                 break :blk try hoverSymbolResolved(arena, markup_kind, &.{}, name, &.{resolved_type_str}, false, &.{});
             }
         }
@@ -443,7 +443,7 @@ fn hoverNumberLiteral(
     };
 
     switch (markup_kind) {
-        .markdown => return try std.fmt.allocPrint(arena,
+        .markdown => return try arena.print(
             \\| Base | {[value]s:<[count]} |
             \\| ---- | {[dash]s:-<[count]} |
             \\| BIN  | {[sign]s}0b{[number]b:<[len]} |
@@ -458,8 +458,7 @@ fn hoverNumberLiteral(
             .count = @max(@bitSizeOf(@TypeOf(number)) - @clz(number) + "0x".len + @intFromBool(is_negative), "Value".len),
             .len = @max(@bitSizeOf(@TypeOf(number)) - @clz(number), "Value".len - "0x".len),
         }),
-        .plaintext, .unknown_value => return try std.fmt.allocPrint(
-            arena,
+        .plaintext, .unknown_value => return try arena.print(
             \\BIN: {[sign]s}0b{[number]b}
             \\OCT: {[sign]s}0o{[number]o}
             \\DEC: {[sign]s}{[number]d}

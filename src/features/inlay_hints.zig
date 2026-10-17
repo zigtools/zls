@@ -224,8 +224,8 @@ const Builder = struct {
             const prefix = if (tooltip_noalias) "noalias " else if (tooltip_comptime) "comptime " else "";
 
             const text = switch (self.hover_kind) {
-                .markdown => try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip_text }),
-                .plaintext, .unknown_value => try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip_text }),
+                .markdown => try self.arena.print("```zig\n{s}{s}\n```", .{ prefix, tooltip_text }),
+                .plaintext, .unknown_value => try self.arena.print("{s}{s}", .{ prefix, tooltip_text }),
             };
 
             break :tooltip .{
@@ -239,7 +239,7 @@ const Builder = struct {
                 offsets.tokenToLoc(&self.handle.tree, token_index - 1).end
             else
                 self.handle.tree.tokenStart(token_index),
-            .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
+            .label = try self.arena.print("{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = tooltip,
         });
@@ -404,7 +404,7 @@ fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hin
 
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(&builder.handle.tree, type_token_index).end,
-        .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{hint}),
+        .label = try builder.arena.print(": {s}", .{hint}),
         .tooltip = null,
         .kind = .Type,
     });

@@ -57,7 +57,7 @@ pub fn msgAtLoc(
     level: std.log.Level,
     args: anytype,
 ) error{OutOfMemory}!void {
-    const message = try std.fmt.allocPrint(builder.allocator, fmt_str, args);
+    const message = try builder.allocator.print(fmt_str, args);
     errdefer builder.allocator.free(message);
     try builder.appendMessage(message, file_name, loc, level);
 }
