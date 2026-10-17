@@ -67,10 +67,10 @@ fn fullPtrTypeComponents(tree: *const Ast, info: full.PtrType.Components) full.P
                     i = lastToken(tree, bit_range_end) + 1;
                 } else if (info.align_node.unwrap()) |align_node| {
                     i = lastToken(tree, align_node) + 1;
-                } else unreachable;
+                } else continue;
             },
             .keyword_addrspace => i = lastToken(tree, info.addrspace_node.unwrap().?) + 1,
-            else => unreachable,
+            else => continue,
         }
     }
     return result;

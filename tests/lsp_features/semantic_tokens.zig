@@ -959,6 +959,16 @@ test "pointer types" {
     });
 }
 
+test "single item pointer with unexpected bit range alignment" {
+    try testSemanticTokens(
+        \\[*]align(0:0:0)u8
+    , &.{
+        .{ "align", .keyword, .{} },
+        .{ "0", .number, .{} },
+        .{ "u8", .type, .{} },
+    });
+}
+
 test "anyframe type" {
     try testSemanticTokens(
         \\const alpha = anyframe->u32;
