@@ -448,6 +448,32 @@ test "multi-line string literal" {
 
 test "error access" {
     try testContext(
+        \\const value = error.<cursor>Foo;
+    , .error_access, .{ .lookahead = true });
+    try testContext(
+        \\const value = error.F<cursor>oo;
+    , .error_access, .{ .lookahead = true });
+    try testContext(
+        \\const value = error.Foo<cursor>;
+    , .error_access, .{});
+    try testContext(
+        \\const value = error.@"error <cursor>name";
+    , .error_access, .{ .lookahead = true });
+    try testContext(
+        \\const Errors = error{F<cursor>oo};
+    , .error_access, .{ .lookahead = true });
+    try testContext(
+        \\const Errors = error{
+        \\    F<cursor>oo,
+        \\};
+    , .error_access, .{ .lookahead = true });
+    try testContext(
+        \\const value = <loc>Errors.F<cursor>oo</loc>;
+    , .field_access, .{ .lookahead = true });
+    try testContext(
+        \\const value = <loc>Err<cursor>ors</loc>.Foo;
+    , .var_access, .{ .lookahead = true });
+    try testContext(
         \\fn foo() <cursor>error!void {
     , .error_access, .{ .lookahead = true });
     try testContext(

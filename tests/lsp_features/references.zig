@@ -41,6 +41,101 @@ test "references" {
     );
 }
 
+test "error names" {
+    for ([_]RequestKind{ .references, .rename, .highlight }) |kind| {
+        try testReferences(&.{
+            \\const Errors = error{
+            \\    /// An error declaration.
+            \\    <0>,
+            \\    Other,
+            \\};
+            \\const MoreErrors = error{<0>};
+            \\const Alias = Errors;
+            \\const first = error.<0>;
+            \\const second = Errors.<0>;
+            \\const third = Alias.<0>;
+            \\const fourth = anyerror.<0>;
+            \\const value_alias = error.<0>;
+            \\const copy = value_alias;
+            \\const placeholder = error.<0>;
+            \\const alias_copy = placeholder;
+            \\const E = enum { placeholder };
+            \\const e = E.placeholder;
+            \\const S = struct { placeholder: u32 };
+            \\const s: S = .{ .placeholder = 0 };
+            \\const field = s.placeholder;
+            \\const text = "error.placeholder";
+            \\// error.placeholder
+            \\fn foo() !void {
+            \\    return error.<0>;
+            \\}
+        }, .{ .format = .symmetric, .request_kind = kind });
+        try testReferences(&.{
+            \\fn foo() !void {
+            \\    return error.<0>;
+            \\}
+            \\const value = error.<0>;
+        }, .{ .format = .symmetric, .request_kind = kind });
+        try testReferences(&.{
+            \\const Errors = error{<0>};
+            \\const value = error.<0>;
+            \\const other = Errors.<0>;
+        }, .{ .format = .symmetric, .request_kind = kind, .placeholder_name = "@\"error name\"" });
+    }
+}
+
+test "error names across files" {
+    for ([_]RequestKind{ .references, .rename }) |kind| {
+        try testReferences(&.{
+            \\pub const Errors = error{<0>};
+            \\pub fn foo() !void {
+            \\    return error.<0>;
+            \\}
+            ,
+            \\const file = @import("Untitled-0.zig");
+            \\const value = error.<0>;
+            \\const other = file.Errors.<0>;
+        }, .{ .format = .symmetric, .request_kind = kind });
+    }
+}
+
+test "error names exclude declarations" {
+    try testReferences(&.{
+        \\const Errors = error{Foo};
+        \\const other = error{Foo};
+        \\const value = error.<loc>Foo</loc><cursor>;
+        \\const member = Errors.<loc>Foo</loc>;
+    }, .{ .format = .asymmetric, .include_declaration = false });
+    try testReferences(&.{
+        \\const Errors = error{Foo<cursor>};
+        \\const value = error.<loc>Foo</loc>;
+    }, .{ .format = .asymmetric, .include_declaration = false });
+}
+
+test "error names rename to escaped identifier" {
+    var ctx: Context = try .init();
+    defer ctx.deinit();
+    const uri = try ctx.addDocument(.{ .source = "const value = error.Foo;" });
+    const arena = ctx.arena.allocator();
+    const position: types.Position = .{ .line = 0, .character = 21 };
+    const prepared = (try ctx.server.sendRequestSync(arena, "textDocument/prepareRename", .{
+        .textDocument = .{ .uri = uri.raw },
+        .position = position,
+    })).?;
+    try std.testing.expectEqualStrings("Foo", prepared.prepare_rename_placeholder.placeholder);
+    const result = (try ctx.server.sendRequestSync(arena, "textDocument/rename", .{
+        .textDocument = .{ .uri = uri.raw },
+        .position = position,
+        .newName = "new name",
+    })).?;
+    const edits = result.changes.?.map.get(uri.raw).?;
+    try std.testing.expectEqual(@as(usize, 1), edits.len);
+    try std.testing.expectEqualStrings("@\"new name\"", edits[0].newText);
+    try std.testing.expectEqualDeep(prepared.prepare_rename_placeholder.range, edits[0].range);
+    try std.testing.expectEqual(@as(u32, 20), edits[0].range.start.character);
+    try std.testing.expectEqual(@as(u32, 23), edits[0].range.end.character);
+}
+
 test "global scope" {
     try testSymbolReferences(
         \\const foo = <0>;
@@ -640,6 +735,7 @@ test "escaped identifier with same name as primitive" {
 const TestOptions = struct {
     request_kind: RequestKind = .references,
     format: TestFormat,
+    include_declaration: bool = true,
     /// Only applies to `TestFormat.symmetric` test cases.
     placeholder_name: []const u8 = "placeholder",
 };
@@ -861,6 +957,7 @@ fn testReferences(
             options.request_kind,
             cursor_file_uri,
             position,
+            options.include_declaration,
         ) orelse {
             std.debug.print("Server returned `null` as the result\n", .{});
             return error.InvalidResponse;
@@ -920,13 +1017,14 @@ fn sendRequest(
     kind: RequestKind,
     uri: zls.Uri,
     position: types.Position,
+    include_declaration: bool,
 ) !?[]const types.Location {
     switch (kind) {
         .references => {
             return try server.sendRequestSync(arena, "textDocument/references", .{
                 .textDocument = .{ .uri = uri.raw },
                 .position = position,
-                .context = .{ .includeDeclaration = true },
+                .context = .{ .includeDeclaration = include_declaration },
             });
         },
         .highlight => {
@@ -949,12 +1047,15 @@ fn sendRequest(
             std.debug.assert(result.documentChanges == null);
             std.debug.assert(result.changeAnnotations == null);
             const changes = result.changes orelse return null;
-            const text_edits = changes.map.get(uri.raw) orelse return &.{};
-            const locations = try arena.alloc(types.Location, text_edits.len);
-            for (locations, text_edits) |*location, text_edit| {
-                location.* = .{ .uri = uri.raw, .range = text_edit.range };
+            var locations: std.ArrayList(types.Location) = .empty;
+            var it = changes.map.iterator();
+            while (it.next()) |entry| {
+                for (entry.value_ptr.*) |text_edit| {
+                    try std.testing.expectEqualStrings("placeholder", text_edit.newText);
+                    try locations.append(arena, .{ .uri = entry.key_ptr.*, .range = text_edit.range });
+                }
             }
-            return locations;
+            return locations.items;
         },
     }
 }
