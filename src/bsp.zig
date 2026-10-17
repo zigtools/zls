@@ -470,6 +470,7 @@ fn loadBuildConfigurationInner(
 
         try client.serveBuildSteps(needed_steps.keys(), .{ .watch = false });
 
+        var did_receive_errors: bool = false;
         // populate `resolved_generated_files`
         while (true) {
             const header = client.receiveMessageWithMultiReader(multi_reader, .none) catch |err| switch (err) {
@@ -524,6 +525,7 @@ fn loadBuildConfigurationInner(
                         });
                     }
 
+                    did_receive_errors = true;
                     try options.diagnostics.pushErrorBundle(
                         diagnostic_tag,
                         options.build_file_version,
@@ -541,6 +543,15 @@ fn loadBuildConfigurationInner(
                 else => log.warn("unexpected message from {s} with tag {f}", .{ protocol_name, fmtEnum(header.tag) }),
             }
         }
+
+        if (!did_receive_errors) {
+            options.diagnostics.clearErrorBundle(diagnostic_tag);
+        }
+
+        options.diagnostics.publishDiagnostics() catch |err| switch (err) {
+            error.Canceled => |e| return e,
+            else => log.err("failed to publish diagnostics: {t}", .{err}),
+        };
     }
 
     // We collect modules in the following order:
@@ -635,11 +646,6 @@ fn loadBuildConfigurationInner(
     //     const resolved_package_path = try Dir.path.resolveAlloc(arena, &.{ maker.base_paths.get(.build_root), package_path, "build.zig" });
     //     dependencies.putAssumeCapacityNoClobber(package_name, resolved_package_path);
     // }
-
-    options.diagnostics.publishDiagnostics() catch |err| switch (err) {
-        error.Canceled => |e| return e,
-        else => log.err("failed to publish diagnostics: {t}", .{err}),
-    };
 
     return .{
         .arena = arena_allocator.state,
