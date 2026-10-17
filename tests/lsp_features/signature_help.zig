@@ -294,6 +294,18 @@ test "self parameter" {
     , "fn foo(self: *S, a: u32, b: void) bool", 2);
 }
 
+test "self parameter with aliased function" {
+    try testSignatureHelp(
+        \\fn fooImpl(self: S, a: u32, b: void) bool {}
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    const foo = fooImpl;
+        \\};
+        \\const s: S = undefined;
+        \\const foo = s.foo(3,<cursor>);
+    , "fn fooImpl(self: S, a: u32, b: void) bool", 2);
+}
+
 test "self parameter is anytype" {
     try testSignatureHelp(
         \\const S = struct {
