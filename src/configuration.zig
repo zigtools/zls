@@ -787,8 +787,8 @@ test {
         // A tagged release of ZLS should support the same tagged release of Zig
         // Example: ZLS 0.12.0 should support Zig 0.12.x -- It is possible that ZLS requires a minimum patch version
         try std.testing.expect(zigVersionCheck(
-            .{ .major = current_zig_version.major, .minor = current_zig_version.minor, .patch = 999 },
             min_runtime_zig_version,
+            .{ .major = current_zig_version.major, .minor = current_zig_version.minor, .patch = 999 },
             is_zls_version_tagged,
         ));
     }
