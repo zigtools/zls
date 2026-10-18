@@ -57,7 +57,7 @@ test "workspace symbols" {
     );
     try testDocumentSymbol(&ctx, "dog",
         \\Constant Dog
-        \\Method walk the dog
+        \\Function walk the dog
     );
     try testDocumentSymbol(&ctx, "potato_d", "");
     // Becomes S\x00\x00 which matches nothing
