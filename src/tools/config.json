@@ -31,6 +31,12 @@
             "default": []
         },
         {
+            "name": "promote_reference_traces",
+            "description": "When a compile error is located outside of the workspace (e.g. inside the standard library or a dependency), report the error at the innermost reference trace location that is inside the workspace instead. The original error location is preserved as related information.",
+            "type": "bool",
+            "default": true
+        },
+        {
             "name": "semantic_tokens",
             "description": "Set level of semantic tokens. `partial` only includes information that requires semantic analysis.",
             "type": "enum",

@@ -981,6 +981,7 @@ pub fn resolveConfiguration(server: *Server) error{ Canceled, OutOfMemory }!void
     const new_force_autofix: bool = result.did_change.force_autofix;
 
     server.document_store.config = createDocumentStoreConfig(server.config_manager);
+    server.diagnostics_collection.setPromoteReferenceTraces(server.config_manager.config.promote_reference_traces);
 
     if (BuildOnSave.isSupportedComptime() and
         // If the client supports the `workspace/configuration` request, defer
@@ -1372,6 +1373,7 @@ pub fn create(options: CreateOptions) std.mem.Allocator.Error!*Server {
         .ip = undefined, // set below
     };
     server.document_store.config = createDocumentStoreConfig(server.config_manager);
+    server.diagnostics_collection.setPromoteReferenceTraces(server.config_manager.config.promote_reference_traces);
 
     server.ip = try InternPool.init(io, allocator);
     errdefer server.ip.deinit(allocator);
