@@ -430,7 +430,7 @@ fn createZLSModule(
     b: *Build,
     options: struct {
         target: Build.ResolvedTarget,
-        optimize: std.lang.Optimize,
+        optimize: ?std.lang.Optimize,
         tracy_enable: bool,
         tracy_options: *std.Build.Module,
         build_options: *std.Build.Module,
@@ -476,7 +476,7 @@ fn createTracyModule(
     b: *Build,
     options: struct {
         target: Build.ResolvedTarget,
-        optimize: std.lang.Optimize,
+        optimize: ?std.lang.Optimize,
         enable: bool,
         tracy_options: *std.Build.Module,
     },
@@ -637,7 +637,7 @@ fn release(b: *Build, release_artifacts: []const *Build.Step.Compile, released_z
 fn addAnalysisCases(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.lang.OptimizeMode,
+    optimize: ?std.lang.Optimize,
     test_step: *std.Build.Step,
     test_filters: []const []const u8,
 ) void {
