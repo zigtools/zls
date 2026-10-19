@@ -70,7 +70,7 @@ jobs:
       - name: Upload release artifacts
         if: env.SKIP_DEPLOY != 'true'
         run: |
-          s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
+          s3cmd --add-header="cache-control: public, max-age=31536000, immutable" --add-header="If-None-Match: *" --host=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com --host-bucket=${R2_ACCOUNT_ID}.r2.cloudflarestorage.com put ./zig-out/artifacts/ --recursive s3://${R2_BUCKET}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
