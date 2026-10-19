@@ -28,7 +28,11 @@ jobs:
           echo "Latest commit with successfull CI: $LAST_SUCCESS_COMMIT"
           echo "Current commit: $CURRENT_COMMIT"
 
-          if [ $LAST_SUCCESS_COMMIT = $CURRENT_COMMIT ]; then
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
+            echo "skipped=yes" >> $GITHUB_OUTPUT
+            echo "Commit is a tag, skipping."
+          elif [ $LAST_SUCCESS_COMMIT = $CURRENT_COMMIT ]; then
             echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
             echo "skipped=yes" >> $GITHUB_OUTPUT
             echo "Commits are equal, skipping."
