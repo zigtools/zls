@@ -451,15 +451,89 @@ test "remove capture" {
     // TODO fix whitespace
     try testDiagnostic(
         \\test {
-        \\    const maybe: ?u32 = 5;
-        \\    if (maybe) |value| {}
+        \\    const u: union(enum) { a: u32, b } = .b;
+        \\    switch (u) {
+        \\        .a => |value| {},
+        \\        .b => {},
+        \\    }
+        \\    _ = @as(anyerror!u32, 1) catch |err| 0;
         \\}
     ,
         \\test {
-        \\    const maybe: ?u32 = 5;
-        \\    if (maybe)  {}
+        \\    const u: union(enum) { a: u32, b } = .b;
+        \\    switch (u) {
+        \\        .a =>  {},
+        \\        .b => {},
+        \\    }
+        \\    _ = @as(anyerror!u32, 1) catch  0;
         \\}
     , .{ .filter_title = "remove capture" });
+}
+
+test "discard capture name - not offered where zig rejects a discard" {
+    const source =
+        \\test {
+        \\    _ = @as(anyerror!u32, 1) catch |err| 0;
+        \\    const u: union(enum) { a: u32, b } = .b;
+        \\    switch (u) {
+        \\        .a => |value| {},
+        \\        .b => {},
+        \\    }
+        \\    for ([_]u8{1}, 0..) |e, i| {
+        \\        _ = e;
+        \\    }
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |*ptr| {}
+        \\}
+    ;
+    try testDiagnostic(source, source, .{ .filter_title = "discard capture name" });
+}
+
+test "discard capture name - switch payload with tag and bounded for counter" {
+    try testDiagnostic(
+        \\test {
+        \\    const u: union(enum) { a: u32, b } = .b;
+        \\    switch (u) {
+        \\        inline .a => |value, tag| {
+        \\            _ = tag;
+        \\        },
+        \\        .b => {},
+        \\    }
+        \\    for ([_]u8{1}, 0..1) |e, i| {
+        \\        _ = e;
+        \\    }
+        \\}
+    ,
+        \\test {
+        \\    const u: union(enum) { a: u32, b } = .b;
+        \\    switch (u) {
+        \\        inline .a => |_, tag| {
+        \\            _ = tag;
+        \\        },
+        \\        .b => {},
+        \\    }
+        \\    for ([_]u8{1}, 0..1) |e, _| {
+        \\        _ = e;
+        \\    }
+        \\}
+    , .{ .filter_title = "discard capture name" });
+}
+
+test "remove capture - not offered where the payload is required" {
+    const source =
+        \\test {
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |value| {}
+        \\    for ([_]u8{1}) |item| {}
+        \\    for ([_]u8{1}, 0..) |e, i| {
+        \\        _ = i;
+        \\    }
+        \\    if (@as(anyerror!u32, 1)) |v| {
+        \\        _ = v;
+        \\    } else |err| {}
+        \\}
+    ;
+    try testDiagnostic(source, source, .{ .filter_title = "remove capture" });
 }
 
 test "organize imports" {

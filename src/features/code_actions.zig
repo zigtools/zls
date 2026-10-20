@@ -504,17 +504,19 @@ fn handleUnusedCapture(
 
         const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
 
-        try builder.actions.append(builder.arena, .{
-            .title = "discard capture name",
-            .kind = .quickfix,
-            .isPreferred = false,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, "_")}),
-        });
+        if (canDiscardCapture(tree, identifier_token)) {
+            try builder.actions.append(builder.arena, .{
+                .title = "discard capture name",
+                .kind = .quickfix,
+                .isPreferred = false,
+                .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, "_")}),
+            });
+        }
 
         // prevent adding duplicate 'remove capture' action.
         // search for a matching action by comparing ranges.
         const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
-        if (!gop.found_existing) {
+        if (canRemoveCapture(tree, identifier_token) and !gop.found_existing) {
             try builder.actions.append(builder.arena, .{
                 .title = "remove capture",
                 .kind = .quickfix,
@@ -1232,6 +1234,83 @@ fn getDiscardLoc(tree: *const Ast, loc: offsets.Loc) ?offsets.Loc {
         .start = start_position,
         .end = autofix_comment_end,
     };
+}
+
+/// Whether AstGen accepts `_` in place of this capture.
+fn canDiscardCapture(tree: *const Ast, identifier_token: Ast.TokenIndex) bool {
+    // `|*_|` is "pointer modifier invalid on discard"
+    if (tree.tokenTag(identifier_token -| 1) == .asterisk) return false;
+
+    const pipe, const capture_index = findCapturePipe(tree, identifier_token) orelse return true;
+
+    switch (tree.tokenTag(pipe - 1)) {
+        // "discard of error capture; omit it instead"
+        .keyword_catch => return false,
+        // a switch prong payload can only be discarded when the tag is captured,
+        // and the tag capture can never be discarded
+        .equal_angle_bracket_right => return capture_index == 0 and tree.tokenTag(identifier_token + 1) == .comma,
+        .r_paren => {
+            // a for loop counter without an end can't be discarded
+            const r_paren = pipe - 1;
+            var l_paren = r_paren;
+            var depth: usize = 0;
+            while (l_paren > 0) : (l_paren -= 1) {
+                switch (tree.tokenTag(l_paren)) {
+                    .r_paren => depth += 1,
+                    .l_paren => {
+                        depth -= 1;
+                        if (depth == 0) break;
+                    },
+                    else => {},
+                }
+            }
+            if (l_paren == 0 or tree.tokenTag(l_paren - 1) != .keyword_for) return true;
+
+            var input_index: usize = 0;
+            depth = 0;
+            var token = l_paren + 1;
+            while (token < r_paren) : (token += 1) {
+                switch (tree.tokenTag(token)) {
+                    .l_paren, .l_bracket, .l_brace => depth += 1,
+                    .r_paren, .r_bracket, .r_brace => depth -= 1,
+                    .comma => if (depth == 0) {
+                        input_index += 1;
+                        continue;
+                    },
+                    else => {},
+                }
+                if (input_index != capture_index) continue;
+                const next = tree.tokenTag(token + 1);
+                const input_end = token + 1 == r_paren or (depth == 0 and next == .comma);
+                if (input_end) return tree.tokenTag(token) != .ellipsis2;
+            }
+            return true;
+        },
+        else => return true,
+    }
+}
+
+/// Whether the payload can be removed: only switch prongs and `catch` take an optional capture,
+/// and removing a payload with several captures would also remove the used ones.
+fn canRemoveCapture(tree: *const Ast, identifier_token: Ast.TokenIndex) bool {
+    const pipe, const capture_index = findCapturePipe(tree, identifier_token) orelse return false;
+    if (capture_index != 0 or tree.tokenTag(identifier_token + 1) != .pipe) return false;
+    return switch (tree.tokenTag(pipe - 1)) {
+        .equal_angle_bracket_right, .keyword_catch => true,
+        else => false,
+    };
+}
+
+/// Returns the opening `|` of the payload containing `identifier_token` and the capture's index.
+fn findCapturePipe(tree: *const Ast, identifier_token: Ast.TokenIndex) ?struct { Ast.TokenIndex, usize } {
+    var pipe = identifier_token;
+    var capture_index: usize = 0;
+    while (tree.tokenTag(pipe) != .pipe) : (pipe -= 1) {
+        if (tree.tokenTag(pipe) == .comma) capture_index += 1;
+        if (pipe == 0) return null;
+    }
+    if (pipe == 0) return null;
+    return .{ pipe, capture_index };
 }
 
 /// takes the location of a capture ie `value` from `...|value...|...`.
