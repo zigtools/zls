@@ -299,6 +299,41 @@ test "discard capture - while loop with continue" {
     );
 }
 
+test "discard with code after the opening brace" {
+    // TODO fix whitespace
+    try testAutofix(
+        \\fn foo() void {}
+        \\fn bar(a: u32, b: u32) void { _ = b; }
+        \\test {
+        \\    bar(1, 2);
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |value| { foo(); }
+        \\    for ([_]u8{1}, 0..1) |e, i| { _ = i; }
+        \\    { const x = 1; foo(); }
+        \\}
+        \\
+    ,
+        \\fn foo() void {}
+        \\fn bar(a: u32, b: u32) void { 
+        \\    _ = a; // autofix
+        \\_ = b; }
+        \\test {
+        \\    bar(1, 2);
+        \\    const maybe: ?u32 = 5;
+        \\    if (maybe) |value| { 
+        \\        _ = value; // autofix
+        \\    foo(); }
+        \\    for ([_]u8{1}, 0..1) |e, i| { 
+        \\        _ = e; // autofix
+        \\    _ = i; }
+        \\    { const x = 1; 
+        \\    _ = x; // autofix
+        \\    foo(); }
+        \\}
+        \\
+    );
+}
+
 test "remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
