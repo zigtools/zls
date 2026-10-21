@@ -638,6 +638,9 @@ test "label decl" {
     try testContext(
         \\var foo = <loc>blk<cursor></loc>: { break :blk null };
     , .label_decl, .{});
+    try testContext(
+        \\<loc>blk<cursor></loc>: inline for (bar) |_| {}
+    , .label_decl, .{});
 }
 
 test "doctest name" {

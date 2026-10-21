@@ -5609,6 +5609,7 @@ pub fn getPositionContext(
                         .l_brace,
                         .keyword_for,
                         .keyword_while,
+                        .keyword_inline,
                         .keyword_switch,
                         => return .{ .label_decl = loc },
                         else => {},
@@ -6280,6 +6281,14 @@ pub fn lookupLabel(
         std.debug.assert(decl == .label);
 
         return .{ .decl = decl, .handle = handle };
+    }
+
+    // A loop label is declared in the scope of the loop body, which does not contain the label itself
+    for (0..document_scope.declarations.len) |decl_index| {
+        const decl = document_scope.declarations.get(decl_index);
+        if (decl != .label) continue;
+        const loc = offsets.tokenToLoc(&handle.tree, decl.label.identifier);
+        if (loc.start <= source_index and source_index <= loc.end) return .{ .decl = decl, .handle = handle };
     }
     return null;
 }
