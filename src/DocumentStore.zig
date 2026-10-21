@@ -318,6 +318,7 @@ pub const Handle = struct {
             switch (result.*) {
                 .none, .unresolved => {},
                 .resolved => |root_source_files| {
+                    for (root_source_files) |file| allocator.free(file);
                     allocator.free(root_source_files);
                 },
             }
@@ -363,6 +364,7 @@ pub const Handle = struct {
 
         var results: std.ArrayList([]const u8) = .empty;
         defer results.deinit(allocator);
+        errdefer for (results.items) |mod| allocator.free(mod);
 
         // Do a graph search from root modules until we reach `root_source_file`
         for (root_modules.keys()) |root_module| {
@@ -372,7 +374,8 @@ pub const Handle = struct {
 
             while (queue.pop()) |index| {
                 if (index == target_index) {
-                    try results.append(allocator, root_module);
+                    try results.ensureUnusedCapacity(allocator, 1);
+                    results.appendAssumeCapacity(try allocator.dupe(u8, root_module));
                     break;
                 }
 
