@@ -779,7 +779,8 @@ const Workspace = struct {
         const config = &config_manager.config;
 
         const enable, const support_file_watching = if (config_manager.zig_exe) |zig_exe| switch (BuildOnSave.FileWatchSupport.check(zig_exe.version)) {
-            .supported, .is_windows => .{ config.enable_build_on_save orelse true, true },
+            .supported => .{ config.enable_build_on_save orelse true, true },
+            .is_windows => .{ config.enable_build_on_save orelse true, false },
             // If if build on save has been explicitly enabled, fallback to the implementation with manual updates
             else => .{ config.enable_build_on_save orelse false, false },
         } else .{ false, false };
