@@ -976,6 +976,141 @@ test "convert string literal to multiline - invalid" {
     );
 }
 
+test "simplify variable initialization - @as" {
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>@as(u32, 5);
+    ,
+        \\const foo: u32 = 5;
+    );
+    try testSimplifyVariableInit(
+        \\test {
+        \\    var <cursor>foo = @as(?*const [2]u8, null);
+        \\    _ = &foo;
+        \\}
+    ,
+        \\test {
+        \\    var foo: ?*const [2]u8 = null;
+        \\    _ = &foo;
+        \\}
+    );
+    try testSimplifyVariableInit(
+        \\pub const foo align(4) = @as(u32, 5)<cursor>;
+    ,
+        \\pub const foo: u32 align(4) = 5;
+    );
+}
+
+test "simplify variable initialization - struct init" {
+    try testSimplifyVariableInit(
+        \\const S = struct { a: u32 = 0 };
+        \\const foo = <cursor>S{};
+    ,
+        \\const S = struct { a: u32 = 0 };
+        \\const foo: S = .{};
+    );
+    try testSimplifyVariableInit(
+        \\const S = struct { a: u32 };
+        \\const <cursor>foo = S{ .a = 1 };
+    ,
+        \\const S = struct { a: u32 };
+        \\const foo: S = .{ .a = 1 };
+    );
+    try testSimplifyVariableInit(
+        \\fn Generic(comptime T: type) type {
+        \\    return struct { a: T, b: T };
+        \\}
+        \\const foo = Generic(u8){
+        \\    .a = <cursor>1,
+        \\    .b = 2,
+        \\};
+    ,
+        \\fn Generic(comptime T: type) type {
+        \\    return struct { a: T, b: T };
+        \\}
+        \\const foo: Generic(u8) = .{
+        \\    .a = 1,
+        \\    .b = 2,
+        \\};
+    );
+}
+
+test "simplify variable initialization - innermost declaration" {
+    try testSimplifyVariableInit(
+        \\const foo = blk: {
+        \\    const bar = @as(u8, <cursor>1);
+        \\    break :blk bar;
+        \\};
+    ,
+        \\const foo = blk: {
+        \\    const bar: u8 = 1;
+        \\    break :blk bar;
+        \\};
+    );
+}
+
+test "simplify variable initialization - no action" {
+    // already has a type annotation
+    try testSimplifyVariableInit(
+        \\const foo: u32 = <cursor>@as(u32, 5);
+    ,
+        \\const foo: u32 = @as(u32, 5);
+    );
+    // anonymous struct literal
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>.{ .a = 1 };
+    ,
+        \\const foo = .{ .a = 1 };
+    );
+    // other builtins
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>@intCast(5);
+    ,
+        \\const foo = @intCast(5);
+    );
+    // `@as` is not the whole initialization expression
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>@as(u32, 5) + 1;
+    ,
+        \\const foo = @as(u32, 5) + 1;
+    );
+    // array initialization, `[_]T` is not a valid type annotation
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>[_]u8{ 1, 2 };
+    ,
+        \\const foo = [_]u8{ 1, 2 };
+    );
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>[_]u8{};
+    ,
+        \\const foo = [_]u8{};
+    );
+    // comments would be removed
+    try testSimplifyVariableInit(
+        \\const foo = <cursor>@as(u32, // comment
+        \\    5);
+    ,
+        \\const foo = @as(u32, // comment
+        \\    5);
+    );
+    try testSimplifyVariableInit(
+        \\const S = struct {};
+        \\const foo = <cursor>S // comment
+        \\{};
+    ,
+        \\const S = struct {};
+        \\const foo = S // comment
+        \\{};
+    );
+    // cursor outside of a variable declaration
+    try testSimplifyVariableInit(
+        \\const foo = @as(u32, 5);
+        \\<cursor>
+    ,
+        \\const foo = @as(u32, 5);
+        \\
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
@@ -1016,6 +1151,10 @@ fn testOrganizeImportsNoAction(source: []const u8) !void {
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .refactor });
+}
+
+fn testSimplifyVariableInit(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .refactor, .filter_title = "simplify variable initialization" });
 }
 
 fn testDiagnostic(
