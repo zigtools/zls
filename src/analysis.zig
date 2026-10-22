@@ -466,6 +466,7 @@ pub fn firstParamIs(
     const resolved_type = func_info.parameters[0].type;
     if (!resolved_type.is_type_val) return false;
     if (resolved_type.data == .anytype_parameter) return true;
+    if (resolved_type.isMetaType()) return false;
 
     const deref_type = deref: switch (resolved_type.data) {
         .pointer => |info| switch (info.size) {

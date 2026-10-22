@@ -306,6 +306,14 @@ test "self parameter with aliased function" {
     , "fn fooImpl(self: S, a: u32, b: void) bool", 2);
 }
 
+test "self parameter cannot be type parameter" {
+    try testSignatureHelp(
+        \\fn Foo(comptime T: type) void {}
+        \\const foo = @This();
+        \\foo.Foo(<cursor>)
+    , "fn Foo(comptime T: type) void", 0);
+}
+
 test "self parameter is anytype" {
     try testSignatureHelp(
         \\const S = struct {
