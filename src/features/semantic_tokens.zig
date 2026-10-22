@@ -199,13 +199,14 @@ const Builder = struct {
             .errorTag,
             => {},
 
+            .builtin => if (self.limited and !token_modifiers.deprecated) return,
+
             .keyword,
             .comment,
             .string,
             .escapeSequence,
             .number,
             .operator,
-            .builtin,
             .label,
             .keywordLiteral,
             => if (self.limited) return,
@@ -722,7 +723,13 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void 
             var buffer: [2]Ast.Node.Index = undefined;
             const params = tree.builtinCallParams(&buffer, node).?;
 
-            try writeToken(builder, main_token, .builtin);
+            const name = offsets.identifierTokenToNameSlice(tree, main_token);
+            const is_deprecated =
+                std.mem.eql(u8, name, "enumFromInt") or
+                std.mem.eql(u8, name, "intFromEnum") or
+                std.mem.eql(u8, name, "intFromFloat");
+
+            try writeTokenMod(builder, main_token, .builtin, .{ .deprecated = is_deprecated });
             for (params) |param|
                 try writeNodeTokens(builder, param);
         },

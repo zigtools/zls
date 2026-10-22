@@ -660,6 +660,10 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
             builtin,
             builtin.parameters.len > 3,
         );
+        const is_deprecated =
+            std.mem.eql(u8, name, "@enumFromInt") or
+            std.mem.eql(u8, name, "@intFromEnum") or
+            std.mem.eql(u8, name, "@intFromFloat");
 
         builder.completions.appendAssumeCapacity(.{
             .label = name,
@@ -674,6 +678,8 @@ fn completeBuiltin(builder: *Builder) error{OutOfMemory}!void {
                     .value = builtin.documentation,
                 },
             },
+            .deprecated = if (is_deprecated and builder.server.client_capabilities.supports_completion_deprecated_old) true else null,
+            .tags = if (is_deprecated and builder.server.client_capabilities.supports_completion_deprecated_tag) &.{.Deprecated} else null,
         });
     }
 }
