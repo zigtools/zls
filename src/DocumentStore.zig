@@ -895,7 +895,7 @@ pub fn refreshDocumentFromFileSystem(self: *DocumentStore, uri: Uri, should_dele
         if (self.getHandle(uri)) |handle| {
             if (handle.lsp_synced) return false;
         } else return false;
-        if (uri.isFileScheme()) return false;
+        if (!uri.isFileScheme()) return false;
         _ = self.createAndStoreDocument(
             uri,
             .uri,
