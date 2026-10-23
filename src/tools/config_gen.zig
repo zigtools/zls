@@ -235,46 +235,26 @@ fn generateVSCodeConfigFile(
     var config_file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer config_file.close(io);
 
-    const predefined_configurations: usize = 4;
     var configuration: std.json.ArrayHashMap(ConfigurationProperty) = .{};
-    try configuration.map.ensureTotalCapacity(allocator, @intCast(predefined_configurations + config.options.len));
+    try configuration.map.ensureTotalCapacity(allocator, @intCast(config.options.len));
     defer {
-        for (configuration.map.keys()[predefined_configurations..]) |name| allocator.free(name);
+        for (configuration.map.keys()) |name| allocator.free(name);
         configuration.map.deinit(allocator);
     }
 
-    configuration.map.putAssumeCapacityNoClobber("zig.zls.debugLog", .{
-        .scope = "resource",
-        .type = "boolean",
-        .description = "Enable debug logging in release builds of ZLS.",
-    });
-    configuration.map.putAssumeCapacityNoClobber("zig.zls.trace.server", .{
-        .scope = "window",
-        .type = "string",
-        .@"enum" = &.{ "off", "messages", "verbose" },
-        .description = "Traces the communication between VS Code and the language server.",
-        .default = .{ .string = "off" },
-    });
-    configuration.map.putAssumeCapacityNoClobber("zig.zls.path", .{
-        .scope = "machine-overridable",
-        .type = "string",
-        .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`. The string \"zls\" means lookup ZLS in PATH.",
-        .format = "path",
-    });
-
     for (config.options) |option| {
-        if (std.mem.eql(u8, option.name, "zig_exe_path")) continue; // vscode-zig has its own option for this
+        if (std.mem.eql(u8, option.name, "zig_exe_path")) continue;
         if (std.mem.eql(u8, option.name, "force_autofix")) continue; // VS Code supports code actions on save without a workaround
+        if (std.mem.eql(u8, option.name, "enable_build_on_save")) continue;
+        if (std.mem.eql(u8, option.name, "build_on_save_args")) continue;
+        if (std.mem.eql(u8, option.name, "zig_lib_path")) continue;
 
         const snake_case_name = try allocator.print("zig.zls.{s}", .{option.name});
         defer allocator.free(snake_case_name);
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
         errdefer allocator.free(name);
 
-        const default: ?std.json.Value = if (std.mem.eql(u8, option.name, "enable_build_on_save"))
-            // "enable_build_on_save" need to be explicitly set to 'null' so that it doesn't default to 'false'
-            .null
-        else if (option.default != .null)
+        const default: ?std.json.Value = if (option.default != .null)
             option.default
         else
             null;
