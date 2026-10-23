@@ -121,7 +121,6 @@ pub fn build(b: *Build) !void {
         update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("Config.zig"), "src/Config.zig");
         gen_cmd.addArg("--generate-schema");
         update_source.addCopyFileToSource(gen_cmd.addOutputFileArg("schema.json"), "schema.json");
-        gen_cmd.addPassthruArgs();
     }
 
     if (b.isRoot()) { // zig build config-gen
