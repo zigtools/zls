@@ -366,9 +366,7 @@ fn getErrorBundleFromAstCheck(
     const term = try process.wait(io);
     switch (term) {
         .exited => return try getErrorBundleFromStderr(allocator, stderr, true, .{ .single_source_file = source }),
-        .signal => |sig| std.log.err("zig ast-check failed with signal {t} and stderr:\n{s}", .{ sig, stderr }),
-        .stopped => |sig| std.log.err("zig ast-check stopped with signal {d} and stderr:\n{s}", .{ sig, stderr }),
-        .unknown => |code| std.log.err("zig ast-check failed for unknown reason with code {d} and stderr:\n{s}", .{ code, stderr }),
+        .signal, .stopped, .unknown => log.err("zig ast-check {f} and stderr:\n{s}", .{ term, stderr }),
     }
     return .empty;
 }

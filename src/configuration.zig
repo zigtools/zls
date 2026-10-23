@@ -551,23 +551,9 @@ pub fn getZigEnv(
         allocator.free(zig_env_result.stderr);
     }
 
-    switch (zig_env_result.term) {
-        .exited => |code| {
-            if (code != 0) {
-                log.err("zig env command exited with error code {d}.", .{code});
-                if (zig_env_result.stderr.len != 0) {
-                    log.err("stderr: {s}", .{zig_env_result.stderr});
-                }
-                return null;
-            }
-        },
-        .signal, .stopped, .unknown => {
-            log.err("zig env command terminated unexpectedly.", .{});
-            if (zig_env_result.stderr.len != 0) {
-                log.err("stderr: {s}", .{zig_env_result.stderr});
-            }
-            return null;
-        },
+    if (!zig_env_result.term.success()) {
+        log.err("zig env {f} and stderr:\n{s}", .{ zig_env_result.term, zig_env_result.stderr });
+        return null;
     }
 
     if (std.mem.startsWith(u8, zig_env_result.stdout, "{")) {
