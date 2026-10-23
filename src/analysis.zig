@@ -2662,9 +2662,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             const else_expr = loop.else_expr.unwrap() orelse return null;
 
-            // TODO: peer type resolution based on `else` and all `break` statements
-            if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_type|
-                return else_type.withoutIPIndex(analyser);
+            // TODO: full peer type resolution based on `else` and all `break` statements
+            const else_type: ?Type = if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_ty|
+                else_ty
+            else
+                null;
+
+            if (else_type) |ty| {
+                if (!(try ty.typeOf(analyser)).isNoreturnType()) return ty.withoutIPIndex(analyser);
+            }
 
             var it: BreakIterator = .{
                 .walker = try .init(analyser.gpa, tree, loop.then_expr),
