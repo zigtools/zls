@@ -1181,6 +1181,10 @@ fn invalidateBuildFileWorker(self: *DocumentStore, build_file: *BuildFile) std.I
             .diagnostics = self.diagnostics_collection,
             .build_file_uri = build_file.uri,
             .build_file_version = new_version,
+            .build_options = if (build_file.build_associated_config) |build_config|
+                build_config.value.build_options orelse &.{}
+            else
+                &.{},
         };
 
         var build_config = bsp.loadBuildConfiguration(

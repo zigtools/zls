@@ -12,6 +12,7 @@ const Server = std.zig.Server;
 
 const log = std.log.scoped(.bsp);
 
+const BuildOption = @import("BuildAssociatedConfig.zig").BuildOption;
 const DiagnosticsCollection = @import("DiagnosticsCollection.zig");
 const Uri = @import("Uri.zig");
 
@@ -51,6 +52,7 @@ pub const LoadBuildConfigOptions = struct {
     diagnostics: *DiagnosticsCollection,
     build_file_uri: Uri,
     build_file_version: u32,
+    build_options: []const BuildOption,
 };
 
 /// Runs the build.zig and extracts include directories and packages
@@ -81,11 +83,22 @@ pub fn loadBuildConfiguration(
         .path = build_root_path,
     };
 
-    const argv: []const []const u8 = &.{
+    const base_args: []const []const u8 = &.{
         options.zig_exe_path,
         "build",
         "--listen=-",
     };
+
+    var argv: std.ArrayList([]const u8) = try .initCapacity(gpa, base_args.len + options.build_options.len);
+    defer {
+        for (argv.items[base_args.len..]) |arg| gpa.free(arg);
+        argv.deinit(gpa);
+    }
+
+    argv.appendSliceAssumeCapacity(base_args);
+    for (options.build_options) |option| {
+        argv.appendAssumeCapacity(try gpa.print("{f}", .{option}));
+    }
 
     var child_environ_map = try environ_map.clone(gpa);
     defer child_environ_map.deinit();
@@ -94,14 +107,14 @@ pub fn loadBuildConfiguration(
     try child_environ_map.put("ZIG_LIB_DIR", options.zig_lib_dir.path orelse ".");
 
     const cmd: std.zig.SubprocessCommand = .{
-        .argv = argv,
+        .argv = argv.items,
         .cwd = build_root.path,
         .parent_env = environ_map,
         .child_env = &child_environ_map,
     };
 
     var child = std.process.spawn(io, .{
-        .argv = argv,
+        .argv = argv.items,
         .cwd = .{ .dir = build_root.handle },
         .environ_map = &child_environ_map,
         .stdin = .pipe,
