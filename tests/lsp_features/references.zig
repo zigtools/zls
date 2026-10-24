@@ -241,6 +241,32 @@ test "label" {
         \\    }
         \\}
     );
+    try testSymbolReferences(
+        \\comptime {
+        \\    <0>: for (0..1) |_| {
+        \\        continue :<0>;
+        \\    } else {
+        \\        break :<0>;
+        \\    }
+        \\}
+    );
+    try testSymbolReferences(
+        \\comptime {
+        \\    var i = 0;
+        \\    <0>: while (i != 1) : (i += 1) {
+        \\        continue :<0>;
+        \\    } else {
+        \\        break :<0>;
+        \\    }
+        \\}
+    );
+    try testSymbolReferences(
+        \\comptime {
+        \\    <0>: inline for (.{0}) |_| {
+        \\        break :<0>;
+        \\    }
+        \\}
+    );
 }
 
 test "asm" {

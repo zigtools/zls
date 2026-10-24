@@ -62,7 +62,7 @@ fn labelReferences(
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
     const first_tok = decl.identifier;
-    const last_tok = ast.lastToken(tree, decl.block);
+    const last_tok = loopLastToken(tree, first_tok) orelse ast.lastToken(tree, decl.block);
 
     var locations: std.ArrayList(types.Location) = .empty;
     errdefer locations.deinit(allocator);
@@ -92,6 +92,21 @@ fn labelReferences(
     }
 
     return locations;
+}
+
+/// A loop label is also used in the `else` branch, which is outside of the loop body.
+fn loopLastToken(tree: *const Ast, label_token: Ast.TokenIndex) ?Ast.TokenIndex {
+    for (0..tree.nodes.len) |i| {
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
+        const loop_label = if (ast.fullWhile(tree, node)) |while_node|
+            while_node.label_token
+        else if (ast.fullFor(tree, node)) |for_node|
+            for_node.label_token
+        else
+            continue;
+        if (loop_label == label_token) return ast.lastToken(tree, node);
+    }
+    return null;
 }
 
 const Builder = struct {
