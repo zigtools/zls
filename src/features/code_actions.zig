@@ -151,6 +151,8 @@ pub const Builder = struct {
 
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
+        try generateSimplifyVariableInitCodeActions(builder, source_index);
+
         const ctx = try Analyser.getPositionContext(builder.arena, tree, source_index, true);
         if (ctx != .string_literal) return;
 
@@ -186,6 +188,72 @@ pub const Builder = struct {
         return workspace_edit;
     }
 };
+
+/// `const foo = @as(T, value);` -> `const foo: T = value;`
+/// `const foo = T{};` -> `const foo: T = .{};`
+fn generateSimplifyVariableInitCodeActions(
+    builder: *Builder,
+    source_index: usize,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
+
+    const tree = &builder.handle.tree;
+
+    const var_decl = for (try ast.nodesOverlappingIndex(builder.arena, tree, source_index)) |node| {
+        if (tree.fullVarDecl(node)) |var_decl| break var_decl;
+    } else return;
+
+    if (var_decl.ast.type_node != .none) return;
+    const init_node = var_decl.ast.init_node.unwrap() orelse return;
+    const name_token = var_decl.ast.mut_token + 1;
+
+    var buffer: [2]Ast.Node.Index = undefined;
+    const type_node: Ast.Node.Index, const init_edit: types.TextEdit = blk: {
+        if (tree.builtinCallParams(&buffer, init_node)) |params| {
+            if (!std.mem.eql(u8, offsets.tokenToSlice(tree, tree.nodeMainToken(init_node)), "@as")) return;
+            if (params.len != 2) return;
+            const init_loc = offsets.nodeToLoc(tree, init_node);
+            const value_loc = offsets.nodeToLoc(tree, params[1]);
+            // don't silently drop comments that are outside of the value
+            if (std.mem.find(u8, tree.source[init_loc.start..value_loc.start], "//") != null) return;
+            if (std.mem.find(u8, tree.source[value_loc.end..init_loc.end], "//") != null) return;
+            break :blk .{
+                params[0],
+                builder.createTextEditLoc(offsets.nodeToLoc(tree, init_node), offsets.nodeToSlice(tree, params[1])),
+            };
+        }
+        if (tree.fullStructInit(&buffer, init_node)) |struct_init| {
+            const type_expr = struct_init.ast.type_expr.unwrap() orelse return;
+            // `[_]T{}` is parsed as a struct init but `[_]T` is not a valid type annotation
+            switch (tree.nodeTag(type_expr)) {
+                .array_type, .array_type_sentinel => return,
+                else => {},
+            }
+            const loc: offsets.Loc = .{
+                .start = offsets.nodeToLoc(tree, type_expr).start,
+                .end = tree.tokenStart(struct_init.ast.lbrace),
+            };
+            if (std.mem.find(u8, offsets.locToSlice(tree.source, loc), "//") != null) return;
+            break :blk .{ type_expr, builder.createTextEditLoc(loc, ".") };
+        }
+        return;
+    };
+
+    const type_annotation = try std.fmt.allocPrint(builder.arena, ": {s}", .{offsets.nodeToSlice(tree, type_node)});
+
+    try builder.actions.append(builder.arena, .{
+        .title = "simplify variable initialization",
+        .kind = .refactor,
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditPos(offsets.tokenToLoc(tree, name_token).end, type_annotation),
+            init_edit,
+        }),
+    });
+}
 
 fn generateStringLiteralCodeActions(
     builder: *Builder,
