@@ -21,13 +21,15 @@ pub const BuildOption = struct {
         };
     }
 
-    /// Formats the `BuildOption` as a command line parameter compatible with `zig build`. This will either be
-    /// `-Dname=value` or `-Dname`. Caller owns returned slice allocated using `allocator`.
-    pub fn formatParam(self: BuildOption, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
-        if (self.value) |val| {
-            return try allocator.print("-D{s}={s}", .{ self.name, val });
+    /// Formats to a CLI argument compatible with `zig build`. Either `-Dname=value` or `-Dname`.
+    pub fn format(
+        option: BuildOption,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        if (option.value) |val| {
+            return try writer.print("-D{s}={s}", .{ option.name, val });
         } else {
-            return try allocator.print("-D{s}", .{self.name});
+            return try writer.print("-D{s}", .{option.name});
         }
     }
 };
