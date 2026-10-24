@@ -417,7 +417,8 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
     const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokenTag(potential_r_paren_token) == .r_paren;
 
     const insert_token = tree.nodeMainToken(block);
-    const add_suffix_newline = is_last_param and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const add_suffix_newline = tree.tokensOnSameLine(insert_token, insert_token + 1) and
+        (is_last_param or tree.tokenTag(insert_token + 1) != .r_brace);
     const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     if (builder.wantKind(.@"source.fixAll")) {
@@ -463,7 +464,8 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) error{Out
     if (insert_token >= tree.tokens.len) return;
     if (tree.tokenTag(insert_token) != .semicolon) return;
 
-    const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, false, false);
+    const add_suffix_newline = insert_token + 1 < tree.tokens.len and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, false, add_suffix_newline);
 
     if (builder.wantKind(.@"source.fixAll")) {
         try builder.fixall_text_edits.append(builder.arena, builder.createTextEditPos(insert_index, new_text));
@@ -569,9 +571,11 @@ fn handleUnusedCapture(
     const is_last_capture = tree.tokenTag(identifier_token + 1) == .pipe;
 
     const insert_token = lbrace_token;
-    // if we are on the last capture of the block, we need to add an additional newline
+    // if code follows on the same line, or we are on the last capture of an empty block,
+    // we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const add_suffix_newline = is_last_capture and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const add_suffix_newline = tree.tokensOnSameLine(insert_token, insert_token + 1) and
+        (is_last_capture or tree.tokenTag(insert_token + 1) != .r_brace);
     const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
