@@ -3149,6 +3149,46 @@ test "function taking a generic struct arg" {
     });
 }
 
+test "function taking an anonymous struct arg" {
+    try testCompletion(
+        \\const Foo = struct {
+        \\   alpha: u32,
+        \\   fn init(opts: struct {alpha: u32}) Foo {
+        \\       return .{ .alpha = opts.alpha };
+        \\   }
+        \\};
+        \\const bar: Foo = .init(.{ .a<cursor> });
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+
+    try testCompletion(
+        \\const Foo = struct {
+        \\   alpha: u32,
+        \\   fn init(opts: struct {alpha: u32}) Foo {
+        \\       return .{ .alpha = opts.alpha };
+        \\   }
+        \\};
+        \\const bar: Foo = .init(.a<cursor>);
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    });
+
+    // // Not working due to parser limitations because the init function call is invalid syntax, ".init" is evaluated
+    // // as primitive value instead of a function call.
+    // try testCompletion(
+    //     \\const Foo = struct {
+    //     \\   alpha: u32,
+    //     \\   fn init(opts: struct {alpha: u32}) Foo {
+    //     \\       return .{ .alpha = opts.alpha };
+    //     \\   }
+    //     \\};
+    //     \\const bar: Foo = .init(.<cursor>);
+    // , &.{
+    //     .{ .label = "alpha", .kind = .Field, .detail = "u32" },
+    // });
+}
+
 test "anytype resolution based on callsite-references" {
     try testCompletion(
         \\const Writer1 = struct {

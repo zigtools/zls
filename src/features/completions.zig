@@ -1668,7 +1668,7 @@ fn collectContainerNodes(
     defer gpa.free(nodes);
 
     switch (handle.tree.nodeTag(nodes[0])) {
-        .field_access => {
+        .field_access, .enum_literal => {
             if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
                 try collectFieldAccessTypes(builder, dot_context, ty, &types_with_handles);
                 return types_with_handles.keys();
