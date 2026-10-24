@@ -182,6 +182,28 @@ test "function" {
     });
 }
 
+test "function with anonymous struct parameter" {
+    try testFoldingRange(
+        \\fn bar(
+        \\    a: A
+        \\) void {
+        \\    _ = a;
+        \\}
+        \\
+        \\fn baz(a: struct {
+        \\    b: i32
+        \\}) void {
+        \\    _ = a.b;
+        \\}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 7, .endLine = 1, .endCharacter = 8 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 3, .endCharacter = 10 },
+        .{ .startLine = 6, .startCharacter = 7, .endLine = 7, .endCharacter = 10 },
+        .{ .startLine = 6, .startCharacter = 18, .endLine = 7, .endCharacter = 10 },
+        .{ .startLine = 8, .startCharacter = 9, .endLine = 9, .endCharacter = 12 },
+    });
+}
+
 test "function with doc comment" {
     try testFoldingRange(
         \\/// this is
