@@ -49,6 +49,7 @@ pub const generic: []const Item = &.{
     .{ .label = "asmv", .snippet = "asm volatile (${1:input}, ${0:input})" },
     .{ .label = "fori", .snippet = "for ($1, 0..) |${2:value}, ${3:i}| {$0}" },
     .{ .label = "if else", .snippet = "if ($1) {$2} else {$0}" },
+    .{ .label = "else =>", .snippet = "else => {$0}" },
     .{ .label = "catch switch", .snippet = "catch |${1:err}| switch (${1:err}) {$0};" },
 
     .{ .label = "print", .snippet = "std.debug.print(\"$1\", .{$0});" },

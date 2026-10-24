@@ -2089,6 +2089,24 @@ test "switch on error set - error unions get all values" {
         .{ .label = "error.F2", .kind = .Constant },
     });
 }
+test "switch else =>" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const E = enum { FOO, BAR, BAZ };
+        \\fn foo(bar: E) void {
+        \\    switch (bar) {
+        \\        .FOO => {
+        \\      },
+        \\      else<cursor>
+        \\    }
+        \\}
+        ,
+        .label = "else =>",
+        .expected_insert_line = "      else => {$0}",
+        .expected_replace_line = "      else => {$0}",
+        .enable_snippets = true,
+    });
+}
 
 test "switch on error set - text edits result" {
     try testCompletionTextEdit(.{
