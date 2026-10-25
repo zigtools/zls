@@ -1214,7 +1214,7 @@ fn getDiscardLoc(tree: *const Ast, loc: offsets.Loc) ?offsets.Loc {
     if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) return null;
     const autofix_str_start = std.mem.findNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse return null;
     if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) return null;
-    const autofix_comment_end = std.mem.findNonePos(u8, tree.source, autofix_str_start + "autofix".len, " ") orelse autofix_str_start + "autofix".len;
+    const autofix_comment_end = std.mem.findNonePos(u8, tree.source, autofix_str_start + "autofix".len, " ") orelse (autofix_str_start + "autofix".len);
 
     // move backwards until we find a newline
     const start_position = found: {
