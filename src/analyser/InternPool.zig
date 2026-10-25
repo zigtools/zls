@@ -1153,7 +1153,7 @@ pub fn init(io: std.Io, gpa: Allocator) Allocator.Error!InternPool {
 
     for (items, 0..) |item, i| {
         assert(@backingInt(item.index) == i);
-        assert(item.index == ip.get(item.key) catch unreachable);
+        assert(item.index == (ip.get(item.key) catch unreachable));
     }
 
     return ip;

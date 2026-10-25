@@ -915,7 +915,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void 
             if (opt_end.unwrap()) |end| try writeNodeTokens(builder, end);
         },
         .identifier => {
-            std.debug.assert(main_token == ast.identifierTokenFromIdentifierNode(tree, node) orelse return);
+            std.debug.assert(main_token == (ast.identifierTokenFromIdentifierNode(tree, node) orelse return));
             try writeIdentifier(builder, main_token);
         },
         .field_access => {

@@ -663,8 +663,8 @@ fn addAnalysisCases(
     var it = dir.iterate();
 
     while (true) {
-        const entry = it.next(b.graph.io) catch |err|
-            std.debug.panic("failed to walk directory '{f}': {}", .{ b.path(cases_path), err }) orelse break;
+        const entry = (it.next(b.graph.io) catch |err|
+            std.debug.panic("failed to walk directory '{f}': {}", .{ b.path(cases_path), err })) orelse break;
 
         if (entry.kind != .file) continue;
         if (!std.mem.eql(u8, std.Io.Dir.path.extension(entry.name), ".zig")) continue;
