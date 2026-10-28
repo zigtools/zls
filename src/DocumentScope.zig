@@ -93,8 +93,8 @@ pub const Declaration = union(enum) {
         identifier: Ast.TokenIndex,
         block: Ast.Node.Index,
     },
-    /// always an identifier
-    /// used as child declarations of an error set declaration
+    /// Always an identifier. Used for error set members; reference searches may
+    /// also use an occurrence of an error name as their target.
     error_token: Ast.TokenIndex,
 
     comptime {

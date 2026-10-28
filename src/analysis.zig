@@ -4995,6 +4995,12 @@ pub fn getFieldAccessType(
             .eof => return current_type,
             .identifier => {
                 const symbol_name = offsets.identifierIndexToSlice(tokenizer.buffer, tok.loc.start, .name);
+                if (tokenizer.buffer[tok.loc.start] != '@') {
+                    if (try analyser.resolvePrimitive(symbol_name)) |primitive| {
+                        current_type = Type.fromIP(analyser, analyser.ip.typeOf(primitive), primitive);
+                        continue;
+                    }
+                }
                 if (try analyser.lookupSymbolGlobal(
                     handle,
                     symbol_name,
@@ -5493,6 +5499,7 @@ pub fn getPositionContext(
             .identifier => if (curr_ctx.isErrSetDef())
                 continue // Intent is to skip everything between the `error{...}` braces
             else switch (curr_ctx.ctx) {
+                .error_access => curr_ctx.ctx,
                 .enum_literal => |loc| .{ .enum_literal = tokenLocAppend(loc, tok) },
                 .field_access => |loc| .{ .field_access = tokenLocAppend(loc, tok) },
                 .label_access => |loc| if (loc.start == loc.end)
