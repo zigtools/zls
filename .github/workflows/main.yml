@@ -33,6 +33,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: bytecodealliance/actions/wasmtime/setup@v1
 
-      - name: Run zig build check test -Dtarget=wasm32-
+      - name: Run zig build check test -Dtarget=wasm32-wasi
         if: matrix.os == 'ubuntu-latest'
         run: zig build check test -Dtarget=wasm32-wasi -fwasmtime --summary all
