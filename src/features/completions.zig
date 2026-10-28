@@ -1776,7 +1776,7 @@ fn collectFieldAccessTypes(
     dot_context: EnumLiteralContext,
     ty: Analyser.Type,
     types_with_handles: *Analyser.Type.ArraySet,
-) error{OutOfMemory}!void {
+) error{ OutOfMemory, Canceled }!void {
     const analyser = builder.analyser;
 
     var node_type = ty;
@@ -1797,9 +1797,26 @@ fn collectFieldAccessTypes(
         _ = try node_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
         return;
     }
-    const has_self_param = try analyser.hasSelfParam(node_type);
+
+    const param_offset: usize = offs: {
+        const tree = &builder.orig_handle.tree;
+        const idx = switch (dot_context.type_info) {
+            .identifier_token_index => |idx| idx,
+            .expr_node_index => break :offs 0,
+        };
+
+        if (tree.tokenTag(idx - 1) != .period) break :offs 0;
+        const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(analyser.arena, tree, tree.tokenStart(idx - 2));
+        defer analyser.arena.free(nodes);
+
+        const node = nodes[0];
+        const typ = try analyser.resolveTypeOfNode(.of(node, builder.orig_handle)) orelse break :offs 0;
+        if (typ.is_type_val) break :offs 0;
+        break :offs @intFromBool(analyser.firstParamIs(node_type, try typ.typeOf(analyser)));
+    };
+
     const params = info.parameters;
-    const param_index = dot_context.fn_arg_index + @intFromBool(has_self_param);
+    const param_index = dot_context.fn_arg_index + param_offset;
     if (param_index >= params.len) return;
     const param_type = params[param_index].type;
     _ = try param_type.getAllTypesWithHandlesArraySet(analyser, types_with_handles);
