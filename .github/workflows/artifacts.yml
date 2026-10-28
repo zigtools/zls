@@ -52,8 +52,8 @@ jobs:
       - name: Install minisign
         if: env.SKIP_DEPLOY != 'true'
         run: |
-          wget https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz
-          tar -xf minisign-0.11-linux.tar.gz --directory ${HOME}
+          wget https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          tar -xf minisign-0.12-linux.tar.gz --directory ${HOME}
           echo "${HOME}/minisign-linux/x86_64/" >> $GITHUB_PATH
 
       - name: Build release artifacts
