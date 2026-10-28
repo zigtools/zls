@@ -15,8 +15,8 @@
     // If you do not use Nix, a ZLS maintainer can take care of this.
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/6da0d0c41b78b9ed2d34fa364fcb81b5ebece6c4.tar.gz",
-            .hash = "known_folders-0.0.0-Fy-PJiDLAAB98m3uYUzatrTb2mO2fpvwx2zpSroEtfbO",
+            .url = "https://github.com/ziglibs/known-folders/archive/c7a8a1974ccf8b5b022ee7f4b13fd734cdd89ae1.tar.gz",
+            .hash = "known_folders-0.0.0-Fy-PJiLLAABzqCdF6GWFmE36oCwioOh6Uxj4FF1Neanr",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/aac8aa99c436ab8277b0711922aad062c0167b12.tar.gz",
