@@ -1,0 +1,4 @@
+contact_links:
+  - name: Copilot and Other LLMs
+    about: "Please do not use GitHub Copilot or any other LLM to write an issue."
+    url: https://github.com/zigtools/zls/blob/master/CONTRIBUTING.md#code-of-conduct
