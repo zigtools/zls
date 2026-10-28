@@ -23,6 +23,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install patchelf
           wget https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
+          echo "78aa17a5f6d27a867cc0540b1550051591d350423a1a0ef98d63c9ce7cc10f9d  kcov-amd64.tar.gz" | sha256sum --check
           sudo tar xf kcov-amd64.tar.gz -C /
           sudo patchelf --replace-needed libopcodes-2.38-system.so libopcodes-2.42-system.so --replace-needed libbfd-2.38-system.so libbfd-2.42-system.so $(which kcov)
 
