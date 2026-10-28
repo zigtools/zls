@@ -5,10 +5,10 @@
 }:
 linkFarm "zig-packages" [
   {
-    name = "known_folders-0.0.0-Fy-PJiDLAAB98m3uYUzatrTb2mO2fpvwx2zpSroEtfbO";
+    name = "known_folders-0.0.0-Fy-PJiLLAABzqCdF6GWFmE36oCwioOh6Uxj4FF1Neanr";
     path = fetchzip {
-      url = "https://github.com/ziglibs/known-folders/archive/6da0d0c41b78b9ed2d34fa364fcb81b5ebece6c4.tar.gz";
-      hash = "sha256-F17Ivvsyyla2CBIh+kImc1O3AtD2yTDAGamzMVbVzuw=";
+      url = "https://github.com/ziglibs/known-folders/archive/c7a8a1974ccf8b5b022ee7f4b13fd734cdd89ae1.tar.gz";
+      hash = "sha256-rgFVAybMdYnRdwZBUXZNr1TRaWmgjgiim/isxOMTxRg=";
     };
   }
   {
